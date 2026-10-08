@@ -489,6 +489,88 @@ jobs:
       - name: Run pyright
         run: uv run pyright --stats
 
+      - name: Run static pytest contracts
+        id: pytest-static
+        if: needs.classify.outputs.backend == 'true'
+        env:
+          COVERAGE_FILE: coverage-data-static
+        # The plugin owns this lane and the native exclusions. No data plane
+        # is provisioned; all private-home and host-effect guards stay active.
+        run: |
+          mkdir -p tmp
+          uv run pytest --test-environment=static -q -n 4 \
+            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
+            --cov=ops --cov=services --cov=ava_builtins \
+            --junit-xml=tmp/junit-backend-static.xml -o junit_family=xunit1
+
+      - name: Report executed test counts
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
+        run: >
+          python3 scripts/ci/shard_counts.py shard --group static
+          --junit tmp/junit-backend-static.xml --out tmp/shard-counts-static.json
+          --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
+
+      - name: Upload executed test counts
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shard-counts-static
+          path: tmp/shard-counts-static.json
+          if-no-files-found: ignore
+
+      - name: Validate static test results
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          test-outcome: ${{ steps.pytest-static.outcome }}
+          junit-patterns: '["tmp/junit-backend-static.xml"]'
+
+      - name: Upload static test reports
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-backend-static
+          path: tmp/junit-backend-static.xml
+          if-no-files-found: warn
+
+      - name: Upload coverage data
+        id: coverage-upload
+        if: needs.classify.outputs.backend == 'true'
+        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
+        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
+        # The retry absorbs that transient service fault; the note below records
+        # the outcome for the coverage gate's arrival check.
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shard-static
+          path: coverage-data-static
+
+      - name: Retry coverage data upload
+        id: coverage-upload-retry
+        # One immediate retry, bounded: transient 403/500 from the artifact
+        # service is the observed failure mode, and a failed upload is the only
+        # copy of the data — a failed download can be retried by re-running the
+        # aggregator, a lost upload cannot.
+        if: ${{ steps.coverage-upload.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shard-static
+          path: coverage-data-static
+          overwrite: true
+
+      - name: Note coverage upload outcome
+        if: ${{ always() && steps.coverage-upload.outcome == 'failure' }}
+        run: |
+          if [ "${{ steps.coverage-upload-retry.outcome }}" = "success" ]; then
+            echo "::warning title=coverage upload retried::first attempt to publish coverage-data-static failed; the retry succeeded"
+          else
+            echo "::warning title=coverage upload failed::coverage-data-static could not be published after a retry — artifact-service failure, not a test failure; the coverage gate scores the data that arrived"
+          fi
+
   backend-structure:
     # Same required check, two segments: A always runs structure lint via
     # pre-commit --all-files; B installs Node/npm and explicitly runs the four
@@ -646,87 +728,6 @@ jobs:
           env -u VIRTUAL_ENV uv run pre-commit run events-registry-fresh --all-files
           env -u VIRTUAL_ENV uv run pre-commit run config-lite-table-fresh --all-files
 
-      - name: Run static pytest contracts
-        id: pytest-static
-        if: needs.classify.outputs.backend == 'true'
-        env:
-          COVERAGE_FILE: coverage-data-static
-        # The plugin owns this lane and the native exclusions. No data plane
-        # is provisioned; all private-home and host-effect guards stay active.
-        run: |
-          mkdir -p tmp
-          uv run pytest --test-environment=static -q \
-            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
-            --cov=ops --cov=services --cov=ava_builtins \
-            --junit-xml=tmp/junit-backend-static.xml -o junit_family=xunit1
-
-      - name: Report executed test counts
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
-        run: >
-          python3 scripts/ci/shard_counts.py shard --group static
-          --junit tmp/junit-backend-static.xml --out tmp/shard-counts-static.json
-          --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
-
-      - name: Upload executed test counts
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: shard-counts-static
-          path: tmp/shard-counts-static.json
-          if-no-files-found: ignore
-
-      - name: Validate static test results
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
-        uses: ./.github/actions/require-test-gate
-        with:
-          test-outcome: ${{ steps.pytest-static.outcome }}
-          junit-patterns: '["tmp/junit-backend-static.xml"]'
-
-      - name: Upload static test reports
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: test-results-backend-static
-          path: tmp/junit-backend-static.xml
-          if-no-files-found: warn
-
-      - name: Upload coverage data
-        id: coverage-upload
-        if: needs.classify.outputs.backend == 'true'
-        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
-        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
-        # The retry absorbs that transient service fault; the note below records
-        # the outcome for the coverage gate's arrival check.
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage-shard-static
-          path: coverage-data-static
-
-      - name: Retry coverage data upload
-        id: coverage-upload-retry
-        # One immediate retry, bounded: transient 403/500 from the artifact
-        # service is the observed failure mode, and a failed upload is the only
-        # copy of the data — a failed download can be retried by re-running the
-        # aggregator, a lost upload cannot.
-        if: ${{ steps.coverage-upload.outcome == 'failure' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage-shard-static
-          path: coverage-data-static
-          overwrite: true
-
-      - name: Note coverage upload outcome
-        if: ${{ always() && steps.coverage-upload.outcome == 'failure' }}
-        run: |
-          if [ "${{ steps.coverage-upload-retry.outcome }}" = "success" ]; then
-            echo "::warning title=coverage upload retried::first attempt to publish coverage-data-static failed; the retry succeeded"
-          else
-            echo "::warning title=coverage upload failed::coverage-data-static could not be published after a retry — artifact-service failure, not a test failure; the coverage gate scores the data that arrived"
-          fi
 
   merged-tree-structure:
     # #1584 caught a file-size violation only after the Trunk Merge Queue
@@ -1623,7 +1624,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true
-    needs: [classify, test-select, backend-structure, backend-shard, backend-serial]
+    needs: [classify, test-select, backend-static, backend-shard, backend-serial]
     if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.test-select.outputs.mode != 'enforce' || needs.test-select.outputs.decision != 'SELECTED') }}
     permissions:
       contents: read
