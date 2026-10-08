@@ -102,7 +102,7 @@ def enumerate_candidates(conn: Connection) -> list[BillingCandidate]:
     ``ops.lifecycle.resurrect_gates``).
     """
     from base.agents import TerminationSource
-    from base.agents.recovery_breaker import (
+    from base.agents.recovery.breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         PERMANENT_REJECT_REASON_BILLING,
     )
@@ -142,7 +142,7 @@ def enumerate_halted_alive(conn: Connection) -> list[BillingHaltedAlive]:
     (a just-resurrected row stays listed until its first successful turn
     clears the streak).
     """
-    from base.agents.recovery_breaker import (
+    from base.agents.recovery.breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         PERMANENT_REJECT_REASON_BILLING,
     )
