@@ -21,7 +21,8 @@ from base.config import settings
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.cursor_store import CursorStore
 from services.entrypoints.im_bridge.tests.slices import feishu_config
-from services.entrypoints.im_bridge.types import InboundMessage
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.types import InboundMessage, RetryableTransportError
 from tests.components.base.poll_until import poll_until_async
 
 _CHAT = "oc_p2p_1"
@@ -77,7 +78,7 @@ def _listing(*newest_first: SimpleNamespace, next_page: str | None = None) -> Si
     data = SimpleNamespace(
         items=list(newest_first), has_more=next_page is not None, page_token=next_page
     )
-    return SimpleNamespace(code=0, msg="ok", data=data)
+    return SimpleNamespace(raw=SimpleNamespace(status_code=200), code=0, msg="ok", data=data)
 
 
 def _adapter(rest: _Rest, store: CursorStore) -> FeishuAdapter:
@@ -158,9 +159,12 @@ async def test_replay_stops_paging_at_the_replay_window(store: CursorStore) -> N
 
 async def test_a_failed_page_fails_the_round_and_keeps_the_replay(store: CursorStore) -> None:
     await _first_run(store, _item("om_1", 5 * _H))
-    failing = SimpleNamespace(code=99, msg="denied", data=None)
+    failing = SimpleNamespace(
+        raw=SimpleNamespace(status_code=503), code=99, msg="denied", data=None
+    )
     adapter = await _restarted(store, _listing(_item("om_3", 1 * _H), next_page="t1"), failing)
-    assert not await adapter._poll_once(_CHAT)
+    with pytest.raises(RetryableTransportError):
+        await adapter._poll_once(_CHAT)
     assert adapter.core.received == []
     assert _CHAT in adapter._poll_replay
     adapter._rest_client.responses = [_listing(_item("om_3", 1 * _H), _item("om_1", 5 * _H))]
@@ -215,12 +219,15 @@ async def test_empty_seed_round_saves_a_position_too(store: CursorStore) -> None
 async def test_the_poll_loop_polls_the_saved_chats_without_an_outbound_send(
     store: CursorStore,
 ) -> None:
-    await _first_run(store, _item("om_1", 5 * _H))
-    adapter = _adapter(_Rest(), store)
-    adapter._start_poller()
-    try:
-        await poll_until_async(lambda: adapter._poll_chats == {_CHAT}, what="saved chat polled")
-        assert adapter._poll_replay == {_CHAT}
-    finally:
-        assert adapter._poll_task is not None
-        adapter._poll_task.cancel()
+    async with owned_tasks() as _owned_tasks:
+        await _first_run(store, _item("om_1", 5 * _H))
+        rest = _Rest()
+        rest.responses = [SimpleNamespace(raw=SimpleNamespace(status_code=503), code=99, data=None)]
+        adapter = _adapter(rest, store)
+        adapter._start_poller(_owned_tasks)
+        try:
+            await poll_until_async(lambda: adapter._poll_chats == {_CHAT}, what="saved chat polled")
+            assert adapter._poll_replay == {_CHAT}
+        finally:
+            assert adapter._poll_task is not None
+            adapter._poll_task.cancel()

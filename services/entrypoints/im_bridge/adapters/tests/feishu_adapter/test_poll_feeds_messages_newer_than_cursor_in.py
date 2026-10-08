@@ -6,6 +6,8 @@ import asyncio
 from collections import deque
 from types import SimpleNamespace
 
+import pytest
+
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, _backoff_delay
 from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
     BlockingThread,
@@ -20,7 +22,7 @@ from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
     adapter as adapter,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
-from services.entrypoints.im_bridge.types import InboundMessage
+from services.entrypoints.im_bridge.types import InboundMessage, RetryableTransportError
 
 
 async def test_poll_feeds_messages_newer_than_cursor_in_order(adapter: FeishuAdapter) -> None:
@@ -181,7 +183,7 @@ async def test_send_does_not_override_existing_owner_open_id(adapter: FeishuAdap
 def test_start_poller_honors_zero_interval() -> None:
     """AVA_FEISHU_POLL_INTERVAL_SECONDS=0 disables the poller (WS-only)."""
     adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_poll_interval_seconds=0))
-    adapter._start_poller()
+    adapter._start_poller(asyncio.TaskGroup())
     assert adapter._poll_task is None
 
 
@@ -346,9 +348,8 @@ async def test_poll_seed_anchors_newest_id_carrying_item(adapter: FeishuAdapter)
     assert adapter._poll_cursor == {"oc_p2p_1": "om_3"}
 
 
-async def test_poll_poison_message_skipped_after_retries(adapter: FeishuAdapter) -> None:
-    """D4: a message that keeps crashing inbound handling is skipped after
-    POISON_MAX_RETRIES consecutive failures instead of wedging the chat."""
+async def test_poll_program_error_preserves_message_and_cursor(adapter: FeishuAdapter) -> None:
+    """An unexpected handler error never acknowledges or skips the message."""
 
     class AlwaysFailingCore(FakeCore):
         async def handle_inbound(self, message: InboundMessage) -> None:
@@ -372,14 +373,11 @@ async def test_poll_poison_message_skipped_after_retries(adapter: FeishuAdapter)
         window,
     ]
     await adapter._poll_once("oc_p2p_1")  # seed at om_0
-    await adapter._poll_once("oc_p2p_1")  # om_5 fails (1)
-    assert adapter._poll_cursor == {"oc_p2p_1": "om_0"}
-    await adapter._poll_once("oc_p2p_1")  # om_5 fails (2)
-    assert adapter._poll_cursor == {"oc_p2p_1": "om_0"}
-    assert adapter._poison_retries == {"oc_p2p_1:om_5": 2}
-    await adapter._poll_once("oc_p2p_1")  # om_5 skipped after 3rd failure
-    assert adapter._poll_cursor == {"oc_p2p_1": "om_5"}
-    assert adapter._poison_retries == {}
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="boom"):
+            await adapter._poll_once("oc_p2p_1")
+        assert adapter._poll_cursor == {"oc_p2p_1": "om_0"}
+        assert "om_5" not in adapter._seen_messages
     assert core.received == []
 
 
@@ -410,7 +408,7 @@ async def test_poll_failed_list_round_does_not_seed(adapter: FeishuAdapter) -> N
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     rest.list_responses = [
-        SimpleNamespace(code=500, msg="boom", data=None),
+        SimpleNamespace(raw=SimpleNamespace(status_code=503), code=500, msg="boom", data=None),
         make_list_response(
             [
                 make_list_item(message_id="om_3"),
@@ -419,7 +417,8 @@ async def test_poll_failed_list_round_does_not_seed(adapter: FeishuAdapter) -> N
             ]
         ),
     ]
-    assert await adapter._poll_once("oc_p2p_1") is False
+    with pytest.raises(RetryableTransportError):
+        await adapter._poll_once("oc_p2p_1")
     assert adapter._poll_seeded == set()
     assert adapter._poll_cursor == {}
     # Next round still seeds (no replay of history).
@@ -462,7 +461,7 @@ async def test_poll_inbound_failure_retried_next_round(adapter: FeishuAdapter) -
         async def handle_inbound(self, message: InboundMessage) -> None:
             if self.fail_first:
                 self.fail_first = False
-                raise RuntimeError("boom")
+                raise RetryableTransportError("network unavailable")
             self.received.append(message)
 
     core = FlakyCore()
@@ -513,7 +512,8 @@ async def test_poll_never_marks_seen_before_delivery(adapter: FeishuAdapter) -> 
         ),
     ]
     await adapter._poll_once("oc_p2p_1")
-    await adapter._poll_once("oc_p2p_1")
+    with pytest.raises(RuntimeError, match="boom"):
+        await adapter._poll_once("oc_p2p_1")
     assert adapter._seen_messages == deque()
     assert adapter._poll_cursor == {"oc_p2p_1": "om_0"}
 

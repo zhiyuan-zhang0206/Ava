@@ -53,7 +53,7 @@ class NoticeAdapter(RecordingAdapter):
 
 
 def make_core(pool: ConnectionPool) -> tuple[IMBridgeCore, NoticeAdapter]:
-    core = IMBridgeCore(im_bridge_config(), FakeGateway(), db_pool=pool)  # type: ignore[arg-type]
+    core = IMBridgeCore(im_bridge_config(), FakeGateway(), db_pool=pool, tasks=asyncio.TaskGroup())  # type: ignore[arg-type]
     adapter = NoticeAdapter()
     core.register(adapter)
     return core, adapter
@@ -217,7 +217,8 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
         raise RuntimeError("crash after insert before receipt commit")
 
     monkeypatch.setattr(IMOutboxStore, "insert_intent", staticmethod(rollback))
-    await core.notice_bridge.poll_once()
+    with pytest.raises(RuntimeError, match="crash after insert"):
+        await core.notice_bridge.poll_once()
     assert not receipts(pool)
     with pool.connection() as conn:
         assert conn.execute("SELECT count(*) FROM im_bridge_outbound_intents").fetchone() == (0,)
@@ -232,7 +233,8 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
         raise RuntimeError("response lost after durable acceptance")
 
     monkeypatch.setattr(core.notice_bridge.poll_store, "accept_notice", lost)
-    await core.notice_bridge.poll_once()
+    with pytest.raises(RuntimeError, match="response lost"):
+        await core.notice_bridge.poll_once()
     assert len(receipts(pool)) == 1 and core.notice_bridge._cursor == 0
     monkeypatch.setattr(core.notice_bridge.poll_store, "accept_notice", accept)
     await core.notice_bridge.poll_once()
@@ -314,3 +316,41 @@ async def test_legacy_stored_manifest_is_claimed_and_dispatched_after_vocabulary
     assert sent == [{"chat_id": "42", "text": "legacy"}]
     with pool.connection() as conn:
         assert conn.execute("SELECT status FROM im_bridge_outbound_intents").fetchone() == ("sent",)
+
+
+@pytest.mark.parametrize("raw", [b"not-json", b"\xff"])
+async def test_unreadable_legacy_payload_uses_only_the_declared_historical_cutover(
+    pool: ConnectionPool,
+    tmp_path: Path,
+    raw: bytes,
+) -> None:
+    with pool.connection() as conn:
+        old = insert_notice(conn, spawn_agent(), 0, "possibly already sent")
+    path = tmp_path / "state" / "im_bridge" / "notice_cursor.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(raw)
+    core, adapter = make_core(pool)
+    await core.notice_bridge.poll_once()
+    assert not receipts(pool) and not adapter.deliveries
+    assert path.read_bytes() == raw
+    floor, _, reason = core.notice_bridge.poll_store.initialize_notice_poll(0)
+    assert floor == old and reason == NoticePollImportReason.LEGACY_HISTORY_UNKNOWN
+
+
+@pytest.mark.parametrize("error", [RuntimeError("reader bug"), KeyError("missing field")])
+def test_legacy_import_does_not_hide_programming_faults(
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    read_text = Path.read_text
+
+    def broken_read(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path.name == "notice_cursor.json":
+            raise error
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", broken_read)
+    with pytest.raises(type(error)) as caught:
+        make_core(pool)
+    assert caught.value is error
