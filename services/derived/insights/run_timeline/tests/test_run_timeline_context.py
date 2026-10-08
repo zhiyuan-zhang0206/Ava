@@ -11,13 +11,13 @@ from fastapi import HTTPException, Request
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from base.agents.history.checkpoint import FullHistory
+from base.agents.history.context_breakdown import RequestBreakdown
+from base.agents.history.context_response import ContextBreakdownResponse, ContextCategory
 from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
-from gateway.agents.history.context_breakdown import RequestBreakdown
-from gateway.agents.schemas import ContextBreakdownResponse, ContextCategory
-from gateway.run_timeline import context
-from gateway.run_timeline.history import HistoryView
+from services.derived.insights.run_timeline import context
+from services.derived.insights.run_timeline.history import HistoryView
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -144,9 +144,7 @@ class Views:
 
 def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch):
 
-    def breakdown(
-        _request: Request, _agent: int, found: RequestBreakdown
-    ) -> ContextBreakdownResponse:
+    def breakdown(_pool: object, _agent: int, found: RequestBreakdown) -> ContextBreakdownResponse:
         # The window and thresholds come from the model registry; the bucketing is the real one.
         return ContextBreakdownResponse(
             total_input_tokens=found.total.tokens,
@@ -165,7 +163,9 @@ def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch):
         )
 
     monkeypatch.setattr(context, "context_breakdown_response", breakdown)
-    app_state = SimpleNamespace(db=cast(Database, object()), run_timeline_views=Views(view))
+    app_state = SimpleNamespace(
+        db=cast(Database, object()), db_pool=object(), run_timeline_views=Views(view)
+    )
     request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=app_state)))
     return context.get_run_timeline_context(request, 7, at)
 

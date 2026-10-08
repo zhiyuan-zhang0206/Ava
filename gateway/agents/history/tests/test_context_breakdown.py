@@ -23,21 +23,21 @@ from langchain_core.messages import (
 # Load agent.graph before agent.hooks.compact to resolve the latent graph<->compact
 # import cycle (compact.py imports agent.hooks; claim._decide imports back from
 # compact). Needed only because this test uses the write-side helper below —
-# gateway.agents.history.context_breakdown itself must NOT need it (see
+# base.agents.history.context_breakdown itself must NOT need it (see
 # test_bucket_messages_works_without_agent_graph).
 import agent.graph  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, inbound_message, system_note_message
-from base.agents.history.message_tokens import MessageTokens
-from base.agents.messages.token_estimate import estimate_message_tokens
-from base.db import create_agent
-from gateway.agents.history.context_breakdown import (
+from base.agents.history.context_breakdown import (
     SECTION_SPLIT_THRESHOLD_TOKENS,
     SectionNode,
     bucket_messages,
     latest_request_breakdown,
     section_breakdown,
 )
+from base.agents.history.message_tokens import MessageTokens
+from base.agents.messages.token_estimate import estimate_message_tokens
+from base.db import create_agent
 from gateway.app import app
 
 
@@ -330,7 +330,7 @@ def test_bucket_messages_works_without_agent_graph() -> None:
     code = (
         "import sys\n"
         "from langchain_core.messages import HumanMessage\n"
-        "from gateway.agents.history.context_breakdown import bucket_messages\n"
+        "from base.agents.history.context_breakdown import bucket_messages\n"
         "from agent.messages import COMPACT_SUMMARY_HEADER\n"
         "from base.agents.history.message_tokens import MessageTokens\n"
         "buckets = bucket_messages("
@@ -414,8 +414,8 @@ def test_endpoint_no_checkpoint_is_empty(
 def test_a_total_that_is_not_the_requests_reported_input_stays_estimated() -> None:
     """A request the token chain dropped (its input contradicted a later one) is not an anchor:
     its context sums to something else, so the total is an accumulation, not the provider's number."""
+    from base.agents.history.context_breakdown import request_breakdown
     from base.agents.history.message_tokens import segment_tokens
-    from gateway.agents.history.context_breakdown import request_breakdown
 
     def reply(inp: int, out: int) -> AIMessage:
         return AIMessage(
