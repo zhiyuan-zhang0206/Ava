@@ -26,7 +26,7 @@ pause exemption changes neither the authentication nor the payload.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 
 from base import config
 from gateway.http.auth.request_principal import cluster_credential
@@ -35,7 +35,9 @@ router = APIRouter()
 
 
 @router.get("/api/bootstrap")
-def get_bootstrap(authorization: str | None = Header(default=None)) -> dict[str, str]:
+def get_bootstrap(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict[str, str]:
     """Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an
     agent-runner to load into its environment.
 
@@ -51,7 +53,13 @@ def get_bootstrap(authorization: str | None = Header(default=None)) -> dict[str,
             endpoint.
     """
     secret = config.settings.data_plane.cluster_secret
-    if secret and cluster_credential(authorization, secret) is None:
+    if (
+        secret
+        and cluster_credential(
+            authorization, secret, cache=request.app.state.machine_token_acceptance
+        )
+        is None
+    ):
         raise HTTPException(status_code=401, detail="machine API token required")
     try:
         return config.bootstrap_config_values()
