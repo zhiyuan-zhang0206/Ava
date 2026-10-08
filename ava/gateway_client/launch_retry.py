@@ -1,4 +1,4 @@
-"""SDK admission and immutable receipt validation for explicit launch retries."""
+"""SDK admission and immutable receipt validation for launch retries."""
 
 from typing import cast
 from uuid import UUID
@@ -24,18 +24,8 @@ def get_launch_attempt(agent_id: int) -> UUID:
     return UUID(attempt)
 
 
-def validate_retry_admission(
-    *, require_idempotency: bool, key: str | None, prior: str | UUID | None
-) -> tuple[str, RetryLaunchRequest] | None:
-    """Refuse incomplete or accidentally legacy strong intents before HTTP."""
-    if type(require_idempotency) is not bool:
-        raise TypeError("require_idempotency must be a bool")
-    if not require_idempotency:
-        if key is not None or prior is not None:
-            raise ValueError(
-                "launch retry key and observed attempt require require_idempotency=True"
-            )
-        return None
+def validate_retry_admission(*, key: str, prior: str | UUID) -> tuple[str, RetryLaunchRequest]:
+    """Require a caller-owned key and observed attempt before HTTP."""
     key = validate_idempotency_key(key)
     if not isinstance(prior, (str, UUID)):
         raise TypeError("expected_prior_attempt_id must be a UUID or UUID string")
@@ -47,23 +37,16 @@ def validate_retry_admission(
 def retry_launch(
     agent_id: int,
     *,
-    require_idempotency: bool = False,
-    idempotency_key: str | None = None,
-    expected_prior_attempt_id: str | UUID | None = None,
+    idempotency_key: str,
+    expected_prior_attempt_id: str | UUID,
 ) -> int:
-    """Use legacy launch retry or a caller-owned guarded operation."""
-    admission = validate_retry_admission(
-        require_idempotency=require_idempotency,
+    """Retry one observed attempt through the fixed guarded operation."""
+    key, request = validate_retry_admission(
         key=idempotency_key,
         prior=expected_prior_attempt_id,
     )
-    if admission is None:
-        response = transport.post(f"/api/agents/{agent_id}/retry-launch")
-        transport.raise_from_response(response)
-        return int(response.json()["id"])
     if type(agent_id) is not int or not 0 < agent_id < 2**63:
         raise ValueError("guarded launch retry requires a positive agent ID")
-    key, request = admission
     response = transport.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
         request.model_dump(mode="json"),

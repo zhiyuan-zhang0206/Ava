@@ -434,35 +434,20 @@ def get_launch_attempt(agent_id: int) -> UUID:
 def retry_launch(
     agent_id: int,
     *,
-    require_idempotency: bool = False,
-    idempotency_key: str | None = None,
-    expected_prior_attempt_id: str | UUID | None = None,
+    idempotency_key: str,
+    expected_prior_attempt_id: str | UUID,
 ) -> int:
     """Retry starting an existing agent after a launch failure.
 
-    This keeps its identity and first prompt. Use the agent id returned in the
-    failed creation response. Set `require_idempotency=True` with an explicit
-    `idempotency_key` and the `expected_prior_attempt_id` you observed to retry
-    one fixed attempt. Reuse all three values when recovering a lost response;
-    acceptance does not prove the agent started. A new retry needs a new key
-    and the latest observed attempt.
+    Keep the agent id, `idempotency_key` and `expected_prior_attempt_id` together
+    when recovering a lost response. Acceptance does not prove the agent started.
+    A deliberate new retry needs a new key and the latest observed attempt.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    from ava.gateway_client.launch_retry import validate_retry_admission
-
-    admission = validate_retry_admission(
-        require_idempotency=require_idempotency,
-        key=idempotency_key,
-        prior=expected_prior_attempt_id,
-    )
-    if admission is None:
-        return _client.retry_launch(agent_id)
-    key, request = admission
     return _client.retry_launch(
         agent_id,
-        require_idempotency=True,
-        idempotency_key=key,
-        expected_prior_attempt_id=request.expected_prior_attempt_id,
+        idempotency_key=idempotency_key,
+        expected_prior_attempt_id=expected_prior_attempt_id,
     )
 
 
