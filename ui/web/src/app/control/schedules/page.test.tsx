@@ -9,6 +9,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/transport/api";
+import { useStore } from "@/lib/state/store";
 import type { ScheduleSummary, ScheduleView } from "@/lib/contracts/types";
 
 // Mock PythonCode — avoid running Prism syntax highlighting in tests
@@ -72,6 +73,32 @@ const SCHEDULE: ScheduleSummary = {
 };
 
 describe("SchedulesPage", () => {
+  it("ignores Enter while the draft is pending", async () => {
+    vi.spyOn(api, "listSchedules").mockResolvedValue([]);
+    const draft = vi.spyOn(api, "draftSchedule").mockReturnValue(new Promise(() => undefined));
+    wrap(<SchedulesPage />);
+    const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
+    fireEvent.change(input, { target: { value: "run nightly" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Describe" }).hasAttribute("disabled")).toBe(true));
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(draft).toHaveBeenCalledOnce();
+  });
+
+  it("does not inherit automatic mutation retries", async () => {
+    useStore.setState({ toast: null });
+    vi.spyOn(api, "listSchedules").mockResolvedValue([]);
+    const draft = vi.spyOn(api, "draftSchedule").mockRejectedValue(new Error("response lost"));
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
+    render(<QueryClientProvider client={client}><SchedulesPage /></QueryClientProvider>);
+    const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
+    fireEvent.change(input, { target: { value: "run nightly" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(useStore.getState().toast).toBe("Draft failed: response lost"));
+    expect(draft).toHaveBeenCalledOnce();
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
+
   it("shows loading spinner", () => {
     vi.spyOn(api, "listSchedules").mockReturnValue(new Promise<ScheduleSummary[]>(() => undefined));
     wrap(<SchedulesPage />);

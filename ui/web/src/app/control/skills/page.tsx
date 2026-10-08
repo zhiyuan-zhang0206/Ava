@@ -9,7 +9,7 @@
 // cross-machine matrix like plugins/MCP).
 //
 // Adding one is not a form: PackageDraftEntry hands a natural-language request
-// to an installer agent (POST /api/packages/draft) that finds, installs, and
+// to an installer agent (POST /api/keyed/v1/packages/draft) that finds, installs, and
 // verifies the skill in its own conversation.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

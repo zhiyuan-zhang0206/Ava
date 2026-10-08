@@ -66,6 +66,10 @@ overlay raises a configuration error before server selection; it never becomes
 an empty server list or enables servers by default. `ava mcp list` reports the
 error and exits unsuccessfully. Definitions-only inventory can still inspect
 all declared servers, but must read the overlay separately to report enable state.
+Each tool request checks that its server remains enabled before reusing a local
+or daemon session. Disabling a server rejects later requests without terminating
+existing sessions or cancelling an already-started call. Warm help metadata can
+still list prior tools; it does not authorize their execution.
 
 Installed server spawn cwd is given by `installed_mcp_dir(name)` (its package directory), allowing its relative `.venv/bin/python` command to resolve to an isolated venv; builtin/plugin/machine returns None (keeping daemon cwd).
 
@@ -81,6 +85,10 @@ After a tool call starts, a lost transport or daemon response returns `MCPCallEr
 with an unknown result; the SDK does not replay the call on a new session or
 fall back to local execution. Tool discovery may retry transport failures;
 a tool call can retry only when session selection fails before it starts.
+The shared retry classifier checks concrete AnyIO, operating-system and MCP SDK
+exception types and this platform's transport errno constants. A matching class
+name alone does not make an unknown error retryable; required dependency import
+failures propagate and are not cached as an empty retry policy.
 Repeating a tool with at-least-once delivery requires a protocol-level
 idempotency key and server deduplication.
 
