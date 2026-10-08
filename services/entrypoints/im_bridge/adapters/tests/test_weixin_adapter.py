@@ -28,6 +28,7 @@ from services.entrypoints.im_bridge.adapters.weixin_login import qr_login
 from services.entrypoints.im_bridge.ingress.tests.conftest import NativeWeixin
 from services.entrypoints.im_bridge.ingress.tests.conftest import native_weixin as native_weixin
 from services.entrypoints.im_bridge.ingress.types import IngressReceipt, IngressStatus
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 
 
@@ -325,13 +326,14 @@ async def test_skips_echo_group_bot_and_textless(native_weixin: NativeWeixin) ->
 
 async def test_unconfigured_start_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """No account file -> start() does nothing and send() raises."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    adapter = WeixinAdapter(FakeCore())
-    assert not adapter._configured
-    await adapter.start()
-    assert adapter._poll_task is None
-    with pytest.raises(RuntimeError, match="not configured"):
-        await adapter.send("peer-1", "hi")
+    async with owned_tasks() as _owned_tasks:
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        adapter = WeixinAdapter(FakeCore())
+        assert not adapter._configured
+        await adapter.start(_owned_tasks)
+        assert adapter._poll_task is None
+        with pytest.raises(RuntimeError, match="not configured"):
+            await adapter.send("peer-1", "hi")
 
 
 async def test_qr_login_saves_account(env: Any, tmp_path: Any) -> None:

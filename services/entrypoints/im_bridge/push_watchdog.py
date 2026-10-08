@@ -27,7 +27,7 @@ from typing import Any
 from base.log import logger
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
-from services.entrypoints.im_bridge.types import SendNotStartedError
+from services.entrypoints.im_bridge.types import SendNotStartedError, SendOutcomeUncertainError
 
 _log = logging.getLogger("services.entrypoints.im_bridge.core.push_watchdog")
 
@@ -77,7 +77,7 @@ async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, ada
         _log.warning("send failed channel=%s chat=%s: %r — retrying once", channel, chat_id, exc)
         try:
             await retry_once_after_backoff(attempt, core.config)
-        except Exception:
+        except (SendNotStartedError, SendOutcomeUncertainError):
             _log.exception("send retry failed channel=%s chat=%s", channel, chat_id)
             logger.warning(
                 "push failed after retry: {channel}",
@@ -85,7 +85,7 @@ async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, ada
                 channel=channel,
                 failures=getattr(adapter, "push_failures", 0),
             )
-    except Exception:
+    except SendOutcomeUncertainError:
         _log.exception("send outcome uncertain channel=%s chat=%s; no retry", channel, chat_id)
         logger.warning(
             "push outcome uncertain: {channel}",
@@ -118,5 +118,5 @@ async def hint_recovered(core: Any, msg: Any) -> None:
             msg.chat_id,
             Reply(copy.PUSH_RECOVERED_HINT.format(channel=msg.channel)),
         )
-    except Exception:
+    except (SendNotStartedError, SendOutcomeUncertainError):
         _log.exception("weixin recovered-hint send failed")

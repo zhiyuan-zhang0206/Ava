@@ -15,6 +15,7 @@ from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 
 
 @dataclass
@@ -83,6 +84,7 @@ async def native_weixin(
     config = im_bridge_config(im_send_retry_delays=(0.0,))
     with database.pool(min_size=1, max_size=3) as pool:
         async with (
+            owned_tasks() as tasks,
             httpx.AsyncClient(
                 base_url="http://isolated-gateway", transport=httpx.MockTransport(gateway)
             ) as gateway_http,
@@ -90,7 +92,7 @@ async def native_weixin(
         ):
             client = GatewayClient(config, gateway_url="http://isolated-gateway", auth_headers={})
             client._client = gateway_http
-            core = IMBridgeCore(config, client, db_pool=pool)
+            core = IMBridgeCore(config, client, db_pool=pool, tasks=tasks)
             adapter = WeixinAdapter(core, client=provider_http)
             core.register(adapter)
 
