@@ -27,6 +27,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import install
+from base.agents.sdk import call_policy
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
@@ -37,7 +38,9 @@ from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
-def _reset() -> Iterator[None]:
+def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    # These tests exercise lazy installation, independently of live sampling refresh.
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     # Each test drives the installation slot + agent identity explicitly;
     # snapshot-restore so nothing leaks between tests. Any SDK surface already
     # installed in this process (ava.memory, ava.tasks, ava.cwd ...) is taken out
