@@ -59,7 +59,7 @@ def _discovered_and_config(
 
     A config entry whose plugin directory is gone (interrupted upgrade, manual
     rm) must not block the load: each dangling name is reported through the one
-    canonical reporter (once per process, via `plugins_cfg.report_dangling`)
+    canonical reporter on each failed read via `plugins_cfg.report_dangling`
     and treated as disabled (the same contract the loader always had —
     2026-08-28 ava_ledger incident).
     """
