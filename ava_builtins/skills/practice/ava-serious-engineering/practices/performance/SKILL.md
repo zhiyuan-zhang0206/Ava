@@ -1,6 +1,6 @@
 ---
 name: performance
-description: "Designs and reviews performance from measurements, critical paths, load, latency, and capacity budgets. Use when working on queries, endpoints, event loops, batch jobs, throughput, memory, or resource limits, even before users report slowness."
+description: "Investigates latency, throughput, and resource use. Use when measuring bottlenecks, setting performance budgets, or reviewing a performance-sensitive design."
 ---
 
 # Performance

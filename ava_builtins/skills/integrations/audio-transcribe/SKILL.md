@@ -1,6 +1,6 @@
 ---
 name: audio-transcribe
-description: Transcribes local audio, video, YouTube, and media URLs to text through OpenAI. Use when the user mentions transcription, podcasts, recordings, subtitles, or speech extraction, or when a feed item lacks a transcript.
+description: "Transcribes speech from audio, video, YouTube, or media URLs. Use when a transcript or spoken-content extraction is needed."
 ---
 
 # audio-transcribe

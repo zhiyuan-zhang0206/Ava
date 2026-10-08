@@ -164,10 +164,8 @@ PURE_REPO_CALLEES: dict[str, str] = {
 ALLOWED: dict[str, str] = {
     "ava/mcp_config.py::hidden-singleton:_session_death_codes": "constants read from mcp.types",
     "ava_builtins/plugins/ava_memory/sdk.py::hidden-cache:_documented_pool": "wraps one home's pool path in a documented constant",
-    "base/api_contracts/contracts.py::hidden-cache:_template_regex": "a regex compiled from a template string",
     "base/config/admin/candidate.py::hidden-cache:_candidate_validation_model": "builds a validation subclass of a given Settings class",
     "base/config/service_read.py::hidden-singleton:domain_model_classes": "the static table of Settings domain classes",
-    "base/host/env/audit.py::hidden-singleton:_load_alias_metadata": "static alias metadata of the env registry",
     "base/host/env/config_registry.py::hidden-singleton:_build_registry": "the static config registry derived from the Settings classes",
     "base/host/env/config_registry.py::hidden-singleton:field_infos": "a static view of the config registry",
     "base/host/env/registry.py::hidden-singleton:agent_runner_cluster_aliases": "a static view of the env registry",
@@ -229,14 +227,6 @@ CLOCK_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "clock")
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
 DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"
-# Log-throttle flags ("already warned" sets, last-emitted stamps). The warning/alert
-# pipeline is being redesigned as a whole; a one-off `warn_once` helper is not added
-# meanwhile, and the throttle code is untouched. Same key shape as ALLOWED -> reason.
-DEFERRED: dict[str, str] = {
-    f"{site}": DEFERRED_WARNING_REDESIGN
-    for site in (
-        "agent/graph/prompt/capabilities.py::ambient-container:_warned_unresolved",
-        "ava_builtins/plugins/ava_syntax_fix/_imports.py::hidden-singleton:_warn_ruff_missing_once",
-        "base/packages/plugins/enable_config.py::ambient-container:_dangling_reported",
-    )
-}
+# Deferred sites remain measured baseline debt, never exemptions. Warning-only
+# process-wide caches have been removed; no warning redesign is needed for them.
+DEFERRED: dict[str, str] = {}

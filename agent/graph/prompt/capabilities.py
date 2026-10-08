@@ -77,26 +77,8 @@ def _is_capability_surface_member(path: str) -> bool:
     return bool(rest) and head in _CAPABILITY_SURFACES
 
 
-# (config_field, name) pairs already warned about in this process. A configured
-# name that resolves to nothing is a fact about static config, so it is worth
-# saying once and worth nothing after that — and resolution is no longer a
-# per-window event: the drift check re-resolves before every LLM call, which
-# without this would repeat the same warning for an agent's whole life.
-_warned_unresolved: set[tuple[str, str]] = set()
-
-
-def forget_unresolved_warnings() -> None:
-    """Reset the once-per-process unresolved-skill warning memory (the test seam)."""
-    _warned_unresolved.clear()
-
-
-def _warn_unresolved_once(config_field: str, name: str) -> None:
-    """Warn that a configured skill name matched nothing — at most once per
-    (list, name) per process. Naming `config_field` so the operator sees which
-    list is stale."""
-    if (config_field, name) in _warned_unresolved:
-        return
-    _warned_unresolved.add((config_field, name))
+def _warn_unresolved(config_field: str, name: str) -> None:
+    """Report an unresolved configured skill on each resolution attempt."""
     logging.getLogger(__name__).warning(
         "%s: skill %r not found among loaded skills, skipping", config_field, name
     )
@@ -118,7 +100,7 @@ def resolve_prompt_skills(
     through `base.packages.skills.names.match_key`, so a stored value still spelled
     `ava_memory.consolidation` (a preset row written before the dash rename, an operator
     typing the Python form) resolves to the same skill as `ava-memory.consolidation`. An
-    unresolved name warns once per process (naming `config_field` so the operator
+    unresolved name warns on each resolution attempt (naming `config_field` so the operator
     sees which list is stale) and is skipped — a plugin-bundled skill only
     resolves while its plugin is enabled, and skills differ per machine.
 
@@ -145,7 +127,7 @@ def resolve_prompt_skills(
             key = match_key(name)
             skill = by_ident.get(key) or by_name.get(key)
             if skill is None:
-                _warn_unresolved_once(config_field, name)
+                _warn_unresolved(config_field, name)
                 continue
             skills.append(skill)  # pyright: ignore[reportUnknownArgumentType]
 

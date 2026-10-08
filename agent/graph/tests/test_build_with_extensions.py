@@ -438,8 +438,8 @@ def test_dangling_config_entry_reported_and_skipped(
     """A config entry whose plugin directory is gone (interrupted upgrade,
     manual rm) must not block the plugin load: reported through the canonical
     fail-soft reporter (loguru ERROR + `plugin_load_failed` event), treated as
-    disabled, the rest of the config intact. A unique missing name keeps the
-    process-wide once-only reporter independent of other tests.
+    disabled, the rest of the config intact. Surface discovery and registry
+    admission each read the config and report their own failed load.
     """
     missing = f"vanished_{uuid4().hex}"
     _make_external_plugin("audit")
@@ -454,7 +454,16 @@ def test_dangling_config_entry_reported_and_skipped(
     assert "plugins.audit.plugin" in sys.modules
     assert missing not in loaded.config.plugins
     attrs = [a for n, a in events if n == "plugin_load_failed"]
-    assert [a["plugin"] for a in attrs] == [missing]
+    assert [a["plugin"] for a in attrs] == [missing, missing]
+    assert all(str(a["error"]).startswith("DanglingPlugin: ") for a in attrs)
+    assert all(missing in str(a["error"]) for a in attrs)
+
+    reloaded = _loader.load_extensions()
+    assert missing not in reloaded.config.plugins
+    repeated = [a for n, a in events if n == "plugin_load_failed"]
+    assert [a["plugin"] for a in repeated] == [missing] * 4
+    assert all(str(a["error"]).startswith("DanglingPlugin: ") for a in repeated)
+    assert all(missing in str(a["error"]) for a in repeated)
 
 
 def test_dot_prefixed_dirs_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -> None:

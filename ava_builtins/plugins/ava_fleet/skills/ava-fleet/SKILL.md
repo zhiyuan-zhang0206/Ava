@@ -1,6 +1,6 @@
 ---
 name: ava-fleet
-description: Explains Fleet collaboration and task-tracking conventions. Use after choosing Fleet coordination, when managing existing Fleet tasks, or when accepting delegated work; workflow selects whether to collaborate.
+description: "Coordinates Ava Fleet tasks after collaboration is chosen. Use when assigning work, tracking delegated tasks, or reporting blockers in Fleet."
 ---
 
 # Working in a Fleet
