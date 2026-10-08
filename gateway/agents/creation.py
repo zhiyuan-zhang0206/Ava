@@ -27,6 +27,13 @@ from ops.agents.creation_identity import (
 from ops.rpc_schemas import ConfigNormalization, LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 
+class DraftCreationArguments(TypedDict, total=False):
+    """Typed opt-in arguments; legacy handler calls pass no new keywords."""
+
+    creation_key: str
+    creation_identity: dict[str, object]
+
+
 class _CreationArguments(TypedDict, total=False):
     creation_key: str
     creation_request_hash: str
