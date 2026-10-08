@@ -78,7 +78,7 @@ def _ruff_format(code: str) -> str:
         return proc.stdout
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
         # Same contract as _ruff_fix (issue #159): a timeout or OS error is a
-        # visible warning; a missing ruff is logged once per process. Pass
+        # visible warning; a missing ruff is logged for each skipped stage. Pass
         # through either way — format only restyles, never fixes an error.
         _log_ruff_give_up("format", code, exc)
         return code
