@@ -383,7 +383,7 @@ def main() -> None:
         if failures:
             _log.error("[im_bridge] async shutdown failed: %r", failures)
             code = 1
-    except Exception:
+    except (Exception, BaseExceptionGroup):
         _log.exception("[im_bridge] daemon crashed — uncaught exception escaped run()")
         code = 1
     _hard_exit(code)

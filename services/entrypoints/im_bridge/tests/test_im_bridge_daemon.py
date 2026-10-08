@@ -414,3 +414,27 @@ async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault
     stop_health.assert_awaited_once_with(health)
     pool.close.assert_called_once()
     remove_pidfile.assert_called_once()
+
+
+def test_cleanup_group_with_cancellation_uses_the_bounded_failure_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import MagicMock
+
+    fault = RuntimeError("cleanup failed during cancellation")
+    group = BaseExceptionGroup("body and cleanup", [asyncio.CancelledError(), fault])
+
+    def run(coroutine: Any) -> None:
+        coroutine.close()
+        raise group
+
+    runner = SimpleNamespace(run=run)
+    exit_process = MagicMock()
+    monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
+    monkeypatch.setattr(daemon, "init_gateway_process", MagicMock())
+    monkeypatch.setattr(daemon, "install_graceful_shutdown", MagicMock())
+    monkeypatch.setattr(daemon, "_gate_httpx_info_logs", lambda: None)
+    monkeypatch.setattr(daemon, "_hard_exit", exit_process)
+    daemon.main()
+    exit_process.assert_called_once_with(1)
+    assert group.exceptions[1] is fault
