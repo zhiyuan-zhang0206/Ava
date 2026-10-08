@@ -1086,6 +1086,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "schedules/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/audit/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
