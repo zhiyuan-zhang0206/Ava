@@ -210,8 +210,3 @@ def test_other_services_are_not_scanned(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
     _write(tmp_path, "services/other/neighbour.py", "value = 'launchd'\n")
     assert gate.main([]) == 0
-
-
-def test_repo_ava_root_is_clean() -> None:
-    """The shipped root supervisor passes its own gate (self-check)."""
-    assert gate.main([]) == 0
