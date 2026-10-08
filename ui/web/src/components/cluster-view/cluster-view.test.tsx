@@ -23,6 +23,7 @@ vi.mock("@/lib/transport/api", () => ({
   api: { getClusterCurves, getClusterLanes, getClusterMessages, getRunTimeline },
 }));
 
+import { alignMargins } from "./cluster-lane-expansion";
 import { ClusterView } from "./cluster-view";
 
 const T0 = Date.parse("2026-10-04T12:00:00Z");
@@ -207,5 +208,22 @@ describe("ClusterView", () => {
     getClusterLanes.mockRejectedValue(new Error("unknown agent IDs: [10]"));
     renderView();
     expect((await screen.findByRole("alert")).textContent).toContain("unknown agent IDs: [10]");
+  });
+});
+
+describe("alignMargins", () => {
+  it("moves each edge of the rows by its gap to the lane track", () => {
+    expect(alignMargins({ left: -13, right: -13 }, { left: 125, right: 1463 }, { left: 130, right: 1458 })).toEqual({
+      left: -18,
+      right: -18,
+    });
+    expect(alignMargins({ left: -13, right: -13 }, { left: 125, right: 1463 }, { left: 120, right: 1470 })).toEqual({
+      left: -8,
+      right: -6,
+    });
+  });
+
+  it("leaves aligned tracks alone", () => {
+    expect(alignMargins({ left: -13, right: -13 }, { left: 125, right: 1463 }, { left: 125.2, right: 1462.8 })).toBeNull();
   });
 });

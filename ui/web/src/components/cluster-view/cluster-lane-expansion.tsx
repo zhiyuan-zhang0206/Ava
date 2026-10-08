@@ -6,7 +6,7 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { RunTimelineRows } from "@/components/run-timeline/run-timeline-rows";
@@ -21,6 +21,25 @@ import {
 import { api } from "@/lib/transport/api";
 
 import { windowIso } from "./cluster-model";
+
+// The run timeline's own frame (border and padding) is about this wide on each side; the real offset is measured.
+const FRAME_GUESS_PX = 13;
+
+/**
+ * Margins that put the rows' tracks exactly over the lanes' tracks: starting from `margins` (the
+ * ones in effect), moves each edge by the gap between the first embedded track and the lane track.
+ * Pure so the arithmetic is tested; `null` when already aligned within half a pixel.
+ */
+export function alignMargins(
+  margins: { left: number; right: number },
+  lane: { left: number; right: number },
+  embedded: { left: number; right: number },
+): { left: number; right: number } | null {
+  const dl = lane.left - embedded.left;
+  const dr = embedded.right - lane.right;
+  if (Math.abs(dl) < 0.5 && Math.abs(dr) < 0.5) return null;
+  return { left: margins.left + dl, right: margins.right + dr };
+}
 
 export function LaneExpansion({
   agentId,
@@ -47,6 +66,17 @@ export function LaneExpansion({
     placeholderData: keepPreviousData,
   });
   const data = query.data;
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [margins, setMargins] = useState({ left: -FRAME_GUESS_PX, right: -FRAME_GUESS_PX });
+  // The frame's chrome differs between renderers of the rows, so measure rather than assume.
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    const laneTrack = frame?.closest('[data-testid="cluster-chart"]')?.querySelector('[data-testid="cluster-lane"] [data-track]');
+    const embeddedTrack = frame?.querySelector("[data-track]");
+    if (!laneTrack || !embeddedTrack) return;
+    const next = alignMargins(margins, laneTrack.getBoundingClientRect(), embeddedTrack.getBoundingClientRect());
+    if (next !== null) setMargins(next);
+  }, [margins, data !== undefined]); // eslint-disable-line react-hooks/exhaustive-deps -- re-measures when the rows appear and after each correction
 
   if (data === undefined) {
     return query.isError ? (
@@ -73,8 +103,8 @@ export function LaneExpansion({
 
   return (
     <div className="space-y-2" data-testid="cluster-expansion">
-      {/* The rows' own frame (border and padding) is 13px each side: pull it out so its track lines up with the lanes' tracks. */}
-      <div className="-mx-[13px]">
+      {/* Pull the rows' own frame out so that its tracks line up with the lanes' tracks. */}
+      <div ref={frameRef} style={{ marginLeft: margins.left, marginRight: margins.right }}>
         <RunTimelineRows
           data={data}
           base={base}
