@@ -19,6 +19,7 @@ failure with an environment template instead of a raw traceback.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -200,7 +201,11 @@ def _deliver_lite_api_token() -> None:
         os.environ[API_TOKEN_ENV] = capability.api.token
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
     # Line-buffer stdout so a long command piped into `tee` (every detached rollout /
     # updater session) streams its own progress in real time instead of block-buffering
     # it to the end of the log, out of order against its children's unbuffered output.
@@ -233,7 +238,8 @@ def main(argv: list[str] | None = None) -> int:
 
     _opt_into_lite_config(args_in)
 
-    parser = _build_parser()
+    children = [] if retained_children is None else retained_children
+    parser = _build_parser(retained_children=children)
     args = parser.parse_args(argv)
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission

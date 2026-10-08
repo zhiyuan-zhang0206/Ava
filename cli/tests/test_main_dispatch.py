@@ -158,7 +158,7 @@ def test_dispatch_invokes_per_subcommand_handler(
     """Each sub-command routes to its `_h_*` handler with the parsed Namespace."""
     captured: dict[str, argparse.Namespace] = {}
 
-    def _fake(args: argparse.Namespace) -> int:
+    def _fake(args: argparse.Namespace, **_kwargs: object) -> int:
         captured["args"] = args
         return 42
 
@@ -177,7 +177,7 @@ def _stub_dispatch(
     parser = build_parser()
     leaf = next(item for item in _iter_leaf_parsers(parser) if item.prog == f"ava {command}")
     leaf.set_defaults(func=handler)
-    monkeypatch.setattr(_main, "_build_parser", lambda: parser)
+    monkeypatch.setattr(_main, "_build_parser", _ignoring_retention(lambda: parser))
 
 
 def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -418,7 +418,9 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     for verb in ("status", "cluster", "agents", "config", "logs"):
         env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
-        monkeypatch.setattr(_main, "_build_parser", lambda v=verb: _noop_parser(v))
+        monkeypatch.setattr(
+            _main, "_build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
+        )
         assert _main.main([verb]) == 0
         assert env.get("AVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
 
@@ -426,7 +428,9 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     for verb in ("start", "stop"):
         env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
-        monkeypatch.setattr(_main, "_build_parser", lambda v=verb: _noop_parser(v))
+        monkeypatch.setattr(
+            _main, "_build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
+        )
         assert _main.main([verb]) == 0
         assert "AVA_CONFIG_FETCH" not in env
 
@@ -505,7 +509,11 @@ def test_foreign_checkout_is_refused_before_dispatch(
     retry a start), and nothing is written to the home."""
     home = _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
-    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording(argv[0], dispatched))
+    monkeypatch.setattr(
+        _main,
+        "_build_parser",
+        _ignoring_retention(lambda: _noop_parser_recording(argv[0], dispatched)),
+    )
 
     rc = _main.main(argv)
 
@@ -528,7 +536,11 @@ def test_the_homes_own_checkout_runs_the_state_changing_verbs(
     (home / "source").symlink_to(Path(_main.__file__).resolve().parents[1])
     monkeypatch.setenv("AVA_HOME", str(home))
     dispatched: list[str] = []
-    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("stop", dispatched))
+    monkeypatch.setattr(
+        _main,
+        "_build_parser",
+        _ignoring_retention(lambda: _noop_parser_recording("stop", dispatched)),
+    )
 
     assert _main.main(["stop", "-y"]) == 0
     assert dispatched == ["stop"]
@@ -541,7 +553,11 @@ def test_a_home_with_no_source_accepts_any_checkout(
     start, stop and reconfigure it."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     dispatched: list[str] = []
-    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("stop", dispatched))
+    monkeypatch.setattr(
+        _main,
+        "_build_parser",
+        _ignoring_retention(lambda: _noop_parser_recording("stop", dispatched)),
+    )
 
     assert _main.main(["stop", "-y"]) == 0
     assert dispatched == ["stop"]
@@ -558,7 +574,11 @@ def test_foreign_checkout_may_still_ask_for_a_lone_help_flag(
     than the gate: no verb runs."""
     _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
-    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("ava", dispatched))
+    monkeypatch.setattr(
+        _main,
+        "_build_parser",
+        _ignoring_retention(lambda: _noop_parser_recording("ava", dispatched)),
+    )
 
     with pytest.raises(SystemExit) as exc:
         _main.main([flag])
@@ -573,7 +593,11 @@ def test_foreign_checkout_may_still_run_bare_ava(
     """With no argv the gate has no verb to refuse; argparse owns the usage error."""
     _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
-    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("ava", dispatched))
+    monkeypatch.setattr(
+        _main,
+        "_build_parser",
+        _ignoring_retention(lambda: _noop_parser_recording("ava", dispatched)),
+    )
 
     assert _main.main([]) == 0
 
@@ -745,3 +769,10 @@ assert code_version.db_gate_applies() is False
 """
     result = _run_isolated_program(code, tmp_path)
     assert result.returncode == 0, result.stderr
+
+
+def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:
+    def invoke(*_args: object, **_kwargs: object) -> T:
+        return callback()
+
+    return invoke

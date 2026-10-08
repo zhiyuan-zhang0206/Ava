@@ -56,7 +56,7 @@ def test_declined_restart_reports_its_own_exit_code(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
-    assert _stop_commands.cmd_restart() == RESTART_DECLINED_EXIT_CODE
+    assert _stop_commands.cmd_restart(retained_children=[]) == RESTART_DECLINED_EXIT_CODE
     assert stopped == []  # validate-before-kill: nothing was taken down
 
 
@@ -74,7 +74,7 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda _operation, **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _stop_commands.cmd_restart()
+    rc = _stop_commands.cmd_restart(retained_children=[])
     assert rc != 0
     assert rc != RESTART_DECLINED_EXIT_CODE
 
