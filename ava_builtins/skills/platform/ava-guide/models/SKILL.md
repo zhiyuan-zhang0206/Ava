@@ -1,6 +1,6 @@
 ---
 name: models
-description: Chooses the LLM model and config overlay for spawned Ava workers under the current cost policy, which only picks models on the intelligence Pareto frontier. Use before every worker spawn or dynamic workflow, even when the model choice seems obvious.
+description: "Selects registered LLMs and config overlays for Ava workers. Use when choosing a worker model, reasoning effort, or speed tier."
 ---
 
 # Model Selection — the Pareto Frontier and Cost Policy

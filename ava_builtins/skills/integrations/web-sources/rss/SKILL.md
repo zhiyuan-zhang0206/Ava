@@ -1,6 +1,6 @@
 ---
 name: rss
-description: "Parses RSS and Atom feeds, lists entries, and ingests full article text. Use when following a blog, news outlet, official feed, or feed URL, or when a source's updates stop appearing."
+description: "Reads RSS/Atom entries and ingests linked articles. Use when following a feed or checking its latest items."
 ---
 
 # rss

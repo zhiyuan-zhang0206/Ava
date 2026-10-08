@@ -37,7 +37,9 @@ sub-skills carry executable procedures and their bundled resources.
 - `agents`, `models`: agent concepts, configuration, and model choice.
 - `presets`: Preset Maker composes role instructions, researched prompts,
   skills, MCP prerequisites, and registered model settings into reusable
-  configurations; role cards remain instance-owned skills.
+  configurations; role cards remain instance-owned skills. The maker uses
+  `skill-creator`'s evaluation contract and delivers cases, metrics, a baseline
+  comparison, and evidence for the complete composition.
 - `schedules`: persistent work; [[ava_builtins/skills/platform/ava-guide/schedules/docs/schedules.ava.okf.md]].
 - `pages`: artifact publishing, user input, and frontend resources;
   [[ava_builtins/skills/platform/ava-guide/pages/docs/pages.ava.okf.md]].
@@ -45,10 +47,24 @@ sub-skills carry executable procedures and their bundled resources.
   [[ava_builtins/skills/platform/ava-guide/external-agents/docs/external-agents.ava.okf.md]].
 - `workspace-cleanup`, `onboarding`: workspace disposal and first use/migration.
 
-`ava-workflow` owns work organization and evaluation. `skill-creator` remains
-an independent authoring method. `ava-self-development` and `impersonator-guide`
+`ava-workflow` owns work organization and general work evaluation.
+`skill-creator` owns skill authoring and the evaluation contract used by Preset
+Maker. `ava-self-development` and `impersonator-guide`
 remain project-local contributor/executor manuals. Guide membership changes
 neither kernel contribution requirements nor operator authorization.
+
+The shared skill/preset evaluation contract lives once at
+`references/evaluation.md`, within the complete externally published Guide
+package. Skill Creator owns the methodology and links to that canonical file.
+Its optional self-evolution replay path loads the separately available Ava
+capability by name; external Guide copies do not assume it is bundled.
+
+Sub-skills load substantial conditional procedures on demand. External-agent
+Mode A reads `references/delegated-workers.md`; takeover keeps its own mode
+boundary. Onboarding separates preference questions, intent branches, and
+shared-memory note formats. `ops` separates resources and sessions; `operations`
+separates diagnosis and authorized-rollout verification. Each entrypoint states
+when to read the relevant reference.
 
 ## Consumers and distribution
 

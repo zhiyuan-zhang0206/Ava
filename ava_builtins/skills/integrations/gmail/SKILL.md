@@ -1,6 +1,6 @@
 ---
 name: gmail
-description: "Reads, searches, sends, replies to, forwards, and drafts Gmail messages, and ingests newsletters over IMAP and SMTP. Use whenever the user mentions email, inbox, Gmail, drafts, attachments, replies, forwarding, or newsletter subscriptions."
+description: "Reads and manages Gmail through IMAP/SMTP. Use when accessing Gmail messages, drafting or sending mail, or ingesting Gmail newsletters."
 ---
 
 # gmail
