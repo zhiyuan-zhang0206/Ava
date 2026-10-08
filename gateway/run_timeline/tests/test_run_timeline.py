@@ -350,7 +350,12 @@ def test_a_view_behind_the_tree_is_rebuilt_but_not_more_than_every_two_seconds(
         loads.append(1)
         return single_segment_history(history_messages())
 
+    def head(_db: object, _agent: int) -> str:
+        return "c1"
+
     monkeypatch.setattr(history_module, "load_checkpoint_history_full", load)
+    # Even an unchanged checkpoint id does not keep a view the tree reaches past.
+    monkeypatch.setattr(history_module, "latest_checkpoint_id", head)
     monkeypatch.setattr(history_module.time, "monotonic", lambda: clock["now"])
     cache = history_module.HistoryViewCache()
     db = cast(Database, object())
