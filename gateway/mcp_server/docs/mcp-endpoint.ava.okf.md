@@ -46,6 +46,9 @@ surface and result shapes are the ones external MCP clients drive.
   those routes admit only the human secret or a session it minted; a machine
   token or a runner-minted session gets 403. A no-secret cluster
   still requires an MCP client token; cluster cookies and secrets never count.
+  The verified client row belongs to the HTTP request state. Framework-injected
+  `Context` passes it explicitly to write-scope checks and business handlers;
+  tool arguments and `clientInfo` never supply authority.
   Messages written through this boundary record `mcp_client:<id>` as their
   server-verified credential fact without storing the token.
 - **Scope**: `read` clients may list/inspect agents, messages, and cluster
