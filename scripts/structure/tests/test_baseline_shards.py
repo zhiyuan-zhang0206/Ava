@@ -40,14 +40,14 @@ def _git(root: pathlib.Path, *args: str) -> None:
     [
         # directories: the key itself is the directory.
         ("directories", "base", "base"),
-        ("directories", "cli/commands", "cli.commands"),
+        ("directories", "cli/commands", "cli/commands"),
         # A plain file path: its parent directory decides.
         ("files", "scripts/lint_x.py", "scripts"),
-        ("files", "agent/graph/x.py", "agent.graph"),
+        ("files", "agent/graph/x.py", "agent/graph"),
         # `path::target` (complexity/nesting/private_imports/owner_bypasses/
         # path_imports): the path half's parent directory decides.
-        ("complexity", "agent/graph/x.py::f", "agent.graph"),
-        ("private_imports", "agent/graph/x.py::base._priv", "agent.graph"),
+        ("complexity", "agent/graph/x.py::f", "agent/graph"),
+        ("private_imports", "agent/graph/x.py::base._priv", "agent/graph"),
         ("owner_bypasses", "gateway/db.py::postgres-dial", "gateway"),
     ],
 )
@@ -59,6 +59,9 @@ def test_shard_path_is_the_repo_relative_shard_file() -> None:
     assert (
         baseline_shards.shard_path("files", "scripts/lint_x.py")
         == "scripts/structure/baseline/scripts.json"
+    )
+    assert baseline_shards.shard_path("patch_targets", "base/db/test_pool.py::base.db._pool") == (
+        "scripts/structure/baseline/base/db.json"
     )
 
 
@@ -80,9 +83,9 @@ def test_split_render_merge_round_trips() -> None:
 
     assert shards == {
         "base": {"directories": {"base": 25}},
-        "cli.commands": {"directories": {"cli/commands": 30}},
+        "cli/commands": {"directories": {"cli/commands": 30}},
         "scripts": {"files": {"scripts/lint_x.py": 900}},
-        "agent.graph": {
+        "agent/graph": {
             "files": {"agent/graph/x.py": 850},
             "complexity": {"agent/graph/x.py::f": 16},
             "private_imports": {"agent/graph/x.py::base._priv": 1},
@@ -120,7 +123,7 @@ def test_merge_preserves_an_entry_in_its_original_shard_after_a_move() -> None:
 
 def test_merge_rejects_duplicate_entries_across_shards() -> None:
     entry = {"files": {"agent/graph/x.py": 900}}
-    texts = {"base": json.dumps(entry), "agent.graph": json.dumps(entry)}
+    texts = {"base": json.dumps(entry), "agent/graph": json.dumps(entry)}
     with pytest.raises(ValueError) as exc_info:
         baseline_shards.merge(texts, ("files",))
 
@@ -203,3 +206,57 @@ def test_read_at_returns_every_committed_shard_byte_for_byte(tmp_path: pathlib.P
     assert baseline_shards.read_at(tmp_path, "HEAD") == {
         name.removesuffix(".json"): text for name, text in contents.items()
     }
+
+
+def test_nested_storage_matches_its_flat_history_and_preserves_rules(
+    tmp_path: pathlib.Path,
+) -> None:
+    directory = tmp_path / baseline_shards.SHARD_DIR
+    directory.mkdir(parents=True)
+    sections = ("patch_targets", "ambient_state")
+    contents = {
+        "base.db.json": '{"ambient_state": {"base/db/pool.py::pool": 1}}\n',
+        "agent.db.json": '{"patch_targets": {"agent/db/test_pool.py::base.db._pool": 2}}',
+        "base.rules.json": '{"ambient_state": {"base/rules.py::registry": 1}}\n',
+    }
+    for name, text in contents.items():
+        (directory / name).write_text(text, encoding="utf-8")
+    (directory / "rules.json").write_text('{"patch_targets": 2}\n', encoding="utf-8")
+    _git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Flat shards")
+    flat = baseline_shards.read_at(tmp_path, "HEAD")
+    assert flat is not None
+    assert flat == {name.removesuffix(".json"): text for name, text in contents.items()}
+    for name in contents:
+        component, area = name.split(".", 1)
+        (directory / component).mkdir(exist_ok=True)
+        _git(
+            tmp_path,
+            "mv",
+            f"{baseline_shards.SHARD_DIR}/{name}",
+            f"{baseline_shards.SHARD_DIR}/{component}/{area}",
+        )
+    nested = baseline_shards.read_worktree(tmp_path)
+    assert nested == {
+        name.replace(".", "/", 1).removesuffix(".json"): text for name, text in contents.items()
+    }
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Component folders")
+    assert baseline_shards.read_at(tmp_path, "HEAD") == nested
+    assert baseline_shards.read_at(tmp_path, "HEAD~1") == flat
+    assert baseline_shards.merge(nested, sections) == baseline_shards.merge(flat, sections)
+    assert baseline_shards.read_rules(tmp_path, "HEAD~1") == (
+        {"patch_targets": 2},
+        {"patch_targets": 2},
+    )
+
+
+def test_nested_shards_cannot_hide_duplicate_sites(tmp_path: pathlib.Path) -> None:
+    directory = tmp_path / baseline_shards.SHARD_DIR
+    text = '{"patch_targets": {"agent/tests/test_x.py::base.db._pool": 1}}\n'
+    for component in ("base", "agent"):
+        (directory / component).mkdir(parents=True)
+        (directory / component / "db.json").write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicates patch_targets entry"):
+        baseline_shards.merge(baseline_shards.read_worktree(tmp_path), ("patch_targets",))
