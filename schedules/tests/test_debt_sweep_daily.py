@@ -162,25 +162,28 @@ def test_scan_failure_is_passed_to_worker_and_registered(
         summary="mechanical scan failed: exit 1",
     )
     prompts: list[str] = []
-    emitted: list[dict[str, Any]] = []
+    emitted: list[dict[str, object]] = []
 
     monkeypatch.setattr(module, "claimed_slot", lambda: datetime(2026, 9, 21, 22, 30, tzinfo=UTC))
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    monkeypatch.setattr(module, "_run_mechanical_scan", lambda *_args: scan)
-    monkeypatch.setattr(
-        module,
-        "ensure_worker",
-        lambda _label, prompt: (
-            prompts.append(prompt) or module.WorkerDispatch(agent_id=44, action="spawned")
-        ),
-    )
-    monkeypatch.setattr(module, "init_gateway_process", lambda **_kwargs: None)
-    monkeypatch.setattr(
-        "base.telemetry.emit",
-        lambda category, event_name, **kwargs: emitted.append(
-            {"category": category, "event_name": event_name, **kwargs}
-        ),
-    )
+
+    def fake_scan(repo: Path, artifact_path: Path | None) -> object:
+        return scan
+
+    def ensure_worker(label: str, prompt: str) -> object:
+        prompts.append(prompt)
+        return module.WorkerDispatch(agent_id=44, action="spawned")
+
+    def init_gateway_process(name: str) -> None:
+        pass
+
+    def record_emit(category: str, event_name: str, **kwargs: object) -> None:
+        emitted.append({"category": category, "event_name": event_name, **kwargs})
+
+    monkeypatch.setattr(module, "_run_mechanical_scan", fake_scan)
+    monkeypatch.setattr(module, "ensure_worker", ensure_worker)
+    monkeypatch.setattr(module, "init_gateway_process", init_gateway_process)
+    monkeypatch.setattr("base.telemetry.emit", record_emit)
 
     module._fire(None)
 
