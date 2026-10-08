@@ -34,10 +34,10 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
-from contextvars import ContextVar
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import FastAPI, HTTPException, Request
+from mcp.server.mcpserver import Context
 from pydantic import Field
 from starlette.responses import JSONResponse
 
@@ -78,9 +78,15 @@ _MESSAGE_SOURCE = "user"
 # How many of an agent's most recent messages `get_messages` returns by default.
 _DEFAULT_MESSAGE_LIMIT = 20
 
-_CURRENT_MCP_CLIENT: ContextVar[dict[str, Any] | None] = ContextVar(
-    "current_mcp_client", default=None
-)
+
+def _authenticated_client(request: Request | None) -> dict[str, Any]:
+    """Read the credential verified by the gateway, never client-supplied metadata."""
+    if request is None:
+        raise RuntimeError("authenticated MCP client request is missing")
+    client = getattr(request.state, "ava_mcp_client", None)
+    if client is None:
+        raise RuntimeError("authenticated MCP client context is missing")
+    return cast(dict[str, Any], client)
 
 
 def _json_type(value: Any) -> str:
@@ -154,9 +160,7 @@ class _AuditMiddleware:
         tool = str(params.get("name", "?"))
         raw_args = params.get("arguments")
         args = cast(dict[str, Any], raw_args) if isinstance(raw_args, dict) else {}
-        client = _CURRENT_MCP_CLIENT.get()
-        if client is None:
-            raise RuntimeError("authenticated MCP client context is missing")
+        client = _authenticated_client(typed_ctx.request)
         # The id comes from token lookup, never tool arguments or clientInfo.
         # Caller display remains asserted; the authenticated credential binding
         # is recorded separately and does not imply human/Ava agent identity.
@@ -226,13 +230,10 @@ def _select_one_blocking(pool: Any, agent_id: int) -> Any:
         return snapshot_module.select_one(conn, agent_id)
 
 
-def _require_write_scope(tool: str) -> None:
+def _require_write_scope(tool: str, client: dict[str, Any]) -> None:
     """Fail a mutating tool before it reaches any fleet side effect."""
     from mcp.server.mcpserver.exceptions import ToolError
 
-    client = _CURRENT_MCP_CLIENT.get()
-    if client is None:
-        raise ToolError("authenticated MCP client context is missing")
     if clients.McpClientScope(client["scope"]) != clients.McpClientScope.WRITE:
         raise ToolError(f"tool {tool!r} requires write scope")
 
@@ -287,6 +288,7 @@ async def _mcp_deliver_send_message(
     agent_id: int,
     content: str,
     *,
+    client: dict[str, Any],
     caller_protocol: Literal["v1"] | None,
     idempotency_key: str | None,
 ) -> dict[str, Any]:
@@ -299,9 +301,6 @@ async def _mcp_deliver_send_message(
     """
     from mcp.server.mcpserver.exceptions import ToolError
 
-    client = _CURRENT_MCP_CLIENT.get()
-    if client is None:
-        raise ToolError("authenticated MCP client context is missing")
     source = _MESSAGE_SOURCE
     if caller_protocol == "v1":
         source = CallerIdentity(
@@ -363,17 +362,16 @@ def _register_fleet_tools(
     @typed_server.tool(description=tool_description("spawn_agent"))
     async def spawn_agent(
         prompt: str,
+        ctx: Context,
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        _require_write_scope("spawn_agent")
+        client = _authenticated_client(ctx.request_context.request)
+        _require_write_scope("spawn_agent", client)
         creation_key = None
         if idempotency_key is not None:
-            client = _CURRENT_MCP_CLIENT.get()
-            if client is None:
-                raise ToolError("authenticated MCP client context is missing")
             try:
                 creation_key = principal_key(
                     AuthPrincipal("mcp_client", str(client["id"])),
@@ -419,16 +417,19 @@ def _register_fleet_tools(
     async def send_message(
         agent_id: int,
         content: str,
+        ctx: Context,
         caller_protocol: Literal["v1"] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        _require_write_scope("send_message")
+        client = _authenticated_client(ctx.request_context.request)
+        _require_write_scope("send_message", client)
         return await _mcp_deliver_send_message(
             pool,
             db,
             bus,
             agent_id,
             content,
+            client=client,
             caller_protocol=caller_protocol,
             idempotency_key=idempotency_key,
         )
@@ -456,11 +457,13 @@ def _register_fleet_tools(
     @typed_server.tool(description=tool_description("terminate_agent"))
     async def terminate_agent(
         agent_id: int,
+        ctx: Context,
         *,
         message: str | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
-        _require_write_scope("terminate_agent")
+        client = _authenticated_client(ctx.request_context.request)
+        _require_write_scope("terminate_agent", client)
         try:
             result = await terminate_agent_with_open_tasks(
                 agent_id,
@@ -564,10 +567,7 @@ def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
             )
             await response(scope, receive, send)
             return
-        context_token = _CURRENT_MCP_CLIENT.set(client)
-        try:
-            await manager.asgi_app(scope, receive, send)
-        finally:
-            _CURRENT_MCP_CLIENT.reset(context_token)
+        Request(scope).state.ava_mcp_client = client
+        await manager.asgi_app(scope, receive, send)
 
     return _gateway

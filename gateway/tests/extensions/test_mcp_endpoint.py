@@ -664,3 +664,55 @@ def test_concurrent_mcp_creation_retries_share_one_identity() -> None:
         with ThreadPoolExecutor(max_workers=3) as executor:
             ids = list(executor.map(submit, range(3)))
     assert len(set(ids)) == 1
+
+
+def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from gateway.agents import router
+
+    create = router.create_and_launch_agent
+    both_started = asyncio.Event()
+    started = 0
+
+    async def simultaneous_create(*args: Any, **kwargs: Any) -> Any:
+        nonlocal started
+        started += 1
+        if started == 2:
+            both_started.set()
+        await asyncio.wait_for(both_started.wait(), timeout=10)
+        return await create(*args, **kwargs)
+
+    monkeypatch.setattr(router, "create_and_launch_agent", simultaneous_create)
+    with TestClient(app) as client:
+        credentials = [
+            client.post("/api/mcp/clients", json={"name": name, "scope": "write"}).json()
+            for name in ("concurrent-first", "concurrent-second")
+        ]
+
+        def submit(index: int) -> int:
+            result = _tool_result(
+                _tool_call(
+                    client,
+                    credentials[index]["token"],
+                    "spawn_agent",
+                    {
+                        "prompt": "shared intent",
+                        "idempotency_key": "same-key",
+                        "ctx": {"client_id": credentials[1 - index]["id"]},
+                    },
+                    req_id=index + 20,
+                )
+            )
+            return int(result["id"])
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            ids = list(executor.map(submit, range(2)))
+    assert len(set(ids)) == 2
+    for credential in credentials:
+        hits = _audit_hits("spawn_agent", credential["name"])
+        assert hits[-1]["attributes"]["client_id"] == credential["id"]
+        assert hits[-1]["attributes"]["outcome"] == "ok"
