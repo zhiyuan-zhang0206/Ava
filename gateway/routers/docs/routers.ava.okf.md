@@ -23,7 +23,7 @@ in `gateway/<feature>/`; single-module routers live in
 ## Router categories
 
 ### Agent core (lifecycle + observability)
-- **agents** (`/api/agents/*`) — [[gateway/agents/docs/agents-router.ava.okf.md|lifecycle and projection contract]].
+- **agents** (`/api/agents/*`) — [[gateway/agents/docs/agents-router/agents-router.ava.okf.md|lifecycle and projection contract]].
 - **agent_events** (`/api/agents/{id}/events` + `/events/stream`) — historical REST query over the unified event stream (Loki) + real-time SSE tail (filtered by agent_id)
 - **events** (`/api/events`) — unified event stream query (Wave 2): every category (audit / telemetry / log) through one surface: audit rows from Postgres `audit_events`, telemetry/log from Postgres `telemetry_events`, merged newest-first; filters category/event_name/agent_id/trace_id/machine/level + time window (`from`/`to` or `hours`) + offset paging, `meta` (total/window/has_more) envelope
 - **run_timeline** (`/api/agents/{id}/run-timeline`) — see [[run_timeline.ava.okf.md|the understanding tree and message units over a window]] (its `/messages` range read included).

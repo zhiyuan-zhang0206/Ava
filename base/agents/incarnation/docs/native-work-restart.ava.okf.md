@@ -27,6 +27,11 @@ commit with the overlay update and pointer. The shared inbound insertion owner
 records the existing audit in that transaction. The sync public acceptance
 transport executes the same SQL as the existing async lifecycle owner.
 
+Fresh model/effort edits validate the merged stored overlay and birth stamp
+under the metadata lock before any configuration, source or receipt write.
+Invalid pairs return the existing `invalid_overlay` refusal. Receipt-first
+replay retains the original acceptance without revalidating changed defaults.
+
 The Gateway uses `/api/keyed/v1/agents/{agent_id}/restart-work`, forwarding the
 same scoped key through `/api/agents/{agent_id}/restart-work-v1`. It requires the
 versioned typed response and a matching actual durable receipt. Unsupported

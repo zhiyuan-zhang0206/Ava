@@ -90,11 +90,35 @@ class TestGet:
         db_conn.commit()
         with TestClient(app) as client:
             resp = client.get("/api/config/default-model")
+            picker = client.get("/api/models")
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"model": "deepseek-flash", "source": "cluster"}
+        assert picker.json()["default"] == "deepseek-flash"
 
 
 class TestPut:
+    def test_picker_preflight_and_birth_use_the_cluster_default(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from base.config import settings
+
+        # MiMo cannot accept max: checking the old config default would reject
+        # this valid DeepSeek birth before it could be persisted.
+        monkeypatch.setattr(settings.lm, "llm_model", "mimo-v2.6-pro")
+        with TestClient(app) as client:
+            saved = client.put("/api/config/default-model", json={"model": "deepseek-flash"})
+            assert saved.status_code == 200, saved.text
+            assert client.get("/api/models").json()["default"] == "deepseek-flash"
+            spawned = client.post("/api/agents", json={"config": {"reasoning_effort": "max"}})
+        assert spawned.status_code == 201, spawned.text
+        row = db_conn.execute(
+            "SELECT config_overlay,birth_config FROM agents_meta WHERE id=%s",
+            (spawned.json()["id"],),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == {"reasoning_effort": "max"}
+        assert row[1]["llm_model"] == "deepseek-flash"
+
     def test_accepts_a_spawnable_model(self) -> None:
         with TestClient(app) as client:
             resp = client.put("/api/config/default-model", json={"model": "deepseek-flash"})

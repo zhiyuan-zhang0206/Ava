@@ -148,6 +148,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     """A runner rejection is reported by the gateway; it never terminates creation."""
 
     def _boom_validate(*_a: object, **_k: object) -> None:
+        assert _k["config"] == {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
         raise RuntimeError("bad model config")
 
     monkeypatch.setattr("base.lm.factory.validate_model_config", _boom_validate)
@@ -161,7 +162,13 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
 
     monkeypatch.setattr(lifecycle, "force_mark_terminated", _fake_reclaim)
 
-    body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
+    body = LaunchAgentRequest(
+        agent_id=7,
+        prompt="go",
+        prompt_source="user",
+        birth_config={"llm_model": "deepseek-flash", "reasoning_effort": "high"},
+        config={"reasoning_effort": "max"},
+    )
     with pytest.raises(RuntimeError, match="bad model config"):
         await lifecycle.launch_agent_op(database, event_bus, body, stub_pool)  # type: ignore[arg-type]
     assert reclaimed == []

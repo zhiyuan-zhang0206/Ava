@@ -27,7 +27,6 @@ from base.agents import (
     AgentLaunchFailed,
     AgentNotFound,
     ForkConfigChangeNotAllowed,
-    InvalidModelConfig,
     SpawnTargetNotAgentRunner,
 )
 from base.agents.impersonation.manifest import record_central_event
@@ -36,7 +35,6 @@ from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
 from base.cluster.machine import machine_name
-from base.config import settings
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
@@ -90,13 +88,14 @@ async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) 
 
 
 @router.get("/api/models")
-def get_models() -> ModelsResponse:
+def get_models(request: Request) -> ModelsResponse:
     """List selectable LLM models (grouped by provider) + the cluster default.
 
     Roster and tuning come from the model registry; current rates come from
-    the versioned pricing catalog. The default mirrors `settings.lm.llm_model`
-    so the UI can pre-select it.
+    the versioned pricing catalog. The default uses the same DB/config
+    resolution as the birth stamp and spawn preflight.
     """
+    from base.agents.birth_config import resolve_default_model
     from base.lm.plugin_providers import model_catalog
     from base.lm.pricing import rates_at
     from base.lm.registry import explain_setting
@@ -139,6 +138,7 @@ def get_models() -> ModelsResponse:
                 context_window=spec.context_window or 0,
                 pricing=pricing,
                 reference_tps=spec.reference_tps,
+                fast_of=spec.fast_of,
                 reasoning_effort_options=(
                     list(spec.effort_levels) if spec.effort_levels is not None else None
                 ),
@@ -146,10 +146,12 @@ def get_models() -> ModelsResponse:
                 superseded_by=spec.superseded_by,
             )
 
+    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        default_model = resolve_default_model(cur).model
     return ModelsResponse(
         providers=dict(catalog.supported_models),
         models=models,
-        default=settings.lm.llm_model,
+        default=default_model,
     )
 
 
@@ -265,12 +267,10 @@ def _spawn_preflight_blocking(
         model_receipt = normalize_overlay_llm_model(body.config)
     # Validate model config before forwarding — fail fast at the gateway
     # instead of letting the agent process silently hang on a missing API key.
-    from base.lm.factory import validate_model_config
+    from base.lm.model_config import validate_spawn_model_config
 
-    try:
-        validate_model_config(model=settings.lm.llm_model, config=body.config)
-    except ValueError as exc:
-        raise InvalidModelConfig(str(exc)) from exc
+    with pool.connection() as conn, conn.cursor() as cur:
+        validate_spawn_model_config(cur, body.config, body.fork_from)
     if model_receipt is not None:
         logger.warning(
             "spawn config_overlay llm_model {requested!r} is withdrawn; stored "

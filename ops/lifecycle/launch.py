@@ -10,6 +10,7 @@ from base.agents import ForkSourceEmpty
 from base.agents.labels import spawn_prompt_with_label
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database, insert_inbound_message, publish_inbound_wake
 from base.events.live.bus import EventBus
 from ops.agents import latest_checkpoint_id
@@ -31,7 +32,11 @@ async def launch_agent_op(
     from base.lm.factory import validate_model_config
     from ops.lifecycle import publish_inbound_arrived
 
-    await asyncio.to_thread(validate_model_config, model=settings.lm.llm_model, config=body.config)
+    await asyncio.to_thread(
+        validate_model_config,
+        model=settings.lm.llm_model,
+        config=resolve_agent_config_pins(body.config, body.birth_config),
+    )
     if body.launch_attempt_id is not None:
         await asyncio.to_thread(_validate_launch_row, db_pool, body)
     elif body.prompt is not None:
@@ -62,12 +67,10 @@ def spawn_prechecks_blocking(body: SpawnAgentRequest, db_pool: ConnectionPool) -
     """Sync spawn pre-checks — via to_thread: model-config validation (may read
     provider API keys) + fork checkpoint lookup. Returns the fork checkpoint
     (None for a plain spawn)."""
-    # Validate model config before any DB work — defense-in-depth on top of the
-    # gateway-side check in post_agents. The gateway may be on a different machine
-    # without API keys; the runner always has its own settings and is authoritative.
-    from base.lm.factory import validate_model_config
+    from base.lm.model_config import validate_spawn_model_config
 
-    validate_model_config(model=settings.lm.llm_model, config=body.config)
+    with db_pool.connection() as conn, conn.cursor() as cur:
+        validate_spawn_model_config(cur, body.config, body.fork_from)
     fork_checkpoint: str | None = None
     if body.fork_from is not None:
         with db_pool.connection() as conn, conn.cursor() as cur:

@@ -194,13 +194,12 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
             )
         payload_json = _json.dumps({"config_overlay": dict(config_overlay)}, sort_keys=True)
 
-    with ava.DB.cursor() as cur:
+    with ava.DB.cursor() as cur, cur.connection.transaction():
+        cur.execute("SET TRANSACTION READ WRITE")
         if config_overlay:
-            # ava.DB is autocommit: the overlay UPDATE commits before the restart
-            # inbound is queued — they are not one transaction. If the process
-            # dies in between, the overlay is staged and applied on the next
-            # restart; calling restart() again re-merges the same keys
-            # (idempotent), so this is safe.
+            from base.lm.model_config import validate_restart_model_config
+
+            validate_restart_model_config(cur, agent_identity.require_agent_id(), config_overlay)
             cur.execute(
                 "UPDATE agents_meta "
                 "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "

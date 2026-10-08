@@ -273,7 +273,7 @@
     "/api/models": {
       "get": {
         "summary": "Get Models",
-        "description": "List selectable LLM models (grouped by provider) + the cluster default.\n\nRoster and tuning come from the model registry; current rates come from\nthe versioned pricing catalog. The default mirrors `settings.lm.llm_model`\nso the UI can pre-select it.",
+        "description": "List selectable LLM models (grouped by provider) + the cluster default.\n\nRoster and tuning come from the model registry; current rates come from\nthe versioned pricing catalog. The default uses the same DB/config\nresolution as the birth stamp and spawn preflight.",
         "operationId": "get_models_api_models_get",
         "responses": {
           "200": {
@@ -11537,6 +11537,14 @@
         "title": "CredentialCreationResult",
         "description": "Original creation metadata; replay deliberately cannot recover a token."
       },
+      "DefaultModelSource": {
+        "type": "string",
+        "enum": [
+          "cluster",
+          "config"
+        ],
+        "title": "DefaultModelSource"
+      },
       "DefaultModelView": {
         "properties": {
           "model": {
@@ -11544,12 +11552,7 @@
             "title": "Model"
           },
           "source": {
-            "type": "string",
-            "enum": [
-              "cluster",
-              "config"
-            ],
-            "title": "Source"
+            "$ref": "#/components/schemas/DefaultModelSource"
           }
         },
         "type": "object",
@@ -14157,6 +14160,17 @@
                 "type": "null"
               }
             ]
+          },
+          "fast_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fast Of"
           },
           "reasoning_effort_options": {
             "anyOf": [

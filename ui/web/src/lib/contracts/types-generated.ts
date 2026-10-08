@@ -228,8 +228,8 @@ export interface paths {
          * @description List selectable LLM models (grouped by provider) + the cluster default.
          *
          *     Roster and tuning come from the model registry; current rates come from
-         *     the versioned pricing catalog. The default mirrors `settings.lm.llm_model`
-         *     so the UI can pre-select it.
+         *     the versioned pricing catalog. The default uses the same DB/config
+         *     resolution as the birth stamp and spawn preflight.
          */
         get: operations["get_models_api_models_get"];
         put?: never;
@@ -5693,6 +5693,11 @@ export interface components {
             token: string | null;
         };
         /**
+         * DefaultModelSource
+         * @enum {string}
+         */
+        DefaultModelSource: "cluster" | "config";
+        /**
          * DefaultModelView
          * @description GET/PUT /api/config/default-model — the model a new agent is born on.
          *
@@ -5705,11 +5710,7 @@ export interface components {
         DefaultModelView: {
             /** Model */
             model: string;
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "cluster" | "config";
+            source: components["schemas"]["DefaultModelSource"];
         };
         /**
          * DefaultModelWrite
@@ -6936,6 +6937,8 @@ export interface components {
             context_window: number;
             pricing?: components["schemas"]["ModelPricing"] | null;
             reference_tps?: components["schemas"]["ReferenceTps"] | null;
+            /** Fast Of */
+            fast_of?: string | null;
             /** Reasoning Effort Options */
             reasoning_effort_options?: string[] | null;
             /** Reasoning Effort Default */

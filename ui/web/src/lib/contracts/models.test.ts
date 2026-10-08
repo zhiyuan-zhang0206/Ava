@@ -45,6 +45,42 @@ describe("providerLabel", () => {
 });
 
 describe("groupedModels", () => {
+  it("keeps declared Standard and Fast services adjacent using the Standard price", () => {
+    const data = modelsResponse(
+      { gpt: ["gpt-cheap-fast", "gpt-other", "gpt-cheap", "gpt-premium-fast", "gpt-premium"] },
+      { "gpt-cheap": 1, "gpt-cheap-fast": 9, "gpt-other": 3, "gpt-premium": 5, "gpt-premium-fast": 10 },
+    );
+    data.models["gpt-cheap-fast"].fast_of = "gpt-cheap";
+    data.models["gpt-premium-fast"].fast_of = "gpt-premium";
+    expect(groupedModels(data)).toEqual([
+      ["gpt", ["gpt-premium", "gpt-premium-fast", "gpt-other", "gpt-cheap", "gpt-cheap-fast"]],
+    ]);
+  });
+
+  it("does not restore a hidden Standard or Fast member", () => {
+    const data = modelsResponse(
+      { mimo: ["mimo-standard", "mimo-ultraspeed", "mimo-other"] },
+      { "mimo-standard": 1, "mimo-ultraspeed": 4, "mimo-other": 2 },
+    );
+    data.models["mimo-ultraspeed"].fast_of = "mimo-standard";
+    expect(groupedModels(data, (model) => model !== "mimo-standard")).toEqual([
+      ["mimo", ["mimo-ultraspeed", "mimo-other"]],
+    ]);
+    expect(groupedModels(data, (model) => model !== "mimo-ultraspeed")).toEqual([
+      ["mimo", ["mimo-other", "mimo-standard"]],
+    ]);
+  });
+
+  it("does not infer a family from a model suffix", () => {
+    const data = modelsResponse(
+      { gpt: ["gpt-standard", "gpt-other", "gpt-standard-fast"] },
+      { "gpt-standard": 1, "gpt-other": 2, "gpt-standard-fast": 4 },
+    );
+    expect(groupedModels(data)).toEqual([
+      ["gpt", ["gpt-standard-fast", "gpt-other", "gpt-standard"]],
+    ]);
+  });
+
   it("keeps API provider order while sorting each provider by input price descending", () => {
     const data = modelsResponse(
       {
