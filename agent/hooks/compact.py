@@ -55,8 +55,8 @@ from base.agents.history.closing_request import ClosingRequest
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.call import ProviderCallBinding
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
-from base.lm.provider_api import ProviderBinding
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
@@ -207,7 +207,7 @@ async def generate_summary(
     slices: AgentSlices,
     *,
     single_attempt: bool = False,
-    binding: ProviderBinding | None = None,
+    binding: ProviderCallBinding | None = None,
 ) -> SummaryText:
     """Summarize the complete conversation using the actual model's binding.
 
@@ -327,7 +327,7 @@ async def emergency_compact_summary(
     llm: BaseChatModel,
     slices: AgentSlices,
     *,
-    binding: ProviderBinding | None = None,
+    binding: ProviderCallBinding | None = None,
 ) -> str:
     """The circuit-breaker compaction summary: a real compaction first, then the
     no-LLM fallback — used by the overflow self-rescue path (claim decide).
@@ -466,7 +466,7 @@ async def _auto_compact_summary(
     llm: BaseChatModel,
     content_count: int,
     slices: AgentSlices,
-    binding: ProviderBinding | None = None,
+    binding: ProviderCallBinding | None = None,
 ) -> str:
     """Generate and validate a summary without committing any context change."""
     summary: str = ""

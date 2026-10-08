@@ -35,8 +35,7 @@ from agent.graph.llm_errors import (
 from agent.llm.cache import prepare_invocation
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.call import recover_invocation
-from base.lm.provider_api import ProviderBinding
+from base.lm.call import ProviderCallBinding, recover_invocation
 from base.log import logger
 
 
@@ -348,7 +347,7 @@ async def _stream_with_cache_retry(
     chunks: list[AIMessageChunk],
     handler: RedisStreamHandler,
     agent: AgentSlices,
-    binding: ProviderBinding | None = None,
+    binding: ProviderCallBinding | None = None,
 ) -> None:
     """Stream the LLM response into `chunks`, retrying once on a stale cache.
 

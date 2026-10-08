@@ -39,7 +39,7 @@ from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
-from base.lm.provider_api import ProviderBinding
+from base.lm.call import ProviderCallBinding
 
 # The handle types are annotations only: the exec child builds this same type from its request
 # envelope, and its start must not import psycopg / redis / langchain for handles it never holds.
@@ -82,7 +82,7 @@ class AvaContext:
     (llm_node + claim node's compact path); graph entry points assert
     non-None at function start."""
 
-    llm_binding: ProviderBinding | None = None
+    llm_binding: ProviderCallBinding | None = None
     """Binding selected alongside llm; never serialized into exec or checkpoints."""
 
     event_publisher: AgentEventPublisher | None = None

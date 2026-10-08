@@ -12,15 +12,14 @@ from langchain_core.runnables import Runnable
 from agent.llm import execute_code
 from base.config import settings
 from base.host.env.agent_slices import LlmCallPolicy
-from base.lm.call import LlmInvocation, ProviderCallContext, recover_invocation
-from base.lm.provider_api import ProviderBinding
+from base.lm.call import LlmInvocation, ProviderCallBinding, ProviderCallContext, recover_invocation
 
 
 async def prepare_invocation(
     llm: BaseChatModel,
     messages: list[AnyMessage],
     policy: LlmCallPolicy,
-    binding: ProviderBinding | None = None,
+    binding: ProviderCallBinding | None = None,
 ) -> LlmInvocation:
     """Ask the actual build's adapter, or use ordinary tool binding."""
     if binding is not None and binding.prepare_call is not None:
@@ -41,7 +40,7 @@ async def ainvoke_with_cache_retry(
     messages: list[AnyMessage],
     policy: LlmCallPolicy,
     *,
-    binding: ProviderBinding | None = None,
+    binding: ProviderCallBinding | None = None,
     retry_stale_cache: bool = True,
 ) -> tuple[AIMessage, bool]:
     """Invoke with at most one adapter recovery and successful-attempt provenance.
