@@ -312,7 +312,6 @@ def test_a_list_entry_whose_site_is_gone_is_stale(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(allow, "ALLOWED", {"base/mod.py::hidden-singleton:table": "static"})
-    monkeypatch.setattr(allow, "DEFERRED", {"base/mod.py::ambient-container:_warned": "later"})
     monkeypatch.setattr(allow, "SINK_FACADES", {"base/mod.py": "buffer"})
     live = "from functools import cache\n\n_warned = set()\n\n@cache\ndef table(): ...\n"
 
@@ -322,7 +321,6 @@ def test_a_list_entry_whose_site_is_gone_is_stale(
     assert any(
         "hidden-singleton:table" in message and "site is gone" in message for message in problems
     )
-    assert any("ambient-container:_warned" in message for message in problems)
     assert any(
         "SINK_FACADES entry" in message and "no module-level state" in message
         for message in problems
@@ -358,10 +356,9 @@ def test_a_pure_repo_callee_is_exempt_where_it_is_assigned(
 
 
 def test_the_closed_lists_carry_a_reason_for_every_entry() -> None:
-    for name in ("SINK_FACADES", "ALLOWED", "DEFERRED", "PURE_REPO_CALLEES"):
+    for name in ("SINK_FACADES", "ALLOWED", "PURE_REPO_CALLEES"):
         entries: dict[str, str] = getattr(allow, name)
         assert all(reason.strip() for reason in entries.values()), name
-    assert set(allow.DEFERRED.values()) <= {allow.DEFERRED_WARNING_REDESIGN}
 
 
 @pytest.mark.parametrize(
