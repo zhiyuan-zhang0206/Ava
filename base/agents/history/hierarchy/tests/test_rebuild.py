@@ -86,7 +86,13 @@ def _groups(monkeypatch: pytest.MonkeyPatch) -> list[list[int]]:
     asked: list[list[int]] = []
 
     def generate(
-        _models: object, model: str, _o: object, _level: int, nodes: list[OpenNode], calls: list
+        _models: object,
+        model: str,
+        _o: object,
+        _level: int,
+        nodes: list[OpenNode],
+        calls: list,
+        _agent_id: int,
     ) -> list[Group]:
         asked.append([n.id for n in nodes])
         calls.append(GroupCall(0, model, "prompt", AIMessage(content="r"), 5.0, None, None))

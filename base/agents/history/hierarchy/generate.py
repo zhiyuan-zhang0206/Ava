@@ -103,6 +103,7 @@ def _invoke_agent_shaped(
     model: str,
     retry_attempts: int,
     params: GenParams,
+    agent_id: int,
     on_call: Callable[[ModelCall], None] | None = None,
 ) -> str:
     """Send a finished agent-shaped request through the tool-bound model; return its text.
@@ -114,7 +115,8 @@ def _invoke_agent_shaped(
     re-invoked, up to `params.tool_rounds` refusal rounds; past that the call
     fails (never an unbounded loop). Shared by the node generation above and
     the chunk generation (`chunk_generate.py`), which builds its own message
-    list.
+    list. `agent_id` is the agent the job belongs to: the usage row of every call is attributed
+    to it (the consumer runs outside any agent turn).
     """
     from langchain_core.messages import ToolMessage
 
@@ -133,6 +135,7 @@ def _invoke_agent_shaped(
                 retry_attempts=retry_attempts,
                 model=model,
                 usage_source="hierarchy.generate",
+                usage_agent_id=agent_id,
             )
         except Exception as exc:
             if on_call is not None:
