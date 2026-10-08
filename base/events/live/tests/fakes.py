@@ -68,7 +68,7 @@ class _PublishRecorder:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def publish(self, channel: str, frame: str) -> None:
+    def publish(self, channel: str, frame: str, *, auth_retry: bool = True) -> None:
         self._published.append((channel, frame))
 
 

@@ -56,7 +56,7 @@ class _BoomSyncClient:
     def __init__(self, exc: BaseException) -> None:
         self._exc = exc
 
-    def publish(self, _channel: str, _payload: str) -> int:
+    def publish(self, _channel: str, _payload: str, *, auth_retry: bool = True) -> int:
         raise self._exc
 
     def close(self) -> None:  # closed in the wrapper's finally
@@ -69,7 +69,7 @@ class _BoomAsyncClient:
     def __init__(self, exc: BaseException) -> None:
         self._exc = exc
 
-    async def publish(self, _channel: str, _payload: str) -> int:
+    async def publish(self, _channel: str, _payload: str, *, auth_retry: bool = True) -> int:
         raise self._exc
 
 

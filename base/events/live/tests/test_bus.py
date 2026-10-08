@@ -18,7 +18,7 @@ class _Client:
         self.published: list[tuple[str, str]] = []
         self.closed = False
 
-    async def publish(self, channel: str, payload: str) -> int:
+    async def publish(self, channel: str, payload: str, *, auth_retry: bool = True) -> int:
         self.published.append((channel, payload))
         return 2
 
@@ -85,7 +85,7 @@ async def test_a_failed_publish_returns_none_and_never_raises(
 def test_sync_publish_uses_a_one_off_client_and_closes_it(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _Client("x")
     sent: list[tuple[str, str]] = []
-    client.publish = lambda channel, payload: sent.append((channel, payload)) or 1  # type: ignore[assignment,method-assign]
+    client.publish = lambda channel, payload, **_options: sent.append((channel, payload)) or 1  # type: ignore[assignment,method-assign]
     urls: list[str] = []
 
     def open_client(url: str, *, decode_responses: bool = False) -> Any:
