@@ -19,6 +19,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentNotFound
+from base.agents.upload_delivery.models import NAMESPACE
 from base.agents.uploads import upload_url
 from base.db import agent_exists
 from base.db.transaction import write_transaction
@@ -29,9 +30,16 @@ RESERVED_PREFIX = "ava-upload-"
 type UploadItem = tuple[str, bytes, str]
 
 
+def is_reserved_upload_name(name: str) -> bool:
+    """Protect both silent flat finals and the nested delivered namespace."""
+    return name.startswith(RESERVED_PREFIX) or name == NAMESPACE
+
+
 def lock_agent(conn: Connection[Any], agent_id: int) -> None:
     """Use the same transaction-scoped quota gate for keyed and legacy writers."""
-    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"upload:{agent_id}",))
+    from base.agents.upload_delivery.storage import lock_agent as native_lock_agent
+
+    native_lock_agent(conn, agent_id)
 
 
 def check_quota(
@@ -44,24 +52,23 @@ def check_quota(
     max_files: int,
 ) -> None:
     """Count receiving objects once, including their not-yet-published bytes."""
-    rows = conn.execute(
-        "SELECT manifest FROM agent_upload_batches WHERE agent_id = %s AND receipt IS NULL",
-        (agent_id,),
-    ).fetchall()
-    receiving = [item for row in rows for item in row[0]]
-    owned = {item["stored_name"] for item in receiving}
-    total_bytes = sum(item["size"] for item in receiving)
-    total_files = len(receiving)
-    for path in directory.iterdir():
-        if path.name not in owned and path.is_file():
-            total_bytes += path.stat().st_size
-            total_files += 1
-    if total_bytes + incoming_bytes > max_bytes:
-        raise HTTPException(
-            413, f"upload would exceed agent {agent_id}'s {max_bytes:,}-byte total quota"
+    from base.agents.upload_delivery.models import UploadQuotaExceededError
+    from base.agents.upload_delivery.storage import check_quota as native_check_quota
+    from base.cluster.machine import machine_name
+
+    try:
+        native_check_quota(
+            conn,
+            agent_id,
+            directory,
+            machine_name(),
+            incoming_bytes,
+            incoming_files,
+            max_bytes,
+            max_files,
         )
-    if total_files + incoming_files > max_files:
-        raise HTTPException(413, f"agent {agent_id} already holds {max_files} uploads")
+    except UploadQuotaExceededError as exc:
+        raise HTTPException(413, str(exc)) from exc
 
 
 def _fingerprint(batch: list[UploadItem], original_names: list[str], *, deliver: bool) -> str:

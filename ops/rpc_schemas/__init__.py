@@ -420,6 +420,7 @@ OpKind = Literal[
     "agent_skill_view",
     "shell_capture",
     "upload_receive",
+    "upload-receive-v1",
 ]
 
 

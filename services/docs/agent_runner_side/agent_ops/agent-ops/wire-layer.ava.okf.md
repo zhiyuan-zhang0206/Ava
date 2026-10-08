@@ -52,3 +52,9 @@ receipts store those same strings; an idempotency replay converts its recorded
 status before returning it. NULL still means the original owner has not
 completed; an unknown stored terminal status is an error, never replayed as
 success. The RPC client validates the response envelope before interpreting it.
+
+`upload-receive-v1` is a naturally repeatable manifest-bound batch copy, with an
+explicit integer version and actual native unit check before effects. Its own
+receiving reservation and create-only files own recovery; no transport key/cache
+or overwrite fallback is used. Ready retries verify actual objects. See
+[[gateway/upload_delivery/docs/delivered-uploads.ava.okf.md]].
