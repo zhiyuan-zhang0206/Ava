@@ -354,11 +354,7 @@ async def emergency_compact_summary(
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = (
-                await generate_summary(messages, llm, slices, binding=binding)
-                if binding is not None
-                else await generate_summary(messages, llm, slices)
-            )
+            summary = await generate_summary(messages, llm, slices, binding=binding)
         except Exception as e:
             last_error = e
             if _is_permanent_provider_failure(e):
@@ -477,11 +473,7 @@ async def _auto_compact_summary(
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = (
-                await generate_summary(messages, llm, slices, binding=binding)
-                if binding is not None
-                else await generate_summary(messages, llm, slices)
-            )
+            summary = await generate_summary(messages, llm, slices, binding=binding)
         except Exception as e:
             last_error = e
             logger.warning(

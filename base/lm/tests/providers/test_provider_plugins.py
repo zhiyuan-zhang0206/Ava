@@ -412,7 +412,7 @@ def test_plugin_price_vendor_reaches_pricing_lookup(
     assert pricing.model_vendor("testp-unpriced") is None
 
 
-def test_plugin_binding_effort_levels_reach_build_context(
+def test_bound_build_preserves_fallback_identity_and_effort(
     add_bindings: AddBindings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     contexts: list[provider_api.BuildContext] = []
