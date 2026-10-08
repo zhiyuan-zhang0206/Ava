@@ -97,7 +97,7 @@ def _git(root: pathlib.Path, *args: str) -> None:
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every main() call scans and invokes Git only in its own temporary root."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", baseline_shards.SHARD_DIR)
@@ -218,7 +218,48 @@ def test_non_git_checkout_fails_the_guard(
     assert lcs.main([]) == 1
     captured = capsys.readouterr()
     assert "baseline guard skipped" not in captured.err
-    assert "ls-tree" in captured.out
+    assert "cannot resolve" in captured.out
+
+
+def test_missing_default_base_fails_instead_of_using_head(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    assert lcs.main([]) == 1
+    captured = capsys.readouterr()
+    assert "origin/main" in captured.out
+    assert "falling back" not in captured.err
+    assert "guard skipped" not in captured.err
+
+
+def test_explicit_base_compares_the_selected_commit_instead_of_its_merge_base(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _git(tmp_path, "checkout", "--quiet", "-b", "comparison")
+    _write(tmp_path, "README.md", 1)
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "commit", "--quiet", "-m", "Selected comparison revision")
+    expected = lcs._git("rev-parse", "HEAD").stdout.strip()
+    _git(tmp_path, "checkout", "--quiet", "-")
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "comparison")
+    assert lcs._baseline_base() == expected
+
+
+def test_explicit_fetched_base_works_without_ancestry_in_a_shallow_checkout(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = lcs._git("rev-parse", "HEAD").stdout.strip()
+    _write(tmp_path, "README.md", 1)
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "commit", "--quiet", "-m", "Change after the comparison revision")
+    shallow = tmp_path.parent / "shallow"
+    _git(tmp_path, "clone", "--quiet", "--depth", "1", tmp_path.as_uri(), str(shallow))
+    _git(shallow, "fetch", "--quiet", "--depth", "1", "origin", base)
+    monkeypatch.setattr(lcs, "_REPO_ROOT", shallow)
+    assert lcs._git("merge-base", "HEAD", base).returncode != 0
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", base)
+    assert lcs._baseline_base() == base
+    assert lcs.main([]) == 0
 
 
 # Malformed/misfiled/missing baseline shards: test_baseline_shard_validity_gate.py.
@@ -550,6 +591,8 @@ def test_committed_baseline_change_uses_base_revision(
     if base == "explicit":
         monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD~1")
         _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    else:
+        monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
     assert lcs.main([]) == (1 if delta > 0 else 0)
     captured = capsys.readouterr()
     assert (f"raised {kind} entry {key}" in captured.out) == (delta > 0)
