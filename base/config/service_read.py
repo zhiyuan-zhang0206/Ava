@@ -85,13 +85,11 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str]) -> None:
     already-reachable URL host pass through unchanged; only the host is swapped
     — scheme / userinfo / port / database / query survive verbatim.
     """
-    # Resolved through the config module (not data_plane directly) so tests
-    # can monkeypatch base.config._self_machine_host, as they always have.
-    from base.config import _self_machine_host
+    from base.config.domains.storage.data_plane import self_machine_host
     from base.host.net.predicates import is_loopback_host
     from base.host.net.url_secret import url_with_host
 
-    reachable = _self_machine_host()
+    reachable = self_machine_host()
     if is_loopback_host(reachable):
         return
     for alias in _DATA_PLANE_URL_ALIASES:
@@ -382,7 +380,7 @@ def served_db_endpoint(aliases: dict[str, str] | None = None) -> str:
 
 def _gateway_otlp_projection(aliases: dict[str, str]) -> str:
     """Publish this gateway's ingress without distributing its local listener settings."""
-    from base.config import _self_machine_host
+    from base.config.domains.storage.data_plane import self_machine_host
     from base.host.net.url_secret import url_with_host
 
     port = int(
@@ -390,5 +388,5 @@ def _gateway_otlp_projection(aliases: dict[str, str]) -> str:
     )
     if not 1 <= port <= 65535:
         raise ValueError("AVA_TELEMETRY_OTLP_PORT must be between 1 and 65535")
-    host = aliases.get("AVA_MACHINE_HOST") or _self_machine_host()
+    host = aliases.get("AVA_MACHINE_HOST") or self_machine_host()
     return url_with_host(f"http://localhost:{port}", host)
