@@ -12,6 +12,7 @@ and `ava stop` — both must never touch a foreign service.
 from __future__ import annotations
 
 import socket
+import subprocess
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -29,12 +30,17 @@ from base.log import logger
 from ops.roster.service_spec import DbAccess
 
 
-def ensure_gateway_data_plane() -> int:
+def ensure_gateway_data_plane(
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
     """Bring up owned storage, or probe an explicitly remote-managed plane.
 
     Pooler startup belongs to ``complete_gateway_data_plane``, after schema and
     runner grants. Storage ports always come from this home's reservation.
     """
+    if retained_children is None and not settings.data_plane.is_remote:
+        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from base.cluster import (
         get_record,
         redis_identity,
@@ -99,6 +105,7 @@ def ensure_gateway_data_plane() -> int:
         redis_admin_password=settings.data_plane.redis_admin_password,
         redis_password=redis_password_from_env(),
         redis_user=redis_identity(),
+        retained_children=retained_children,
     )
 
 

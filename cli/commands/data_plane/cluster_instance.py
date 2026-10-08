@@ -331,7 +331,14 @@ def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
     return out.returncode == 0
 
 
-def _start_pg(pg_port: int, cluster_secret: str) -> int:
+def _start_pg(
+    pg_port: int,
+    cluster_secret: str,
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
+    if retained_children is None:
+        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     owner = ownership.require_postgres(_pg_data_dir(), pg_port, required=False)
     data = _ensure_pg_data()
     (data / "pg_ident.conf").write_text(_pg_ident_body())
@@ -380,6 +387,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
         ready=lambda: _pg_running(pg_port, dial_host),
         timeout=_PG_START_TIMEOUT_S,
         expected=owner,
+        retained_children=retained_children,
     )
     ownership.require_postgres(data, pg_port)
     require_authenticated_hba(pg_port, dial_host)
@@ -551,6 +559,7 @@ def ensure_cluster_storage(
     redis_admin_password: str,
     redis_password: str,
     redis_user: str,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Ensure owned Postgres and Redis; schema, authority and pooler follow in
     start order (`cli.commands.data_plane.bringup`).
@@ -583,7 +592,7 @@ def ensure_cluster_storage(
             "always authenticated and no conversion exists; re-birth it as a new home."
         )
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
-    if (rc := _start_pg(pg_port, cluster_secret)) != 0:
+    if (rc := _start_pg(pg_port, cluster_secret, retained_children=retained_children)) != 0:
         return rc
     if (
         rc := start_redis(
@@ -694,7 +703,10 @@ def _print_pooler_status() -> None:
     print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
 
 
-def stop_cluster_instance() -> int:
+def stop_cluster_instance(
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
     """Stop this cluster's own Postgres + Redis (data preserved on disk). The
     counterpart of ensure_cluster_storage for `ava stop` of a cluster running its
     own instance. Best-effort: a not-running instance is a
@@ -727,7 +739,10 @@ def stop_cluster_instance() -> int:
     )
 
     escalation = owned_postgres.stop(
-        data, immediate_wait=PROCESS_CLEANUP_WAIT_S, kill_wait=PROCESS_KILL_WAIT_S
+        data,
+        immediate_wait=PROCESS_CLEANUP_WAIT_S,
+        kill_wait=PROCESS_KILL_WAIT_S,
+        retained_children=retained_children,
     )
     if escalation is not None:
         report_postgres_stop_escalation(escalation)

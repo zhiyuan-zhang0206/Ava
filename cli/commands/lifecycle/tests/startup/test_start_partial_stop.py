@@ -99,6 +99,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
         save: bool = True,
         notes: list[str] | None = None,
         clients: list[str] | None = None,
+        retained_children: object = None,
     ) -> list[str]:
         steps.append("native")
         return []

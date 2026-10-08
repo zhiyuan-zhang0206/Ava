@@ -161,7 +161,7 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     )
     monkeypatch.setattr(start_commands, "_cmd_start_body", record_start)
 
-    assert entry.cmd_restart(mode="smooth") == 0
+    assert entry.cmd_restart(mode="smooth", retained_children=[]) == 0
 
     assert events == [
         "services-stopped",
