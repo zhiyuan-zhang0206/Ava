@@ -103,7 +103,7 @@ no coverage-derived map yet; that is a future option, not an enforcement claim.
 ## Duration guard
 
 The timing input is the repository-root
-[.test_durations](../../../.test_durations) file, refreshed nightly by
+[.test_durations](../../../.test_durations) file, refreshed after 20 main changes with a nightly fallback by
 [refresh-test-durations.yml](../../../.github/workflows/refresh-test-durations.yml).
 It maps pytest node IDs to seconds. Refreshes retain every measured node,
 including fast tests and durations that round to zero; only unmeasured nodes

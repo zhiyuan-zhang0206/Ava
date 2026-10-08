@@ -11,7 +11,11 @@ fallback).
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
@@ -198,6 +202,7 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
         attempts += 1
         assert pytest_args == [
             "-q",
+            "--omit-static-tests",
             "--ignore=tests/e2e",
             "-m",
             "not flaky",
@@ -346,3 +351,81 @@ def test_merge_all_ci_shards_writes_the_compact_combined_durations(
     assert combined["tests/components/agent/test_1.py::test_one"] == 0.019
     assert combined["tests/components/agent/test_12.py::test_one"] == 1.0
     assert combined["tests/e2e/test_4.py::test_one"] == 1.0
+
+
+def test_real_pytest_split_clean_recording_preserves_selection_and_partition(
+    tmp_path: Path,
+) -> None:
+    """Recording with xdist must keep the original partition and clean only its output."""
+    tests = tmp_path / "test_sample.py"
+    tests.write_text("\n".join(f"def test_{index}():\n    assert True\n" for index in range(6)))
+    config = tmp_path / "pytest.ini"
+    config.write_text("[pytest]\n")
+    seed = {f"test_sample.py::test_{index}": float(index + 1) for index in range(6)}
+    recorded: set[str] = set()
+    for group in (1, 2):
+        memberships: list[set[str]] = []
+        for recording in (False, True):
+            durations = tmp_path / "durations.json"
+            durations.write_text(json.dumps(seed))
+            members = _run_sample_shard(tmp_path, config, durations, group, recording)
+            memberships.append(members)
+            measured = json.loads(durations.read_text())
+            if recording:
+                assert set(measured) == members
+                assert all(value >= 0 for value in measured.values())
+                assert not recorded & members
+                recorded.update(members)
+            else:
+                assert measured == seed
+        assert memberships[0] == memberships[1]
+    assert recorded == set(seed)
+
+
+def _run_sample_shard(
+    tmp_path: Path,
+    config: Path,
+    durations: Path,
+    group: int,
+    recording: bool,
+) -> set[str]:
+    report = tmp_path / "junit.xml"
+    args = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-c",
+        str(config),
+        "-p",
+        "pytest_split.plugin",
+        "-p",
+        "xdist.plugin",
+        "-n",
+        "2",
+        "--splits",
+        "2",
+        "--group",
+        str(group),
+        "--splitting-algorithm",
+        "least_duration",
+        "--durations-path",
+        str(durations),
+        "--junit-xml",
+        str(report),
+    ]
+    if recording:
+        args.extend(["--store-durations", "--clean-durations"])
+    result = subprocess.run(  # noqa: S603 — fixed interpreter, tiny test-owned suite
+        args,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=os.environ | {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return {
+        f"test_sample.py::{case.attrib['name']}"
+        for case in ElementTree.parse(report).iter("testcase")  # noqa: S314 — test-owned local pytest report
+    }
