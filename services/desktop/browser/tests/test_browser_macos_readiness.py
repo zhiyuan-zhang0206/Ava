@@ -31,7 +31,7 @@ def _macos_probes(
     a "Background" answer is the agent/SSH chain that must be refused.
     """
     calls: list[list[str]] = []
-    monkeypatch.setattr(readiness, "IS_MACOS", True)
+    monkeypatch.setattr(readiness, "is_macos", lambda: True)
     monkeypatch.setattr(readiness.os, "getuid", lambda: 501)
 
     def _account() -> tuple[str, Path]:
@@ -54,7 +54,7 @@ def _macos_probes(
 
 
 def test_non_macos_needs_no_macos_readiness_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(readiness, "IS_MACOS", False)
+    monkeypatch.setattr(readiness, "is_macos", lambda: False)
     assert readiness.probe_startup_readiness().ready is True
 
 

@@ -21,7 +21,7 @@ def test_get_backend_returns_correct_type() -> None:
 
 
 def test_unsupported_host_does_not_select_linux_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(backend_module, "IS_MACOS", False)
+    monkeypatch.setattr(backend_module, "is_macos", lambda: False)
     monkeypatch.setattr(backend_module, "is_linux", lambda: False, raising=False)
     with pytest.raises(RuntimeError, match="unsupported host platform"):
         backend_module.get_backend()

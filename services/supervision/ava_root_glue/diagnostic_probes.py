@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from base.config import settings
 from base.daemon.health import DaemonProbe
-from base.native_process.os_platform import IS_MACOS
+from base.native_process.os_platform import is_macos
 from services.supervision.ava_root_glue.diagnostics import Diagnostic
 
 
@@ -198,10 +198,10 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
     from base.cluster.machine import is_gateway
 
     checks: list[Diagnostic] = []
-    if IS_MACOS:
+    if is_macos():
         checks.append(Diagnostic("brew-pin", brew_pins))
     checks.append(Diagnostic("venv", venv))
-    if IS_MACOS:
+    if is_macos():
         from services.supervision.healthchecks.permissions_helper import episode_reporter, probe
 
         checks.append(Diagnostic("permissions-helper", probe, report=episode_reporter()))
