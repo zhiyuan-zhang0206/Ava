@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents import AgentLaunchFailed, AvaAgentError
+from base.agents.messages.chat_delivery import ChatInboundCommittedError
 from gateway.http.auth.cors import cors_allowed_origins
 from gateway.http.middleware.error_envelope import error_response
 
@@ -99,7 +100,20 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         request,
         code="internal_error",
         status=500,
-        detail="Internal Server Error",
+        detail=(
+            "Chat inbound committed; post-commit work failed. Reconcile with the same logical key."
+            if isinstance(exc, ChatInboundCommittedError)
+            else "Internal Server Error"
+        ),
         retryable=False,
+        extensions=(
+            {
+                "committed": True,
+                "inbound_id": exc.receipt.inbound_id,
+                "idempotency_key": request.headers.get("Idempotency-Key"),
+            }
+            if isinstance(exc, ChatInboundCommittedError)
+            else None
+        ),
         headers=cors_headers(request),
     )
