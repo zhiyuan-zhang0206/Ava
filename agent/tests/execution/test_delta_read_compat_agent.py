@@ -493,7 +493,7 @@ async def test_startup_reconcile_reads_reconstructed_delta_state(
     )
 
     wrap_saver_reads_with_delta_reconstruction(saver)
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent_id)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent_id, incarnation=None)
 
     status = db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id = %s", (inbound,)

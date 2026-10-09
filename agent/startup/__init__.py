@@ -60,6 +60,7 @@ from agent.startup._page_reconcile import (
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def wrap_saver_writes_with_loud_failure(
@@ -389,6 +390,8 @@ async def reconcile_claimed_inbounds_at_startup(
     ops_pool: AsyncConnectionPool,
     checkpointer: AsyncPostgresSaver,
     agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> None:
     """Hand `reconcile_claimed_inbounds` the set of committed `ava_inbound_id`s
     so it can finalize any `'claimed'` chat rows left behind by interrupted
@@ -418,7 +421,7 @@ async def reconcile_claimed_inbounds_at_startup(
     committed_inbound_ids = await committed_ids_for_reconcile(ops_pool, checkpointer, agent_id)
 
     committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-        ops_pool, agent_id, committed_inbound_ids
+        ops_pool, agent_id, committed_inbound_ids, incarnation=incarnation
     )
     if committed or reset or dead_lettered:
         logger.info(

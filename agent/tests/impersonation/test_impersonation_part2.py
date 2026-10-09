@@ -17,7 +17,6 @@ from base.agents.incarnation.resources import ResourceProcess
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from tests.impersonation_support import recorded_tree
 
 
@@ -29,8 +28,7 @@ def gate_ctx(database: Database, event_bus: EventBus) -> AvaContext:
 @pytest.fixture
 def incarnation() -> Iterator[RuntimeIncarnation]:
     token = RuntimeIncarnation(42, uuid4(), uuid4())
-    with bind_turn_identity(token.agent_id, incarnation=token):
-        yield token
+    yield token
 
 
 def _session(status: str = "active", **values: Any) -> dict[str, Any]:

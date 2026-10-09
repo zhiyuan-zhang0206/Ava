@@ -185,7 +185,7 @@ class TestReconcileClaimedInbounds:
         db_conn.commit()
 
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids={iid}
+            aops_pool, tid, committed_inbound_ids={iid}, incarnation=None
         )
         assert (committed, reset, dead_lettered) == (1, 0, 0)
         with db_conn.cursor() as cur:
@@ -210,7 +210,7 @@ class TestReconcileClaimedInbounds:
         # Empty committed set = simulating "no prior checkpoint" or "this id
         # wasn't in state.messages" — orphan path. Either way it gets reset.
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids=set()
+            aops_pool, tid, committed_inbound_ids=set(), incarnation=None
         )
         assert (committed, reset, dead_lettered) == (0, 1, 0)
         with db_conn.cursor() as cur:
@@ -241,7 +241,7 @@ class TestReconcileClaimedInbounds:
         db_conn.commit()
 
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids={iid_a}
+            aops_pool, tid, committed_inbound_ids={iid_a}, incarnation=None
         )
         assert (committed, reset, dead_lettered) == (1, 1, 0)
         with db_conn.cursor() as cur:
@@ -260,7 +260,7 @@ class TestReconcileClaimedInbounds:
 
         tid = spawn_agent()
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids={42, 43}
+            aops_pool, tid, committed_inbound_ids={42, 43}, incarnation=None
         )
         assert (committed, reset, dead_lettered) == (0, 0, 0)
 
@@ -283,7 +283,7 @@ class TestReconcileClaimedInbounds:
         db_conn.commit()
 
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, mine, committed_inbound_ids=set()
+            aops_pool, mine, committed_inbound_ids=set(), incarnation=None
         )
         assert (committed, reset, dead_lettered) == (0, 0, 0)
         with db_conn.cursor() as cur:
@@ -311,7 +311,7 @@ class TestReconcileClaimedInbounds:
         db_conn.commit()
 
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids=set()
+            aops_pool, tid, committed_inbound_ids=set(), incarnation=None
         )
         assert (committed, reset, dead_lettered) == (0, 0, 1)
         with db_conn.cursor() as cur:
@@ -338,7 +338,7 @@ class TestReconcileClaimedInbounds:
         db_conn.commit()
 
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids=set()
+            aops_pool, tid, committed_inbound_ids=set(), incarnation=None
         )
         assert (committed, reset, dead_lettered) == (0, 1, 0)
         with db_conn.cursor() as cur:
@@ -381,7 +381,7 @@ class TestReconcileClaimedInbounds:
         db_conn.commit()
 
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids={committed_iid}
+            aops_pool, tid, committed_inbound_ids={committed_iid}, incarnation=None
         )
         assert (committed, reset, dead_lettered) == (1, 1, 1)
         with db_conn.cursor() as cur:
@@ -423,7 +423,7 @@ class TestReconcileClaimedInbounds:
         db_conn.commit()
 
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids=set()
+            aops_pool, tid, committed_inbound_ids=set(), incarnation=None
         )
         assert (committed, reset, dead_lettered) == (0, 1, 1)
         with db_conn.cursor() as cur:

@@ -38,7 +38,7 @@ from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import _collect_child
 from base.db import Database
 from base.native_process.ownership import OwnedProcess
-from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
+from base.native_process.turn_identity import HostedTurnResources
 from base.sessions.posixproc import _group_empty
 from tests.e2e._proc import kill_group_or_prove_already_gone
 from tests.fixtures.pin_agent import exec_context
@@ -537,15 +537,14 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
         return owned
 
     async def run() -> None:
-        with bind_hosted_resources(scope):
-            outcome, _ = await _subprocess._run_legacy_subprocess(
-                "private reader fixture",
-                exec_context(None),
-                asyncio.Event(),
-                20,
-                exec_dir=tmp_path / "exec",
-                accumulation_max_chars=1_000_000,
-            )
+        outcome, _ = await _subprocess._run_legacy_subprocess(
+            "private reader fixture",
+            exec_context(None, resources=scope),
+            asyncio.Event(),
+            20,
+            exec_dir=tmp_path / "exec",
+            accumulation_max_chars=1_000_000,
+        )
         assert isinstance(outcome, _ExecCrashed)
         assert isinstance(outcome.exc, ExecTeardownError)
         assert [failure.stage for failure in outcome.exc.failures] == ["reader_join"]
@@ -587,7 +586,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
 
 
 async def test_teardown_failure_is_returned_as_crash_with_partial_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     real_settle_resources = _process.settle_resources
     teardown_failure = RuntimeError("synthetic reader teardown failure")
@@ -601,7 +600,7 @@ async def test_teardown_failure_is_returned_as_crash_with_partial_output(
     monkeypatch.setattr(_process, "settle_resources", _fail_after_settling)
 
     result, _payload = await _subprocess._run_in_subprocess(
-        Database.from_settings(),
+        database,
         "print('partial before teardown')",
         exec_context(_AGENT_ID),
         asyncio.Event(),

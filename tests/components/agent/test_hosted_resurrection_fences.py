@@ -21,7 +21,6 @@ from base.agents.incarnation.resources import (
 from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.spawn import create_agent_row
 from ops.agents.wake import resurrect_agent
 
@@ -39,7 +38,12 @@ async def _resurrected(
     db.commit()
     owner = uuid4()
     old = await admit_hosted_runtime(
-        pool, aid, machine_name(), owner, expected_from="idling", db=Database.from_settings()
+        pool,
+        aid,
+        machine_name(),
+        owner,
+        expected_from="idling",
+        db=Database.from_settings(),
     )
     assert old is not None
     command = insert_inbound_message(
@@ -51,10 +55,19 @@ async def _resurrected(
         bus=EventBus.from_settings(),
         database=Database.from_settings(),
     )
-    with bind_turn_identity(aid, incarnation=old):
-        assert [item.id for item in await claim_inbound_batch(pool, aid)] == [command]
-        assert await apply_hosted_lifecycle(pool, old, bus=EventBus.from_settings()) == "terminate"
-    resurrect_agent(Database.from_settings(), EventBus.from_settings(), aid, resurrected_by="user")
+    assert [
+        item.id for item in await claim_inbound_batch(pool, aid, incarnation=old, work=None)
+    ] == [command]
+    assert (
+        await apply_hosted_lifecycle(pool, old, bus=EventBus.from_settings(), resources=None)
+        == "terminate"
+    )
+    resurrect_agent(
+        Database.from_settings(),
+        EventBus.from_settings(),
+        aid,
+        resurrected_by="user",
+    )
     row = db.execute("SELECT incarnation_resources FROM agents_meta WHERE id=%s", (aid,)).fetchone()
     assert row is not None
     resources = decode_resources(row[0])

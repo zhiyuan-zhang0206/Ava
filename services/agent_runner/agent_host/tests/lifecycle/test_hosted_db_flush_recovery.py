@@ -1,5 +1,6 @@
 """Database failures at final flush and lifecycle commit cannot replay work."""
 
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,7 +17,6 @@ from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
@@ -35,7 +35,10 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
     command_kind: str,
 ) -> None:
     agent = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent)
+    incarnation = await _admit(
+        aops_pool,
+        agent,
+    )
     replies: list[str] = []
     graph, saver, config, _history = await _prepare_graph(aops_pool, agent, 100, replies)
     command = (
@@ -97,8 +100,10 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
         monkeypatch.setattr(host_module, "flush_checkpoint", fail_flush_once)
     else:
         monkeypatch.setattr(host_module, "apply_hosted_lifecycle", fail_lifecycle_once)
-    with bind_turn_identity(agent, incarnation=incarnation):
-        outcome = await host._invoke_until_done(agent, ctx)
+    outcome = await host._invoke_until_done(
+        agent,
+        replace(ctx, original_incarnation=incarnation, hosted_resources=None, native_work=None),
+    )
     assert outcome.exited == (command is not None and command_kind == "terminate")
     assert failed
     cold = await saver.aget(config)

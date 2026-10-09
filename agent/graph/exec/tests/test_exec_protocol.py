@@ -118,7 +118,12 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
     state = _make_state_dump()
     path = make_request_path(tmp_path, agent_id=7)
     write_request(
-        path, code="print('hi')", context=exec_context(7).describe(), timeout_s=300.0, state=state
+        path,
+        code="print('hi')",
+        context=exec_context(7).describe(),
+        timeout_s=300.0,
+        state=state,
+        incarnation=None,
     )
     payload = read_request(path)
     assert payload.code == "print('hi')"
@@ -147,6 +152,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path)
             context=exec_context(7).describe(),
             timeout_s=1.0,
             state=_make_state_dump(),
+            incarnation=None,
         )
         read_request(path)
 
@@ -173,7 +179,12 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path)
 def test_request_envelope_without_state(tmp_path: Path) -> None:
     path = make_request_path(tmp_path, agent_id=None)
     write_request(
-        path, code="x = 1", context=exec_context(None).describe(), timeout_s=0.0, state=None
+        path,
+        code="x = 1",
+        context=exec_context(None).describe(),
+        timeout_s=0.0,
+        state=None,
+        incarnation=None,
     )
     payload = read_request(path)
     assert payload.agent_id is None
@@ -185,7 +196,14 @@ def test_request_envelope_without_state(tmp_path: Path) -> None:
 
 def test_request_envelope_rejects_version_drift(tmp_path: Path) -> None:
     path = make_request_path(tmp_path, agent_id=7)
-    write_request(path, code="x = 1", context=exec_context(7).describe(), timeout_s=1.0, state=None)
+    write_request(
+        path,
+        code="x = 1",
+        context=exec_context(7).describe(),
+        timeout_s=1.0,
+        state=None,
+        incarnation=None,
+    )
     raw = json.loads(path.read_text(encoding="utf-8"))
     raw["v"] = REQUEST_VERSION + 99
     path.write_text(json.dumps(raw), encoding="utf-8")
@@ -260,7 +278,12 @@ def test_result_envelope_rejects_version_drift(tmp_path: Path) -> None:
 def test_envelope_files_are_owner_only(tmp_path: Path) -> None:
     request = make_request_path(tmp_path, agent_id=7)
     write_request(
-        request, code="x = 1", context=exec_context(7).describe(), timeout_s=1.0, state=None
+        request,
+        code="x = 1",
+        context=exec_context(7).describe(),
+        timeout_s=1.0,
+        state=None,
+        incarnation=None,
     )
     result = make_result_path(tmp_path, agent_id=7)
     write_result(result, ResultPayload(kind="done"))
@@ -311,7 +334,12 @@ def test_failed_envelope_write_leaves_nothing_at_the_destination(
 
     with pytest.raises(OSError, match="replace refused"):
         write_request(
-            path, code="x = 1", context=exec_context(7).describe(), timeout_s=1.0, state=None
+            path,
+            code="x = 1",
+            context=exec_context(7).describe(),
+            timeout_s=1.0,
+            state=None,
+            incarnation=None,
         )
 
     assert not path.exists()
@@ -339,7 +367,7 @@ def test_writer_killed_before_commit_leaves_no_envelope_at_all(
         f"{kill_point} = die\n"
         "protocol.write_request(Path(sys.argv[1]), code='x=1', "
         "context={'identity': {'agent_id': 7, 'owns_loop': True, 'actor': None}}, "
-        "timeout_s=1.0, state=None)\n"
+        "timeout_s=1.0, state=None, incarnation=None)\n"
     )
     completed = subprocess.run(  # noqa: S603 — our own venv python running a fixed in-test script
         [sys.executable, "-c", script, str(path)], check=False
@@ -354,10 +382,24 @@ def test_envelope_write_commits_the_full_bytes_and_a_second_write_replaces_them(
 ) -> None:
     """The committed file is complete, owner-only, and leaves no scratch behind."""
     path = make_request_path(tmp_path, agent_id=7)
-    write_request(path, code="x = 1", context=exec_context(7).describe(), timeout_s=1.0, state=None)
+    write_request(
+        path,
+        code="x = 1",
+        context=exec_context(7).describe(),
+        timeout_s=1.0,
+        state=None,
+        incarnation=None,
+    )
     first = path.read_text(encoding="utf-8")
 
-    write_request(path, code="x = 2", context=exec_context(7).describe(), timeout_s=2.0, state=None)
+    write_request(
+        path,
+        code="x = 2",
+        context=exec_context(7).describe(),
+        timeout_s=2.0,
+        state=None,
+        incarnation=None,
+    )
 
     assert json.loads(path.read_text(encoding="utf-8"))["code"] == "x = 2"
     assert json.loads(first)["code"] == "x = 1"
@@ -386,7 +428,14 @@ def test_orphaned_write_temp_files_are_swept(tmp_path: Path) -> None:
 
 def test_size_ceiling_enforced(tmp_path: Path) -> None:
     path = make_request_path(tmp_path, agent_id=7)
-    write_request(path, code="x = 1", context=exec_context(7).describe(), timeout_s=1.0, state=None)
+    write_request(
+        path,
+        code="x = 1",
+        context=exec_context(7).describe(),
+        timeout_s=1.0,
+        state=None,
+        incarnation=None,
+    )
     path.write_bytes(b"x" * (MAX_ENVELOPE_BYTES + 1))
     with pytest.raises(ValueError, match=r"ceiling.*compact the conversation"):
         read_request(path)

@@ -14,13 +14,14 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent.ownership.inbound import lock_inbound_owner
 from agent.ownership.native_cancel import bound_native_cancel
 from base.agents.compaction.models import CompactHeldError
-from base.agents.incarnation.native_work_models import NativeCancelPendingError
+from base.agents.incarnation.native_work_models import NativeCancelPendingError, NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.config import settings
 from base.db import ALIVE_STATUSES, Database, InboundRow, publish_inbound_wake
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 # The slow-borrow threshold is settings.agent.db_pool_slow_acquire_warn_seconds: a
 # slow-but-served borrow is visible below the acquire timeout.
@@ -243,17 +244,20 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
 
 
 async def _claim_lifecycle_command(
-    conn: psycopg.AsyncConnection[Any], cur: psycopg.AsyncCursor[Any], agent_id: int
+    conn: psycopg.AsyncConnection[Any],
+    cur: psycopg.AsyncCursor[Any],
+    agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> list[ClaimedInbound] | None:
     """Accept the agent's owned restart/terminate command; None when there is none."""
     from agent.ownership.lifecycle_intent import (
         accept_lifecycle_intent,
         settle_superseded_intent,
     )
-    from base.native_process.runtime_incarnation import current_incarnation
 
-    command = await accept_lifecycle_intent(conn, agent_id)
-    token = current_incarnation(agent_id)
+    command = await accept_lifecycle_intent(conn, agent_id, incarnation=incarnation)
+    token = incarnation
     if (
         command is not None
         and token is not None
@@ -261,7 +265,7 @@ async def _claim_lifecycle_command(
     ):
         if not await settle_superseded_intent(conn, command):
             raise RuntimeError("replacement cannot execute or settle the prior lifecycle target")
-        command = await accept_lifecycle_intent(conn, agent_id)
+        command = await accept_lifecycle_intent(conn, agent_id, incarnation=incarnation)
     if command is not None:
         if token is None or (command.generation, command.owner) != (
             token.generation,
@@ -301,6 +305,8 @@ async def claim_inbound_batch(
     agent_id: int,
     *,
     lifecycle_only: bool = False,
+    incarnation: RuntimeIncarnation | None,
+    work: NativeWorkTarget | None,
 ) -> list[ClaimedInbound]:
     """Claim under current runtime ownership in one explicit write transaction.
 
@@ -324,8 +330,10 @@ async def claim_inbound_batch(
         await conn.execute(
             "SELECT set_config('lock_timeout', %s, true)", (f"{acquire_timeout_s:g}s",)
         )
-        await lock_inbound_owner(conn, agent_id)
-        native_cancel = await bound_native_cancel(conn, agent_id)
+        await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
+        native_cancel = await bound_native_cancel(
+            conn, agent_id, incarnation=incarnation, work=work
+        )
         if native_cancel is not None:
             raise NativeCancelPendingError(native_cancel)
         compact = await (
@@ -340,7 +348,7 @@ async def claim_inbound_batch(
         runtime = await cur.fetchone()
         runtime_owned = runtime in (("process",), ("hosted",))
         if runtime_owned:
-            accepted = await _claim_lifecycle_command(conn, cur, agent_id)
+            accepted = await _claim_lifecycle_command(conn, cur, agent_id, incarnation=incarnation)
             if accepted is not None:
                 return accepted
         else:
@@ -403,6 +411,8 @@ async def reconcile_claimed_inbounds(
     pool: AsyncConnectionPool,
     agent_id: int,
     committed_inbound_ids: set[int],
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> tuple[int, int, int]:
     """Finalize every `'claimed'` row for `agent_id` based on whether its
     HumanMessage reached settled state, including one later removed from it.
@@ -451,7 +461,7 @@ async def reconcile_claimed_inbounds(
         # one reset path. (Common shape: brand-new process, no prior
         # in-flight work; the SELECT below will likely return 0 rows.)
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-            await lock_inbound_owner(conn, agent_id)
+            await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
             await cur.execute(
                 "UPDATE inbound_messages SET status = 'done' "
                 "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
@@ -473,7 +483,7 @@ async def reconcile_claimed_inbounds(
     # is autocommit=True; `conn.transaction()` opens an explicit BEGIN.
     async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
         await conn.execute("SET TRANSACTION READ WRITE")
-        await lock_inbound_owner(conn, agent_id)
+        await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
         await cur.execute(
             "UPDATE inbound_messages SET status = 'done' "
             "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s AND id = ANY(%s)",
@@ -497,7 +507,9 @@ async def reconcile_claimed_inbounds(
     return (committed, reset, dead_lettered)
 
 
-async def finalize_claimed_inbounds(pool: AsyncConnectionPool | None, agent_id: int) -> int:
+async def finalize_claimed_inbounds(
+    pool: AsyncConnectionPool | None, agent_id: int, *, incarnation: RuntimeIncarnation | None
+) -> int:
     """Mark every 'claimed' row for `agent_id` as 'done' — the compaction
     terminal-consumption point.
 
@@ -524,7 +536,7 @@ async def finalize_claimed_inbounds(pool: AsyncConnectionPool | None, agent_id: 
     if pool is None:
         return 0
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await lock_inbound_owner(conn, agent_id)
+        await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
         await cur.execute(
             "UPDATE inbound_messages SET status = 'done' "
             "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s",
@@ -555,13 +567,26 @@ async def has_pending_inbound_after(
         return await cur.fetchone() is not None
 
 
-async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> bool:
+async def has_pending_interrupt(
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation | None,
+    work: NativeWorkTarget | None,
+) -> bool:
     """Whether a durable external abort is present, without claiming it."""
-    return await pending_interrupt_reason(pool, agent_id) is not None
+    return (
+        await pending_interrupt_reason(pool, agent_id, incarnation=incarnation, work=work)
+        is not None
+    )
 
 
 async def pending_interrupt_reason(
-    pool: AsyncConnectionPool, agent_id: int
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation | None,
+    work: NativeWorkTarget | None,
 ) -> InterruptReason | None:
     """Attribute the first queued external abort without claiming its command.
 
@@ -581,7 +606,10 @@ async def pending_interrupt_reason(
     self row is still dispatched normally at claim.
     """
     async with pool.connection() as conn, conn.cursor() as cur:
-        if await bound_native_cancel(conn, agent_id) is not None:
+        if (
+            await bound_native_cancel(conn, agent_id, incarnation=incarnation, work=work)
+            is not None
+        ):
             return InterruptReason.USER
         await cur.execute(
             "SELECT i.source FROM inbound_messages i WHERE i.agent_id=%s "

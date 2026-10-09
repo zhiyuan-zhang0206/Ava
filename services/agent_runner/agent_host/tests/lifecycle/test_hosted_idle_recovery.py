@@ -32,7 +32,6 @@ from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host import dispatcher
-from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
@@ -145,7 +144,7 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
 
     monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model)
     monkeypatch.setattr(
-        host_module,
+        runtime_module,
         "boot_agent_scope",
         AsyncMock(return_value=(FakeListChatModel(responses=[]), None)),
     )

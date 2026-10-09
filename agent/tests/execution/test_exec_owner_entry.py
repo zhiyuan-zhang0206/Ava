@@ -37,6 +37,7 @@ def _context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
         context=exec_context(agent_id).describe(),
         timeout_s=20,
         state=None,
+        incarnation=None,
     )
     return OwnerContext(
         agent_id=agent_id,
@@ -149,6 +150,7 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
         context=exec_context(1).describe(),
         timeout_s=20,
         state=None,
+        incarnation=None,
     )
     context = context.model_copy(
         update={
@@ -336,6 +338,7 @@ def test_real_host_death_closes_active_managed_child(
         context=exec_context(1).describe(),
         timeout_s=20,
         state=None,
+        incarnation=None,
     )
     context = context.model_copy(
         update={

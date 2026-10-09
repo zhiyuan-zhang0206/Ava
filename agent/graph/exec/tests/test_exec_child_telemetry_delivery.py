@@ -96,6 +96,7 @@ def _spawn(
             context=exec_context(_AGENT_ID).describe(),
             timeout_s=60.0,
             state=None,
+            incarnation=None,
         )
     env = os.environ.copy()
     env.update(

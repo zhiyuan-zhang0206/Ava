@@ -1,6 +1,7 @@
 """A provider failure the host persists before it releases the turn (the circuit breaker's
 durable half)."""
 
+from dataclasses import replace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -15,7 +16,6 @@ from base.agents.context import AvaContext
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -49,7 +49,12 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     row = db_conn.execute("SELECT machine FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert row is not None
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, row[0], uuid4(), db=Database.from_settings(), expected_from="idling"
+        aops_pool,
+        agent_id,
+        row[0],
+        uuid4(),
+        db=Database.from_settings(),
+        expected_from="idling",
     )
     assert incarnation is not None
     calls = 0
@@ -80,8 +85,17 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             bus=EventBus.from_settings(),
             db=Database.from_settings(),
         )
-        with bind_turn_identity(agent_id, incarnation=incarnation):
-            assert not (await host._invoke_until_done(agent_id, _breaker_ctx(aops_pool))).exited
+        assert not (
+            await host._invoke_until_done(
+                agent_id,
+                replace(
+                    _breaker_ctx(aops_pool),
+                    original_incarnation=incarnation,
+                    hosted_resources=None,
+                    native_work=None,
+                ),
+            )
+        ).exited
     # New saver/connection prevents in-memory buffered state from faking success.
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as reader:
         stored = await reader.aget_tuple({"configurable": {"thread_id": str(agent_id)}})

@@ -130,7 +130,6 @@ async def test_actual_original_supersession_owner_retains_no_effect_fact(
         supersede_lifecycle_for_resurrect,
     )
     from base.db.transaction import async_write_transaction
-    from base.native_process.turn_identity import bind_turn_identity
 
     incarnation, target = await managed_work(db_conn, aops_pool)
     request = NativeRestartRequest(target=target)
@@ -139,10 +138,11 @@ async def test_actual_original_supersession_owner_retains_no_effect_fact(
             pool, "original-no-effect", target.agent_id, request, _overlay
         )
         if fence == "target_replaced":
-            with bind_turn_identity(target.agent_id, incarnation=incarnation):
-                async with async_write_transaction(aops_pool) as conn:
-                    intent = await accept_lifecycle_intent(conn, target.agent_id)
-                    assert intent is not None
+            async with async_write_transaction(aops_pool) as conn:
+                intent = await accept_lifecycle_intent(
+                    conn, target.agent_id, incarnation=incarnation
+                )
+                assert intent is not None
             db_conn.execute(
                 "UPDATE agents_meta SET runtime_generation=%s WHERE id=%s",
                 (uuid4(), target.agent_id),

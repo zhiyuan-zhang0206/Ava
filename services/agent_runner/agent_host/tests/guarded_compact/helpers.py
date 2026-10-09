@@ -11,6 +11,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import START, StateGraph
+from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 from pydantic import Field
@@ -24,7 +25,6 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import current_native_work_id
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import _AgentRuntime
@@ -58,8 +58,9 @@ async def make_host(
     *,
     seed_history: bool = True,
 ) -> tuple[AgentHost, AsyncPostgresSaver, RunnableConfig]:
-    async def model(state: AgentState) -> Command[Any]:
-        ordinary.append(current_native_work_id())
+    async def model(state: AgentState, runtime: Runtime[AvaContext]) -> Command[Any]:
+        work = runtime.context.native_work
+        ordinary.append(None if work is None else work.work_id)
         return Command(
             update={"halted": True, "messages": [AIMessage(content="ordinary reply")]}, goto="claim"
         )

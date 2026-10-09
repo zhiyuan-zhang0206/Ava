@@ -17,7 +17,6 @@ from base.agents.messages.native_cancel import (
     accept_native_cancel,
     observe_native_work,
 )
-from base.native_process.turn_identity import bind_native_work, bind_turn_identity
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
 
@@ -98,12 +97,10 @@ async def test_preparing_refused_and_cancel_claim_guard_leaves_chat_pending(
         db_conn.commit()
         chat = _insert(db_conn, target.agent_id)
         await asyncio.to_thread(accept_native_cancel, pool, "ready", target.agent_id, target)
-        with (
-            bind_turn_identity(target.agent_id, incarnation=incarnation),
-            bind_native_work(target.work_id),
-            pytest.raises(NativeCancelPendingError),
-        ):
-            await claim_inbound_batch(aops_pool, target.agent_id)
+        with pytest.raises(NativeCancelPendingError):
+            await claim_inbound_batch(
+                aops_pool, target.agent_id, incarnation=incarnation, work=target
+            )
     assert db_conn.execute(
         "SELECT status,claimed_at FROM inbound_messages WHERE id=%s", (chat,)
     ).fetchone() == ("pending", None)

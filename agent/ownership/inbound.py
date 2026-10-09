@@ -2,14 +2,16 @@
 
 import psycopg
 
-from base.native_process.runtime_incarnation import current_incarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 class RuntimeOwnershipLostError(RuntimeError):
     """The caller must stop without changing a replacement runtime's state."""
 
 
-async def lock_inbound_owner(conn: psycopg.AsyncConnection, agent_id: int) -> None:
+async def lock_inbound_owner(
+    conn: psycopg.AsyncConnection, agent_id: int, *, incarnation: RuntimeIncarnation | None
+) -> None:
     """Lock agents_meta before inbound rows in the caller's write transaction.
 
     Unknown legacy rows remain compatible, but an owned row never accepts a
@@ -17,7 +19,8 @@ async def lock_inbound_owner(conn: psycopg.AsyncConnection, agent_id: int) -> No
     clock_timestamp checks freshness after any lock wait, not at BEGIN time.
     This does not fence old binaries that still issue unconditional writes.
     """
-    incarnation = current_incarnation(agent_id)
+    if incarnation is not None:
+        incarnation.require_agent(agent_id)
     cursor = await conn.execute(
         "SELECT runtime_generation, runtime_owner, runtime_kind, status, "
         "lease_expires_at FROM agents_meta WHERE id = %s FOR UPDATE",

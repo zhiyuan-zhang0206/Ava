@@ -58,7 +58,9 @@ async def _race_stream_vs_cancel(
     assert ctx.event_publisher is not None, (  # noqa: S101
         "_race_stream_vs_cancel requires ctx.event_publisher"
     )
-    async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
+    async with subscribe_interrupt(
+        ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
+    ) as cancel_event:
         try:
             await interruptible_model(stream_coro, cancel_event)
         except ModelInterruptedError:

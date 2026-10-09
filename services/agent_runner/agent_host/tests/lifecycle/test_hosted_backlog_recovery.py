@@ -23,7 +23,6 @@ from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import dispatcher
-from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
@@ -42,7 +41,7 @@ def isolated_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.03)
     monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model_config)
     monkeypatch.setattr(
-        host_module,
+        runtime_module,
         "boot_agent_scope",
         AsyncMock(return_value=(FakeListChatModel(responses=["unused"]), None)),
     )

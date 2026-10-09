@@ -438,7 +438,7 @@ async def test_resume_admits_a_successor_without_rewriting_legacy_history(
         aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
     )
     assert admitted is not None and admitted.owner == owner
-    assert await settle_hosted_runtime(aops_pool, admitted, bus=event_bus)
+    assert await settle_hosted_runtime(aops_pool, admitted, bus=event_bus, resources=None)
     assert db_conn.execute(
         "SELECT status,runtime_owner FROM agents_meta WHERE id=%s", (agent,)
     ).fetchone() == ("idling", owner)

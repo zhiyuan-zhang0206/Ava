@@ -74,9 +74,7 @@ def test_linux_missing_ticks_are_unknown(monkeypatch: pytest.MonkeyPatch) -> Non
     ],
 )
 def test_invalid_linux_anchor_cannot_attest_or_prove_death(
-    monkeypatch: pytest.MonkeyPatch,
-    field: str,
-    value: object,
+    monkeypatch: pytest.MonkeyPatch, field: str, value: object
 ) -> None:
     monkeypatch.setattr(store, "sys", SimpleNamespace(platform="linux"))
     anchor = {
@@ -174,8 +172,7 @@ def test_unavailable_current_boot_is_unknown(
 
 @pytest.mark.parametrize("missing", ["boot_id", "starttime"])
 def test_windows_head_requires_explicit_native_fields(
-    monkeypatch: pytest.MonkeyPatch,
-    missing: str,
+    monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
     monkeypatch.setattr(store, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="win32"))
@@ -191,9 +188,7 @@ def test_windows_head_requires_explicit_native_fields(
     "error,state", [(psutil.AccessDenied(4240), "denied"), (OSError("unreadable"), "unknown")]
 )
 def test_anchor_read_errors_are_not_death(
-    monkeypatch: pytest.MonkeyPatch,
-    error: Exception,
-    state: str,
+    monkeypatch: pytest.MonkeyPatch, error: Exception, state: str
 ) -> None:
     monkeypatch.setattr(store.psutil, "Process", Mock(side_effect=error))
     tree = recorded_tree()
@@ -349,7 +344,9 @@ def _anchor_recognized(node: dict[str, Any]) -> bool:
         ("2.1.274", "/opt/other/claude/versions/2.1.274/extra", False),
     ],
 )
-def test_provider_anchor_recognition(name: str, executable: str, recognized: bool) -> None:
+def test_provider_anchor_recognition(
+    name: str, executable: str, recognized: bool, *, database: Database
+) -> None:
     node = {
         "pid": 4240,
         "name": name,
@@ -371,7 +368,9 @@ def test_provider_anchor_recognition(name: str, executable: str, recognized: boo
         ("python3.12", "/opt/homebrew/bin/dsh", False),
     ],
 )
-def test_dsh_node_anchor_recognition(name: str, script: str | None, recognized: bool) -> None:
+def test_dsh_node_anchor_recognition(
+    name: str, script: str | None, recognized: bool, *, database: Database
+) -> None:
     """DeepSeek Harness runs as ``node <dsh launcher>``: only the recorded script names it."""
     node: dict[str, Any] = {
         "pid": 4240,
@@ -405,7 +404,12 @@ def _agent(db_conn: Any) -> RuntimeIncarnation:
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
         "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
         "clock_timestamp()+interval '10 minutes')",
-        (agent_id, machine_name(), owner.generation, owner.owner),
+        (
+            agent_id,
+            machine_name(),
+            owner.generation,
+            owner.owner,
+        ),
     )
     db_conn.commit()
     return owner
@@ -431,7 +435,12 @@ def _active(owner: RuntimeIncarnation, tree: dict[str, Any]) -> dict[str, Any]:
         owner,
         "Handoff brief",
     )
-    leases.activate(Database.from_settings(), EventBus.from_settings(), lease["id"], owner)
+    leases.activate(
+        Database.from_settings(),
+        EventBus.from_settings(),
+        lease["id"],
+        owner,
+    )
     return lease
 
 

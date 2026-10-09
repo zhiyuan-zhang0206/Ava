@@ -10,6 +10,7 @@ from langgraph.graph import END
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+import ava
 from agent.graph import claim_node
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.state import AgentState
@@ -101,7 +102,9 @@ async def test_claim_inbound_batch_stamps_claimed_at(
         term_id = term_row[0]
     db_conn.commit()
 
-    rows = await claim_inbound_batch(aops_pool, tid)
+    rows = await claim_inbound_batch(
+        aops_pool, tid, incarnation=ava.context.require_original_incarnation(tid), work=None
+    )
     by_id = {r.id: r for r in rows}
     assert set(by_id) == {term_id}
     assert by_id[term_id].claimed_at is not None

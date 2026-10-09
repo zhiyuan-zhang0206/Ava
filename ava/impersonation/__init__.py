@@ -13,7 +13,7 @@ from typing import NoReturn
 from ava.sdk_surface import agent_identity
 from ava.sdk_surface.validation import coerce_str
 from base.agents.lifecycle import AgentImpersonation
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 # Existing in-flight consent requests may still call accept/reject by name.
 # New sessions prepare automatically, so these are absent from normal discovery.
@@ -23,10 +23,9 @@ __all_for_ava__ = []
 
 def _native_incarnation() -> RuntimeIncarnation:
     agent_identity.assert_self_action("impersonation")
-    incarnation = current_incarnation(agent_identity.require_agent_id())
-    if incarnation is None:
-        raise RuntimeError("impersonation acceptance requires the admitted native runtime")
-    return incarnation
+    import ava
+
+    return ava.context.require_original_incarnation(agent_identity.require_agent_id())
 
 
 def accept(request_id: str, start_message: str) -> NoReturn:

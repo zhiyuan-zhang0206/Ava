@@ -49,13 +49,22 @@ async def _close_captured(
     """Run the real close_hosted_turn with each step swapped for a recorder."""
 
     async def settle_and_stamp(
-        _pool: object, _incarnation: object, *, bus: object, exited: bool, crashed: bool
+        _pool: object,
+        _incarnation: object,
+        *,
+        bus: object,
+        exited: bool,
+        crashed: bool,
+        resources: object,
     ) -> TurnSettlement:
         del exited, crashed
+        assert resources is None
         order.append("settle")
         return settlement
 
-    async def reconcile(_pool: object, _checkpointer: object, _incarnation: object) -> None:
+    async def reconcile(
+        _pool: object, _checkpointer: object, _incarnation: object, *, resources: object
+    ) -> None:
         order.append("reconcile")
 
     async def reap(_pool: object, _incarnation: object, *, bus: object) -> list[int]:
@@ -73,6 +82,7 @@ async def _close_captured(
         cast(AsyncPostgresSaver, object()),
         RuntimeIncarnation(42, uuid4(), uuid4()),
         outcome,
+        resources=None,
     )
 
 
@@ -261,6 +271,7 @@ async def _crash_a_fresh_admission(
         cast(AsyncPostgresSaver, object()),
         incarnation,
         TurnOutcome(exited=False, crashed=True),
+        resources=None,
     )
 
 

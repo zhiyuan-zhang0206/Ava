@@ -22,12 +22,13 @@ from base.agents.history.delta_read_compat import (
     RecoveryReconstructionScope,
     recovery_reconstruction_scope,
 )
+from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.observation.db_wait import DatabaseWait, DatabaseWaits
 from base.config import settings
 from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import AGENT_LEASE_TTL_S
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.recovery.interrupt import RecoveryInterrupt
 
 _PROBE_TIMEOUT_SECONDS = 5.0
@@ -193,6 +194,7 @@ async def recover_database(
     incarnation: RuntimeIncarnation,
     database_waits: DatabaseWaits,
     peek_lock: asyncio.Lock,
+    work: NativeWorkTarget | None,
 ) -> None:
     """Recover inside the original single-flight task, without an inbound wake.
 
@@ -209,10 +211,8 @@ async def recover_database(
     starts once it is spent. Exhaustion uses the existing turn crash path.
     """
     recovery_started = time.monotonic()
-    if current_incarnation(incarnation.agent_id) != incarnation:
-        raise RuntimeOwnershipLostError("database recovery needs the original bound incarnation")
     backoff = _INITIAL_BACKOFF_SECONDS
-    interrupt = RecoveryInterrupt(pool, incarnation, peek_lock)
+    interrupt = RecoveryInterrupt(pool, incarnation, peek_lock, work=work)
     attempt = 0
     phase = "owner_probe"
     last_error_type: str | None = None
@@ -269,14 +269,19 @@ async def recover_database(
                 # An accepted strong command belongs to the interrupted original
                 # work. The host must settle its exact marker before startup repair
                 # can change channels or dispose claimed rows.
-                if await observe_bound_cancel(pool, incarnation.agent_id) is not None:
+                if (
+                    await observe_bound_cancel(
+                        pool, incarnation.agent_id, incarnation=incarnation, work=work
+                    )
+                    is not None
+                ):
                     waiting.complete()
                     return
                 phase = "inbound_reconciliation"
                 await _run_bounded_stage(
                     waiting,
                     lambda: reconcile_claimed_inbounds_at_startup(
-                        pool, checkpointer, incarnation.agent_id
+                        pool, checkpointer, incarnation.agent_id, incarnation=incarnation
                     ),
                     phase=phase,
                     agent_id=incarnation.agent_id,

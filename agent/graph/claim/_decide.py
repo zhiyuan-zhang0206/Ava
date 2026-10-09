@@ -163,7 +163,9 @@ async def _compact_outcome(
     # itself is a clean wipe: only the summary and framework lifecycle
     # markers (resurrect / fork) ride the tail — never raw conversation.
     if st.committed_chat_ids:
-        await _defer_chats_to_pending(ctx.ops_pool, agent_id, st.committed_chat_ids)
+        await _defer_chats_to_pending(
+            ctx.ops_pool, agent_id, st.committed_chat_ids, incarnation=ctx.original_incarnation
+        )
         st.new_msgs = _markers_only(st.new_msgs)
         st.committed_chat_ids = []
     # Finalize every remaining claimed inbound before the wipe: their
@@ -173,7 +175,7 @@ async def _compact_outcome(
     # resets them to 'pending', and re-delivers already-answered messages
     # — a run of consecutive user messages with the compacted replies
     # gone (Task #823).
-    await finalize_claimed_inbounds(ctx.ops_pool, agent_id)
+    await finalize_claimed_inbounds(ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
     # Pre-compact history dump: snapshot the full conversation before the
     # wipe. The note rides the fresh context tail (after the summary),

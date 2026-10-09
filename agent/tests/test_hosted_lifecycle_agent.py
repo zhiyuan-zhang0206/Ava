@@ -14,7 +14,6 @@ from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import bind_turn_identity
 
 
 async def test_stale_unapplied_pointer_closes_without_retargeting(
@@ -23,8 +22,7 @@ async def test_stale_unapplied_pointer_closes_without_retargeting(
     agent_id = _agent(db_conn)
     old = await _admit(aops_pool, agent_id)
     first = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=old):
-        await claim_inbound_batch(aops_pool, agent_id)
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=old, work=None)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at=now()-interval '1 second' WHERE id=%s", (agent_id,)
     )
@@ -34,8 +32,9 @@ async def test_stale_unapplied_pointer_closes_without_retargeting(
     )
     assert new is not None
     second = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=new):
-        assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [second]
+    assert [
+        row.id for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=new, work=None)
+    ] == [second]
     assert db_conn.execute(
         "SELECT status,applied_at,target_generation FROM inbound_messages WHERE id=%s", (first,)
     ).fetchone() == ("done", None, old.generation)
@@ -83,32 +82,33 @@ async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
     _command(db_conn, agent_id, "restart")
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        assert (
-            await apply_hosted_lifecycle(
-                aops_pool,
-                owner,
-                kill_shell_sessions=lambda _aid: kills.append((_aid, None)),
-                bus=event_bus,
-            )
-            == "restart"
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    assert (
+        await apply_hosted_lifecycle(
+            aops_pool,
+            owner,
+            kill_shell_sessions=lambda _aid: kills.append((_aid, None)),
+            bus=event_bus,
+            resources=None,
         )
+        == "restart"
+    )
     assert kills == []
 
 
 async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
 ) -> None:
     """Fail fast: a caller that binds no killer cannot silently drop the
     request — the apply raises and rolls back, the termination stays pending."""
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     command = _terminate_command(db_conn, agent_id, kill=True)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        with pytest.raises(RuntimeError, match="no killer is bound"):
-            await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus)
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    with pytest.raises(RuntimeError, match="no killer is bound"):
+        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None)
     assert db_conn.execute(
         "SELECT i.applied_at, m.status FROM inbound_messages i JOIN agents_meta m "
         "ON m.id=i.agent_id WHERE i.id=%s",

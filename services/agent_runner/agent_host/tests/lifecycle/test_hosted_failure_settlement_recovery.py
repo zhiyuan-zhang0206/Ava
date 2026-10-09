@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -31,7 +32,6 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host.host import AgentHost
 
 
@@ -123,6 +123,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
+    database: Database,
 ) -> None:
     ancestor, agent, owner = await _admitted_descendant(db_conn, aops_pool)
     model_calls: list[str] = []
@@ -161,8 +162,11 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
     )
-    with bind_turn_identity(agent, incarnation=owner):
-        assert not (await host._invoke_until_done(agent, ctx)).exited
+    assert not (
+        await host._invoke_until_done(
+            agent, replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None)
+        )
+    ).exited
     assert outages.count == 2 and len(model_calls) == (0 if failure == "compaction" else 1)
     errors = _published_errors(publisher)
     values = await _cold_channel_values(aops_pool, config)
@@ -190,6 +194,7 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     interrupted_at: str,
+    database: Database,
 ) -> None:
     ancestor, agent, owner = await _admitted_descendant(db_conn, aops_pool)
     failure = FatalProviderError("invalid credentials", error_class="permanent", status=401)
@@ -205,10 +210,15 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
         bus=EventBus.from_settings(),
     )
     pending = PendingTurnFailure(failure)
-    with bind_turn_identity(agent, incarnation=owner):
-        with pytest.raises(FatalProviderError):
-            await graph.ainvoke({"turn_active": False}, config, context=ctx)
-        await flush_checkpoint(saver, agent)
+    with pytest.raises(FatalProviderError):
+        await graph.ainvoke(
+            {"turn_active": False},
+            config,
+            context=replace(
+                ctx, original_incarnation=owner, hosted_resources=None, native_work=None
+            ),
+        )
+    await flush_checkpoint(saver, agent)
     entered = asyncio.Event()
     target = graph if interrupted_at == "circuit_read" else agent_db
     method = (
@@ -226,20 +236,17 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
         return result
 
     monkeypatch.setattr(target, method, interrupted_prepare)
-    with bind_turn_identity(agent, incarnation=owner):
-        attempt = asyncio.create_task(
-            settle_turn_failure(graph, saver, config, ctx, agent, pending)
-        )
-        try:
-            await asyncio.wait_for(entered.wait(), 5)
-            with pytest.raises(TimeoutError):
-                await asyncio.wait_for(attempt, 0.01)
-        finally:
-            if not attempt.done():
-                attempt.cancel()
-                await asyncio.gather(attempt, return_exceptions=True)
-        assert pending.prepared_update is None and pending.reports_started
-        await settle_turn_failure(graph, saver, config, ctx, agent, pending)
+    attempt = asyncio.create_task(settle_turn_failure(graph, saver, config, ctx, agent, pending))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(attempt, 0.01)
+    finally:
+        if not attempt.done():
+            attempt.cancel()
+            await asyncio.gather(attempt, return_exceptions=True)
+    assert pending.prepared_update is None and pending.reports_started
+    await settle_turn_failure(graph, saver, config, ctx, agent, pending)
     assert model.await_count == 1
     errors = [
         json.loads(call.args[0])

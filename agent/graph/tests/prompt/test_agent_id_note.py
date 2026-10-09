@@ -21,7 +21,6 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
@@ -129,11 +128,10 @@ def test_workspace_clause_respects_the_section_gate(
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicit host context wins over unrelated native turn identity."""
+    context = _context(31)
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-
-    with bind_turn_identity(97):
-        note = agent_id_note(_context(31))
+    note = agent_id_note(context)
 
     assert note is not None
     assert "Your Agent ID is 31" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -141,9 +139,10 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
 
 def test_opts_out_without_any_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot renders / dev REPL: no slot, no turn, no env — decline."""
+    context = _context(None)
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert agent_id_note(_context(None)) is None
+    assert agent_id_note(context) is None
 
 
 # ── clause readers ──

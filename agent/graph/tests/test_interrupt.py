@@ -19,11 +19,13 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm_errors import LlmLedger
+from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.cluster.machine import machine_name
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
@@ -64,8 +66,8 @@ class TestHasPendingInterrupt:
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel", source=source)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel", source="user")  # pyright: ignore[reportUnknownArgumentType]
-        assert await pending_interrupt_reason(aops_pool, tid) is reason
-        async with subscribe_interrupt(aops_pool, tid) as event:
+        assert await pending_interrupt_reason(aops_pool, tid, incarnation=None, work=None) is reason
+        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.reason is reason
             event.set(
@@ -79,28 +81,28 @@ class TestHasPendingInterrupt:
 
     async def test_false_when_empty(self, db_conn, aops_pool: AsyncConnectionPool):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        assert await has_pending_interrupt(aops_pool, tid) is False
+        assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is False
 
     async def test_true_on_cancel(self, db_conn, aops_pool: AsyncConnectionPool):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel")  # pyright: ignore[reportUnknownArgumentType]
-        assert await has_pending_interrupt(aops_pool, tid) is True
+        assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is True
 
     async def test_true_on_terminate(self, db_conn, aops_pool: AsyncConnectionPool):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "terminate")  # pyright: ignore[reportUnknownArgumentType]
-        assert await has_pending_interrupt(aops_pool, tid) is True
+        assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is True
 
     async def test_false_on_chat_only(self, db_conn, aops_pool: AsyncConnectionPool):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "chat")  # pyright: ignore[reportUnknownArgumentType]
-        assert await has_pending_interrupt(aops_pool, tid) is False
+        assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is False
 
     async def test_ignores_other_agent(self, db_conn, aops_pool: AsyncConnectionPool):
         mine = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         other = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, other, "cancel")  # pyright: ignore[reportUnknownArgumentType]
-        assert await has_pending_interrupt(aops_pool, mine) is False
+        assert await has_pending_interrupt(aops_pool, mine, incarnation=None, work=None) is False
 
     async def test_ignores_self_initiated_terminate(self, db_conn, aops_pool: AsyncConnectionPool):
         # ava.self.terminate() inserts a terminate row source='self' then raises
@@ -109,13 +111,13 @@ class TestHasPendingInterrupt:
         # racing the clean lifecycle exit). claim still dispatches the row.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "terminate", source="self")  # pyright: ignore[reportUnknownArgumentType]
-        assert await has_pending_interrupt(aops_pool, tid) is False
+        assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is False
 
     async def test_external_terminate_still_fires(self, db_conn, aops_pool: AsyncConnectionPool):
         # a peer / admin / user terminate (non-self source) does interrupt mid-turn
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "terminate", source="agent:9")  # pyright: ignore[reportUnknownArgumentType]
-        assert await has_pending_interrupt(aops_pool, tid) is True
+        assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is True
 
     async def test_false_on_unmarked_maintenance_restart(
         self, db_conn, aops_pool: AsyncConnectionPool
@@ -136,7 +138,7 @@ class TestHasPendingInterrupt:
             (tid, machine_name()),
         )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        assert await has_pending_interrupt(aops_pool, tid) is False
+        assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is False
 
 
 class TestSubscribeInterrupt:
@@ -145,7 +147,7 @@ class TestSubscribeInterrupt:
         # cancel landed BEFORE the node subscribed — the initial SELECT catches it.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel")  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid) as event:
+        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.is_set()
 
@@ -156,7 +158,7 @@ class TestSubscribeInterrupt:
         # cancel arrives mid-action -> the watcher's next DB poll catches it
         # within one poll interval.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid) as event:
+        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
             assert not event.is_set()
             _insert(db_conn, tid, "cancel")  # pyright: ignore[reportUnknownArgumentType]
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
@@ -166,21 +168,21 @@ class TestSubscribeInterrupt:
     async def test_fires_on_terminate(self, db_conn, aops_pool: AsyncConnectionPool):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "terminate")  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid) as event:
+        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.is_set()
 
     async def test_does_not_fire_on_chat(self, db_conn, aops_pool: AsyncConnectionPool):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "chat")  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid) as event:
+        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(event.wait(), timeout=0.5)
             assert not event.is_set()
 
     async def test_none_pool_never_fires(self):
         # container/eval: no inbound queue -> the wrapped action is uninterruptible.
-        async with subscribe_interrupt(None, 1) as event:
+        async with subscribe_interrupt(None, 1, incarnation=None, work=None) as event:
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(event.wait(), timeout=0.3)
             assert not event.is_set()
@@ -215,7 +217,7 @@ class TestWatcherDecoupledFromSharedListener:
         _ = _BoomListener()
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel")  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid) as event:
+        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.is_set()
         assert not calls, f"watcher touched the listener: {calls}"
@@ -233,7 +235,9 @@ class TestWatcherDecoupledFromSharedListener:
         entered = asyncio.Event()
         swallowed = False
 
-        async def _swallow_once(pool, agent_id):
+        async def _swallow_once(
+            pool, agent_id, *, incarnation: RuntimeIncarnation | None, work: NativeWorkTarget | None
+        ):
             # Deterministic race simulation: the watcher is "inside the SELECT"
             # (blocked here) when the turn ends; the cancellation lands at this
             # await and is swallowed, then the SELECT "completes" normally.
@@ -243,14 +247,14 @@ class TestWatcherDecoupledFromSharedListener:
                 await asyncio.Event().wait()
             except asyncio.CancelledError:
                 swallowed = True
-            return await real(pool, agent_id)  # pyright: ignore[reportUnknownArgumentType]
+            return await real(pool, agent_id, incarnation=incarnation, work=work)  # pyright: ignore[reportUnknownArgumentType]
 
         monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 0.5)
         monkeypatch.setattr(mod, "_INTERRUPT_POLL_S", 0.05)
         monkeypatch.setattr(mod, "pending_interrupt_reason", _swallow_once)  # pyright: ignore[reportUnknownArgumentType]
 
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid):
+        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None):
             await entered.wait()  # watcher is inside the SELECT when we exit
             watchers = [
                 t
@@ -278,20 +282,30 @@ class TestWatcherDecoupledFromSharedListener:
         entered = asyncio.Event()
         swallowed = False
 
-        async def _swallow_once(pool, agent_id):
+        async def _swallow_once(
+            pool, agent_id, *, incarnation: RuntimeIncarnation | None, work: NativeWorkTarget | None
+        ):
             nonlocal swallowed
             entered.set()
             try:
                 await asyncio.Event().wait()
             except asyncio.CancelledError:
                 swallowed = True  # cancel lost; the SELECT "completes" normally
-            return await real(pool, agent_id)  # pyright: ignore[reportUnknownArgumentType]
+            return await real(pool, agent_id, incarnation=incarnation, work=work)  # pyright: ignore[reportUnknownArgumentType]
 
         real_watch = mod._watch_for_interrupt
 
-        async def _recording_watch(pool, event, agent_id, stop):
+        async def _recording_watch(
+            pool,
+            event,
+            agent_id,
+            stop,
+            *,
+            incarnation: RuntimeIncarnation | None,
+            work: NativeWorkTarget | None,
+        ):
             recorded_events.append(event)  # pyright: ignore[reportUnknownArgumentType]
-            await real_watch(pool, event, agent_id, stop)  # pyright: ignore[reportUnknownArgumentType]
+            await real_watch(pool, event, agent_id, stop, incarnation=incarnation, work=work)  # pyright: ignore[reportUnknownArgumentType]
 
         monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 1.0)
         monkeypatch.setattr(mod, "_INTERRUPT_POLL_S", 0.05)
@@ -299,7 +313,7 @@ class TestWatcherDecoupledFromSharedListener:
         monkeypatch.setattr(mod, "_watch_for_interrupt", _recording_watch)  # pyright: ignore[reportUnknownArgumentType]
 
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid):
+        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None):
             await entered.wait()  # watcher is inside the SELECT when we exit
         # turn over; the swallow-once path must have been exercised
         assert swallowed, "race not simulated — cancel was delivered cleanly"
@@ -342,7 +356,7 @@ class TestWatcherExitBounded:
         monkeypatch.setattr(mod, "_watch_for_interrupt", _wedged)
         monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 0.2)
         t0 = asyncio.get_running_loop().time()
-        async with subscribe_interrupt(object(), 1):  # type: ignore[arg-type]
+        async with subscribe_interrupt(object(), 1, incarnation=None, work=None):  # type: ignore[arg-type]
             await asyncio.sleep(
                 0
             )  # let the watcher actually start (an unstarted task cancels instantly)
@@ -380,7 +394,7 @@ class TestWatcherExitBounded:
             await asyncio.sleep(3600)
 
         monkeypatch.setattr(mod, "_watch_for_interrupt", _healthy)
-        async with subscribe_interrupt(object(), 1):  # type: ignore[arg-type]
+        async with subscribe_interrupt(object(), 1, incarnation=None, work=None):  # type: ignore[arg-type]
             await asyncio.sleep(0)  # watcher running, suspended in its sleep
         assert not any("abandoning" in r["message"] for r in loguru_records)
 

@@ -31,7 +31,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.impersonation import ImpersonationError
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.runtime import TurnOutcome
 
 __all__ = [
@@ -55,10 +55,15 @@ _FORCE_SQL = (
 
 
 async def force_termination_outcome(
-    exc: BaseException, pool: AsyncConnectionPool, agent_id: int
+    exc: BaseException,
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> TurnOutcome | None:
     """The truncated outcome when `exc` is this turn's own applied force end, else None."""
-    incarnation = current_incarnation(agent_id)
+    if incarnation is not None:
+        incarnation.require_agent(agent_id)
     if incarnation is None or not await _is_force_end(exc, pool, incarnation):
         return None
     logger.info(

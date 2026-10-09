@@ -33,7 +33,6 @@ from base.deploy.maintenance import cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
 
@@ -137,22 +136,18 @@ async def _seed_stalled_repair_scenario(
         database=Database.from_settings(),
     )
     db_conn.commit()
-    with bind_turn_identity(aid, incarnation=incarnation):
-        await claim_inbound_batch(aops_pool, aid)
-        await graph.ainvoke(
-            {
-                "messages": [
-                    HumanMessage(
-                        content="Original private request",
-                        additional_kwargs={"ava_inbound_id": inbound},
-                    )
-                ]
-            },
-            config,
-        )
-        # The superstep checkpoint (with the dangling tool call) is durable
-        # at once — delta threads retire the nstep buffer (#3180), so the
-        # crash shape is the dangling call persisted, not a buffered tail.
+    await claim_inbound_batch(aops_pool, aid, incarnation=incarnation, work=None)
+    await graph.ainvoke(
+        {
+            "messages": [
+                HumanMessage(
+                    content="Original private request",
+                    additional_kwargs={"ava_inbound_id": inbound},
+                )
+            ]
+        },
+        config,
+    )
     at = datetime.now(UTC)
     pause_owner.begin_maintenance("private-slow-recovery", at)
     hold = cohort.prepare(
@@ -233,15 +228,15 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
     monkeypatch.setattr(saver, "aget_delta_channel_history", counted_history)
     monkeypatch.setattr(db_recovery, "flush_checkpoint", counted_flush)
     monkeypatch.setattr(db_recovery, "repair_dangling_tool_use_at_startup", flaky_repair)
-    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
-        await db_recovery.recover_database(
-            pool=aops_pool,
-            graph=graph,
-            checkpointer=saver,
-            incarnation=incarnation,
-            database_waits=DatabaseWaits(),
-            peek_lock=asyncio.Lock(),
-        )
+    await db_recovery.recover_database(
+        pool=aops_pool,
+        graph=graph,
+        checkpointer=saver,
+        incarnation=incarnation,
+        database_waits=DatabaseWaits(),
+        peek_lock=asyncio.Lock(),
+        work=None,
+    )
     assert repairs == 2
     assert flushes == (2 if write_before_retry else 1)
     assert walks == (2 if write_before_retry else 1)

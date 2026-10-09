@@ -14,7 +14,6 @@ from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
 
 
@@ -29,10 +28,12 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     first = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        if applied:
-            assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) == "restart"
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    if applied:
+        assert (
+            await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None)
+            == "restart"
+        )
     with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
@@ -40,7 +41,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     later = _command(db_conn, agent_id, "restart")
-    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) is None
+    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None) is None
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database

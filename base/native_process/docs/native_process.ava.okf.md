@@ -10,10 +10,20 @@ tags: [base]
 `base/native_process/` owns native process identity, observation, signaling and root control.
 Its component nodes describe the current contracts and implementation.
 
-`turn_identity` carries the original native admission and hosted-resource scope.
-It exposes no current-agent getter; graph identity comes from `Runtime[AvaContext]`
-and SDK identity from the execution process entry. Native incarnation/task-copy
-and resource-settlement fences remain distinct from ordinary log attribution.
+`runtime_incarnation.RuntimeIncarnation` is the immutable original admission.
+The host retains it after admission commits and hands the same object to
+`AvaContext.original_incarnation`; context copies preserve that reference.
+The disposable child receives it in its request envelope and binds it through
+the existing SDK process-context entry. A successor read cannot replace it.
+
+`turn_identity.HostedTurnResources` holds the unresolved domains and late-reader
+completions of one actual hosted turn Task. The host creates the scope before
+starting the Task and passes it through `AvaContext.hosted_resources` to exec
+and settlement. Exact request/domain identity is required to discharge an entry.
+Neither primitive exposes an ambient current getter or uses a ContextVar.
+Graph identity comes from `Runtime[AvaContext]` and SDK identity from the
+execution process entry. Native ownership and resource-settlement fences remain
+distinct from ordinary log attribution.
 
 ## Platform facts
 

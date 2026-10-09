@@ -47,9 +47,10 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import pending_interrupt_reason
 from agent.graph.node_log import awaiter_chain_lines
 from agent.ownership.native_cancel import observe_bound_cancel
-from base.agents.incarnation.native_work_models import NativeCancelMarker
+from base.agents.incarnation.native_work_models import NativeCancelMarker, NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 class InterruptEvent(asyncio.Event):
@@ -111,6 +112,9 @@ async def _watch_for_interrupt(
     event: InterruptEvent,
     agent_id: int,
     stop: asyncio.Event,
+    *,
+    incarnation: RuntimeIncarnation | None,
+    work: NativeWorkTarget | None,
 ) -> None:
     """Set `event` as soon as a pending cancel/terminate row exists for agent_id.
 
@@ -128,12 +132,12 @@ async def _watch_for_interrupt(
     watcher holds no shared resource, even that lingering poll is harmless.
     """
     while not stop.is_set():
-        marker = await observe_bound_cancel(pool, agent_id)
+        marker = await observe_bound_cancel(pool, agent_id, incarnation=incarnation, work=work)
         if marker is not None:
             if not stop.is_set():
                 event.set(InterruptReason.USER, native_cancel=marker)
             return
-        reason = await pending_interrupt_reason(pool, agent_id)
+        reason = await pending_interrupt_reason(pool, agent_id, incarnation=incarnation, work=work)
         if reason is not None:
             if not stop.is_set():
                 event.set(reason)
@@ -162,6 +166,9 @@ _INTERRUPT_POLL_S = 2.0
 async def subscribe_interrupt(
     pool: AsyncConnectionPool | None,
     agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation | None,
+    work: NativeWorkTarget | None,
 ) -> AsyncGenerator[InterruptEvent]:
     """RAII watch for a durable interrupt (cancel/terminate) on this agent.
 
@@ -180,7 +187,7 @@ async def subscribe_interrupt(
         return
     stop = asyncio.Event()
     watcher = asyncio.create_task(
-        _watch_for_interrupt(pool, event, agent_id, stop),
+        _watch_for_interrupt(pool, event, agent_id, stop, incarnation=incarnation, work=work),
         name=f"interrupt-watcher-{agent_id}",
     )
     try:
