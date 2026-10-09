@@ -38,7 +38,7 @@ def test_build_and_cors_use_entry_without_changing_gateway(monkeypatch: pytest.M
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://192.0.2.2:8800")
     monkeypatch.setattr(settings.gateway, "gateway_port", 8800)
     monkeypatch.setattr(settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr("base.cluster.derive.IS_WINDOWS", False)
+    monkeypatch.setattr("base.cluster.derive.is_windows", lambda: False)
     env = dict(item.split("=", 1) for item in shlex.split(fe_build_env()))
     assert env == {
         "NEXT_PUBLIC_GATEWAY_PORT": "8800",

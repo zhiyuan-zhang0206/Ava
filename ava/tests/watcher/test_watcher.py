@@ -24,11 +24,11 @@ import pytest
 import ava
 from ava import watcher
 from ava.shell import background
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from tests.path_scoped.pty_shells import wait_for
 
 pytestmark = [
-    pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
+    pytest.mark.skipif(is_windows(), reason="PTY supervisor is POSIX-only"),
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); apply it
     # module-wide here since every watcher session test needs the fake-id +
     # pty cleanup isolation. `pty_service` first — the isolation fixture's

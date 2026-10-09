@@ -1,7 +1,7 @@
 """Host-platform facts and POSIX process primitives below the import graph.
 
-The Windows flag and subprocess constants remain as compatibility symbols for
-protected release and cluster modules while native Windows runtime is retired.
+Platform predicates query Python's current platform without import-time probes.
+Subprocess constants remain while native Windows runtime is retired.
 """
 
 from __future__ import annotations
@@ -16,7 +16,10 @@ import time
 from collections.abc import Generator
 from pathlib import Path
 
-IS_WINDOWS = sys.platform == "win32"
+
+def is_windows() -> bool:
+    """Whether this process runs on Windows, queried directly from Python."""
+    return sys.platform == "win32"
 
 
 def is_macos() -> bool:
