@@ -6,7 +6,11 @@ resolved module edges always use the current checkout.
 
 `executed.py` supplies bounded facts about actual Python `-c` inputs. It follows
 literal source, one plain binding and local undecorated helpers that pass a
-source parameter unchanged. Launchers and Python executables must resolve
+source parameter unchanged or through one plain local binding. A positional
+source before `*argv` and a keyword-only source remain independent of trailing
+argument data. `**kwargs` and unpacking before a positional source stay unknown.
+Literal `-W`/`-X` operands are consumed as interpreter options; source selection
+stops at a script, `-m` or `--`. Launchers and Python executables must resolve
 through their imported bindings; unrelated source samples do not participate.
 
 `inputs()` returns known source texts and structured `Unresolved` facts with
