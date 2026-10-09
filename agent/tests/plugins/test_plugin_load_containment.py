@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 
 from base import paths
+from base.config.service_read import ConfigAuthority
 from base.packages.plugins.enable_config import write_local
 
 # Every dotted name a plugin module can be registered under.
@@ -192,5 +193,28 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
         loaded = load_extensions()
         assert [name for name, _ in loaded.registry.plugins] == ["faced"]
         assert settings.plugins.faced.knob == 7
+        with pytest.raises(RuntimeError, match="no ModelCatalog"):
+            settings.model_catalog()
+        with pytest.raises(RuntimeError, match="no ConfigAuthority"):
+            settings.config_authority()
+    finally:
+        install.uninstall()
+
+
+def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAuthority) -> None:
+    from agent.extensions import load_extensions
+    from ava.sdk_surface import install, settings
+    from base.lm.catalog import CatalogBuilder
+
+    catalog = CatalogBuilder().build()
+    _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
+    write_local({"plugins": {"good": {"enabled": True}}})
+    try:
+        loaded = load_extensions(catalog=catalog, authority=config_authority)
+        installation = install.installed()
+        assert installation is not None
+        assert installation.registry is loaded.registry
+        assert settings.model_catalog() is catalog
+        assert settings.config_authority() is config_authority
     finally:
         install.uninstall()

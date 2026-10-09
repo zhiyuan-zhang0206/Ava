@@ -11,7 +11,8 @@ authority or validating unrelated configuration.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import threading
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -31,13 +32,38 @@ __all__ = [
 ]
 
 
+def _validate_complete_model(model: Any) -> None:
+    if model.profile is not None:
+        raise ValueError("ConfigAuthority requires a profile-independent read model")
+
+
+class _DeferredReadModel:
+    """Memoize a supplied complete model only after successful construction."""
+
+    profile = None
+
+    def __init__(self, build: Callable[[], Any]) -> None:
+        self._build: Callable[[], Any] | None = build
+        self._model: Any = None
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name: str) -> Any:
+        with self._lock:
+            if self._build is not None:
+                model = self._build()
+                _validate_complete_model(model)
+                self._model = model
+                self._build = None
+            return getattr(self._model, name)
+
+
 @dataclass(frozen=True, slots=True)
 class ConfigAuthority:
     """One root's explicit runtime, complete read model and unit config path.
 
     ``all_domains`` must be built with ``profile=None`` by the composition
     root. It may be the runtime itself when that runtime is already complete.
-    Missing file fields retain this owner's validated boot values. Fresh reads
+    Missing file fields retain this owner's validated model values. Fresh reads
     do not mutate either model and are never memoized.
     """
 
@@ -46,10 +72,22 @@ class ConfigAuthority:
     env_path: Path
 
     def __post_init__(self) -> None:
-        if self.all_domains.profile is not None:
-            raise ValueError("ConfigAuthority requires a profile-independent read model")
+        _validate_complete_model(self.all_domains)
         if not self.env_path.is_absolute():
             raise ValueError("ConfigAuthority env_path must be absolute")
+
+    @classmethod
+    def deferred(
+        cls, *, runtime: Any, build_all_domains: Callable[[], Any], env_path: Path
+    ) -> ConfigAuthority:
+        """Retain a root's complete-model factory without forcing a lite process to upgrade.
+
+        The first read outside the supplied runtime constructs and validates the
+        complete model from the environment at that first use. Successful
+        construction is memoized; failures propagate without an internal retry.
+        Fresh file reads remain uncached and use this authority's fixed path.
+        """
+        return cls(runtime, _DeferredReadModel(build_all_domains), env_path)
 
     def read_env_aliases(self) -> dict[str, str]:
         """Read this authority's file once; preserve explicitly empty values."""
@@ -60,7 +98,7 @@ class ConfigAuthority:
         }
 
     def service_field_value(self, name: str) -> Any:
-        """Read a boot value without recovering arbitrary AttributeError failures."""
+        """Read an owned model value without recovering arbitrary AttributeError failures."""
         domain = fields()[name].domain
         source = self.runtime if self.runtime.has_domain(domain) else self.all_domains
         return getattr(getattr(source, domain), name)
@@ -76,8 +114,9 @@ class ConfigAuthority:
     def current_field_values(self) -> dict[str, Any]:
         """Decode fresh file fields in complete domain batches, failing on invalid values.
 
-        Providing every domain field from the owned read models prevents a
-        later ambient environment change from supplying or poisoning values.
+        Once the complete read model is constructed, providing every domain
+        field from the owned models prevents later ambient environment changes
+        from supplying or poisoning values.
         Domain validation keeps field coercion and cross-field invariants.
         """
         aliases = self.read_env_aliases()

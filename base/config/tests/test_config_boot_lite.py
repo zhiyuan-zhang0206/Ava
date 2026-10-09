@@ -38,6 +38,7 @@ _LITE_CONFIG_MODULES = {
     "base.config",
     "base.config._lite",
     "base.config.profiles",
+    "base.config.service_read",
     "base.host.env.config_lite_table",
     "base.host.env.config_registry",
 }

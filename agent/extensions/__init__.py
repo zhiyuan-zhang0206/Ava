@@ -37,6 +37,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base import paths
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins import enable_config as plugins_cfg
 from base.packages.plugins import load_report
 from base.packages.plugins.config_face import CONFIG_FACE
@@ -116,7 +118,11 @@ class LoadedExtensions:
 
 
 def load_extensions(
-    *, surface: bool = False, report: load_report.Reporter | None = None
+    *,
+    surface: bool = False,
+    report: load_report.Reporter | None = None,
+    catalog: ModelCatalog | None = None,
+    authority: ConfigAuthority | None = None,
 ) -> LoadedExtensions:
     """Read plugins_config.json, import the enabled plugins' faces, install what they declare.
 
@@ -138,6 +144,10 @@ def load_extensions(
 
     ``report`` receives each contained failure instead of the canonical reporter (log + telemetry);
     `ava plugins verify` passes a collector, so the failures come back as values.
+
+    Model and configuration consumers receive their composition root's explicit
+    ``catalog`` and ``authority``. Inventory-only loads supply neither; accessing
+    those SDK capabilities still requires a bound owner.
     """
     from agent.extensions.registry import ALL_FACES, SURFACE_FACES, build_registry
     from ava.sdk_surface import install as sdk_install
@@ -167,17 +177,6 @@ def load_extensions(
             _load_face(name, plugin_dir, pkg=pkg, report=report)
 
     registry = build_registry(SURFACE_FACES if surface else ALL_FACES, report)
-    from base.config import Settings, ensure_eager, settings
-    from base.config.service_read import ConfigAuthority
-    from base.lm.plugin_providers import build_model_catalog
-
-    ensure_eager()
-    authority = ConfigAuthority(
-        runtime=settings,
-        all_domains=settings if settings.profile is None else Settings(profile=None),
-        env_path=paths.ava_home() / ".env",
-    )
-    catalog = build_model_catalog()
     return LoadedExtensions(
         config, sdk_install.install(registry, report, catalog=catalog, authority=authority)
     )
