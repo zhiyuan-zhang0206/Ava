@@ -5,9 +5,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
+from base.agents.history.hierarchy.units import (
+    display_blocks,
+    divide_units,
+    read_times,
+)
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -47,9 +52,13 @@ def turn(
 
 def result(seconds: int) -> ToolMessage:
     return ToolMessage(
-        content="Code execution output [x]:\n\nfiles",
+        content="Code execution output after running for 3s [x]:\n\nfiles",
         tool_call_id="t",
-        additional_kwargs={"ava_msg_type": "exec_output", "ava_created_at": at(seconds)},
+        additional_kwargs={
+            "ava_msg_type": "exec_output",
+            "ava_exec_body_start": len("Code execution output after running for 3s [x]:\n\n"),
+            "ava_created_at": at(seconds),
+        },
     )
 
 
@@ -113,3 +122,13 @@ def test_blocks_follow_the_read_order_when_an_arrival_is_stamped_early() -> None
         ("call", 3, 3, 20, 20),
         ("output", 3, 4, 20, 30),
     ]
+
+
+def test_a_result_without_a_recorded_body_start_is_rejected() -> None:
+    old = ToolMessage(
+        content="Code execution output [x]:\n\nfiles",
+        tool_call_id="t",
+        additional_kwargs={"ava_msg_type": "exec_output", "ava_created_at": at(25)},
+    )
+    with pytest.raises(ValueError, match="ava_exec_body_start"):
+        blocks([inbound(0), turn(10), old])

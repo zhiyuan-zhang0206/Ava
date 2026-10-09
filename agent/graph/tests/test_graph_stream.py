@@ -432,7 +432,8 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         clock=Clock.from_settings(),
         timeout_seconds=settings.sandbox.exec_timeout_seconds,
         max_chars=settings.sandbox.exec_output_max_chars,
-    )
+        elapsed_seconds=1.0,
+    ).text
     archive = next(directory.glob("crop_*.txt"))
     state = AgentState(
         messages=[
