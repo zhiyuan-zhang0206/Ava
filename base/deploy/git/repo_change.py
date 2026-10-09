@@ -10,7 +10,6 @@ from __future__ import annotations
 _DOC_ROOTS = (
     "docs/",  # project documentation, including contributor guidance and frozen history
     "future/",  # the plans axis
-    "okf/",  # the OKF index layer
     "assets/",  # README-embedded artifacts
     "schedules/",  # version-controlled schedule templates (provisioned, not imported)
 )

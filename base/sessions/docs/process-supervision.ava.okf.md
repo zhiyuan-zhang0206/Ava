@@ -14,7 +14,7 @@ tags:
 `base/daemon/shutdown.py`, `base/daemon/health.py`,
 `base/deploy/lifecycle/start_serving.py`: services, orchestration sessions and agent
 processes are **native** sessions; agent shells are held by the machine's **pty-sessions
-service** ([[base/sessions/pty/docs/pty_sessions.ava.okf.md]]). Start-serving
+service** ([[base/sessions/pty/docs/pty_sessions/pty_sessions.ava.okf.md]]). Start-serving
 gates recovery until readiness passes. Daemon health
 accepts either one `Liveness` heartbeat or a worst-case `LivenessGroup` whose
 per-loop progress snapshots make concurrent-loop failures attributable. OS

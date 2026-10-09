@@ -30,6 +30,7 @@ lives with the current agent documentation; these rows track its remaining work.
 
 | File | What's left |
 |------|------|
+| [Retry consumer contracts](infra/engineering/retry-consumer-contracts.md) | Audit TypeError recovery in the Redis loop; preserve its wait, cancellation and durable recheck semantics |
 | [Agent-runner as server](infra/lifecycle/agent-runner-as-server.md) | Implemented as the sole runtime; remaining question is host fault isolation |
 | [Vendored data-plane binaries](infra/data/vendored-data-plane-binaries.md) | **Redis leg only** — Postgres vendoring landed (`base/cluster/dataplane/runtime_binaries.py`), redis still comes from brew/apt. Also the single home for slice 3 of the doc below |
 | [Embedded per-cluster data plane](infra/data/embedded-per-cluster-data-plane.md) | Retained design evidence; no independent implementation work. The Redis remainder is tracked only in the vendored-binaries row above |
