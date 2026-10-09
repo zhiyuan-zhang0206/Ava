@@ -12,6 +12,8 @@ from ava.tests.understand._understand_helpers import mock_deepseek as mock_deeps
 from ava.tests.understand._understand_helpers import understand_mod
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+
 # ── auto-save output ────────────────────────────────────────────────────────
 
 

@@ -27,13 +27,19 @@ def _render_help(target: object) -> str:
 
 
 @pytest.fixture
-def _load_ava_code_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _load_ava_code_plugin(
+    monkeypatch: pytest.MonkeyPatch, model_installation: install.Installation
+) -> Iterator[None]:
     from ava_builtins.plugins.ava_code import plugin
     from base.agents.sdk import call_policy
 
     monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
 
-    install.install(ExtensionRegistry((("ava_code", plugin.contribute()),)))
+    install.install(
+        ExtensionRegistry((("ava_code", plugin.contribute()),)),
+        catalog=model_installation.require_catalog(),
+        authority=model_installation.authority,
+    )
 
     yield
 
@@ -41,13 +47,19 @@ def _load_ava_code_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture
-def _load_ava_fleet_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _load_ava_fleet_plugin(
+    monkeypatch: pytest.MonkeyPatch, model_installation: install.Installation
+) -> Iterator[None]:
     from ava_builtins.plugins.ava_fleet import plugin
     from base.agents.sdk import call_policy
 
     monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
 
-    install.install(ExtensionRegistry((("ava_fleet", plugin.contribute()),)))
+    install.install(
+        ExtensionRegistry((("ava_fleet", plugin.contribute()),)),
+        catalog=model_installation.require_catalog(),
+        authority=model_installation.authority,
+    )
 
     yield
 

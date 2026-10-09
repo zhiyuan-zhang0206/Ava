@@ -92,6 +92,7 @@ def test_install_namespace_adds_to_all(installer: _Installer):
     assert "code" in ava.__all_for_ava__
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 @pytest.mark.parametrize(
     "make_module",
     [
@@ -293,6 +294,7 @@ def test_install_member_attaches_to_existing_namespace(installer: _Installer):
     assert ava.self.__all_for_ava__.count("sample_member") == 1
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_install_member_visible_in_help(installer: _Installer):
     """The member's product purpose is discoverability — it must render in
     help(ava.self), not merely sit in __all_for_ava__."""
@@ -410,6 +412,7 @@ def test_simple_namespace_install_is_importable_module(installer: _Installer):
     assert ava.probe.ping() == "pong"
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_materialized_namespace_help_renders_members(installer: _Installer):
     """Materializing a SimpleNamespace must not change what help(ava.<name>)
     renders — members stay discoverable through the synthesized

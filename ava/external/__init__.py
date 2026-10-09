@@ -119,12 +119,12 @@ class Attachment:
             self.agent_id = int(lease["agent_id"])
             self.session_id = int(lease["session_id"])
             self._version = int(lease["delta_version"])
-            self._bind_borrowed_context()
             # Native load: load_snapshot below rebuilds the checkpoint state
             # (build_agent_state().model_validate), which needs the plugins'
             # state fields registered — the surface-only default would silently
             # drop them (review finding, #2616).
             ava.ensure_plugins_loaded(surface=False)
+            self._bind_borrowed_context()
             state, overlay, birth = load_snapshot(self.agent_id)
             self._state_cls = type(state)
             self._resolve_config(overlay, birth)

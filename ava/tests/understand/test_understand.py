@@ -27,6 +27,8 @@ from ava.tests.understand._understand_helpers import mock_gemini as mock_gemini
 from base.config import settings
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+
 # ── mode validation (paths= / text= mutually exclusive) ─────────────────────
 
 

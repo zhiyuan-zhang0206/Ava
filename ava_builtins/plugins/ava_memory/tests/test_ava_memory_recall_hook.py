@@ -25,7 +25,13 @@ from base.agents.context import AvaContext
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
+
+
+def _compact_disabled(_state: Any, _agent: AgentSlices, *, catalog: ModelCatalog) -> bool:
+    assert catalog.models
+    return False
 
 
 @pytest.fixture
@@ -43,7 +49,7 @@ def _hook_env(_loaded: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
-    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state, _model: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_loaded, "auto_compact_will_fire", _compact_disabled)  # pyright: ignore[reportUnknownArgumentType]
     recall = AsyncMock(
         return_value=PassiveRecall(
             note=system_note_message(content="recalled", tag=NoteTag.MEMORY),
@@ -58,12 +64,13 @@ def _state(messages: list[AnyMessage], **fields: Any):
     return build_agent_state(EMPTY)(messages=messages, **fields)
 
 
-def _runtime() -> Runtime[AvaContext]:
+def _runtime(catalog: ModelCatalog) -> Runtime[AvaContext]:
     ctx = AvaContext(
         ops_pool=MagicMock(),
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
+        catalog=catalog,
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
     )
@@ -83,14 +90,16 @@ def _inbound(source: str) -> AnyMessage:
     ["user", "agent:402", "schedule:7", "system"],
     ids=["user", "agent", "schedule", "system"],
 )
-async def test_fires_on_real_inbound_sources(_hook_env: Any, source: str) -> None:
+async def test_fires_on_real_inbound_sources(
+    _hook_env: Any, source: str, model_catalog: ModelCatalog
+) -> None:
     """User chat, peer-agent messages, scheduled turns, and system notices all
     carry conversation the recall should search over."""
     _loaded, recall = _hook_env
     hook = _loaded.passive_memory_recall_before_llm
     state = _state([AIMessage(content="prev", id="a0"), _inbound(source)])
 
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(model_catalog), _config())
 
     recall.assert_awaited_once()
     assert result is not None
@@ -102,20 +111,24 @@ async def test_fires_on_real_inbound_sources(_hook_env: Any, source: str) -> Non
     ["watcher:3", "shell:9"],
     ids=["watcher", "shell"],
 )
-async def test_skips_machine_wakeups(_hook_env: Any, source: str) -> None:
+async def test_skips_machine_wakeups(
+    _hook_env: Any, source: str, model_catalog: ModelCatalog
+) -> None:
     """Watcher and shell completions are machine-originated wake-ups whose
     payload is the notice itself — recalling durable notes over them is noise."""
     _loaded, recall = _hook_env
     hook = _loaded.passive_memory_recall_before_llm
     state = _state([AIMessage(content="prev", id="a0"), _inbound(source)])
 
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(model_catalog), _config())
 
     recall.assert_not_awaited()
     assert result is None
 
 
-async def test_fires_when_a_real_inbound_sits_among_wakeups(_hook_env: Any) -> None:
+async def test_fires_when_a_real_inbound_sits_among_wakeups(
+    _hook_env: Any, model_catalog: ModelCatalog
+) -> None:
     """A mixed tail with one real inbound still fires — the gate rejects the
     turn only when *every* inbound is a wake-up."""
     _loaded, recall = _hook_env
@@ -128,14 +141,14 @@ async def test_fires_when_a_real_inbound_sits_among_wakeups(_hook_env: Any) -> N
         ]
     )
 
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(model_catalog), _config())
 
     recall.assert_awaited_once()
     assert result is not None
 
 
 async def test_gateway_error_leaves_the_turn_running(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """The whole hook path — not just the recall function — survives a memory
     search that errors out.
@@ -149,7 +162,7 @@ async def test_gateway_error_leaves_the_turn_running(
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
-    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state, _model: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_loaded, "auto_compact_will_fire", _compact_disabled)  # pyright: ignore[reportUnknownArgumentType]
 
     request = httpx.Request("POST", "http://gateway.test/api/memory/search")
 
@@ -163,11 +176,11 @@ async def test_gateway_error_leaves_the_turn_running(
     hook = _loaded.passive_memory_recall_before_llm
     state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])
 
-    assert await hook(state, _runtime(), _config()) is None
+    assert await hook(state, _runtime(model_catalog), _config()) is None
 
 
 async def test_recall_deadline_exceeded_skips_recall_this_turn(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """A recall pass slower than `memory_recall_deadline_seconds` degrades to
     no recall instead of stalling the turn's first LLM call.
@@ -183,7 +196,7 @@ async def test_recall_deadline_exceeded_skips_recall_this_turn(
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
     monkeypatch.setattr(settings.agent, "memory_recall_deadline_seconds", 0.05)
-    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state, _model: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_loaded, "auto_compact_will_fire", _compact_disabled)  # pyright: ignore[reportUnknownArgumentType]
 
     async def _slow_recall(_messages: Any, **_kwargs: Any) -> PassiveRecall:
         await asyncio.sleep(0.5)
@@ -197,17 +210,17 @@ async def test_recall_deadline_exceeded_skips_recall_this_turn(
     hook = _loaded.passive_memory_recall_before_llm
     state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])
 
-    assert await hook(state, _runtime(), _config()) is None
+    assert await hook(state, _runtime(model_catalog), _config()) is None
 
 
-async def test_no_inbound_tail_is_a_noop(_hook_env: Any) -> None:
+async def test_no_inbound_tail_is_a_noop(_hook_env: Any, model_catalog: ModelCatalog) -> None:
     """A silent-idle continue (bare AIMessage tail) carries no inbound at all —
     skipped, and mutually exclusive with hooks that claim that shape."""
     _loaded, recall = _hook_env
     hook = _loaded.passive_memory_recall_before_llm
     state = _state([AIMessage(content="idle", id="a0")])
 
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(model_catalog), _config())
 
     recall.assert_not_awaited()
     assert result is None

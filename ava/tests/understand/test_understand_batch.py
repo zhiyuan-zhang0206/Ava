@@ -12,6 +12,8 @@ from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.tests.understand._understand_helpers import mock_deepseek as mock_deepseek
 from ava.tests.understand._understand_helpers import understand_mod
 
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+
 # ── batch (concurrent) mode ─────────────────────────────────────────────────
 
 

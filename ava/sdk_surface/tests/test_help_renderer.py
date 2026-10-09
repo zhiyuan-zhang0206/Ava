@@ -35,6 +35,8 @@ from ava.sdk_surface.help import (
 )
 from ava.sdk_surface.plugin_loader import load_plugin_module
 
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+
 
 def _fake_module(source: str, name: str = "fakemod") -> types.ModuleType:
     """Build a module whose source is `source` and whose globals reflect

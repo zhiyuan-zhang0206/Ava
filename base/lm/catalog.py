@@ -20,7 +20,7 @@ from functools import cached_property
 from types import MappingProxyType
 
 from base.lm.pricing import ModelPrice, PriceBook, load_archive, plugin_model_price
-from base.lm.provider_api import (
+from base.lm.provider_contract import (
     ProviderBinding,
     ProviderContribution,
     ProviderRegistrationError,

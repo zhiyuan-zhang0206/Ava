@@ -155,6 +155,7 @@ def test_module_getattr_returns_proxy(fake_skills_dir: Path) -> None:
     assert hasattr(proxy, "_ava_skill_kind")
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_help_on_skill_renders_full_body(
     fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -177,6 +178,7 @@ def test_help_on_skill_renders_full_body(
     assert "Filesystem path" not in out
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_help_on_skill_namespace_lists_children(
     fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -487,6 +489,7 @@ def test_root_skill_is_both_skill_and_namespace(fake_skills_dir: Path) -> None:
     assert "sources:bilibili" in by_id and by_id["sources:bilibili"]["namespace"] == ("sources",)
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_root_skill_help_renders_body_then_children(
     fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -28,10 +28,12 @@ from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.tests.web._web_helpers import _FakeResp
 from ava.web import FetchError, WebError
 from base.config import settings
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 
 # Retry backoff waits are recorded, not slept, so retry-path tests run instantly; the retry
 # loop itself is still exercised (call counts).
-pytestmark = pytest.mark.usefixtures("retry_waits")
+pytestmark = [pytest.mark.usefixtures("retry_waits"), pytest.mark.usefixtures("sdk_model_owner")]
 
 
 # ─── ava.web.fetch (Jina Reader) ───
@@ -87,7 +89,7 @@ class _FakeLLM:
 
 
 @pytest.fixture
-def mock_llm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def mock_llm(monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog) -> dict[str, Any]:
     """Patch `base.lm.factory.build_chat_model` so fetch's answer step never
     calls a real LLM. Captures the model, reasoning_effort, and input content
     blocks; returns "FAKE ANSWER" by default, or raises `captured["error"]`
@@ -101,7 +103,11 @@ def mock_llm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         reasoning_effort: object = None,
         streaming: object = None,
         timeout: float | None = None,
+        catalog: ModelCatalog,
+        llm_override: str,
+        overrides: ModelOverrides,
     ) -> _FakeLLM:
+        assert catalog is model_catalog
         captured["model"] = model
         captured["reasoning_effort"] = reasoning_effort
         return _FakeLLM(captured)
@@ -662,6 +668,9 @@ def test_fetch_llm_build_error_wraps_as_fetcherror(
         reasoning_effort: object = None,
         streaming: object = None,
         timeout: float | None = None,
+        catalog: ModelCatalog,
+        llm_override: str,
+        overrides: ModelOverrides,
     ):
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 

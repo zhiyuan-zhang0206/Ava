@@ -50,8 +50,10 @@ forbid it. Other bindings remain ordinary tool calls when no adapter exists.
 
 Core owns only the extension and normalization mechanisms:
 
-- `provider_api.py` defines `ProviderBinding`, `BuildContext`, `AttachPolicy`,
-  `PriceRates`, and the fail-fast registration contract.
+- `provider_contract.py` owns the lightweight `ProviderBinding`, `BuildContext`,
+  `AttachPolicy`, `PriceRates`, and fail-fast registration declaration types.
+  `provider_api.py` exposes the same objects to plugins alongside key and model
+  helpers; SDK imports consume the declaration owner without loading this API.
 - `plugin_providers.py` discovers enabled plugins and imports their
   `provider.py` modules into a fresh builder for each explicit catalog.
   An Installation or service root retains that immutable result.

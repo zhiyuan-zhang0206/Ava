@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage
 
 from base import paths
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import pricing, provider_api, stop
+from base.lm import pricing, provider_api, provider_contract, stop
 from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.lm.factory import (
     build_chat_model,
@@ -777,3 +777,24 @@ def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None])
     catalog = build_model_catalog()
     assert "kept-1" in catalog.models
     assert "orphan-provider-1" not in catalog.models
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "PROVIDER_API_VERSION",
+        "AttachPolicy",
+        "BuildContext",
+        "InferenceSpeed",
+        "PricePeriod",
+        "PriceRates",
+        "PriceTier",
+        "PriceWindow",
+        "ProviderBinding",
+        "ProviderContribution",
+        "ProviderRegistrationError",
+        "ThinkingConfig",
+    ],
+)
+def test_provider_api_exposes_the_single_declaration_owner(name: str) -> None:
+    assert getattr(provider_api, name) is getattr(provider_contract, name)
