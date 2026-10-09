@@ -51,7 +51,11 @@ _KEY = b"test-key"
 
 
 def _conversation() -> list[AnyMessage]:
-    return [inbound_message(content="how do I deploy the gateway", source="user", inbound_id=1)]
+    return [
+        inbound_message(
+            content="how do I deploy the gateway", source="user", inbound_id=1, body_start=0
+        )
+    ]
 
 
 async def test_renders_path_and_description(
