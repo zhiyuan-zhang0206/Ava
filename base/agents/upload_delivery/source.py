@@ -24,7 +24,11 @@ from base.agents.upload_delivery.models import (
     make_manifest,
     request_hash,
 )
-from base.agents.uploads import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES, agent_upload_dir
+from base.agents.upload_delivery.paths import (
+    MAX_AGENT_UPLOAD_BYTES,
+    MAX_AGENT_UPLOAD_FILES,
+    agent_upload_dir,
+)
 from base.cluster.authority.unit import UnitIdentity
 from base.db.transaction import write_transaction
 
