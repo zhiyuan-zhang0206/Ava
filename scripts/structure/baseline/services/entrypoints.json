@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "services/entrypoints/im_bridge/adapters/feishu.py::thread:FeishuAdapter.start": 1
-  }
-}
