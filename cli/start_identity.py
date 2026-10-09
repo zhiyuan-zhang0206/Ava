@@ -23,7 +23,7 @@ from base import cluster
 from base.host.atomic_io import write_text_atomic
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import ensure_private_dir, ensure_private_file
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 
 INTENT_NAME = cluster.INTENT_NAME
 _CAPS = ("gateway", "agent-runner", "observability-station")
@@ -344,7 +344,7 @@ def capability_roles(stored: dict[str, str], explicit: dict[str, bool | None]) -
             "no capability declared: `ava init` takes --serve-gateway, --serve-agent-runner "
             "and/or --serve-observability-station"
         )
-    if IS_WINDOWS:
+    if is_windows():
         raise ValueError("native Windows is unsupported; use WSL2 or a POSIX host")
     return frozenset(roles)
 

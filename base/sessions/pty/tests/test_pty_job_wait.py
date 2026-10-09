@@ -14,10 +14,10 @@ import subprocess
 import psutil
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.sessions.pty.tests.job_wait import wait_for_job
 
-pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
+pytestmark = pytest.mark.skipif(is_windows(), reason="pty sessions are POSIX-only")
 
 # The trailing `:` keeps bash from exec-ing the job in place of itself, so the
 # job is a child of the stand-in shell, as `sleep 300` is of a session shell.

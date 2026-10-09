@@ -25,7 +25,7 @@ import pytest
 from base.cluster.dataplane import pg_throwaway_base as base
 from base.cluster.dataplane import pg_tools
 from base.config import settings
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 
 
 @pytest.fixture
@@ -160,7 +160,7 @@ def test_format_bytes_reads_at_both_scales() -> None:
     assert base.format_bytes(2**20) == "1 MiB"
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="throwaway clusters are POSIX-only in this suite")
+@pytest.mark.skipif(is_windows(), reason="throwaway clusters are POSIX-only in this suite")
 def test_throwaway_postgres_creates_the_instance_under_the_given_base() -> None:
     """`base=` is where the instance dir actually lands, and teardown removes it
     again — the drill's chosen base is the base used. A short `/tmp` root: the
