@@ -44,6 +44,7 @@ from starlette.responses import JSONResponse
 from base.agents import AvaAgentError
 from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
 from base.agents.messages.caller_identity import CallerIdentity
+from base.agents.messages.caller_protocol import CallerProtocolUnavailableError
 from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.observation import roster
@@ -337,7 +338,7 @@ async def _mcp_deliver_send_message(
                 source_transport="http",
             ),
         )
-    except (AvaAgentError, ClientMessageConflictError) as exc:
+    except (AvaAgentError, ClientMessageConflictError, CallerProtocolUnavailableError) as exc:
         raise ToolError(str(exc)) from exc
     except HTTPException as exc:
         raise ToolError(str(exc.detail)) from exc
