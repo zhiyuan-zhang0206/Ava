@@ -3,7 +3,7 @@
 # Hosted minutes are free and unmetered for public repos and public forks, so one
 # lane runs everywhere with no canonical-vs-fork gating — and the same economics
 # make SHARDING the speed lever: the pytest suite dominates wall clock, so it
-# fans out over pytest-split shards (LPT duration-balanced via the committed
+# fans out over whole-file shards (pytest-split's LPT algorithm, balanced via the committed
 # .test_durations and least_duration — refreshes retain all measured tests;
 # unmeasured tests are costed at this run's average. Refreshed every 20 main changes
 # with existing CI timings, with nightly fallback measurements by
@@ -897,28 +897,52 @@ jobs:
         # cannot false-positive. A stall outside any test (controller, or a
         # worker between items) produces no dump — the cap stays its backstop.
         #
-        # No positional path: pytest collects `testpaths` from pyproject.toml, the
-        # top-level tests/ plus every package's own <pkg>/**/tests/ (the flaky
-        # bucket and scripts/ci/refresh_test_durations.py do the same).
+        # Fresh complete collection follows pyproject.toml's testpaths on this
+        # runner. Checked whole-file groups retain every eligible node and its
+        # fixture closure; workers only import their group's files. Planning or
+        # collection validation errors cannot fall back to a different split.
         run: |
-          set +e
+          set -e
           set -o pipefail
-          mkdir -p tmp/durations
+          mkdir -p tmp/durations tmp/file-shards
+          timeout --kill-after=15s 4m uv run python -u - <<'PY' 2>&1 | tee tmp/file-shards/plan-collection.log
+          import faulthandler
+
+          with open("tmp/file-shards/plan-stacks.log", "w") as stacks:
+              faulthandler.dump_traceback_later(60, repeat=True, file=stacks)
+              try:
+                  import pytest
+
+                  raise SystemExit(pytest.main([
+                      "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-qq",
+                      "--ignore=tests/e2e", "-m", "not flaky", "--omit-static-tests",
+                      "-o", "junit_family=xunit1", "-o", "faulthandler_timeout=300",
+                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=16",
+                      "--file-shard-plan=tmp/file-shards/plan.json",
+                  ]))
+              finally:
+                  faulthandler.cancel_dump_traceback_later()
+          PY
+          set +e
           DURATION_ARGS=()
           DURATION_FILE="tmp/durations/backend-${{ matrix.group }}.json"
           if [ "$RECORD_DURATIONS" = true ]; then
             cp .test_durations "$DURATION_FILE" || exit 1
             DURATION_ARGS=(--store-durations --clean-durations --durations-path "$DURATION_FILE")
           fi
-          uv run pytest -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
-            --splits 16 --group ${{ matrix.group }} \
-            --splitting-algorithm least_duration "${DURATION_ARGS[@]}" \
+          uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
+            -p scripts.ci.file_shard_shadow --file-shard-execute \
+            --file-shard-check=tmp/file-shards/plan.json --file-shard-group=${{ matrix.group }} \
+            --file-shard-report=tmp/file-shards/collection-a1.json \
+            --file-shard-runtime-report=tmp/file-shards/runtime-a1.json "${DURATION_ARGS[@]}" \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
             --cov=ops --cov=services --cov=ava_builtins \
             --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a1.xml -o junit_family=xunit1 \
             -o faulthandler_timeout=300 \
             2>&1 | tee tmp/flake-attempt1-shard-${{ matrix.group }}.log
           status=$?
+          # Invalid configuration, collection and worker validation fail closed.
+          case "$status" in 2|3|4) exit "$status" ;; esac
           if [ '${{ matrix.group }}' = 8 ]; then
             exit "$status"
           fi
@@ -933,9 +957,11 @@ jobs:
             if [ "$RECORD_DURATIONS" = true ]; then
               cp .test_durations "$DURATION_FILE" || exit 1
             fi
-            uv run pytest -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
-              --splits 16 --group ${{ matrix.group }} \
-              --splitting-algorithm least_duration "${DURATION_ARGS[@]}" \
+            uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
+              -p scripts.ci.file_shard_shadow --file-shard-execute \
+              --file-shard-check=tmp/file-shards/plan.json --file-shard-group=${{ matrix.group }} \
+              --file-shard-report=tmp/file-shards/collection-a2.json \
+              --file-shard-runtime-report=tmp/file-shards/runtime-a2.json "${DURATION_ARGS[@]}" \
               --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
               --cov=ops --cov=services --cov=ava_builtins \
               --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a2.xml -o junit_family=xunit1 \
@@ -992,6 +1018,7 @@ jobs:
           name: test-results-backend-shard-${{ matrix.group }}
           path: |
             tmp/junit-backend-shard-${{ matrix.group }}-a*.xml
+            tmp/file-shards/
           if-no-files-found: warn
 
       - name: Upload flake telemetry (attempt-1 failure)

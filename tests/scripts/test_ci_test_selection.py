@@ -10,6 +10,7 @@ instead of silently weakening CI.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -56,7 +57,7 @@ def test_enforce_is_the_default_and_test_select_republishes_the_mode() -> None:
     assert 'echo "mode=$TEST_SELECTION_MODE" >> "$GITHUB_OUTPUT"' in selector_step["run"]
 
 
-def test_shards_are_skipped_only_on_the_enforced_subset_path() -> None:
+def test_shards_are_skipped_only_on_the_enforced_subset_path(tmp_path: Path) -> None:
     """Everything except enforce+SELECTED runs the full fan-out: shadow, FULL,
     SKIP, and a selector failure (empty decision) all keep the gate."""
     shard = _workflow_jobs()["backend-shard"]
@@ -67,6 +68,85 @@ def test_shards_are_skipped_only_on_the_enforced_subset_path() -> None:
     assert "always()" in condition
     assert "needs.test-select.outputs.mode != 'enforce'" in condition
     assert "needs.test-select.outputs.decision != 'SELECTED'" in condition
+    run = _step(shard, "Run pytest shard")["run"]
+    assert '"--collect-only", "-qq"' in run
+    assert '"--file-shard-plan=tmp/file-shards/plan.json"' in run
+    assert run.count("--file-shard-check=tmp/file-shards/plan.json") == 2
+    assert run.count("--file-shard-group=${{ matrix.group }}") == 2
+    assert run.count("--file-shard-execute") == 2
+    assert "--splits" not in run
+    _assert_shard_failure_verdicts(tmp_path, run)
+
+
+def _assert_shard_failure_verdicts(root: Path, script: str) -> None:
+    """Exercise the actual shell boundary without native services or real timers."""
+    binary = root / "bin"
+    binary.mkdir()
+    timeout = binary / "timeout"
+    timeout.write_text('#!/bin/sh\nshift 2\nexec "$@"\n')
+    timeout.chmod(0o755)
+    uv = binary / "uv"
+    uv.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, sys\n"
+        "path = pathlib.Path('calls.json')\n"
+        "calls = json.loads(path.read_text()) if path.exists() else []\n"
+        "calls.append(sys.argv[1:])\n"
+        "path.write_text(json.dumps(calls))\n"
+        "if sys.argv[2] == 'python':\n"
+        "    sys.exit(int(os.environ['PLAN_STATUS']))\n"
+        "duration = pathlib.Path('tmp/durations/backend-' + os.environ['GROUP'] + '.json')\n"
+        "assert duration.read_text() == '{}'\n"
+        "duration.write_text('{\"measured\": 1}')\n"
+        "attempt = sum(call[1] == 'pytest' for call in calls)\n"
+        "sys.exit(int(os.environ['FIRST_STATUS' if attempt == 1 else 'FINAL_STATUS']))\n"
+    )
+    uv.chmod(0o755)
+    cases = [
+        (23, 0, 0, 1, 23, 0),
+        (0, 2, 0, 1, 2, 1),
+        (0, 3, 0, 1, 3, 1),
+        (0, 4, 0, 1, 4, 1),
+        (0, 1, 0, 1, 0, 2),
+        (0, 1, 19, 1, 19, 2),
+        (0, 1, 0, 8, 1, 1),
+        (0, 0, 0, 1, 0, 1),
+    ]
+    for index, (plan_status, first, final, group, expected, attempts) in enumerate(cases):
+        directory = root / str(index)
+        directory.mkdir()
+        (directory / ".test_durations").write_text("{}")
+        env = {
+            **os.environ,
+            "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+            "PLAN_STATUS": str(plan_status),
+            "FIRST_STATUS": str(first),
+            "FINAL_STATUS": str(final),
+            "GROUP": str(group),
+            "RECORD_DURATIONS": "true",
+            "COVERAGE_FILE": "coverage-data",
+            "GITHUB_OUTPUT": str(directory / "outputs"),
+        }
+        result = subprocess.run(  # noqa: S603 -- repository shell with test-owned commands
+            [
+                "bash",
+                "--noprofile",
+                "--norc",
+                "-eo",
+                "pipefail",
+                "-c",
+                script.replace("${{ matrix.group }}", str(group)),
+            ],
+            cwd=directory,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == expected, result.stdout + result.stderr
+        calls = cast("list[list[str]]", json.loads((directory / "calls.json").read_text()))
+        assert len(calls) == 1 + attempts
+        assert sum(call[1] == "python" for call in calls) == 1
 
 
 def test_subset_job_gates_only_in_enforce() -> None:
@@ -141,6 +221,10 @@ def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
         ("backend-serial", "Run flaky pytest bucket serially"),
     ):
         run = _step(jobs[job], name)["run"]
+        if job == "backend-shard":
+            planning, run = run.split("\nPY\n", 1)
+            assert '"--omit-static-tests"' in planning
+            assert '"--collect-only"' in planning
         assert run.count("--omit-static-tests") == run.count("uv run pytest") > 0
 
 
