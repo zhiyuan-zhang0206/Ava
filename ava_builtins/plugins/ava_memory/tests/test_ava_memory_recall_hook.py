@@ -75,7 +75,7 @@ def _config() -> RunnableConfig:
 
 
 def _inbound(source: str) -> AnyMessage:
-    return inbound_message(content="hello", source=source, inbound_id=1)
+    return inbound_message(content="hello", source=source, inbound_id=1, body_start=0)
 
 
 @pytest.mark.parametrize(

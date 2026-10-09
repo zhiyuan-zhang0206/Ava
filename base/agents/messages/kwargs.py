@@ -164,6 +164,7 @@ class AvaMessageKwargs(TypedDict, total=False):
     ava_msg_type: str
     ava_source: str
     ava_inbound_id: int
+    ava_inbound_body_start: int
     ava_created_at: str
     ava_picked_up_at: str
     ava_compact_id: str

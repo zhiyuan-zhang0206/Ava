@@ -119,11 +119,11 @@ _ID_SOURCE_LABELS = (
 )
 
 
-def _caller_envelope(content: str, source: str) -> str:
+def _caller_head(source: str) -> str:
     caller = CallerIdentity.from_source(source)
     instance = f" / {caller.instance}" if caller.instance is not None else ""
     label = "External agent" if caller.kind == "external_agent" else "Unknown caller"
-    return f"{label} ({caller.subject}{instance}; asserted provenance):\n\n{content}"
+    return f"{label} ({caller.subject}{instance}; asserted provenance):\n\n"
 
 
 def _timestamp(created_at: datetime | None) -> tuple[str, str]:
@@ -141,8 +141,9 @@ def _timestamp(created_at: datetime | None) -> tuple[str, str]:
     return formatted, f" {formatted}"
 
 
-def wrap_inbound(content: str, source: str, *, created_at: datetime | None = None) -> str:
-    """Dispatch envelope wrap by source.
+def inbound_head(source: str, *, created_at: datetime | None = None) -> str:
+    """The envelope header the agent reads before an inbound's content, naming the sender
+    and time as `source` and the timestamp setting dictate; empty when there is none.
 
     When ``created_at`` is given (the inbound row's original creation time),
     the timestamp uses that wall-clock so the agent sees a chronological timeline
@@ -150,24 +151,30 @@ def wrap_inbound(content: str, source: str, *, created_at: datetime | None = Non
     callers / system messages), the current time is used as before.
     """
     if source.startswith(_CALLER_PREFIXES):
-        return _caller_envelope(content, source)
+        return _caller_head(source)
     if source == "system" or source.startswith(_SYSTEM_PREFIX):
-        return f"[system] {content}"
+        return "[system] "
     formatted, ts = _timestamp(created_at)
     if source == "user" or source.startswith(_PAGE_PREFIX):
         # Bare "[ts]" header for both human sources (user ruling 2026-09-18):
         # no label, no colon; with timestamps off there is no header at all.
-        return f"{formatted}\n\n{content}" if formatted else content
+        return f"{formatted}\n\n" if formatted else ""
     if source.startswith(_AGENT_PREFIX):
         sender_id = source.removeprefix(_AGENT_PREFIX)
-        return f"Agent {sender_id}{ts}:\n\n{content}"
+        return f"Agent {sender_id}{ts}:\n\n"
     for prefix, label in _ID_SOURCE_LABELS:
         if source.startswith(prefix):
             ident = source.removeprefix(prefix)
             _check_positive_int_id(ident, source)
-            return f"{label} (id {ident}){ts}:\n\n{content}"
+            return f"{label} (id {ident}){ts}:\n\n"
     raise ValueError(
         f"Unrecognized inbound source: {source!r} — "
         "must be 'system' / 'system:<subtype>' / 'agent:N' / 'user' / 'ui:page:<name>' / "
         "'watcher:N' / 'shell:N' / 'schedule:N'"
     )
+
+
+def wrap_inbound(content: str, source: str, *, created_at: datetime | None = None) -> str:
+    """The inbound's content behind its `inbound_head`. The body begins at
+    `len(inbound_head(...))`, which callers record as `ava_inbound_body_start`."""
+    return inbound_head(source, created_at=created_at) + content
