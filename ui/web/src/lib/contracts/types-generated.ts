@@ -316,7 +316,7 @@ export interface paths {
         put?: never;
         /**
          * Post Guarded Agents
-         * @description Create a plain agent through a versioned, principal-bound keyed entry.
+         * @description Create or fork an agent through principal-bound keyed admission.
          *
          *     Older routing cannot execute this path. Callers must keep it fixed for an
          *     intent and never fall back to the legacy path after an uncertain response.

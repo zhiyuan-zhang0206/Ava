@@ -1,11 +1,13 @@
 """Explicit strong creation never downgrades an uncertain intent."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import httpx
 import pytest
 
 from ava.gateway_client import spawn, transport
+from ava.gateway_client.tests.test_gateway_client import _client_mock
 from base.agents import GatewayUnavailable
 from base.agents.context import AvaContext
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
@@ -38,8 +40,8 @@ def _spawn(**kwargs: object) -> int:
 
 
 @pytest.mark.parametrize("bad", [1, "true", None, [True]])
-def test_invalid_mode_never_submits(client: MagicMock, bad: object) -> None:
-    with pytest.raises(TypeError, match="must be a bool"):
+def test_removed_mode_never_submits(client: MagicMock, bad: object) -> None:
+    with pytest.raises(TypeError, match="require_idempotency"):
         _spawn(require_idempotency=bad, idempotency_key="key")
     client.post.assert_not_called()
 
@@ -47,28 +49,27 @@ def test_invalid_mode_never_submits(client: MagicMock, bad: object) -> None:
 @pytest.mark.parametrize("key", [None, "", "x" * 129, 123])
 def test_strong_requires_valid_caller_key(client: MagicMock, key: object) -> None:
     with pytest.raises((ValueError, TypeError), match="idempotency key"):
-        _spawn(require_idempotency=True, idempotency_key=key)
+        _spawn(idempotency_key=key)
     client.post.assert_not_called()
 
 
-def test_strong_fork_rejected_before_http(client: MagicMock) -> None:
-    with pytest.raises(ValueError, match="does not support fork_from"):
+def test_fork_uses_fixed_keyed_admission(client: MagicMock) -> None:
+    client.post.return_value = httpx.Response(
+        201, json={"id": 42}, request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents")
+    )
+    assert (
         spawn(
-            spawner="user",
-            prompt=None,
-            fork_from=1,
-            prompt_source="user",
-            require_idempotency=True,
-            idempotency_key="fork",
+            spawner="user", prompt=None, fork_from=1, prompt_source="user", idempotency_key="fork"
         )
-    client.post.assert_not_called()
+        == 42
+    )
+    assert client.post.call_args.args == ("/api/keyed/v1/agents",)
+    assert client.post.call_args.kwargs["json"]["fork_from"] == 1
+    assert client.post.call_args.kwargs["headers"][SCOPE_HEADER] == PRINCIPAL_SCOPE
 
 
-@pytest.mark.parametrize("strong", [False, True])
-def test_unknown_outcome_one_shot_and_caller_retry_preserves_path(
-    client: MagicMock, strong: bool
-) -> None:
-    path = "/api/keyed/v1/agents" if strong else "/api/agents"
+def test_unknown_outcome_one_shot_and_caller_retry_preserves_path(client: MagicMock) -> None:
+    path = "/api/keyed/v1/agents"
     client.post.side_effect = [
         httpx.ReadTimeout("lost"),
         httpx.Response(
@@ -76,17 +77,14 @@ def test_unknown_outcome_one_shot_and_caller_retry_preserves_path(
         ),
     ]
     with pytest.raises(GatewayUnavailable):
-        _spawn(require_idempotency=strong, idempotency_key="intent")
+        _spawn(idempotency_key="intent")
     assert client.post.call_count == 1
-    assert _spawn(require_idempotency=strong, idempotency_key="intent") == 42
+    assert _spawn(idempotency_key="intent") == 42
     first, second = client.post.call_args_list
     assert first == second
     assert first.args == (path,)
     assert first.kwargs["headers"]["Idempotency-Key"] == "intent"
-    if strong:
-        assert first.kwargs["headers"][SCOPE_HEADER] == PRINCIPAL_SCOPE
-    else:
-        assert SCOPE_HEADER not in first.kwargs["headers"]
+    assert first.kwargs["headers"][SCOPE_HEADER] == PRINCIPAL_SCOPE
 
 
 @pytest.mark.parametrize("status", [404, 405, 422, 409, 500])
@@ -97,7 +95,7 @@ def test_guarded_http_error_never_falls_back(client: MagicMock, status: int) -> 
         request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents"),
     )
     with pytest.raises(httpx.HTTPStatusError):
-        _spawn(require_idempotency=True, idempotency_key="intent")
+        _spawn(idempotency_key="intent")
     assert client.post.call_count == 1
     assert client.post.call_args.args == ("/api/keyed/v1/agents",)
 
@@ -111,7 +109,7 @@ def test_connect_retry_keeps_exact_guarded_intent(client: MagicMock) -> None:
             request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents"),
         ),
     ]
-    assert _spawn(require_idempotency=True, idempotency_key="intent") == 42
+    assert _spawn(idempotency_key="intent") == 42
     assert len(client.post.call_args_list) == 2
     assert client.post.call_args_list[0] == client.post.call_args_list[1]
 
@@ -130,3 +128,127 @@ def test_transport_scope_rejects_invalid_admission(
     with pytest.raises((ValueError, TypeError)):
         transport.post(path, idempotency_key=key, idempotency_scope=scope)
     client.post.assert_not_called()
+
+
+class TestSpawn:
+    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
+    def test_spawn_returns_agent_id(self, mock_client: MagicMock):
+        from ava.gateway_client import spawn
+
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.is_success = True
+        mock_resp.json.return_value = {"id": 42}
+        mock_client.post.return_value = mock_resp
+
+        agent_id = spawn(
+            spawner="user",
+            prompt="hello",
+            fork_from=None,
+            prompt_source="user",
+            idempotency_key=str(uuid4()),
+        )
+        assert agent_id == 42
+
+    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
+    def test_spawn_without_prompt(self, mock_client: MagicMock):
+        from ava.gateway_client import spawn
+
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.is_success = True
+        mock_resp.json.return_value = {"id": 7}
+        mock_client.post.return_value = mock_resp
+
+        agent_id = spawn(
+            spawner="agent:1",
+            prompt=None,
+            fork_from=5,
+            prompt_source="agent",
+            idempotency_key=str(uuid4()),
+        )
+        assert agent_id == 7
+
+    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
+    def test_spawn_read_timeout_is_not_retried(self, mock_client: MagicMock):
+        """Spawn is non-idempotent: a ReadTimeout means the gateway may have
+        already created the agent (response lost, not request lost). Retrying
+        the POST could spawn a phantom-twin agent, so the first read timeout
+        must raise immediately — one POST, no re-send (task #698 G7)."""
+        from ava.gateway_client import GatewayUnavailable, spawn
+
+        mock_client.post.side_effect = httpx.ReadTimeout("gateway slow")
+
+        with pytest.raises(GatewayUnavailable, match="no retry: non-idempotent"):
+            spawn(
+                spawner="user",
+                prompt="hello",
+                fork_from=None,
+                prompt_source="user",
+                idempotency_key=str(uuid4()),
+            )
+        assert mock_client.post.call_count == 1
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            httpx.ConnectError("refused"),
+            httpx.ConnectTimeout("dial stalled"),
+            httpx.PoolTimeout("pool busy"),
+        ],
+    )
+    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
+    @pytest.mark.usefixtures("retry_waits")
+    def test_spawn_pre_send_error_is_retried(
+        self, mock_client: MagicMock, error: httpx.TransportError
+    ):
+        """Connect-family failures happen before the request reaches the
+        server, so re-sending a spawn is safe — the retry stays."""
+        from ava.gateway_client import spawn
+
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.is_success = True
+        mock_resp.json.return_value = {"id": 42}
+        mock_client.post.side_effect = [error, mock_resp]
+
+        agent_id = spawn(
+            spawner="user",
+            prompt="hello",
+            fork_from=None,
+            prompt_source="user",
+            idempotency_key=str(uuid4()),
+        )
+        assert agent_id == 42
+        assert mock_client.post.call_count == 2
+        keys = [
+            call.kwargs["headers"]["Idempotency-Key"] for call in mock_client.post.call_args_list
+        ]
+        assert keys[0] == keys[1] and keys[0]
+
+    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
+    @pytest.mark.usefixtures("retry_waits")
+    def test_spawn_read_timeout_after_connect_error_retries_connect_only(
+        self, mock_client: MagicMock
+    ):
+        """Mixed failure: the first connect error is retried, but the read
+        timeout that follows is terminal — the request may have landed."""
+        from ava.gateway_client import GatewayUnavailable, spawn
+
+        mock_client.post.side_effect = [
+            httpx.ConnectError("refused"),
+            httpx.ReadTimeout("gateway slow"),
+        ]
+
+        with pytest.raises(GatewayUnavailable, match="no retry: non-idempotent"):
+            spawn(
+                spawner="user",
+                prompt="hello",
+                fork_from=None,
+                prompt_source="user",
+                idempotency_key=str(uuid4()),
+            )
+        assert mock_client.post.call_count == 2
+
+
+# --- send_message ---

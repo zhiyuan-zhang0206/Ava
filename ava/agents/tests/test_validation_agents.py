@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -19,7 +20,7 @@ class TestAgentsEntries:
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 1)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "agent:1")
 
-        agents.spawn(prompt=("hello",))  # pyright: ignore[reportArgumentType]
+        agents.spawn(prompt=("hello",), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
         assert seen["prompt"] == "hello"
 
     @pytest.mark.parametrize(
@@ -34,12 +35,12 @@ class TestAgentsEntries:
     ) -> None:
         monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="prompt must be a string"):
-            agents.spawn(prompt=prompt)  # pyright: ignore[reportArgumentType]
+            agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     def test_spawn_fork_from_never_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="fork_from must be int"):
-            agents.spawn(fork_from=(5,))  # pyright: ignore[reportArgumentType]
+            agents.spawn(fork_from=(5,), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     def test_send_message_content_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen: dict[str, Any] = {}
@@ -144,7 +145,7 @@ class TestAgentsEntries:
             call()
 
 
-def test_core_spawn_forwards_explicit_strong_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_core_spawn_forwards_caller_key(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
 
     def capture(**kwargs: Any) -> int:
@@ -153,8 +154,8 @@ def test_core_spawn_forwards_explicit_strong_mode(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(gateway_client, "spawn", capture)
     monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "agent:1")
-    assert agents.spawn(prompt="goal", idempotency_key="intent", require_idempotency=True) == 42
-    assert seen["require_idempotency"] is True
+    assert agents.spawn(prompt="goal", idempotency_key="intent") == 42
+    assert "require_idempotency" not in seen
     assert seen["idempotency_key"] == "intent"
 
 
@@ -163,7 +164,9 @@ def test_core_spawn_forwards_explicit_strong_mode(monkeypatch: pytest.MonkeyPatc
     [
         {"require_idempotency": 1, "idempotency_key": "key"},
         {"require_idempotency": True},
-        {"require_idempotency": True, "idempotency_key": "key", "fork_from": 1},
+        {"idempotency_key": None},
+        {"idempotency_key": ""},
+        {"idempotency_key": "x" * 129},
     ],
 )
 def test_core_spawn_invalid_strong_admission_before_actor_or_http(
