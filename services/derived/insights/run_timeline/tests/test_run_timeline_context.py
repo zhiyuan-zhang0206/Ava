@@ -114,7 +114,8 @@ def test_the_context_before_a_reply_is_the_input_of_the_request_that_made_it() -
     for idx, input_tokens in inputs.items():
         # The total through the message before the reply is what that request sent.
         assert bars[idx - 1].context_total == input_tokens
-        assert bars[idx].request is not None and bars[idx].request.input == input_tokens
+        request = bars[idx].request
+        assert request is not None and request.input == input_tokens
     # A message adds its own weight, and the reply's output is re-sent after it.
     assert bars[5].context_total == 160 + 7
     assert bars[2].context_total == 100 + 5
