@@ -328,26 +328,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/retry-launch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retry Agent Launch
-         * @description Retry dispatch for one committed identity without adding an inbound.
-         */
-        post: operations["retry_agent_launch_api_agents__agent_id__retry_launch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{agent_id}/born-chain": {
         parameters: {
             query?: never;
@@ -415,71 +395,6 @@ export interface paths {
          * @description End the caller's observed takeover without terminating the native agent.
          */
         post: operations["post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/compact": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Compact
-         * @description Trigger compact — INSERT kind='compact_request' inbound; the claim
-         *     Node takes over, runs the backend Compaction LLM to generate a summary
-         *     that replaces messages, and publishes a `compact_done` event to notify
-         *     UI.
-         *
-         *     The new design uniformly uses backend LLM summary generation (see
-         *     docs/decisions/agents/graph/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
-         *     parameter old frontends sent is ignored (still accepted — extra query
-         *     parameters never fail the call). Agent-initiated compact still goes through
-         *     ava.self.compact() -> kind='compact_summary'; this is a separate signal
-         *     from UI-triggered compact_request.
-         *
-         *     A compact targeting a terminated agent auto-resurrects it (shared with the
-         *     chat path): otherwise the compact_request row would sit pending with no live
-         *     process to claim it. The co-batched resurrect wins the claim node's recency
-         *     routing, so the agent wakes and the requested compaction still runs.
-         */
-        post: operations["post_compact_api_agents__agent_id__compact_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cancel
-         * @description Pause/stop the agent — INSERT a durable kind='cancel' inbound.
-         *
-         *     Durable, not fire-and-forget: a running llm/exec node interrupts on the
-         *     row immediately (it watches the inbound Redis pub/sub path); if the agent
-         *     is between actions when the cancel lands, the row stays pending and the
-         *     next claim pass halts it to idle. Either way the agent stops and stays
-         *     alive (resumable by the next message). Enqueue-and-return like `/messages`;
-         *     the kernel emits a `cancelled` SSE event when it actually stops.
-         *
-         *     No cross-machine forwarding: the cancel is a durable row in the shared DB
-         *     (plus a Redis wake), delivered regardless of which host runs the agent.
-         */
-        post: operations["post_cancel_api_cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5207,34 +5122,6 @@ export interface components {
             rebuild_id: number | null;
         };
         /**
-         * CancelRequest
-         * @description POST /api/cancel request body — pause/stop the agent, addressed by id.
-         */
-        CancelRequest: {
-            /** Agent Id */
-            agent_id: number;
-        };
-        /**
-         * CancelRequested
-         * @description POST /api/cancel response.
-         *
-         *     `enqueued`: a durable kind='cancel' inbound was INSERTed. The in-flight
-         *         llm/exec node interrupts on it if one is running; otherwise the next
-         *         claim pass halts the agent to idle. The process stays alive.
-         *     `already_terminated`: agent is dead — nothing to pause.
-         */
-        CancelRequested: {
-            status: components["schemas"]["CancelResult"];
-            /** Inbound Id */
-            inbound_id?: number | null;
-        };
-        /**
-         * CancelResult
-         * @description Acceptance of a durable cancel request; separate from process termination.
-         * @enum {string}
-         */
-        CancelResult: "enqueued" | "already_terminated";
-        /**
          * ClusterPanel
          * @description GET /api/status cluster sub-section — multi-machine view.
          *
@@ -5343,22 +5230,6 @@ export interface components {
              */
             command_id: string;
             target: components["schemas"]["CompactTarget"];
-        };
-        /**
-         * CompactEnqueued
-         * @description POST /api/agents/{id}/compact response — returns immediately after
-         *     pending insert, does not wait for the kernel loop to finish.
-         */
-        CompactEnqueued: {
-            /** Agent Id */
-            agent_id: number;
-            /**
-             * Status
-             * @constant
-             */
-            status: "enqueued";
-            /** Inbound Id */
-            inbound_id?: number | null;
         };
         /**
          * CompactOutcome
@@ -9925,37 +9796,6 @@ export interface operations {
             };
         };
     };
-    retry_agent_launch_api_agents__agent_id__retry_launch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpawnedAgent"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_agent_born_chain_api_agents__agent_id__born_chain_get: {
         parameters: {
             query?: never;
@@ -10044,70 +9884,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ForceExpireImpersonationResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_compact_api_agents__agent_id__compact_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompactEnqueued"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cancel_api_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CancelRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CancelRequested"];
                 };
             };
             /** @description Validation Error */

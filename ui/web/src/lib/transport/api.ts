@@ -28,11 +28,14 @@ import type { NoticesFeed,
   AlertsResponse,
   AlertsWindow,
   ResolveNoticeIn,
-  CancelRequested,
+  NativeWorkTarget,
+  NativeCancelAcceptance,
+  RetryLaunchAccepted,
   ClusterStatus,
   CommandItem,
   ContentBlock,
-  CompactEnqueued,
+  CompactTarget,
+  CompactAcceptance,
   ConfigView,
   ConfigWriteResult,
   WireFleetGraph,
@@ -218,11 +221,7 @@ const POST_JSON = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-async function draftAgent(
-  path: string,
-  body: unknown,
-  operationKey: string,
-): Promise<GuideDraftResponse> {
+function keyedJson(body: unknown, operationKey: string): RequestInit {
   if (typeof operationKey !== "string" || !operationKey || operationKey.length > 128) {
     throw new Error("idempotency key must contain 1 to 128 characters");
   }
@@ -230,7 +229,16 @@ async function draftAgent(
   const headers = new Headers(init.headers);
   headers.set("Idempotency-Key", operationKey);
   headers.set("Idempotency-Scope", "principal-v1");
-  const response = await f(path, { ...init, headers });
+  return { ...init, headers };
+}
+
+async function draftAgent(
+  path: string,
+  body: unknown,
+  operationKey: string,
+): Promise<GuideDraftResponse> {
+  const init = keyedJson(body, operationKey);
+  const response = await f(path, init);
   const accepted = await ok<unknown>(response);
   if (response.status !== 200 || !accepted || typeof accepted !== "object" ||
     !("agent_id" in accepted) || typeof accepted.agent_id !== "number" ||
@@ -455,24 +463,19 @@ export const api = {
     ).then(ok<{ status: string }>);
   },
 
-  compact: (agentId: number, idempotencyKey: string = newOperationKey()): Promise<CompactEnqueued> => {
-    return f(`/api/agents/${agentId}/compact`, {
-      ...POST, headers: { "Idempotency-Key": idempotencyKey },
-    }).then(ok<CompactEnqueued>);
-  },
+  observeCompact: (agentId: number): Promise<CompactTarget> =>
+    f(`/api/keyed/v1/agents/${agentId}/compact-target`).then(ok<CompactTarget>),
 
-  cancel: (agentId: number, idempotencyKey: string = newOperationKey()): Promise<CancelRequested> => {
-    // Each agent runs its own turn — the gateway watcher dispatches to
-    // the corresponding cancel_event. Returns as soon as the signal is
-    // sent; the actual kernel response is delivered to the UI via the
-    // SSE `cancelled` event.
-    return f("/api/cancel", {
-      ...POST_JSON({ agent_id: agentId }),
-      headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
-    }).then(
-      ok<CancelRequested>,
-    );
-  },
+  compact: (target: CompactTarget, operationKey: string): Promise<CompactAcceptance> =>
+    f(`/api/keyed/v1/agents/${target.source.agent_id}/compact-history`, keyedJson(target, operationKey))
+      .then(ok<CompactAcceptance>),
+
+  observeWork: (agentId: number): Promise<NativeWorkTarget> =>
+    f(`/api/keyed/v1/agents/${agentId}/native-work`).then(ok<NativeWorkTarget>),
+
+  cancel: (target: NativeWorkTarget, operationKey: string): Promise<NativeCancelAcceptance> =>
+    f(`/api/keyed/v1/agents/${target.agent_id}/cancel-work`, keyedJson(target, operationKey))
+      .then(ok<NativeCancelAcceptance>),
 
   // --- lifecycle ---
   //
@@ -502,8 +505,9 @@ export const api = {
     headers.set("Idempotency-Key", operationKey);
     return f("/api/agents", { ...init, headers }).then(ok<SpawnedAgent>);
   },
-  retryAgentLaunch: (agentId: number): Promise<SpawnedAgent> =>
-    f(`/api/agents/${agentId}/retry-launch`, { method: "POST" }).then(ok<SpawnedAgent>),
+  retryAgentLaunch: (agentId: number, priorAttempt: string, operationKey: string): Promise<RetryLaunchAccepted> =>
+    f(`/api/keyed/v1/agents/${agentId}/retry-launch`, keyedJson({ expected_prior_attempt_id: priorAttempt }, operationKey))
+      .then(ok<RetryLaunchAccepted>),
 
   // force=false (default) → graceful path: backend inserts a terminate
   // inbound and the agent exits after its current turn. force=true → backend

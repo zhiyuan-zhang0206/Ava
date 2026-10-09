@@ -15,8 +15,12 @@ import type { components } from "./types-generated";
 
 type Schemas = components["schemas"];
 
-export type CompactEnqueued = Schemas["CompactEnqueued"];
-export type CancelRequested = Schemas["CancelRequested"];
+export type CompactTarget = Schemas["CompactTarget"];
+export type CompactAcceptance = Schemas["CompactAcceptance"];
+export type CompactStatus = Schemas["CompactStatus"];
+export type NativeWorkTarget = Schemas["NativeWorkTarget"];
+export type NativeCancelAcceptance = Schemas["NativeCancelAcceptance"];
+export type RetryLaunchAccepted = Schemas["RetryLaunchAccepted"];
 
 /** The persisted lifecycle vocabulary carried on the gateway wire. These are
  *  control-plane states, not the status vocabulary the console presents. */

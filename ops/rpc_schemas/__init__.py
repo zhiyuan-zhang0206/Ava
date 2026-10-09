@@ -27,7 +27,6 @@ from pydantic import (
 )
 
 from base.agents import (
-    CancelResult,
     CrashRecoveryResult,
     RestartResult,
     ResurrectResult,
@@ -73,18 +72,6 @@ from ops.rpc_schemas.terminate import OpenTaskRow as OpenTaskRow
 from ops.rpc_schemas.terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_schemas.terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_schemas.terminate import TerminateAgentResponse as TerminateAgentResponse
-
-
-class CancelRequested(BaseModel):
-    """POST /api/cancel response.
-
-    `enqueued`: a durable kind='cancel' inbound was INSERTed. The in-flight
-        llm/exec node interrupts on it if one is running; otherwise the next
-        claim pass halts the agent to idle. The process stays alive.
-    `already_terminated`: agent is dead — nothing to pause."""
-
-    status: CancelResult
-    inbound_id: int | None = None
 
 
 class SpawnAgentRequest(BaseModel):

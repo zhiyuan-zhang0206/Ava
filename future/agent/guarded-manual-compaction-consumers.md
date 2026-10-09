@@ -7,8 +7,12 @@ tags: [agent, compaction, idempotency]
 
 # Guarded manual compaction consumer audit
 
-Companion to [the protocol design](guarded-manual-compaction.md). This is a plan,
-not evidence that any current runner implements guarded compact.
+Historical preparation audit for [the protocol design](guarded-manual-compaction.md).
+The native protocol is implemented; UI and CLI now use observed closed-history
+admission and the old public compact route is removed. Current behavior is owned
+by [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md]] and
+[[gateway/agents/docs/control-acceptance.ava.okf.md]]. The matrix and proposed gates
+below record the preparation state, not current contributor instructions.
 
 ## Actual consumers and verification matrix
 

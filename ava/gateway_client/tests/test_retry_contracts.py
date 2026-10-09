@@ -10,11 +10,9 @@ from base.agents import GatewayUnavailable
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("POST", "/api/cancel"),
         ("POST", "/api/agents"),
         ("POST", "/api/agents/7/restart"),
         ("POST", "/api/agents/7/pages"),
-        ("POST", "/api/agents/7/compact"),
         ("POST", "/api/agents/7/notices/1/resolve"),
         ("POST", "/api/schedules/1/restart"),
         ("PATCH", "/api/tasks/1"),
@@ -52,7 +50,7 @@ def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) ->
         else:
             assert send().status_code == 503
     assert len(requests) == 1
-    if path in ("/api/agents", "/api/cancel", "/api/agents/7/compact", "/api/tasks/1"):
+    if path in ("/api/agents", "/api/tasks/1"):
         assert requests[0].headers["Idempotency-Key"]
 
 

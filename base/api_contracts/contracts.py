@@ -133,10 +133,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         transactional_idempotency=True,
         legacy_keyed_retry=False,
     ),
-    ("POST", "/api/agents/{agent_id}/retry-launch"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="explicit same-ID launch retry rotates the attempt key; each call dispatches once",
-    ),
     ("POST", "/api/keyed/v1/agents"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="guarded plain creation requires a verified principal-v1 key; no legacy fallback",
@@ -296,16 +292,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/agents/lifecycle.py ───────────────────────────
     ("POST", "/api/agents/{agent_id}/impersonation/force-expire"): RouteContract(
         note="observed-session CAS close — repeated or stale requests leave the lease unchanged"
-    ),
-    ("POST", "/api/agents/{agent_id}/compact"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="transactional compact acceptance; pending original inbound only permits recovery",
-        transactional_idempotency=True,
-    ),
-    ("POST", "/api/cancel"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="transactional cancel acceptance; native work-episode fencing remains separate",
-        transactional_idempotency=True,
     ),
     ("POST", "/api/agents/{agent_id}/terminate"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="termination is not bound to the observed incarnation"
