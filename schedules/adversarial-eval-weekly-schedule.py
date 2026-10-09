@@ -487,7 +487,7 @@ def _record_batch_error(exc: Exception) -> Path:
     return root / "results" / "index.jsonl"
 
 
-def _fire_weekly_batch(_trigger: None) -> None:
+def _fire_weekly_batch(_slot: datetime, _trigger: None) -> None:
     try:
         run_weekly_batch()
     except Exception as exc:
