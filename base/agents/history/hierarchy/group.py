@@ -199,6 +199,7 @@ def generate_groups(
     nodes: Sequence[OpenNode],
     *,
     model: str,
+    agent_id: int,
     corrections: int,
     clock: Clock,
     must_close: bool = False,
@@ -207,6 +208,7 @@ def generate_groups(
 ) -> list[Group]:
     """Ask the model to close groups over `nodes`; blocking (run it in a worker thread).
 
+    `agent_id` is the agent whose summaries these are; the calls' usage is attributed to it.
     A refused reply is answered in the same conversation with its problem, up to
     `corrections` more calls. `on_call` sees every provider call, the failed one included.
 
@@ -228,6 +230,7 @@ def generate_groups(
                 retry_attempts=retry_attempts,
                 model=model,
                 usage_source="hierarchy.group",
+                usage_agent_id=agent_id,
             )
         except Exception as exc:
             _record(

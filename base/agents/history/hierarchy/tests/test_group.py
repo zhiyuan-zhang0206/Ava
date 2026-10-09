@@ -148,6 +148,7 @@ def _run(
         llm,
         nodes,
         model="m",
+        agent_id=7,
         corrections=corrections,
         clock=Clock.from_settings(),
         retry_attempts=0,
@@ -187,6 +188,7 @@ def test_corrections_run_out_into_a_failure_with_every_call_recorded() -> None:
             llm,
             _nodes(5),
             model="m",
+            agent_id=7,
             corrections=2,
             clock=Clock.from_settings(),
             retry_attempts=0,
@@ -207,6 +209,7 @@ def test_must_close_is_passed_to_the_prompt_and_the_check() -> None:
         llm,
         _nodes(5),
         model="m",
+        agent_id=7,
         corrections=2,
         clock=Clock.from_settings(),
         must_close=True,
@@ -226,6 +229,7 @@ def test_a_provider_error_is_recorded_and_raised() -> None:
             llm,
             _nodes(5),
             model="m",
+            agent_id=7,
             corrections=2,
             clock=Clock.from_settings(),
             retry_attempts=0,
@@ -243,6 +247,7 @@ def test_unknown_group_invocation_error_is_recorded_once_and_preserved(error: Ex
             llm,
             _nodes(5),
             model="m",
+            agent_id=7,
             corrections=2,
             clock=Clock.from_settings(),
             retry_attempts=2,
@@ -323,3 +328,14 @@ def test_a_trailing_single_group_stays_open_and_the_others_close_in_order() -> N
     ]
     tail = _reply((100, 102), (103, 103))
     assert [(g.first, g.last) for g in parse_groups(tail, nodes, must_close=False)] == [(100, 102)]
+
+
+def test_group_calls_log_their_usage_under_the_job_agent(
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    _run(_Llm(_reply((100, 102))), _nodes(5))
+    [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
+    extra = record["extra"]
+    assert extra["agent_id"] == 7
+    assert extra["source"] == "hierarchy.group"
+    assert extra["usage_kind"] == "chat"
