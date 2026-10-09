@@ -1,6 +1,6 @@
 """GET/PUT /api/config/default-model — the cluster's default model.
 
-A narrow endpoint on purpose (see gateway/routers/default_model.py): the value
+A narrow endpoint on purpose (see gateway/routers/configuration/default_model.py): the value
 does not live in `.env`, and the full-replace `PUT /api/config` reducer has no
 business touching it. These tests pin the two things that make it safe to expose
 in the panel — the roster check, and that a write never reaches an existing agent.
