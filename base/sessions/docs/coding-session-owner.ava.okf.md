@@ -78,7 +78,7 @@ anything is launched.
 
 ## Key dependencies
 
-- [[base/sessions/pty/docs/pty_sessions.ava.okf.md]] — full-name PTY liveness and
+- [[base/sessions/pty/docs/pty_sessions/pty_sessions.ava.okf.md]] — full-name PTY liveness and
   termination used by exact generation cleanup
 - [[ava_builtins/skills/platform/ava-guide/external-agents/docs/external-agents.ava.okf.md]]
   — Codex launcher and supervisor that consume this owner contract

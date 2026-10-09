@@ -56,8 +56,8 @@ Rules (source of truth):
      campaign produced.
  14. Docs layer (block): every node sits in a `docs/` layer — a directory
      segment named `docs` in its path — beside the code it describes, so the
-     source tree holds code and its `tests/` and `docs/`, nothing else. `okf/`
-     (the index layer) and `.github/` are exempt. E014 names the location the
+     source tree holds code and its `tests/` and `docs/`, nothing else.
+     `.github/` is exempt. E014 names the location the
      node belongs in: `docs/` under the nearest directory above it that holds
      code, or under the node's own directory when none does.
 
@@ -114,8 +114,8 @@ _SPLIT_HINT = (
     "the parent edge; the docs/ layer stands for its package directory, so here "
     "that is '{home}') — see docs/conventions/doc-maintenance.md."
 )
-# The index layer and the CI overview keep their nodes outside a docs/ layer.
-_LAYER_EXEMPT = ("okf/", ".github/")
+# The CI overview keeps its nodes outside a docs/ layer.
+_LAYER_EXEMPT = (".github/",)
 # A directory "holds code" (rule 14's anchor) when it directly contains one of these.
 _CODE_SUFFIXES = frozenset({".py", ".pyi", ".ts", ".tsx"})
 _CODE_NAMES = frozenset({"SKILL.md", "package.json"})
@@ -283,7 +283,7 @@ def _layer_home(rel: str, repo_root: Path) -> str:
 
 
 def _layer_error(filepath: Path, repo_root: Path) -> LintError | None:
-    """Rule 14: a node outside `okf/` and `.github/` sits in a `docs/` layer."""
+    """Rule 14: a node outside `.github/` sits in a `docs/` layer."""
     try:
         rel = filepath.resolve().relative_to(repo_root).as_posix()
     except ValueError:
@@ -295,7 +295,7 @@ def _layer_error(filepath: Path, repo_root: Path) -> LintError | None:
         1,
         "E014",
         f"Node outside a docs/ layer: OKF nodes live in a docs/ directory beside "
-        f"the code they describe (okf/ and .github/ are exempt). Move it to "
+        f"the code they describe (.github/ is exempt). Move it to "
         f"'{_layer_home(rel, repo_root)}'.",
     )
 

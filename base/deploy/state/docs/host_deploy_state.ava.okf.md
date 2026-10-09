@@ -1,11 +1,10 @@
 ---
 type: doc
 title: Host Deploy State
-description: One row per machine in `host_deploy_state` — its posture (idle/paused), the host-level half of the R1 deployment-state model.
+description: One row per machine in `host_deploy_state` — its idle/paused posture after native service drain.
 tags:
 - deploy
 - liveness
-- r1
 ---
 
 # Host Deploy State
@@ -33,7 +32,7 @@ The table carries only `machine`, `posture` and `updated_at`: the updater lease,
 ## Key Dependencies
 
 - [[base.ava.okf.md|Base Library]] — layering: `base` must not import `cli`/`gateway`; identity from `base.cluster.machine`, DB from `base.db`
-- [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the two-table deployment-state model
+- [[base/deploy/state/docs/state.ava.okf.md|Deployment state]] — current host posture and code-version responsibilities; the [deployment lease was retired](../../../../docs/decisions/runtime/updates/release/2026-09-30-remove-deployment-lease.md)
 
 ## Entry Points
 
