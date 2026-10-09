@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -238,3 +239,88 @@ def test_repair_cli_can_fix_invalid_file_without_authority(tmp_path: Path) -> No
     assert result.returncode == 0, result.stderr
     assert dotenv_values(path)["AVA_EXEC_NODE_TIMEOUT_SECONDS"] == "2000.0"
     assert dotenv_values(path)["AVA_OPS_CONCURRENCY"] == "7"
+
+
+def test_deferred_complete_model_builds_once_and_keeps_file_reads_fresh(tmp_path: Path) -> None:
+    complete = _complete()
+    runtime = complete.model_copy(update={"profile": "gateway"})
+    builds: list[Settings] = []
+
+    def build() -> Settings:
+        builds.append(complete)
+        return complete
+
+    path = tmp_path / ".env"
+    authority = ConfigAuthority.deferred(runtime=runtime, build_all_domains=build, env_path=path)
+    assert builds == []
+    assert authority.runtime is runtime
+    assert authority.service_field_value("machine_host") == runtime.general.machine_host
+    assert builds == []
+
+    def read(_index: int) -> float:
+        return authority.service_field_value("exec_timeout_seconds")
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        values = list(pool.map(read, range(8)))
+    assert values == [complete.sandbox.exec_timeout_seconds] * 8
+    assert builds == [complete]
+    path.write_text("AVA_TRACE_ENABLED=false\n")
+    assert authority.current_field_values()["trace_enabled"] is False
+    path.write_text("AVA_TRACE_ENABLED=true\n")
+    assert authority.current_field_values()["trace_enabled"] is True
+    assert builds == [complete]
+
+
+@pytest.mark.parametrize("error", [RuntimeError("factory failed"), KeyboardInterrupt("cancelled")])
+def test_deferred_complete_model_propagates_failure_and_memoizes_only_success(
+    tmp_path: Path, error: BaseException
+) -> None:
+    builds: list[None] = []
+
+    complete = _complete()
+
+    def build() -> Settings:
+        builds.append(None)
+        if len(builds) == 1:
+            raise error
+        return complete
+
+    runtime = complete.model_copy(update={"profile": "gateway"})
+    authority = ConfigAuthority.deferred(
+        runtime=runtime, build_all_domains=build, env_path=tmp_path / ".env"
+    )
+    assert builds == []
+    with pytest.raises(type(error)) as raised:
+        authority.service_field_value("exec_timeout_seconds")
+    assert raised.value is error
+    assert builds == [None]
+    assert (
+        authority.service_field_value("exec_timeout_seconds")
+        == complete.sandbox.exec_timeout_seconds
+    )
+    assert (
+        authority.service_field_value("exec_timeout_seconds")
+        == complete.sandbox.exec_timeout_seconds
+    )
+    assert builds == [None, None]
+
+
+def test_deferred_complete_model_validates_profile_on_first_read(tmp_path: Path) -> None:
+    builds: list[None] = []
+
+    def build() -> Settings:
+        builds.append(None)
+        return _complete().model_copy(update={"profile": "agent"})
+
+    runtime = _complete().model_copy(update={"profile": "gateway"})
+    authority = ConfigAuthority.deferred(
+        runtime=runtime, build_all_domains=build, env_path=tmp_path / ".env"
+    )
+    assert builds == []
+    failures: list[ValueError] = []
+    for _ in range(2):
+        with pytest.raises(ValueError, match="profile-independent") as raised:
+            authority.service_field_value("exec_timeout_seconds")
+        failures.append(raised.value)
+    assert failures[0] is not failures[1]
+    assert builds == [None, None]

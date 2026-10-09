@@ -317,7 +317,24 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
             loader.load_agent_faces()
             _sdk_install.mark_faces_loaded()
         else:
-            loader.load_extensions(surface=surface)
+            from base import paths
+            from base.config import settings
+            from base.config.service_read import ConfigAuthority
+            from base.lm.plugin_providers import build_model_catalog
+
+            def complete_read_model() -> Any:
+                from base.config import Settings
+
+                return Settings(profile=None)
+
+            authority = ConfigAuthority.deferred(
+                runtime=settings,
+                build_all_domains=complete_read_model,
+                env_path=paths.ava_home() / ".env",
+            )
+            loader.load_extensions(
+                surface=surface, catalog=build_model_catalog(), authority=authority
+            )
             if not surface:
                 _sdk_install.mark_faces_loaded()
     except BaseException as exc:

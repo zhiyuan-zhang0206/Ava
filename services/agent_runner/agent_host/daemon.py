@@ -415,8 +415,18 @@ def _load_plugin_installation() -> Installation:
     """
     from agent.extensions import load_extensions
     from ava.sdk_surface.install import installed
+    from base.config import Settings
+    from base.config.service_read import ConfigAuthority
+    from base.lm.plugin_providers import build_model_catalog
 
-    load_extensions()
+    env_path = paths.ava_home() / ".env"
+    if settings.profile is None:
+        authority = ConfigAuthority(runtime=settings, all_domains=settings, env_path=env_path)
+    else:
+        authority = ConfigAuthority.deferred(
+            runtime=settings, build_all_domains=lambda: Settings(profile=None), env_path=env_path
+        )
+    load_extensions(catalog=build_model_catalog(), authority=authority)
     installation = installed()
     if installation is None:
         raise RuntimeError("the plugin load did not install its SDK surface")
