@@ -27,7 +27,7 @@ in_progress ──→ done
 
 ## API
 
-### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None, operation_key=None) -> Task`
+### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None, operation_key) -> Task`
 
 Create a task and return the full `Task`. `title` is a single line (unique among `in_progress` tasks); `description` is the task description.
 
@@ -38,7 +38,7 @@ Create a task and return the full `Task`. `title` is a single line (unique among
 - **Rejects duplicate titles** among `in_progress` tasks (`ValueError`) — the check is `base.agents.tasks.rules.open_title_holder`, shared with `update()`'s rename check and the gateway PATCH.
 - Triggers a `task_create` event log + publishes `task_created` (SSE, board invalidates and refetches).
 
-Keyed standalone creation returns the original accepted Task snapshot on replay;
+Standalone creation returns the original accepted Task snapshot on replay;
 see [[task_creation_receipts.ava.okf.md|Creation receipts]]. Query `get(task.id)`
 for current state.
 
@@ -66,7 +66,7 @@ Filter the task list, ordered by `created_at` ascending. All parameters are opti
 | `parent=some_id, recursive=True` | Entire subtree (recursive CTE) |
 | No parameters | All tasks |
 
-### `update(task_id, *, status=None, title=None, description=None, results=None, owner=<unchanged>, remind_interval_seconds=<unchanged>, priority=None, note=None, operation_key=None) -> None`
+### `update(task_id, *, status=None, title=None, description=None, results=None, owner=<unchanged>, remind_interval_seconds=<unchanged>, priority=None, note=None, operation_key) -> None`
 
 Modify task fields, **pass only what you want to change**—omitted fields remain unchanged. `results` is replaced wholesale; to append progress, use `note=` or `log()`.
 
@@ -80,17 +80,19 @@ Modify task fields, **pass only what you want to change**—omitted fields remai
 - Each fresh committed write publishes `task_updated` (SSE, board invalidates and refetches).
 - `operation_key`: [[task_update_receipts.ava.okf.md|explicit agent/task-scoped replay]] skips repeated task effects; changed effective inputs with the same key raise `ValueError`.
 
-### `log(task_id, message, *, operation_key=None) -> None`
+### `log(task_id, message, *, operation_key) -> None`
 
-Append a line `[YYYY-MM-DD HH:MM:SS] message` to `results`—**delegates to `update(task_id, note=message)`**, same timestamped append, same reminder counter reset.
+Append a line `[YYYY-MM-DD HH:MM:SS] message` to `results`—**delegates to `update(task_id, note=message, operation_key=operation_key)`**, same timestamped append, same reminder counter reset.
 
 **Common operation patterns**:
 
 ```python
-ava.tasks.update(task_id, owner=ava.self.AGENT_ID, status="in_progress")  # claim and start
-ava.tasks.log(task_id, "Finished phase one")                               # log progress
-ava.tasks.update(task_id, status="done")                                    # complete
-ava.tasks.update(task_id, owner=other_agent_id)                             # transfer to another agent
+from uuid import uuid4
+
+ava.tasks.update(task_id, owner=ava.self.AGENT_ID, status="in_progress", operation_key=str(uuid4()))  # claim and start
+ava.tasks.log(task_id, "Finished phase one", operation_key=str(uuid4()))                               # log progress
+ava.tasks.update(task_id, status="done", operation_key=str(uuid4()))                                    # complete
+ava.tasks.update(task_id, owner=other_agent_id, operation_key=str(uuid4()))                             # transfer to another agent
 ```
 
 ## Concurrency Safety

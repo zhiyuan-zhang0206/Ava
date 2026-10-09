@@ -18,6 +18,7 @@ import datetime as dt
 import re
 import time
 from pathlib import Path
+from uuid import uuid4
 
 import ava
 from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
@@ -124,11 +125,14 @@ def _notify(agent_id: int, content: str, *, canonical: bool) -> bool:
     failed — the one-shot call sites exit 2 on that, while the in-loop call
     sites keep supervising and retry at their next trigger.
     """
+    operation_key = str(uuid4())
     delay = WAKE_BACKOFF_S
     for attempt in range(1, WAKE_ATTEMPTS + 1):
         try:
             if canonical:
-                ava.agents.send_system_note(agent_id, content, tag="task", resurrect=False)
+                ava.agents.send_system_note(
+                    agent_id, content, tag="task", resurrect=False, idempotency_key=operation_key
+                )
             else:
                 ava.agents.send_message(agent_id, content)
             return True

@@ -131,11 +131,17 @@ def test_task_patch_caller_key_survives_explicit_replay(failure: str) -> None:
         for _ in range(2):
             if failure == "timeout":
                 with pytest.raises(GatewayUnavailable, match="result unknown"):
-                    transport.patch("/api/tasks/1", {"priority": "P1"}, idempotency_key="original")
+                    transport.patch(
+                        "/api/tasks/1",
+                        {"priority": "P1"},
+                        idempotency_key="original",
+                    )
             else:
                 assert (
                     transport.patch(
-                        "/api/tasks/1", {"priority": "P1"}, idempotency_key="original"
+                        "/api/tasks/1",
+                        {"priority": "P1"},
+                        idempotency_key="original",
                     ).status_code
                     == 503
                 )

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from itertools import count
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -209,7 +210,9 @@ def test_gateway_patch_clears_escalation_marker(db_conn: psycopg.Connection) -> 
         )
     db_conn.commit()
     with TestClient(app) as client:
-        resp = client.patch(f"/api/tasks/{tid}", json={"priority": "P1"})
+        resp = client.patch(
+            f"/api/tasks/{tid}", json={"priority": "P1"}, headers={"Idempotency-Key": str(uuid4())}
+        )
     assert resp.status_code == 200
     with db_conn.cursor() as cur:
         cur.execute(
