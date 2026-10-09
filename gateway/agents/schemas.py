@@ -54,15 +54,6 @@ class LabelPatchRequest(BaseModel):
     source: Literal["user", "self"] = "user"
 
 
-class CompactEnqueued(BaseModel):
-    """POST /api/agents/{id}/compact response — returns immediately after
-    pending insert, does not wait for the kernel loop to finish."""
-
-    agent_id: int
-    status: Literal["enqueued"]
-    inbound_id: int | None = None
-
-
 class UserMessageIn(BaseModel):
     """POST /api/agents/{id}/messages request body — user message to agent.
 
@@ -78,12 +69,6 @@ class MessageEnqueued(BaseModel):
 
     agent_id: int
     status: Literal["enqueued"]
-
-
-class CancelRequest(BaseModel):
-    """POST /api/cancel request body — pause/stop the agent, addressed by id."""
-
-    agent_id: int = Field(..., gt=0)
 
 
 class AgentMessageEnqueued(BaseModel):

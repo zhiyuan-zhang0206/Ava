@@ -23,7 +23,6 @@ from fastapi import APIRouter, Body, HTTPException, Path, Request
 from psycopg_pool import ConnectionPool, PoolTimeout
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from base.agents import AgentNotFound
 from base.agents.compaction.commands import accept as accept_guarded_compact
 from base.agents.compaction.commands import observe as observe_guarded_compact
 from base.agents.compaction.commands import status as guarded_compact_status
@@ -44,8 +43,6 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartRequest,
 )
 from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
-from base.agents.messages.control_delivery import ControlConflictError, accept_control
-from base.agents.messages.inbound import InboundKind
 from base.agents.messages.native_cancel import (
     NativeCancelConflictError,
     accept_native_cancel,
@@ -59,20 +56,16 @@ from base.agents.messages.native_restart import (
 from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from gateway.agents.forward import forward_to_home_machine
-from gateway.agents.schemas import CancelRequest, CompactEnqueued
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
     SCOPE_HEADER,
     AuthPrincipal,
     PrincipalScopeError,
-    optional_request_key,
     request_key,
 )
-from ops import lifecycle as _ops
 from ops.rpc_schemas import (
     BillingResurrectRequest,
     BillingResurrectResponse,
-    CancelRequested,
     OpenTaskRow,
     OpenTasksHint,
     RestartAgentRequest,
@@ -126,98 +119,6 @@ async def post_force_expire_impersonation(
     except ImpersonationError as exc:
         raise HTTPException(status_code=404, detail=f"agent {agent_id} not found") from exc
     return ForceExpireImpersonationResponse(session_id=body.session_id, status=status)
-
-
-@router.post("/api/agents/{agent_id}/compact")
-async def post_compact(
-    agent_id: Annotated[int, Path(gt=0)],
-    request: Request,
-) -> CompactEnqueued:
-    """Trigger compact — INSERT kind='compact_request' inbound; the claim
-    Node takes over, runs the backend Compaction LLM to generate a summary
-    that replaces messages, and publishes a `compact_done` event to notify
-    UI.
-
-    The new design uniformly uses backend LLM summary generation (see
-    docs/decisions/agents/graph/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
-    parameter old frontends sent is ignored (still accepted — extra query
-    parameters never fail the call). Agent-initiated compact still goes through
-    ava.self.compact() -> kind='compact_summary'; this is a separate signal
-    from UI-triggered compact_request.
-
-    A compact targeting a terminated agent auto-resurrects it (shared with the
-    chat path): otherwise the compact_request row would sit pending with no live
-    process to claim it. The co-batched resurrect wins the claim node's recency
-    routing, so the agent wakes and the requested compaction still runs.
-    """
-    try:
-        receipt = await asyncio.to_thread(
-            accept_control,
-            request.app.state.db_pool,
-            agent_id,
-            InboundKind.COMPACT_REQUEST,
-            path=request.url.path,
-            key=optional_request_key(request),
-        )
-    except (PrincipalScopeError, ControlConflictError, AgentNotFound) as exc:
-        raise _control_http_error(exc) from exc
-    from base import telemetry
-
-    if receipt.event is not None:
-        telemetry.emit_prepared(receipt.event)
-    if receipt.pending and receipt.inbound_id is not None:
-        await asyncio.to_thread(
-            publish_inbound_wake,
-            request.app.state.db,
-            request.app.state.bus,
-            agent_id,
-            str(receipt.inbound_id),
-        )
-        await _ops.resurrect_if_terminated(
-            request.app.state.db,
-            request.app.state.bus,
-            agent_id,
-            trigger_inbound_id=receipt.inbound_id,
-            trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
-        )
-    return CompactEnqueued(agent_id=agent_id, status="enqueued", inbound_id=receipt.inbound_id)
-
-
-@router.post("/api/cancel")
-async def post_cancel(body: CancelRequest, request: Request) -> CancelRequested:
-    """Pause/stop the agent — INSERT a durable kind='cancel' inbound.
-
-    Durable, not fire-and-forget: a running llm/exec node interrupts on the
-    row immediately (it watches the inbound Redis pub/sub path); if the agent
-    is between actions when the cancel lands, the row stays pending and the
-    next claim pass halts it to idle. Either way the agent stops and stays
-    alive (resumable by the next message). Enqueue-and-return like `/messages`;
-    the kernel emits a `cancelled` SSE event when it actually stops.
-
-    No cross-machine forwarding: the cancel is a durable row in the shared DB
-    (plus a Redis wake), delivered regardless of which host runs the agent.
-    """
-    try:
-        return await _ops.cancel_agent_op(
-            request.app.state.db,
-            request.app.state.bus,
-            body.agent_id,
-            request.app.state.db_pool,
-            operation_key=optional_request_key(request),
-            operation_path=request.url.path,
-        )
-    except (PrincipalScopeError, ControlConflictError, AgentNotFound) as exc:
-        raise _control_http_error(exc) from exc
-
-
-def _control_http_error(
-    exc: PrincipalScopeError | ControlConflictError | AgentNotFound,
-) -> HTTPException:
-    if isinstance(exc, PrincipalScopeError):
-        return HTTPException(status_code=422, detail=str(exc))
-    if isinstance(exc, ControlConflictError):
-        return HTTPException(status_code=409, detail=str(exc))
-    return HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/api/agents/{agent_id}/terminate")

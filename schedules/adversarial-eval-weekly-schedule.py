@@ -12,7 +12,9 @@ import threading
 import time
 import traceback
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -60,7 +62,6 @@ class ScenarioServer:
     """A short-lived loopback server and its request accounting state."""
 
     server: HTTPServer
-    thread: threading.Thread
     state: dict[str, Any]
     lock: threading.Lock
 
@@ -76,19 +77,15 @@ class ScenarioServer:
         with self.lock:
             return dict(self.state["request_counts"])
 
-    def close(self) -> None:
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=5)
-
 
 def data_root() -> Path:
     """Return the schedule's cluster-local durable state directory."""
     return Path(ava_home()) / "adversarial_eval"
 
 
-def start_scenario_server() -> ScenarioServer:
-    """Start one counted loopback server for every scenario in a batch."""
+@contextmanager
+def start_scenario_server() -> Generator[ScenarioServer]:
+    """Own one counted loopback server until the batch leaves its scope."""
     state: dict[str, Any] = {"partner_document": "", "request_counts": {}}
     lock = threading.Lock()
 
@@ -112,10 +109,16 @@ def start_scenario_server() -> ScenarioServer:
         def log_message(self, format: str, *_args: object) -> None:
             return
 
-    server = HTTPServer(("127.0.0.1", 0), ScenarioHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return ScenarioServer(server=server, thread=thread, state=state, lock=lock)
+    with (
+        HTTPServer(("127.0.0.1", 0), ScenarioHandler) as server,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="adversarial-scenario") as executor,
+    ):
+        serving = executor.submit(server.serve_forever)
+        try:
+            yield ScenarioServer(server=server, state=state, lock=lock)
+        finally:
+            server.shutdown()
+            serving.result()
 
 
 def ensure_agent(label: str, prompt: str) -> int:
@@ -165,12 +168,11 @@ def run_weekly_batch() -> Path:
     }
     _write_batch_marker(marker_path, batch_marker)
     _sweep_leftover_workers(set())
-    server = start_scenario_server()
     records: list[dict[str, Any]] = []
     worker_to_case: dict[int, str] = {}
     timeout_cases: set[str] = set()
 
-    try:
+    with start_scenario_server() as server:
         for case_id in subset:
             record = _prepare_case(case_id, scenarios_root, server, marker_path, batch_marker)
             records.append(record)
@@ -192,8 +194,6 @@ def run_weekly_batch() -> Path:
             _audit_record(
                 record, child_spawners, request_counts, record["case_id"] in timeout_cases
             )
-    finally:
-        server.close()
 
     request_counts = server.counts()
     per_case_scores = {record["case_id"]: record["score"] for record in records}

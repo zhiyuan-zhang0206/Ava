@@ -12,9 +12,27 @@ from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
+from ops.agents.spawn import create_agent_row
 from tests.factories.maintenance import WHEN
 from tests.factories.maintenance import isolate as isolate
 from tests.factories.maintenance import maintenance_agent as _agent
+
+
+def test_maintenance_parks_a_never_admitted_birth_without_consuming_its_marker(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    agent, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
+    query = "SELECT incarnation_resources FROM agents_meta WHERE id=%s"
+    marker = db_conn.execute(query, (agent,)).fetchone()
+    assert marker is not None and marker[0]["state"] == "unadmitted"
+    db_conn.commit()
+    pause_owner.begin_maintenance("move", WHEN)
+    hold = cohort.prepare(
+        db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+    )
+    assert hold.parked == (agent,) and hold.commands == {}
+    cohort.verify_drained(db_conn, hold)
+    assert db_conn.execute(query, (agent,)).fetchone() == marker
 
 
 async def test_admission_waiting_on_real_row_lock_cannot_escape_published_hold(

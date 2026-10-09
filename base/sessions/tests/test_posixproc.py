@@ -20,7 +20,7 @@ import psutil
 import pytest
 
 from base.native_process import pid_starttime_ticks
-from base.native_process.os_platform import IS_LINUX, IS_WINDOWS
+from base.native_process.os_platform import IS_WINDOWS, is_linux
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
 from base.sessions.tests.process_evidence import (
@@ -308,7 +308,7 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:
     assert not posixproc._record_path(name).exists()
 
 
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
     """A stable kernel start tick keeps a live record despite a bad epoch time."""
     name = "ava-test-agent-starttime-drift"
@@ -368,7 +368,7 @@ def test_session_record_spans_import_epochs(
         posixproc.kill_session(name, graceful=False)
 
 
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_list_sessions_reaps_starttime_pid_reuse(unit_home: Path) -> None:
     """A live pid with different start ticks is a recycled pid and is reaped."""
     name = "ava-test-agent-starttime-reuse"

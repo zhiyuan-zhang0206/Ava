@@ -27,7 +27,7 @@ For multiple tool calls, `exec` loops to itself until each original ID has a res
 ## Core Responsibilities
 
 - **init_context** (`_init_context.py`): Sole owner of the standing message head (SystemMessage + the ordered context notes). Lays it down whenever `messages` is empty — an agent's first wake, and the turn after any compaction, which routes back here with the post-compact tail parked in `state.context_reset`. A pass-through otherwise.
-- **claim** (`claim/node.py` + `_attach_drain.py` / `claim/_batch.py` / `claim/_routing.py` / `claim/_dispatch.py` / `claim/_decide.py`): At an idle turn boundary, drains pending attachments into one tail HumanMessage before taking the existing end-turn or wait route; otherwise long-waits on Redis pub/sub and dispatches inbound messages (new message / resume / terminate / restart). A non-overflow circuit-breaker heartbeat parks only a heartbeat-only batch; a co-batched chat still routes to `before_llm`. A flagged chat / system-note inbound gets a SECURITY note in claim's own delta ([[inbound-findings.ava.okf.md]]).
+- **claim** (`claim/node.py` + `_attach_drain.py` / `claim/_batch.py` / `claim/_routing.py` / `claim/_dispatch.py` / `claim/_decide.py`): At idle turn boundaries, drains pending attachments into one tail HumanMessage before end-turn or wait; otherwise long-waits on Redis pub/sub and dispatches inbound messages (new message / resume / terminate / restart). A non-overflow circuit-breaker heartbeat parks only a heartbeat-only batch; a co-batched chat still routes to `before_llm`. A flagged chat / system-note inbound gets a SECURITY note in claim's own delta ([[inbound-findings.ava.okf.md]]). Tests: `agent/graph/claim/tests/`.
 - **before_llm** (hook container): Runs the plugins' declared `before_llm` hooks, then the framework's—plugins can modify state or inject extra context
 - **llm** (`llm/node.py`): Owns automatic compaction and normal streaming inference. Both model operations race the durable interrupt. Interrupted compaction discards its result without replacing history or advancing the compact version; completed compaction routes `init_context → claim`. A tagged summary with no later AIMessage gets one ordinary generation before the threshold re-arms; this survives cancellation, new input, and checkpoint recovery. Actual provider overflow still uses circuit-breaker rescue. Normal streaming cancellation discards the partial generation. Streaming-first with one non-streaming fallback; fatal provider errors fail-fast to idle.
 - **before_exec** (hook container): Runs the declared `before_exec` hooks—final checkpoint before tool invocation
@@ -36,18 +36,17 @@ For multiple tool calls, `exec` loops to itself until each original ID has a res
 
 ## Interrupting a turn: cancel and terminate
 
-Both are **durable inbound rows**, not a Redis control channel. `POST
-/api/cancel` INSERTs `kind='cancel'`; terminate shares the same machinery.
-An in-flight llm/exec node notices it via a short-cadence **DB poll of
-`inbound_messages`** (`agent/graph/interrupt.py`, `_INTERRUPT_POLL_S` = 2s —
-deliberately not sharing the claim node's Redis pub/sub listener: that sharing
-was the 2026-08-02 lost-wake root cause), sets `halted=True`, and routes to
-claim. The two differ only in claim's routing:
+Public cancel uses the dedicated native command tied to one observed graph
+work UUID, not the generic inbound queue. The two-second interrupt watcher
+checks that exact work's command; claim preserves co-queued chat, and the host
+settles the command only after committed halt/checkpoint and resource-closure
+proof. See [[base/agents/incarnation/docs/native-work-cancel.ava.okf.md]].
 
-| | claim routes to | Process |
-|---|---|---|
-| cancel | idle | stays alive, publishes `cancelled` |
-| terminate | `END` | exits (unless vetoed — see below) |
+Terminate remains a durable inbound. The same DB poll in
+`agent/graph/interrupt.py` observes it during LLM/exec, halts and returns to
+claim; claim routes termination to `END` while cancel keeps the agent alive and
+idle. Retained native cancel envelopes follow the existing history/claim
+contract, but there is no public `/api/cancel` producer.
 
 A terminate **yields to a message the death decision did not see**: a chat
 co-batched with a self-initiated terminate (`ava.self.terminate()` — the chat
@@ -69,8 +68,8 @@ Node-level discard semantics differ, and deliberately so:
   The watcher retains that attribution through subprocess cleanup; a later
   inbound cannot relabel it. Existing side effects are not undone or replayed.
 
-Durability is what makes this correct under a race: a cancel landing *between*
-actions is not lost, because the row is dispatched by the next claim pass.
+An accepted native cancel remains bound to its original work across action
+boundaries; a later chat or work UUID cannot consume that command.
 
 ## Key Dependencies
 

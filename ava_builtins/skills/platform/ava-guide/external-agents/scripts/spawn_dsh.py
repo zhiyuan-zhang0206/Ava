@@ -40,7 +40,6 @@ import time
 from pathlib import Path
 
 import ava
-import base.paths
 from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -130,9 +129,9 @@ def _wait_for_session(sid: int, timeout: float = 90.0) -> str:
 def _takeover_bootstrap_message(agent_id: int, name: str, brief: str) -> str:
     """Inline the briefing; a takeover reads no task or work file."""
     from ava.impersonation.launch import bootstrap_message
+    from ava.shell.coding_tools import impersonator_guide
 
-    guide = base.paths.repo_root() / ".agents" / "skills" / "impersonator-guide" / "SKILL.md"
-    return bootstrap_message(agent_id, name, "dsh", brief, guide)
+    return bootstrap_message(agent_id, name, "dsh", brief, impersonator_guide())
 
 
 def _owner_terminated(agent_id: int) -> bool:

@@ -51,6 +51,23 @@ class AvaMsgType(StrEnum):
     COMPACT_REQUEST = "compact_request"
 
 
+class ExecStatus(StrEnum):
+    """How one `execute_code` call ended, stored as `ava_exec_status` (`<member>.value`).
+
+    COMPLETED: the code returned. FAILED: it raised, crashed, or was rejected before
+    running (syntax error). TIMED_OUT / CANCELLED: stopped at the sandbox limit / by an
+    interrupt. HALTED: it ended the run by lifecycle request (compact, restart,
+    terminate, impersonation). NOT_RUN: the call never executed (unknown tool, skipped
+    behind an earlier halt, synthetic interrupted result)."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
+    HALTED = "halted"
+    NOT_RUN = "not_run"
+
+
 class NoteTag(StrEnum):
     """Category of a framework-injected system note, carried in
     additional_kwargs['ava_note_tag'] beside ava_msg_type='system_note'.
@@ -123,8 +140,8 @@ class AvaUsage(TypedDict, total=False):
 class AvaMessageKwargs(TypedDict, total=False):
     """The `ava_*` metadata bag on a message's `additional_kwargs`. Every key is
     contextual to the message kind (total=False): an `inbound` carries source /
-    inbound_id / image_urls, an `exec_output` carries exec_ms /
-    sdk_calls, a `system_note` carries note_tag, a compact summary carries
+    inbound_id / image_urls, an `exec_output` carries exec_ms / exec_status /
+    exec_started_at / exec_body_start / sdk_calls, a `system_note` carries note_tag, a compact summary carries
     `ava_compact_id`, an AIMessage carries the reasoning timings. `sdk_calls`
     is the one framework key without the `ava_` prefix — the frozen wire name
     for the exec_output's runtime SDK-call tally (`agent/graph/exec/node.py` writes
@@ -154,6 +171,9 @@ class AvaMessageKwargs(TypedDict, total=False):
     ava_note_tag: str
     ava_task_id: int
     ava_exec_ms: int | None
+    ava_exec_status: str
+    ava_exec_started_at: str | None
+    ava_exec_body_start: int
     sdk_calls: list[dict[str, Any]] | None
     ava_reasoning_ms_by_block: dict[str, int]
     ava_code_ms_by_block: dict[str, int]
