@@ -20,8 +20,11 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx2
+import openai
 import psycopg
 import pytest
+from langchain_core.exceptions import ModelAPIError
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
@@ -49,13 +52,14 @@ from tests.fixtures.units import spawn_agent
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
-class _FakeProviderStatusError(Exception):
-    """anthropic/openai APIStatusError shape driving the classifier."""
+class _FakeProviderStatusError(openai.APIStatusError):
+    """An actual SDK status error with a synthetic response."""
 
-    def __init__(self, status_code: int, body: dict | None = None) -> None:
-        super().__init__(f"HTTP {status_code}")
-        self.status_code = status_code
-        self.body = body  # pyright: ignore[reportUnknownMemberType]
+    def __init__(self, status_code: int, body: object = None) -> None:
+        response = httpx2.Response(
+            status_code, request=httpx2.Request("POST", "https://audit.invalid")
+        )
+        super().__init__(f"HTTP {status_code}", response=response, body=body)
 
 
 class _RecordingPublisher:
@@ -380,7 +384,7 @@ async def test_heartbeat_while_breaker_open_compaction_failure_emits_terminal(
 
     state = _overflow_state(breaker_reason="context_overflow")
     llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=RuntimeError("provider 502"))
+    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=ModelAPIError("provider 502"))
     publisher = MagicMock()
 
     with pytest.raises(CompactionFailedError, match="no usable summary"):

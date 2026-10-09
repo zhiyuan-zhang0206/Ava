@@ -182,13 +182,15 @@ half-loaded namespace can make a broken package look fine. Spawn a fresh agent
 and give it a task that only succeeds if the package really works:
 
 ```python
+from uuid import uuid4
+
 import ava
 tid = ava.agents.spawn(prompt=(
     "Use ava.skills.<name> (or ava.mcps.<server>) to <a concrete task that fails "
     "without it>. Report exactly what you called, what came back, and anything "
     "confusing or missing in the instructions. Do not work around it — if it is "
     "broken, say so."
-))
+), idempotency_key=str(uuid4()))
 ```
 
 Poll `ava.agents.get_status(tid)` and read the verdict with
@@ -239,10 +241,12 @@ remote install flag, and you should not invent one out of ssh. To install
 somewhere else, hand the whole job to an agent over there:
 
 ```python
+from uuid import uuid4
+
 ava.agents.spawn(machine="<machine-name>", prompt=(
     "Install <package> on this machine and verify it. Read and follow "
     "ava.skills.ava_guide.packages.install."
-))
+), idempotency_key=str(uuid4()))
 ```
 
 `ava.agents.list_machines()` names the hosts. That agent runs this same skill on

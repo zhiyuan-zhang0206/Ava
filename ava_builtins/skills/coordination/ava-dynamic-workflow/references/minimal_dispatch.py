@@ -15,6 +15,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import ava
 
@@ -90,7 +91,8 @@ def run(handoff: Path, tasks: list[dict[str, str]]) -> dict:
                 "The file is the routine handoff; report blockers or budget decisions directly "
                 "to the responsible peer instead of making partial output look complete. "
                 "Choose whether to idle or end yourself after delivery based on follow-up needs."
-            )
+            ),
+            idempotency_key=str(uuid4()),
         )
         state[task_id] = {"input_hash": fingerprint, "phase": "assigned", "agent_id": int(peer_id)}
         _save(state_path, state)

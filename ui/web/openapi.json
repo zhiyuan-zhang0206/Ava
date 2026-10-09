@@ -455,7 +455,7 @@
     "/api/keyed/v1/agents": {
       "post": {
         "summary": "Post Guarded Agents",
-        "description": "Create a plain agent through a versioned, principal-bound keyed entry.\n\nOlder routing cannot execute this path. Callers must keep it fixed for an\nintent and never fall back to the legacy path after an uncertain response.",
+        "description": "Create or fork an agent through principal-bound keyed admission.\n\nOlder routing cannot execute this path. Callers must keep it fixed for an\nintent and never fall back to the legacy path after an uncertain response.",
         "operationId": "post_guarded_agents_api_keyed_v1_agents_post",
         "parameters": [
           {
@@ -491,46 +491,6 @@
         },
         "responses": {
           "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SpawnedAgent"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/retry-launch": {
-      "post": {
-        "summary": "Retry Agent Launch",
-        "description": "Retry dispatch for one committed identity without adding an inbound.",
-        "operationId": "retry_agent_launch_api_agents__agent_id__retry_launch_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -676,86 +636,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ForceExpireImpersonationResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/compact": {
-      "post": {
-        "summary": "Post Compact",
-        "description": "Trigger compact — INSERT kind='compact_request' inbound; the claim\nNode takes over, runs the backend Compaction LLM to generate a summary\nthat replaces messages, and publishes a `compact_done` event to notify\nUI.\n\nThe new design uniformly uses backend LLM summary generation (see\ndocs/decisions/agents/graph/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query\nparameter old frontends sent is ignored (still accepted — extra query\nparameters never fail the call). Agent-initiated compact still goes through\nava.self.compact() -> kind='compact_summary'; this is a separate signal\nfrom UI-triggered compact_request.\n\nA compact targeting a terminated agent auto-resurrects it (shared with the\nchat path): otherwise the compact_request row would sit pending with no live\nprocess to claim it. The co-batched resurrect wins the claim node's recency\nrouting, so the agent wakes and the requested compaction still runs.",
-        "operationId": "post_compact_api_agents__agent_id__compact_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CompactEnqueued"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/cancel": {
-      "post": {
-        "summary": "Post Cancel",
-        "description": "Pause/stop the agent — INSERT a durable kind='cancel' inbound.\n\nDurable, not fire-and-forget: a running llm/exec node interrupts on the\nrow immediately (it watches the inbound Redis pub/sub path); if the agent\nis between actions when the cancel lands, the row stays pending and the\nnext claim pass halts it to idle. Either way the agent stops and stays\nalive (resumable by the next message). Enqueue-and-return like `/messages`;\nthe kernel emits a `cancelled` SSE event when it actually stops.\n\nNo cross-machine forwarding: the cancel is a durable row in the shared DB\n(plus a Redis wake), delivered regardless of which host runs the agent.",
-        "operationId": "post_cancel_api_cancel_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CancelRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CancelRequested"
                 }
               }
             }
@@ -1586,7 +1466,7 @@
     "/api/agents/{agent_id}/system-note": {
       "post": {
         "summary": "Post Agent System Note",
-        "description": "Deliver a framework system note to the specified agent.\n\nThe note is queued as a kind='system_note' inbound; the agent's claim\nrenders it as a system note (system_marker, NoteTag `body.note_tag`) in\nits timeline — no Agent prefix, no peer timestamp — instead of a chat\npeer message. Task notifications (assign / update / reminder) are the\ncurrent family (`note_tag='task'`).\n\n`body.resurrect` mirrors the chat path's auto-resurrect but is a choice,\nnot a given: task assignment (a delegator direction) wakes a terminated\nowner, while plain update / reminder notices must not (user ruling\n2026-08-27 — notification messages never resurrect a terminated owner).\n\nAn optional Idempotency-Key names one logical note, including its\nresurrection policy. Replays return the original inbound id and repair\nits wake tail; changed requests conflict (409). Keyless legacy requests\ncreate a fresh note. The inbound remains kind='system_note'.\n\n404: agent_id does not exist. 413: content exceeds the 1 MiB transport\nlimit. 422: note_tag is not a NoteTag value, or source is not a legal\nenvelope source.",
+        "description": "Deliver a framework system note to the specified agent.\n\nThe note is queued as a kind='system_note' inbound; the agent's claim\nrenders it as a system note (system_marker, NoteTag `body.note_tag`) in\nits timeline — no Agent prefix, no peer timestamp — instead of a chat\npeer message. Task notifications (assign / update / reminder) are the\ncurrent family (`note_tag='task'`).\n\n`body.resurrect` mirrors the chat path's auto-resurrect but is a choice,\nnot a given: task assignment (a delegator direction) wakes a terminated\nowner, while plain update / reminder notices must not (user ruling\n2026-08-27 — notification messages never resurrect a terminated owner).\n\nA required Idempotency-Key names one logical note, including its\nresurrection policy. Replays return the original inbound id and repair\nits wake tail; changed requests conflict (409). The inbound remains kind='system_note'.\n\n404: agent_id does not exist. 413: content exceeds the 1 MiB transport\nlimit. 422: note_tag is not a NoteTag value, or source is not a legal\nenvelope source.",
         "operationId": "post_agent_system_note_api_agents__agent_id__system_note_post",
         "parameters": [
           {
@@ -1601,18 +1481,11 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
               "title": "Idempotency-Key"
             }
           }
@@ -3312,18 +3185,11 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
               "title": "Idempotency-Key"
             }
           }
@@ -3380,18 +3246,11 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
               "title": "Idempotency-Key"
             }
           }
@@ -7458,7 +7317,7 @@
     "/api/tasks/{task_id}": {
       "patch": {
         "summary": "Patch Task",
-        "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(status must be one of in_progress/done/cancelled and priority one of\nP0..P3 — both are shared enums, so pydantic 422s anything else; a title\ncolliding with another in_progress task's is rejected). owner reassigns to\nanother agent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes in the same database transaction.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nAn optional Idempotency-Key commits an immutable response with the write.\nReusing that key with different fields returns 409; replay returns the original\ntask snapshot without another update or wake, even if the task later changes.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains in progress. Close or cancel those children first.",
+        "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(status must be one of in_progress/done/cancelled and priority one of\nP0..P3 — both are shared enums, so pydantic 422s anything else; a title\ncolliding with another in_progress task's is rejected). owner reassigns to\nanother agent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes in the same database transaction.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nA required Idempotency-Key commits an immutable response with the write.\nReusing that key with different fields returns 409; replay returns the original\ntask snapshot without another update or wake, even if the task later changes.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains in progress. Close or cancel those children first.",
         "operationId": "patch_task_api_tasks__task_id__patch",
         "parameters": [
           {
@@ -7468,6 +7327,17 @@
             "schema": {
               "type": "integer",
               "title": "Task Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
             }
           }
         ],
@@ -10565,54 +10435,6 @@
         "title": "BuildResponse",
         "description": "POST /api/agents/{agent_id}/understanding/build response.\n\n`build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs\nnewly on the queue, `merged` those of the same stretch already live. `jobs` may be empty\n(everything chosen is covered): the rebuild of the upper levels is still queued."
       },
-      "CancelRequest": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "exclusiveMinimum": 0.0,
-            "title": "Agent Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id"
-        ],
-        "title": "CancelRequest",
-        "description": "POST /api/cancel request body — pause/stop the agent, addressed by id."
-      },
-      "CancelRequested": {
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/CancelResult"
-          },
-          "inbound_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inbound Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status"
-        ],
-        "title": "CancelRequested",
-        "description": "POST /api/cancel response.\n\n`enqueued`: a durable kind='cancel' inbound was INSERTed. The in-flight\n    llm/exec node interrupts on it if one is running; otherwise the next\n    claim pass halts the agent to idle. The process stays alive.\n`already_terminated`: agent is dead — nothing to pause."
-      },
-      "CancelResult": {
-        "type": "string",
-        "enum": [
-          "enqueued",
-          "already_terminated"
-        ],
-        "title": "CancelResult",
-        "description": "Acceptance of a durable cancel request; separate from process termination."
-      },
       "ClusterPanel": {
         "properties": {
           "current_machine": {
@@ -10837,37 +10659,6 @@
         ],
         "title": "CompactAcceptance",
         "description": "Original business acceptance, never proof of application or provider completion."
-      },
-      "CompactEnqueued": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "status": {
-            "type": "string",
-            "const": "enqueued",
-            "title": "Status"
-          },
-          "inbound_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inbound Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "status"
-        ],
-        "title": "CompactEnqueued",
-        "description": "POST /api/agents/{id}/compact response — returns immediately after\npending insert, does not wait for the kernel loop to finish."
       },
       "CompactOutcome": {
         "type": "string",

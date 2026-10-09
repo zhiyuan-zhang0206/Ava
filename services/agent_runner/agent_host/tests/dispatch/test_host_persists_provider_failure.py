@@ -19,10 +19,10 @@ from base.native_process.turn_identity import bind_turn_identity
 from tests.fixtures.units import spawn_agent
 
 
-def _breaker_ctx() -> AvaContext:
-    """An AvaContext whose event-log write is skipped (no ops_pool)."""
+def _breaker_ctx(pool: AsyncConnectionPool) -> AvaContext:
+    """Use the original owner's database channel for native failure settlement."""
     return AvaContext(
-        ops_pool=None,
+        ops_pool=pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
@@ -81,7 +81,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             db=Database.from_settings(),
         )
         with bind_turn_identity(agent_id, incarnation=incarnation):
-            assert not (await host._invoke_until_done(agent_id, _breaker_ctx())).exited
+            assert not (await host._invoke_until_done(agent_id, _breaker_ctx(aops_pool))).exited
     # New saver/connection prevents in-memory buffered state from faking success.
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as reader:
         stored = await reader.aget_tuple({"configurable": {"thread_id": str(agent_id)}})

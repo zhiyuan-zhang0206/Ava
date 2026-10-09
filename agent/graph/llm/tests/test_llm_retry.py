@@ -13,6 +13,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.exceptions import ModelConnectionError
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -28,9 +29,12 @@ from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
     LlmLedger,
+    LLMStreamCorruptedError,
     LLMStreamStallPairError,
     LLMStreamStallPairExhaustedError,
     LLMStreamStallTimeoutError,
+    LLMStreamTruncatedError,
+    LLMStreamUnexpectedStopReasonError,
 )
 from agent.hooks.compact import CompactionFailedError
 from base.agents.context import AvaContext
@@ -102,7 +106,7 @@ def test_fatal_and_compaction_failures_are_never_retried(ledger: LlmLedger) -> N
 
 
 def test_other_failures_are_retried(ledger: LlmLedger) -> None:
-    assert _wait(ConnectionError("network"), ledger=ledger) is not None
+    assert _wait(ModelConnectionError("network"), ledger=ledger) is not None
     assert _wait(LLMStreamStallTimeoutError("stall"), ledger=ledger) is not None
 
 
@@ -111,7 +115,7 @@ def test_transient_waits_double_from_the_initial_interval_plus_up_to_a_second_of
 ) -> None:
     initial = settings.lm.llm_retry_initial_interval_seconds
     for attempts in (1, 2, 3):
-        wait = _wait(ConnectionError("x"), attempts, ledger=ledger)
+        wait = _wait(ModelConnectionError("x"), attempts, ledger=ledger)
         assert wait is not None
         base = min(initial * 2 ** (attempts - 1), settings.lm.llm_retry_max_interval_seconds)
         assert base <= wait < base + 1.0, attempts
@@ -127,7 +131,7 @@ def test_the_model_caps_the_number_of_tries(
         return 3
 
     monkeypatch.setattr("base.lm.registry.resolve_setting", fake_resolve)
-    exc = ConnectionError("x")
+    exc = ModelConnectionError("x")
     assert retry_wait(exc, 2, model="model-for-this-agent", agent_id=1, ledger=ledger) is not None
     assert retry_wait(exc, 3, model="model-for-this-agent", agent_id=1, ledger=ledger) is None
     assert set(seen) == {"model-for-this-agent"}
@@ -137,7 +141,7 @@ def test_a_spent_total_budget_ends_the_retries(ledger: LlmLedger) -> None:
     from base.config.domains.lm import LmSettings
 
     assert LmSettings().llm_retry_max_total_seconds == 420.0
-    exc = ConnectionError("budget exhausted")
+    exc = ModelConnectionError("budget exhausted")
     setattr(exc, RETRY_REMAINING_ATTR, 0.0)
     assert _wait(exc, ledger=ledger) is None
 
@@ -148,7 +152,7 @@ def test_the_clipped_wait_is_exactly_the_clipped_base_plus_the_jitter(
 ) -> None:
     """The former policy's `max_interval == 0.5` with jitter on, at 1.5s left: the base wait is
     0.5s and the jitter (0..1s) rides on top."""
-    exc = ConnectionError("retryable")
+    exc = ModelConnectionError("retryable")
     setattr(exc, RETRY_REMAINING_ATTR, 1.5)
     monkeypatch.setattr(_retry.random, "uniform", _uniform_low)
     assert _wait(exc, ledger=ledger) == 0.5
@@ -160,13 +164,13 @@ def test_the_last_wait_is_clipped_to_the_remaining_budget(ledger: LlmLedger) -> 
     """With 1.5s left one second is reserved for the jitter the wait carries, so the base wait is
     0.5s and the whole sleep stays inside the budget; at or under a second left there is no
     jitter and the wait is what remains."""
-    exc = ConnectionError("retryable")
+    exc = ModelConnectionError("retryable")
     setattr(exc, RETRY_REMAINING_ATTR, 1.5)
     wait = _wait(exc, ledger=ledger)
     assert wait is not None
     assert 0.5 <= wait < 1.5
 
-    tight = ConnectionError("retryable")
+    tight = ModelConnectionError("retryable")
     setattr(tight, RETRY_REMAINING_ATTR, 0.8)
     assert _wait(tight, ledger=ledger) == 0.8
 
@@ -187,14 +191,14 @@ def test_the_phase_offsets_of_two_named_agents(ledger: LlmLedger) -> None:
     assert first == RETRY_JITTER_SPAN_S * 234 / 1000 and second == RETRY_JITTER_SPAN_S * 678 / 1000
     assert retry_phase_jitter(1000) == 0.0  # no offset: the schedule is exactly the configured one
     initial = settings.lm.llm_retry_initial_interval_seconds
-    wait = _wait(ConnectionError("x"), agent_id=1000, ledger=ledger)
+    wait = _wait(ModelConnectionError("x"), agent_id=1000, ledger=ledger)
     assert wait is not None and initial <= wait < initial + 1.0
 
 
 def test_the_transient_schedule_starts_at_the_agents_phase(ledger: LlmLedger) -> None:
     initial = settings.lm.llm_retry_initial_interval_seconds
     for agent_id in (11, 22):
-        wait = _wait(ConnectionError("x"), agent_id=agent_id, ledger=ledger)
+        wait = _wait(ModelConnectionError("x"), agent_id=agent_id, ledger=ledger)
         assert wait is not None
         start = initial + retry_phase_jitter(agent_id)
         assert start <= wait < start + 1.0
@@ -359,7 +363,9 @@ def _drive(
 def test_the_node_retries_a_transient_failure_and_returns_the_next_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tries, sleeps, result = _drive(monkeypatch, [ConnectionError("a"), ConnectionError("b"), "ok"])
+    tries, sleeps, result = _drive(
+        monkeypatch, [ModelConnectionError("a"), ModelConnectionError("b"), "ok"]
+    )
 
     assert result == {"ok": "ok"}
     assert [t.number for t in tries] == [1, 2, 3]
@@ -374,10 +380,39 @@ def test_the_node_does_not_retry_a_fatal_failure(monkeypatch: pytest.MonkeyPatch
     assert len(tries) == 1 and sleeps == []
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("programming error"),
+        ValueError("invalid input"),
+        ConnectionError("another service"),
+        TimeoutError("another operation"),
+        LLMStreamCorruptedError("missing terminal field"),
+        LLMStreamUnexpectedStopReasonError("refused", stop_reason="unknown", output_tokens=3),
+        LLMStreamTruncatedError("truncated", stop_reason="length", output_tokens=3),
+    ],
+)
+def test_the_node_does_not_repeat_unknown_or_protocol_failures(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    tries, sleeps, result = _drive(monkeypatch, [error, "must not execute"])
+    assert result["error"] is error
+    assert len(tries) == 1 and sleeps == []
+
+
+def test_non_retryable_protocol_failure_does_not_poison_the_next_user_turn(
+    ledger: LlmLedger,
+) -> None:
+    for _ in range(4):
+        ledger.record_consecutive_error("one-agent", LLMStreamCorruptedError("invalid response"))
+        assert ledger.consecutive_error("one-agent") is None
+        ledger.check_consecutive_error_cap("one-agent")
+
+
 def test_the_node_gives_up_at_the_models_attempt_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_retry, "_NEVER_RETRIED", ())
     monkeypatch.setattr("base.lm.registry.resolve_setting", _fixed_cap(3))
-    tries, sleeps, result = _drive(monkeypatch, [ConnectionError(str(i)) for i in range(5)])
+    tries, sleeps, result = _drive(monkeypatch, [ModelConnectionError(str(i)) for i in range(5)])
 
     assert str(result["error"]) == "2"  # the third failed try ends the node
     assert len(tries) == 3 and len(sleeps) == 2
@@ -417,7 +452,7 @@ def _failing_node_run(
 
     async def fake_attempt(_s: object, _r: object, _c: object, attempt: Attempt, _ledger: object):
         tries.append(attempt)
-        raise ConnectionError("net")
+        raise ModelConnectionError("net")
 
     async def fake_sleep(seconds: float) -> None:
         sleeps.append(seconds)
@@ -433,7 +468,7 @@ def _failing_node_run(
         bus=EventBus.from_settings(),
     )
     config: RunnableConfig = {"configurable": {"thread_id": thread}}
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ModelConnectionError):
         asyncio.run(node.llm_node(cast(Any, object()), Runtime(context=ctx), config, ledger=ledger))
     return len(tries), sleeps
 

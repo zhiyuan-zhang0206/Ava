@@ -18,6 +18,7 @@ from base.agents import AgentStatus, ResurrectError, ResurrectRefused
 from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceBirth,
+    ResourceEvidenceError,
     decode_resources,
 )
 from base.agents.messages.inbound import InboundKind
@@ -359,7 +360,11 @@ def _legacy_row(db: psycopg.Connection) -> int:
     aid, _, _, _ = create_agent_row(
         Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
     )
-    db.execute("UPDATE agents_meta SET last_resurrect_inbound_id=NULL WHERE id=%s", (aid,))
+    db.execute(
+        "UPDATE agents_meta SET last_resurrect_inbound_id=NULL,incarnation_resources=NULL "
+        "WHERE id=%s",
+        (aid,),
+    )
     db.commit()
     return aid
 
@@ -415,8 +420,58 @@ async def _restarted(db: psycopg.Connection, pool: AsyncConnectionPool) -> int:
     return aid
 
 
+async def _managed_restarted(db: psycopg.Connection, pool: AsyncConnectionPool) -> int:
+    """An actual fresh birth whose original host applied its restart."""
+    aid = await _spawned(db, pool)
+    owner = await _admitted(pool, aid)
+    insert_inbound_message(
+        db,
+        aid,
+        "",
+        "user",
+        kind="restart",
+        bus=EventBus.from_settings(),
+        database=Database.from_settings(),
+    )
+    db.commit()
+    with bind_turn_identity(aid, incarnation=owner):
+        await claim_inbound_batch(pool, aid)
+        assert await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings()) == "restart"
+    assert isinstance(decode_resources(_resources(db, aid)), IncarnationResources)
+    return aid
+
+
+@pytest.mark.parametrize("invalid", ["unapplied", "failed"])
+async def test_unowned_force_cannot_invent_predecessor_restart_closure(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    invalid: str,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    aid = await _managed_restarted(db_conn, aops_pool)
+    _force(aid)
+    if invalid == "unapplied":
+        db_conn.execute(
+            "UPDATE inbound_messages SET applied_at=NULL WHERE agent_id=%s AND kind='restart'",
+            (aid,),
+        )
+    else:
+        db_conn.execute(
+            "UPDATE inbound_messages SET payload=jsonb_set(payload,'{lifecycle_result}',%s) "
+            "WHERE agent_id=%s AND kind='restart'",
+            (Jsonb({"outcome": "failed", "reason": "restart_deadline_expired"}), aid),
+        )
+    db_conn.commit()
+    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+    before = _resources(db_conn, aid)
+    with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
+        await _admitted(aops_pool, aid)
+    assert _resources(db_conn, aid) == before
+
+
 @pytest.mark.parametrize("guarded", [False, True])
-@pytest.mark.parametrize("arrange", [_spawned, _resurrected, _restarted])
+@pytest.mark.parametrize("arrange", [_spawned, _resurrected, _restarted, _managed_restarted])
 async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -548,8 +603,10 @@ def _earlier_life_receipt(db: psycopg.Connection) -> int:
     wake.resurrect_agent(
         Database.from_settings(), EventBus.from_settings(), aid, resurrected_by="user"
     )
+    # This later life has an unknown allocation; its earlier force receipt cannot close it.
     db.execute(
-        "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
+        "UPDATE agents_meta SET status='terminated',termination_source='user', "
+        "incarnation_resources=NULL WHERE id=%s",
         (aid,),
     )
     db.commit()

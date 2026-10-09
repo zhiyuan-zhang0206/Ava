@@ -1,153 +1,59 @@
-"""Contract tests for plugin declarations and reads of core configuration flags."""
-
-from collections.abc import Callable, Iterator
+"""Core flag admission and explicit service reads need only the declaration."""
 
 import pytest
 
-from base.config import get_field, set_field
-from base.host.env.agent_slices import AgentSlices
-from base.host.env.config_registry import fields
-from base.lm.registry import DEFAULT_TUNING
-from base.packages.plugins.config_registration import _field_is_sensitive
+from base.config import settings
 from base.packages.plugins.flags import (
+    FlagDomainUnavailable,
     UndeclaredFlag,
     UnknownFlag,
-    declare_flags,
-    declared_flags,
-    read_flag,
+    read_declared_flag,
+    validate_flag_key,
 )
 
-FLAG = "agent.prompt_invest_future_enabled"
-
-
-@pytest.fixture
-def declare() -> Iterator[Callable[[str, tuple[str, ...]], Callable[[], None]]]:
-    """`declare_flags` whose every declaration is undone at teardown (the registry is module state)."""
-    undos: list[Callable[[], None]] = []
-
-    def _declare(plugin: str, keys: tuple[str, ...]) -> Callable[[], None]:
-        undo = declare_flags(plugin, keys)
-        undos.append(undo)
-        return undo
-
-    yield _declare
-    for undo in reversed(undos):
-        undo()
+FLAG = "daemon.notice_ttl_limit_seconds"
 
 
 @pytest.mark.parametrize(
     "key",
-    ["nodot", "a.b.c", "", "bogus.x", "agent.bogus_field", "data_plane.db_url"],
+    [
+        "nodot",
+        "a.b.c",
+        "",
+        "bogus.x",
+        "agent.bogus_field",
+        "agent.notice_ttl_limit_seconds",
+        "data_plane.db_url",
+    ],
 )
-def test_declare_flags_rejects_invalid_or_sensitive_keys(key: str) -> None:
-    if key == "data_plane.db_url":
-        assert _field_is_sensitive(fields()["db_url"].info.json_schema_extra)
-    with pytest.raises(UnknownFlag) as exc_info:
-        declare_flags("plugin", (key,))
-    assert repr(key) in str(exc_info.value)
-    assert declared_flags("plugin") == frozenset()
+def test_invalid_or_sensitive_core_dependency_is_rejected(key: str) -> None:
+    with pytest.raises(UnknownFlag) as caught:
+        validate_flag_key(key)
+    assert repr(key) in str(caught.value)
 
 
-def test_declare_flags_validates_every_key_before_recording_any() -> None:
+@pytest.mark.parametrize("key", ["bogus.x", "data_plane.db_url"])
+def test_read_validates_the_whole_supplied_declaration(key: str) -> None:
     with pytest.raises(UnknownFlag):
-        declare_flags("plugin", (FLAG, "bogus.x"))
-    assert declared_flags("plugin") == frozenset()
+        read_declared_flag(FLAG, (FLAG, key))
 
 
-def test_declare_flags_registers_a_valid_key(declare) -> None:
-    declare("plugin", (FLAG,))
-
-    assert declared_flags("plugin") == {FLAG}
-
-
-def test_declarations_are_per_plugin_and_shared_keys_read_alike(declare) -> None:
-    declare("first", (FLAG,))
-    declare("second", (FLAG,))
-
-    assert declared_flags("first") == {FLAG}
-    assert declared_flags("second") == {FLAG}
-    first_value = read_flag(FLAG, AgentSlices.resolve(), plugin="first")
-    assert read_flag(FLAG, AgentSlices.resolve(), plugin="second") is first_value
-
-
-def test_read_flag_requires_a_plugin_name() -> None:
-    with pytest.raises(TypeError):
-        read_flag(FLAG, AgentSlices.resolve())  # type: ignore[call-arg]
-
-
-def test_read_flag_reads_the_named_plugins_declaration(declare) -> None:
-    previous = get_field("prompt_invest_future_enabled")
-    try:
-        set_field("prompt_invest_future_enabled", False)
-        declare("plugin", (FLAG,))
-
-        assert read_flag(FLAG, AgentSlices.resolve(), plugin="plugin") is False
-    finally:
-        set_field("prompt_invest_future_enabled", previous)
-
-
-def test_read_flag_rejects_a_plugin_that_did_not_declare_the_key(declare) -> None:
-    declare("declared-plugin", (FLAG,))
-
-    assert read_flag(FLAG, AgentSlices.resolve(), plugin="declared-plugin") is True
-    with pytest.raises(UndeclaredFlag, match="declaration is contract"):
-        read_flag(FLAG, AgentSlices.resolve(), plugin="other-plugin")
-
-
-def test_read_flag_requires_a_declaration() -> None:
-    with pytest.raises(UndeclaredFlag, match="declaration is contract"):
-        read_flag(FLAG, AgentSlices.resolve(), plugin="plugin")
-
-
-def test_read_flag_returns_non_tuning_turn_value(declare) -> None:
-    previous = get_field("exec_timeout_seconds")
-    try:
-        set_field("exec_timeout_seconds", 123.0)
-        declare("plugin", ("sandbox.exec_timeout_seconds",))
-        assert (
-            read_flag("sandbox.exec_timeout_seconds", AgentSlices.resolve(), plugin="plugin")
-            == 123.0
-        )
-    finally:
-        set_field("exec_timeout_seconds", previous)
-
-
-def test_read_flag_resolves_tuning_explicit_value_then_model_default(declare) -> None:
-    previous = get_field("prompt_invest_future_enabled")
-    try:
-        declare("plugin", (FLAG,))
-        set_field("prompt_invest_future_enabled", False)
-        assert read_flag(FLAG, AgentSlices.resolve(), plugin="plugin") is False
-        set_field("prompt_invest_future_enabled", None)
-        assert read_flag(FLAG, AgentSlices.resolve(), plugin="plugin") is True
-        assert DEFAULT_TUNING.prompt_invest_future_enabled is True
-    finally:
-        set_field("prompt_invest_future_enabled", previous)
-
-
-def test_undo_removes_the_plugins_declarations() -> None:
-    undo = declare_flags("plugin", (FLAG,))
-    assert declared_flags("plugin") == {FLAG}
-    undo()
-
-    assert declared_flags("plugin") == frozenset()
+def test_read_requires_the_explicit_core_dependency() -> None:
     with pytest.raises(UndeclaredFlag):
-        read_flag(FLAG, AgentSlices.resolve(), plugin="plugin")
+        read_declared_flag(FLAG, ())
 
 
-def test_hook_shaped_behavior_can_read_a_declared_flag(declare) -> None:
-    previous = get_field("prompt_invest_future_enabled")
+def test_declared_dependency_reads_the_constructed_process_domain() -> None:
+    assert validate_flag_key(FLAG) == FLAG
+    assert read_declared_flag(FLAG, (FLAG,)) == settings.daemon.notice_ttl_limit_seconds
 
-    def hook_behavior() -> str:
-        if read_flag(FLAG, AgentSlices.resolve(), plugin="plugin"):
-            return "include future work"
-        return "skip future work"
 
-    try:
-        declare("plugin", (FLAG,))
-        set_field("prompt_invest_future_enabled", False)
-        assert hook_behavior() == "skip future work"
-        set_field("prompt_invest_future_enabled", True)
-        assert hook_behavior() == "include future work"
-    finally:
-        set_field("prompt_invest_future_enabled", previous)
+def test_unavailable_domain_is_rejected_without_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(_self: object, _domain: str) -> bool:
+        return False
+
+    monkeypatch.setattr(type(settings), "has_domain", unavailable)
+    with pytest.raises(FlagDomainUnavailable):
+        read_declared_flag(FLAG, (FLAG,))

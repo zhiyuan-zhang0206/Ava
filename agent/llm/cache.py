@@ -13,6 +13,19 @@ from agent.llm import execute_code
 from base.config import settings
 from base.host.env.agent_slices import LlmCallPolicy
 from base.lm.call import LlmInvocation, ProviderCallBinding, ProviderCallContext, recover_invocation
+from base.lm.errors import normalize_provider_transport_error
+
+
+async def _invoke_model(invocation: LlmInvocation) -> AIMessage:
+    try:
+        return await cast(Runnable[list[AnyMessage], AIMessage], invocation.runnable).ainvoke(
+            invocation.messages
+        )
+    except Exception as exc:
+        normalized = normalize_provider_transport_error(exc)
+        if normalized is exc:
+            raise
+        raise normalized from exc
 
 
 async def prepare_invocation(
@@ -54,17 +67,13 @@ async def ainvoke_with_cache_retry(
     async def _invoke() -> tuple[AIMessage, bool]:
         invocation = await prepare_invocation(llm, messages, policy, binding)
         try:
-            response = await cast(
-                Runnable[list[AnyMessage], AIMessage], invocation.runnable
-            ).ainvoke(invocation.messages)
+            response = await _invoke_model(invocation)
         except Exception as exc:
             plain = recover_invocation(invocation, exc) if retry_stale_cache else None
             if plain is None:
                 raise
             invocation = plain
-            response = await cast(Runnable[list[AnyMessage], AIMessage], plain.runnable).ainvoke(
-                plain.messages
-            )
+            response = await _invoke_model(plain)
         assert isinstance(response, AIMessage)  # noqa: S101 — chat models return AIMessage
         return response, invocation.used_explicit_cache
 

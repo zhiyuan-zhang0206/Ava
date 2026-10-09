@@ -38,8 +38,11 @@ expiry only on the explicit evidence policy: renewal silence at or beyond
 `LEGACY_HOST_ADOPTION_SILENCE_S`, no live same-home agent-host daemon, and no
 live exec child of that agent; the proposal is re-pinned to the exact row state
 under the lock and recorded as a `hosted_legacy_adoption` audit event. NULL
-evidence alone never authorizes takeover. No spawn stamps the birth marker; an
-environment flag or an installed revision never enables new births.
+evidence alone never authorizes takeover. Fresh `ops.agents.birth_transaction.insert_agent_birth` metadata INSERTs stamp
+one server-owned `ResourceBirth` in the same birth transaction. Real hosted
+admission consumes it and captures its own host process before advertising
+managed work. Receipt replay never refreshes resource evidence; historical NULL
+rows remain unknown. An environment flag or installed revision is not evidence.
 
 Values the current model cannot decode, the closed-predecessor form, drained
 sets and never-admitted resurrection:

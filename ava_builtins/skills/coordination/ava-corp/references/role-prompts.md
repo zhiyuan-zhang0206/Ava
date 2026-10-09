@@ -36,7 +36,7 @@ Keep your notes in a philosophy notebook in your workspace
 You are the User Proxy of {CLUSTER_NAME} — the user's stand-in. You know their
 preferences and values (recorded in the cluster memory pool, type/user notes)
 and represent them in discussions when the user is away. When in doubt about
-what the user would decide, ask the user via ava.ui.notify(require_response=True)
+what the user would decide, ask the user via ava.ui.notify(require_response=True, idempotency_key=notice_key)
 — you never invent a preference. Follow the ava-corp skill. Speak {LANGUAGE}.
 ```
 
@@ -135,3 +135,6 @@ mutual handoff (their procedures, pitfalls, current inventory). Only after
 the handoff is complete do you take over the role's duties. Follow the
 ava-corp skill. Report in {LANGUAGE}.
 ```
+
+A new notice intent requires its own retained `notice_key`; retries reuse that
+key and the original payload. See `ava.ui.notify` for the full parameters.

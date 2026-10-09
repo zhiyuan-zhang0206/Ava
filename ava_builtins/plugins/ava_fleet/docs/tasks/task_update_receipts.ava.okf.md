@@ -11,11 +11,10 @@ tags:
 # SDK Task Update Receipts
 
 `ava.tasks.update(..., operation_key=...)` and
-`ava.tasks.log(task_id, message, operation_key=...)` accept an optional stable
+`ava.tasks.log(task_id, message, operation_key=...)` require a stable
 caller key. Persist or retain that key for deliberate retries of the same logical
 operation; do not replay an entire `execute_code` block to retry one mutation.
-Keyless calls keep their previous behavior, including system tooling without an
-agent identity. The result remains `None`: no new task-state or execution result
+Missing keys and absent agent identity fail before mutation. The result remains `None`: no new task-state or execution result
 is inferred from a successful replay.
 
 ## Scope and identity
@@ -71,6 +70,6 @@ retention requires an explicit replay horizon before removing tombstones.
 
 Standalone `create` has its own provenance-scoped receipt owner in
 [[task_creation_receipts.ava.okf.md]]. Compound `create_and_assign` has a separate
-explicit [[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|guarded acceptance]]
-mode; keyless calls retain their existing separate transactions. Gateway task PATCH has its own actual-path and
+[[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|atomic acceptance]]
+contract. Gateway task PATCH has its own actual-path and
 credential-scoped receipt owner rather than sharing the SDK namespace.

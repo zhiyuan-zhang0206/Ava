@@ -231,7 +231,7 @@ def test_receiver_wrong_actual_unit_and_legacy_writer_cannot_overwrite_nested_fi
     )
     with pytest.raises(UploadDeliveryConflictError):
         receiver.receive(app.state.db_pool, request)
-    from base.agents.uploads import sanitize_upload_name
+    from base.agents.upload_delivery.paths import sanitize_upload_name
 
     path = Path(proof_for(request).directory) / request.manifest.objects[0].name
     flat = path.parent.parent.parent / sanitize_upload_name(

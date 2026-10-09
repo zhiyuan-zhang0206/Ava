@@ -399,7 +399,7 @@ def test_embed_survives_billing_emit_failure(monkeypatch: pytest.MonkeyPatch) ->
     def _boom(**kwargs: object) -> None:
         raise RuntimeError("billing exploded")
 
-    monkeypatch.setattr("base.lm.billing.emit_billing_event", _boom)
+    monkeypatch.setattr("base.lm.pricing.billing.emit_billing_event", _boom)
 
     result = _provider().embed_batch(["hello"])
 

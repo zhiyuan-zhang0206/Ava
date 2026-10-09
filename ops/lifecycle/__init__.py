@@ -116,7 +116,6 @@ from ops.lifecycle.termination import (
 )
 from ops.rpc_schemas import (
     BillingResurrectAgentResponse,
-    CancelRequested,
     RecoverCrashMarkedResponse,
     RestartAgentRequest,
     RestartAgentResponse,
@@ -128,46 +127,6 @@ from ops.rpc_schemas import (
 from ops.rpc_schemas.terminate import ShellSessionsKill
 
 _log = logging.getLogger(__name__)
-
-
-async def cancel_agent_op(
-    db: Database,
-    bus: EventBus,
-    agent_id: int,
-    db_pool: ConnectionPool,
-    *,
-    operation_key: str | None = None,
-    operation_path: str = "/api/cancel",
-) -> CancelRequested:
-    """Commit a cancel acceptance; pending original rows permit recovery hints.
-
-    Same-key replay preserves a terminated no-op even after resurrection.
-    This does not fence work episodes or recover after native claim/application.
-    """
-    from base import telemetry
-    from base.agents.messages.control_delivery import accept_control
-    from base.agents.messages.inbound import InboundKind
-    from base.db import publish_inbound_wake
-
-    receipt = await asyncio.to_thread(
-        accept_control,
-        db_pool,
-        agent_id,
-        InboundKind.CANCEL,
-        path=operation_path,
-        key=operation_key,
-    )
-    if receipt.event is not None:
-        telemetry.emit_prepared(receipt.event)
-    if receipt.pending and receipt.inbound_id is not None:
-        try:
-            await asyncio.to_thread(
-                publish_inbound_wake, db, bus, agent_id, str(receipt.inbound_id)
-            )
-            await publish_inbound_arrived(bus, agent_id, receipt.inbound_id, "cancel", "user", "")
-        except Exception:
-            _log.exception("cancel acceptance %s lost its live hint", receipt.inbound_id)
-    return CancelRequested(status=receipt.status, inbound_id=receipt.inbound_id)
 
 
 async def terminate_agent_op(
