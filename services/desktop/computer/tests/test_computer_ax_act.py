@@ -14,13 +14,14 @@ from typing import Any
 import pytest
 
 from base.db import Database
-from services.desktop.computer import ax_act as ax_action_tools
-from services.desktop.computer.ax_ids import AxIdTable, AxSession
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.tests.slices import computer_use_config
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import AxNode, PermissionsHelperError
+
+from ...permissions_helper import client as helper
+from ...permissions_helper.client import AxNode, PermissionsHelperError
+from .. import ax_act as ax_action_tools
+from ..ax_ids import AxIdTable, AxSession
+from ..errors import ComputerUseError
+from ..mcp_daemon import ComputerMcpDaemon
+from .slices import computer_use_config
 
 TYPED_TEXT = "hunter2-s3cret"
 

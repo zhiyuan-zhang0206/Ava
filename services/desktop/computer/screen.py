@@ -9,9 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from base.paths import logs_dir
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.targets import CaptureRegion
-from services.desktop.permissions_helper import client as helper
+
+from ..permissions_helper import client as helper
+from .errors import ComputerUseError
+from .targets import CaptureRegion
 
 
 def _png_size(path: Path) -> tuple[int, int]:

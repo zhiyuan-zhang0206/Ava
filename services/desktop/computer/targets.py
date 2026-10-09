@@ -11,7 +11,7 @@ from enum import StrEnum
 from math import isfinite
 from typing import Any, NotRequired, TypedDict, cast
 
-from services.desktop.computer.errors import ComputerUseError
+from .errors import ComputerUseError
 
 
 def _integer(value: Any, name: str, *, positive: bool = False) -> int:

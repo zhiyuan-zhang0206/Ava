@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from services.desktop.permissions_helper import client
+from .. import client
 
 
 def roundtrip(kwargs: dict[str, Any], response: dict[str, Any]) -> tuple[dict[str, Any], Any]:

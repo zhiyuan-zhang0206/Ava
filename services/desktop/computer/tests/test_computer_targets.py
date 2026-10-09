@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.targets import (
+from ..errors import ComputerUseError
+from ..targets import (
     AppTarget,
     CaptureFrame,
     CaptureRegion,

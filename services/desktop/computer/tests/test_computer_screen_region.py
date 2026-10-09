@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from services.desktop.computer import screen
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.targets import CaptureRegion
-from services.desktop.permissions_helper.client import ScreenSize
+from ...permissions_helper.client import ScreenSize
+from .. import screen
+from ..errors import ComputerUseError
+from ..targets import CaptureRegion
 
 
 @pytest.fixture

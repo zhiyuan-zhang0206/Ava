@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Computer-mcp — computer-use executor (task #1101)"
-description: "One per-machine daemon drives the shared desktop through the signed permissions helper, serializes actions machine-wide, coordinates screen ownership (lease + FIFO queue), adds Vision OCR to snapshots, and audits every action as computer_action events. No code-enforced governance: per-agent permission division is a prompt-level peer convention (user ruling 2026-08-10); the cluster's security boundary is its entry point."
+description: "Per-machine desktop executor through the signed helper, with serialized actions, renewable screen ownership, OCR/AX observations and action audits."
 tags:
 - services
 - computer-use
@@ -69,7 +69,8 @@ may be unknown and a desktop action could repeat; a closed socket detected
 before writing remains retryable.
 
 ## Tool surface
-`snapshot` / `click` / [[drag.ava.okf.md|drag]] / `type_text` / `key` / `scroll` / `window_info` /
+`snapshot` / `click` / [[drag.ava.okf.md|drag]] / `move` / `cursor_position` /
+`type_text` / `key` / `scroll` / `list_apps` / `list_windows` / `focus_app` / `window_info` /
 `session_info` / `frontmost_app` / `release_control`, plus `find_text` /
 `click_text` (OCR), `ax_tree` and `ax_act` (accessibility, below). Coordinates are
 **physical pixels** (the screenshot space); the daemon converts to the
@@ -82,6 +83,7 @@ from `services/desktop/computer/ocr.swift` into `$AVA_HOME/logs/computer/ocr-bin
 
 Explicit observation selectors, cropped captures and coordinate frames are owned
 by `targets.py` and `screen.py`: [[observation-frames.ava.okf.md]].
+Strict input contracts and generated schemas: [[native-input.ava.okf.md]].
 
 ## Accessibility tools (`ax_tree`, `ax_act`)
 Element-level alternative to screenshot + OCR; the helper walks the window and

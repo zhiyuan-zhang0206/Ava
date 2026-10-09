@@ -17,13 +17,13 @@ from __future__ import annotations
 import re
 from typing import Any, Literal, NamedTuple, cast
 
-from services.desktop.computer import ax_gap
-from services.desktop.computer.ax_gap import Frame
-from services.desktop.computer.ax_ids import AxSession
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.screen import _current_scale
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import AxNode, AxTreeResult
+from ..permissions_helper import client as helper
+from ..permissions_helper.client import AxNode, AxTreeResult
+from . import ax_gap
+from .ax_gap import Frame
+from .ax_ids import AxSession
+from .errors import ComputerUseError
+from .screen import _current_scale
 
 Mode = Literal["interactive", "text", "full"]
 _MODES: tuple[str, ...] = ("interactive", "text", "full")

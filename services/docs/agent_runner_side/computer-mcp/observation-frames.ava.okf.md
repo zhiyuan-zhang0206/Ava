@@ -35,3 +35,30 @@ measures backing scale from the PNG, rejecting inconsistent dimensions.
 Partial clipping, regions on another display and mixed-display rectangles
 are outside this capture contract. A local capture must not replace the
 daemon's whole-screen scale or whole-screen OCR cache.
+
+## Public operations
+
+`snapshot(region={x,y,w,h})` returns `source="region"` and a frame. Its OCR boxes
+are local to that capture and do not replace the whole-screen OCR cache.
+`snapshot(target={pid,window_id})` returns `source="window"` and a window frame.
+Selectors are mutually exclusive. Whole-screen calls retain the existing
+screen/pixels result and include_ax behavior; include_ax is refused for local
+captures because it would combine different coordinate spaces.
+
+`list_apps()` lists running processes with nullable display name and bundle ID.
+`list_windows(app=...)` returns layer-zero, nonempty windows, including small
+dialogs and off-screen windows. It requires Screen Recording for metadata and
+rejects missing or ambiguous explicit app selectors. `focus_app(target={pid})`
+or `focus_app(target={bundle_id})` explicitly activates one running app and
+confirms the focused PID through AX. A failed postcondition may follow an
+activation side effect; callers must capture again before deciding their next
+action. The helper pumps bounded default-run-loop turns for AppKit freshness.
+
+Window captures use macOS 14+ ScreenCaptureKit's desktopIndependentWindow filter,
+exclude cursor/shadow pixels, and recheck PID/window ID and geometry after the
+capture. Bounded callbacks pump the main run loop instead of blocking it on a
+semaphore. Closed, recycled or moving targets fail explicitly. No title or
+geometry matching selects an AX window. A caller can explicitly raise a real
+AX window root through ax_act perform_action/native_action="AXRaise" only when
+that element reports the action, then activate its app and capture again.
+Neither operation implies background input support.

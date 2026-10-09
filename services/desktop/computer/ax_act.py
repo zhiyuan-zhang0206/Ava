@@ -18,12 +18,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from services.desktop.computer.ax_ids import AxIdTable, AxSession
-from services.desktop.computer.ax_tools import require_helper_support
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.screen import _current_scale
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import AxActResult
+from ..permissions_helper import client as helper
+from ..permissions_helper.client import AxActResult
+from .ax_ids import AxIdTable, AxSession
+from .ax_tools import require_helper_support
+from .errors import ComputerUseError
+from .screen import _current_scale
 
 
 class AxAction(StrEnum):

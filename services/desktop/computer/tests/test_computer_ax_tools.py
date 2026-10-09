@@ -13,13 +13,14 @@ from typing import Any
 
 import pytest
 
-import services.desktop.computer.ax_tools as ax
 from base.db import Database
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.tests.slices import computer_use_config
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import AxNode, AxTreeResult
+
+from ...permissions_helper import client as helper
+from ...permissions_helper.client import AxNode, AxTreeResult
+from .. import ax_tools as ax
+from ..errors import ComputerUseError
+from ..mcp_daemon import ComputerMcpDaemon
+from .slices import computer_use_config
 
 
 def node(

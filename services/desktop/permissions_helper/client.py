@@ -21,12 +21,121 @@ import json
 import socket
 import time
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
+from typing import Any
 
 from base.host.converge.accessibility import AccessibilityState, AccessibilityStatus
 from base.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
 from base.host.net.resilience import Policy, retry
 from base.paths import permissions_helper_socket
+
+from .wire import (
+    AliveResult as AliveResult,
+)
+from .wire import (
+    AppsResult as AppsResult,
+)
+from .wire import (
+    AxActResult as AxActResult,
+)
+from .wire import (
+    AxNode as AxNode,
+)
+from .wire import (
+    AxTreeResult as AxTreeResult,
+)
+from .wire import (
+    AxWindowInfo as AxWindowInfo,
+)
+from .wire import (
+    ClickPoint as ClickPoint,
+)
+from .wire import (
+    ClickResult as ClickResult,
+)
+from .wire import (
+    DragResult as DragResult,
+)
+from .wire import (
+    FileListResult as FileListResult,
+)
+from .wire import (
+    FileReadResult as FileReadResult,
+)
+from .wire import (
+    FocusAppResult as FocusAppResult,
+)
+from .wire import (
+    FrontmostApp as FrontmostApp,
+)
+from .wire import (
+    HelperShutdownResult as HelperShutdownResult,
+)
+from .wire import (
+    KeyResult as KeyResult,
+)
+from .wire import (
+    MoveResult as MoveResult,
+)
+from .wire import (
+    PermissionsFileEntry as PermissionsFileEntry,
+)
+from .wire import (
+    PingResult as PingResult,
+)
+from .wire import (
+    RootConflictInfo as RootConflictInfo,
+)
+from .wire import (
+    RootExitInfo as RootExitInfo,
+)
+from .wire import (
+    RootSeedConfig as RootSeedConfig,
+)
+from .wire import (
+    RootSeedReport as RootSeedReport,
+)
+from .wire import (
+    RootStatus as RootStatus,
+)
+from .wire import (
+    ScreencaptureResult as ScreencaptureResult,
+)
+from .wire import (
+    ScreenSize as ScreenSize,
+)
+from .wire import (
+    ScrollResult as ScrollResult,
+)
+from .wire import (
+    SessionInfo as SessionInfo,
+)
+from .wire import (
+    SessionListResult as SessionListResult,
+)
+from .wire import (
+    SessionProc as SessionProc,
+)
+from .wire import (
+    SignalResult as SignalResult,
+)
+from .wire import (
+    SpawnResult as SpawnResult,
+)
+from .wire import (
+    TypeResult as TypeResult,
+)
+from .wire import (
+    WindowCaptureResult as WindowCaptureResult,
+)
+from .wire import (
+    WindowGeometry as WindowGeometry,
+)
+from .wire import (
+    WindowInfo as WindowInfo,
+)
+from .wire import (
+    WindowsResult as WindowsResult,
+)
 
 _LINE_LIMIT = (
     64 * 1024 * 1024
@@ -142,248 +251,6 @@ def parse_reply(buf: bytes, method: str) -> Any:
     return resp["result"]
 
 
-# Per-method `result` shapes. Each mirrors the object the Swift daemon's matching
-# handler returns (`services/desktop/permissions_helper/helper/main.swift`); they are the typed face
-# of `_call`'s dynamic JSON so callers index fields, not a bare dict.
-
-
-class PingResult(TypedDict):
-    pong: bool
-    pid: NotRequired[int]
-    root_stop_intent_v1: NotRequired[bool]
-    helper_shutdown_v1: NotRequired[bool]
-    root_seed_report_v1: NotRequired[bool]  # `root_status.seed` is reported
-    preflight_screen: bool  # Screen Recording grant held
-    ax_trusted: bool  # Accessibility grant held
-    ax_tree_v1: NotRequired[bool]  # the helper serves `ax_tree`
-    ax_act_v1: NotRequired[bool]  # the helper serves `ax_act`
-
-
-class ScreencaptureResult(TypedDict):
-    path: str
-    bytes: int  # PNG size on disk, or -1 if it could not be stat'd
-
-
-class ClickPoint(TypedDict):
-    x: float
-    y: float
-
-
-class ClickResult(TypedDict):
-    clicked: ClickPoint
-    double: bool
-
-
-class DragResult(TypedDict):
-    start: ClickPoint
-    end: ClickPoint
-
-
-class TypeResult(TypedDict):
-    typed: int  # characters sent
-
-
-class KeyResult(TypedDict):
-    key: int  # the virtual keycode pressed
-    cmd: bool
-
-
-class ScrollResult(TypedDict):
-    scrolled: int  # dy pixels applied
-
-
-class WindowGeometry(TypedDict):
-    x: float
-    y: float
-    w: float
-    h: float
-
-
-class AxWindowInfo(WindowGeometry):
-    app: str
-
-
-class WindowInfo(WindowGeometry):
-    owner: str
-
-
-class AxNode(TypedDict):
-    """One raw accessibility element; geometry is logical points. Absent keys
-    mean the app did not expose that attribute."""
-
-    id: int  # raw id: valid for `ax_act` / `scope` until a later walk replaces the table
-    fp: str  # path fingerprint: the same element keeps it across walks
-    depth: int
-    n: int  # children the app listed (visible ones for list-like roles)
-    parent: NotRequired[int]
-    role: NotRequired[str]
-    subrole: NotRequired[str]
-    title: NotRequired[str]
-    desc: NotRequired[str]
-    value: NotRequired[str]
-    ident: NotRequired[str]
-    x: NotRequired[float]
-    y: NotRequired[float]
-    w: NotRequired[float]
-    h: NotRequired[float]
-    enabled: NotRequired[bool]
-    focused: NotRequired[bool]
-    selected: NotRequired[bool]
-    actions: NotRequired[list[str]]
-
-
-class AxActResult(TypedDict):
-    """Outcome of one `ax_act`. `stale` means the raw id is gone or its element
-    changed (nothing was done); `unanswered` means the app did not answer in time
-    (the action may still have run). Geometry is logical points."""
-
-    completed: bool
-    stale: NotRequired[bool]
-    unanswered: NotRequired[bool]
-    action: NotRequired[str]
-    role: NotRequired[str]
-    label: NotRequired[str]
-    x: NotRequired[float]
-    y: NotRequired[float]
-    w: NotRequired[float]
-    h: NotRequired[float]
-
-
-class AxTreeResult(TypedDict):
-    app: str
-    pid: int
-    windows: int
-    framework: str  # "electron" / "cef" / "chromium" when the bundle ships one, else ""
-    ax_enable: NotRequired[
-        str
-    ]  # Chromium switch: n/a | off | set | already | failed (older helpers omit it)
-    nodes: list[AxNode]
-    visited: int
-    truncated: bool  # the node or depth cap cut the walk
-    timed_out: bool  # the time budget cut the walk
-    unreadable: int  # elements whose attributes could not be read
-    elapsed_ms: int
-
-
-class SessionInfo(TypedDict):
-    locked: bool
-    on_console: bool
-
-
-class SessionProc(TypedDict):
-    name: str
-    pid: int
-    alive: bool
-
-
-class SpawnResult(TypedDict):
-    pid: int
-    reused: bool
-
-
-class SessionListResult(TypedDict):
-    sessions: list[SessionProc]
-
-
-class AliveResult(TypedDict):
-    alive: bool
-
-
-class SignalResult(TypedDict):
-    sent: bool
-
-
-class RootSeedConfig(TypedDict):
-    """The root keeper's launch config (wire `root_seed.config`).
-
-    All paths absolute; `env` entries override the helper's own environment
-    for the root process.
-    """
-
-    argv: list[str]
-    cwd: str
-    run_dir: str
-    stdout: str
-    stderr: str
-    env: NotRequired[dict[str, str]]
-
-
-class RootSeedReport(TypedDict):
-    """The seed the keeper holds for its next spawn; its environment is withheld."""
-
-    argv: list[str]
-    cwd: str
-    run_dir: str
-    stdout: str
-    stderr: str
-
-
-class RootExitInfo(TypedDict):
-    """How the root process last ended (a `last_exit` on `RootStatus`)."""
-
-    kind: str  # clean | refused | crash | stopped | spawn-failed
-    at: float
-    code: NotRequired[int]
-    signal: NotRequired[int]
-    detail: NotRequired[str]
-
-
-class RootConflictInfo(TypedDict):
-    """A live root that holds the run dir but was not seeded by this helper."""
-
-    pid: NotRequired[int]  # omitted when the lock's pid line was unreadable
-    since: NotRequired[float]
-
-
-class RootStatus(TypedDict):
-    """The root keeper's state (wire `root_status`, and every mutating reply)."""
-
-    state: str  # unseeded | running | backoff | conflict | stopping | stopped
-    seeded: bool
-    restarts: int
-    stop_requested: bool
-    run_dir: NotRequired[str]
-    seed: NotRequired[RootSeedReport]  # present while seeded (`root_seed_report_v1`)
-    pid: NotRequired[int]  # the keeper's live root child
-    last_exit: NotRequired[RootExitInfo]
-    next_restart_in_s: NotRequired[float]
-    conflict: NotRequired[RootConflictInfo]
-    seed_error: NotRequired[str]  # startup seed file was rejected
-
-
-class HelperShutdownResult(TypedDict):
-    stopping: bool
-    pid: int
-    run_dir: str
-
-
-class ScreenSize(TypedDict):
-    x: float
-    y: float
-    w: float
-    h: float
-    scale: float  # backing scale factor
-
-
-class FrontmostApp(TypedDict):
-    app: str  # display name, or "" when nothing is focused
-
-
-class PermissionsFileEntry(TypedDict):
-    name: str
-    size: int
-    mtime: int
-    is_dir: bool
-
-
-class FileListResult(TypedDict):
-    entries: list[PermissionsFileEntry]
-
-
-class FileReadResult(TypedDict):
-    content_b64: str
-
-
 def ping(*, sock_path: str | Path | None = None) -> PingResult:
     """Report the helper's liveness and whether it holds the desktop grants."""
     return _call("ping", sock_path=sock_path)
@@ -421,10 +288,50 @@ def read_file(path: str, *, sock_path: str | Path | None = None) -> bytes:
 
 
 def click(
-    x: float, y: float, *, double: bool = False, sock_path: str | Path | None = None
+    x: float,
+    y: float,
+    *,
+    double: bool = False,
+    button: str = "left",
+    click_count: int | None = None,
+    modifiers: list[str] | None = None,
+    duration_ms: float | None = None,
+    sock_path: str | Path | None = None,
 ) -> ClickResult:
-    """Click the left mouse button at the global screen point (x, y)."""
-    return _call("click", x=x, y=y, double=double, sock_path=sock_path)
+    """Click at a logical global screen point, optionally with modifiers and a hold."""
+    args: dict[str, object] = {}
+    if button != "left":
+        args["button"] = button
+    if click_count is not None:
+        args["click_count"] = click_count
+    if modifiers is not None:
+        args["modifiers"] = modifiers
+    if duration_ms is not None:
+        args["duration_ms"] = duration_ms
+    if args:
+        _require_native_input(sock_path)
+    return _call("click", x=x, y=y, double=double, sock_path=sock_path, **args)
+
+
+def _require_native_input(sock_path: str | Path | None) -> None:
+    if ping(sock_path=sock_path).get("native_input_v1") is not True:
+        raise PermissionsHelperError(
+            "permissions helper lacks native_input_v1; update it before using extended input"
+        )
+
+
+def move(
+    x: float, y: float, *, modifiers: list[str] | None = None, sock_path: str | Path | None = None
+) -> MoveResult:
+    """Move the pointer without pressing a button (logical global coordinates)."""
+    return _call(
+        "move", x=x, y=y, modifiers=[] if modifiers is None else modifiers, sock_path=sock_path
+    )
+
+
+def cursor_position(*, sock_path: str | Path | None = None) -> ClickPoint:
+    """Read the actual global pointer position in logical points."""
+    return _call("cursor_position", sock_path=sock_path)
 
 
 def drag(
@@ -446,14 +353,68 @@ def type_text(text: str, *, sock_path: str | Path | None = None) -> TypeResult:
     return _call("type", text=text, sock_path=sock_path)
 
 
-def key(code: int, *, cmd: bool = False, sock_path: str | Path | None = None) -> KeyResult:
-    """Press the key with virtual keycode `code`."""
-    return _call("key", code=code, cmd=cmd, sock_path=sock_path)
+def key(
+    code: int,
+    *,
+    cmd: bool = False,
+    modifiers: list[str] | None = None,
+    duration_ms: float | None = None,
+    sock_path: str | Path | None = None,
+) -> KeyResult:
+    """Press and release one virtual key, optionally holding it with modifiers."""
+    args: dict[str, object] = {}
+    if modifiers is not None:
+        args["modifiers"] = modifiers
+    if duration_ms is not None:
+        args["duration_ms"] = duration_ms
+    if args:
+        _require_native_input(sock_path)
+    return _call("key", code=code, cmd=cmd, sock_path=sock_path, **args)
 
 
-def scroll(x: float, y: float, dy: int, *, sock_path: str | Path | None = None) -> ScrollResult:
-    """Move to (x, y) and scroll vertically by `dy` pixels (negative = older)."""
-    return _call("scroll", x=x, y=y, dy=dy, sock_path=sock_path)
+def scroll(
+    x: float,
+    y: float,
+    dy: int,
+    *,
+    dx: int | None = None,
+    modifiers: list[str] | None = None,
+    sock_path: str | Path | None = None,
+) -> ScrollResult:
+    """Scroll by signed vertical/horizontal pixel deltas at a logical global point."""
+    args: dict[str, object] = {}
+    if dx is not None:
+        args["dx"] = dx
+    if modifiers is not None:
+        args["modifiers"] = modifiers
+    if args:
+        _require_native_input(sock_path)
+    return _call("scroll", x=x, y=y, dy=dy, sock_path=sock_path, **args)
+
+
+def list_apps(*, sock_path: str | Path | None = None) -> AppsResult:
+    """List running GUI applications by process and bundle identity."""
+    return _call("list_apps", sock_path=sock_path)
+
+
+def list_windows(app: str | None = None, *, sock_path: str | Path | None = None) -> WindowsResult:
+    """List live window-server identities, optionally for one exact application."""
+    args: dict[str, object] = {} if app is None else {"app": app}
+    return _call("list_windows", sock_path=sock_path, **args)
+
+
+def focus_app(target: dict[str, object], *, sock_path: str | Path | None = None) -> FocusAppResult:
+    """Explicitly activate a running app selected by pid or unique bundle identity."""
+    return _call("focus_app", sock_path=sock_path, **target)
+
+
+def screencapture_window(
+    pid: int, window_id: int, path: str, *, sock_path: str | Path | None = None
+) -> WindowCaptureResult:
+    """Capture the identified window, verifying its live owning process."""
+    return _call(
+        "screencapture_window", pid=pid, window_id=window_id, path=path, sock_path=sock_path
+    )
 
 
 def ax_window_info(app: str, *, sock_path: str | Path | None = None) -> AxWindowInfo:

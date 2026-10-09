@@ -29,6 +29,7 @@ import AppKit
 import CoreGraphics
 import Darwin
 import Foundation
+import ScreenCaptureKit
 
 // MARK: - JSON line IO
 
@@ -477,6 +478,166 @@ func screencaptureRegion(_ req: [String: Any]) throws -> [String: Any] {
     return ["path": path, "bytes": size ?? -1]
 }
 
+/// Let AppKit process bounded queued updates before reading running-app state.
+private func refreshAppKit() {
+    _ = RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+}
+
+private func selectedRunningApp(_ req: [String: Any]) throws -> NSRunningApplication {
+    refreshAppKit()
+    let matches: [NSRunningApplication]
+    if req["pid"] != nil && req["bundle_id"] == nil {
+        let pid = try inputInteger(req, "pid", lower: 1, upper: Int(Int32.max))
+        matches = NSWorkspace.shared.runningApplications.filter { Int($0.processIdentifier) == pid }
+    } else if req["bundle_id"] != nil && req["pid"] == nil {
+        guard let bundle = req["bundle_id"] as? String, !bundle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { throw OpError.bad("bundle_id must be a nonempty string") }
+        matches = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == bundle }
+    } else { throw OpError.bad("app target needs exactly pid or bundle_id") }
+    guard matches.count == 1 else { throw OpError.bad("app target is missing or ambiguous") }
+    guard !matches[0].isTerminated else { throw OpError.bad("app target has terminated") }
+    return matches[0]
+}
+
+func listApps() -> [String: Any] {
+    refreshAppKit()
+    let apps: [[String: Any]] = NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }.map {
+        ["pid": Int($0.processIdentifier), "name": $0.localizedName as Any? ?? NSNull(),
+         "bundle_id": $0.bundleIdentifier as Any? ?? NSNull()]
+    }
+    return ["apps": apps]
+}
+
+func listWindows(_ req: [String: Any]) throws -> [String: Any] {
+    guard CGPreflightScreenCaptureAccess() else {
+        throw OpError.bad("Screen Recording grant missing: window inventory metadata is unavailable")
+    }
+    var selectedPid: pid_t?
+    if let raw = req["app"] {
+        guard let selector = raw as? String, !selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { throw OpError.bad("app must be a nonempty name or bundle_id") }
+        refreshAppKit()
+        let matches = NSWorkspace.shared.runningApplications.filter {
+            !$0.isTerminated && ($0.localizedName == selector || $0.bundleIdentifier == selector)
+        }
+        guard matches.count == 1 else { throw OpError.bad("app selector is missing or ambiguous") }
+        selectedPid = matches[0].processIdentifier
+    }
+    guard let inventory = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]]
+    else { throw OpError.bad("window inventory is unavailable in this login session") }
+    var windows: [[String: Any]] = []
+    for window in inventory {
+        guard (window[kCGWindowLayer as String] as? Int) == 0,
+              let pid = window[kCGWindowOwnerPID as String] as? Int,
+              let id = window[kCGWindowNumber as String] as? Int,
+              let rawBounds = window[kCGWindowBounds as String] as? [String: Any],
+              let bounds = CGRect(dictionaryRepresentation: rawBounds as CFDictionary),
+              bounds.width > 0, bounds.height > 0
+        else { continue }
+        if let chosen = selectedPid, pid != Int(chosen) { continue }
+        windows.append(["window_id": id, "pid": pid,
+            "owner": window[kCGWindowOwnerName as String] ?? NSNull(),
+            "title": window[kCGWindowName as String] ?? NSNull(),
+            "x": bounds.minX, "y": bounds.minY, "w": bounds.width, "h": bounds.height,
+            "on_screen": window[kCGWindowIsOnscreen as String] as? Bool ?? false])
+    }
+    return ["windows": windows]
+}
+
+/// Explicit foreground activation; confirm the actual focused application's PID through AX.
+func focusApp(_ req: [String: Any]) throws -> [String: Any] {
+    let app = try selectedRunningApp(req)
+    guard app.activate(options: []) else { throw OpError.bad("app activation was refused") }
+    let system = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(system, 0.2)
+    let deadline = Date(timeIntervalSinceNow: 1)
+    repeat {
+        refreshAppKit()
+        var focused: CFTypeRef?
+        if AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &focused) == .success,
+           let focused = focused, CFGetTypeID(focused) == AXUIElementGetTypeID() {
+            var pid: pid_t = 0
+            if AXUIElementGetPid(focused as! AXUIElement, &pid) == .success, pid == app.processIdentifier {
+                return ["focused": true, "pid": Int(pid)]
+            }
+        }
+    } while Date() < deadline
+    throw OpError.bad("app activation was requested but focused PID could not be confirmed; capture again")
+}
+
+/// Pump the main run loop while ScreenCaptureKit completes its asynchronous callback.
+private func captureCallback<T>(_ start: (@escaping (T?, Error?) -> Void) -> Void) throws -> T {
+    let lock = NSLock()
+    var finished = false
+    var result: T?
+    var failure: Error?
+    start { value, error in
+        lock.lock()
+        result = value; failure = error; finished = true
+        lock.unlock()
+    }
+    let deadline = Date(timeIntervalSinceNow: 5)
+    while Date() < deadline {
+        lock.lock()
+        let done = finished
+        let value = result
+        let error = failure
+        lock.unlock()
+        if done {
+            if let error = error { throw OpError.bad("window capture failed: \(error.localizedDescription)") }
+            guard let value = value else { throw OpError.bad("window capture returned no image or content") }
+            return value
+        }
+        _ = RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+    }
+    throw OpError.bad("window capture timed out")
+}
+
+@available(macOS 14.0, *)
+private func capturedWindow(_ req: [String: Any]) throws -> [String: Any] {
+    let pid = try inputInteger(req, "pid", lower: 1, upper: Int(Int32.max))
+    let id = try inputInteger(req, "window_id", lower: 1, upper: Int(UInt32.max))
+    guard let path = req["path"] as? String else { throw OpError.bad("window capture needs string path") }
+    guard CGPreflightScreenCaptureAccess() else { throw OpError.bad("Screen Recording grant missing for window capture") }
+    let content: SCShareableContent = try captureCallback { completion in
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false, completionHandler: completion)
+    }
+    guard let window = content.windows.first(where: {
+        Int($0.windowID) == id && Int($0.owningApplication?.processID ?? 0) == pid
+    }) else { throw OpError.bad("window target is stale or does not belong to the requested PID") }
+    let filter = SCContentFilter(desktopIndependentWindow: window)
+    let rect = filter.contentRect
+    let scale = Double(filter.pointPixelScale)
+    guard rect.width > 0, rect.height > 0, scale.isFinite, scale > 0 else {
+        throw OpError.bad("window target has no capturable geometry")
+    }
+    let configuration = SCStreamConfiguration()
+    configuration.width = Int((rect.width * scale).rounded())
+    configuration.height = Int((rect.height * scale).rounded())
+    configuration.showsCursor = false
+    configuration.ignoreShadowsSingleWindow = true
+    let image: CGImage = try captureCallback { completion in
+        SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration, completionHandler: completion)
+    }
+    // Re-resolve ownership and geometry after capture; moving/recycled windows require a new observation.
+    let latest: SCShareableContent = try captureCallback { completion in
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false, completionHandler: completion)
+    }
+    guard let fresh = latest.windows.first(where: { Int($0.windowID) == id }),
+          Int(fresh.owningApplication?.processID ?? 0) == pid, fresh.frame == window.frame
+    else { throw OpError.bad("window identity or geometry changed during capture") }
+    let bitmap = NSBitmapImageRep(cgImage: image)
+    guard let png = bitmap.representation(using: .png, properties: [:]) else { throw OpError.bad("could not encode window PNG") }
+    try png.write(to: URL(fileURLWithPath: path), options: .atomic)
+    return ["path": path, "bytes": png.count, "width": image.width, "height": image.height,
+            "origin": ["x": rect.minX, "y": rect.minY], "scale": scale]
+}
+
+func screencaptureWindow(_ req: [String: Any]) throws -> [String: Any] {
+    guard #available(macOS 14.0, *) else { throw OpError.bad("window capture requires macOS 14 or later") }
+    return try capturedWindow(req)
+}
+
 /// Coerce a JSON number (which may decode as Int or Double) to Double.
 func numericDouble(_ v: Any?) -> Double? {
     if let d = v as? Double { return d }
@@ -509,25 +670,145 @@ func axTrustedOrPrompt() -> Bool {
     return false
 }
 
+/// Strict JSON input primitives shared by the atomic input operations.
+func inputNumber(_ req: [String: Any], _ key: String, defaultValue: Double? = nil) throws -> Double {
+    if req[key] == nil, let value = defaultValue { return value }
+    guard let number = req[key] as? NSNumber,
+          CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite
+    else { throw OpError.bad("\(key) must be a finite number") }
+    return number.doubleValue
+}
+
+func inputInteger(_ req: [String: Any], _ key: String, lower: Int, upper: Int,
+                  defaultValue: Int? = nil) throws -> Int {
+    if req[key] == nil, let value = defaultValue { return value }
+    guard let number = req[key] as? NSNumber,
+          CFGetTypeID(number) != CFBooleanGetTypeID(),
+          !["f", "d"].contains(String(cString: number.objCType)),
+          let value = Int(exactly: number.doubleValue), value >= lower, value <= upper
+    else { throw OpError.bad("\(key) must be an integer in \(lower)...\(upper)") }
+    return value
+}
+
+func inputBool(_ req: [String: Any], _ key: String) throws -> Bool {
+    if req[key] == nil { return false }
+    guard let number = req[key] as? NSNumber,
+          CFGetTypeID(number) == CFBooleanGetTypeID()
+    else { throw OpError.bad("\(key) must be a boolean") }
+    return number.boolValue
+}
+
+func inputDuration(_ req: [String: Any], maximum: Double) throws -> Double {
+    let duration = try inputNumber(req, "duration_ms", defaultValue: 0)
+    guard duration >= 0 && duration <= maximum
+    else { throw OpError.bad("duration_ms must be in 0...\(maximum)") }
+    return duration / 1000
+}
+
+func inputModifiers(_ req: [String: Any], legacyCmd: Bool = false) throws -> CGEventFlags {
+    var names: [String] = []
+    if let raw = req["modifiers"] {
+        guard let values = raw as? [String], values.count <= 4, Set(values).count == values.count
+        else { throw OpError.bad("modifiers must be a list of distinct shift/ctrl/alt/cmd names") }
+        names = values
+    }
+    var flags: CGEventFlags = legacyCmd ? .maskCommand : []
+    for name in names {
+        switch name {
+        case "shift": flags.insert(.maskShift)
+        case "ctrl": flags.insert(.maskControl)
+        case "alt": flags.insert(.maskAlternate)
+        case "cmd": flags.insert(.maskCommand)
+        default: throw OpError.bad("unknown modifier: \(name)")
+        }
+    }
+    return flags
+}
+
+func inputMouseEvent(_ kind: CGEventType, _ point: CGPoint, _ button: CGMouseButton,
+                     _ flags: CGEventFlags, count: Int64 = 0) throws -> CGEvent {
+    guard let event = CGEvent(mouseEventSource: nil, mouseType: kind,
+                              mouseCursorPosition: point, mouseButton: button)
+    else { throw OpError.bad("could not create mouse event") }
+    event.flags = flags
+    event.setIntegerValueField(.mouseEventClickState, value: count)
+    return event
+}
+
+func postInputEvent(_ event: CGEvent) {
+    // Events are preallocated for safe release, but their timestamps describe posting.
+    event.timestamp = DispatchTime.now().uptimeNanoseconds
+    event.post(tap: .cghidEventTap)
+}
+
+/// Allocate modifier presses and their reverse releases before any input is posted.
+func inputModifierPairs(_ flags: CGEventFlags) throws -> [(CGEvent, CGEvent)] {
+    let keys: [(CGEventFlags, CGKeyCode)] = [(.maskShift, 56), (.maskControl, 59),
+                                           (.maskAlternate, 58), (.maskCommand, 55)]
+    var active: CGEventFlags = []
+    var pairs: [(CGEvent, CGEvent)] = []
+    for (flag, code) in keys where flags.contains(flag) {
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
+        else { throw OpError.bad("could not create modifier events") }
+        up.type = .flagsChanged; up.flags = active
+        active.insert(flag)
+        down.type = .flagsChanged; down.flags = active
+        pairs.append((down, up))
+    }
+    return pairs
+}
+
+func pressModifiers(_ pairs: [(CGEvent, CGEvent)]) {
+    for pair in pairs { postInputEvent(pair.0) }
+}
+
+func releaseModifiers(_ pairs: [(CGEvent, CGEvent)]) {
+    for pair in pairs.reversed() { postInputEvent(pair.1) }
+}
+
 /// Post a synthetic mouse click at a global screen coordinate (move + down + up).
 /// Pass "double": true for a second click. Dispatch refuses it without the
 /// Accessibility grant instead of posting events macOS would silently drop.
 func click(_ req: [String: Any]) throws -> [String: Any] {
-    guard let x = numericDouble(req["x"]), let y = numericDouble(req["y"])
-    else { throw OpError.bad("click needs numeric x,y") }
-    let double = (req["double"] as? Bool) ?? false
-    let pt = CGPoint(x: x, y: y)
-    func once() throws {
-        for kind in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-            guard let ev = CGEvent(mouseEventSource: nil, mouseType: kind,
-                                   mouseCursorPosition: pt, mouseButton: .left)
-            else { throw OpError.bad("could not create mouse event") }
-            ev.post(tap: .cghidEventTap)
-        }
+    let x = try inputNumber(req, "x"), y = try inputNumber(req, "y")
+    let double = try inputBool(req, "double")
+    let count = try inputInteger(req, "click_count", lower: 1, upper: 3, defaultValue: double ? 2 : 1)
+    if double && count != 2 { throw OpError.bad("double=true requires click_count=2") }
+    let duration = try inputDuration(req, maximum: 5000)
+    let flags = try inputModifiers(req)
+    let name: String
+    if let raw = req["button"] {
+        guard let value = raw as? String else { throw OpError.bad("button must be left/right/middle") }
+        name = value
+    } else { name = "left" }
+    let button: CGMouseButton, downKind: CGEventType, upKind: CGEventType
+    switch name {
+    case "left": button = .left; downKind = .leftMouseDown; upKind = .leftMouseUp
+    case "right": button = .right; downKind = .rightMouseDown; upKind = .rightMouseUp
+    case "middle": button = .center; downKind = .otherMouseDown; upKind = .otherMouseUp
+    default: throw OpError.bad("unknown mouse button: \(name)")
     }
-    try once()
-    if double { try once() }
-    return ["clicked": ["x": x, "y": y], "double": double]
+    let point = CGPoint(x: x, y: y)
+    let move = try inputMouseEvent(.mouseMoved, point, button, flags)
+    let pairs = try (1...count).map { index in
+        (try inputMouseEvent(downKind, point, button, flags, count: Int64(index)),
+         try inputMouseEvent(upKind, point, button, flags, count: Int64(index)))
+    }
+    let modifiers = try inputModifierPairs(flags)
+    func once(_ pair: (CGEvent, CGEvent)) {
+        postInputEvent(pair.0)
+        defer { postInputEvent(pair.1) }
+        if duration > 0 { Thread.sleep(forTimeInterval: duration) }
+    }
+    pressModifiers(modifiers)
+    defer { releaseModifiers(modifiers) }
+    postInputEvent(move)
+    for (index, pair) in pairs.enumerated() {
+        once(pair)
+        if index + 1 < pairs.count { Thread.sleep(forTimeInterval: 0.075) }
+    }
+    return ["clicked": ["x": x, "y": y], "double": count == 2, "button": name, "click_count": count]
 }
 
 /// A bounded straight-line drag. Prepare every event before pressing, so allocation
@@ -574,35 +855,72 @@ func drag(_ req: [String: Any]) throws -> [String: Any] {
 /// event cannot inherit a stale Command flag. Dispatch refuses it without the
 /// Accessibility grant instead of posting events macOS would silently drop.
 func key(_ req: [String: Any]) throws -> [String: Any] {
-    guard let code = req["code"] as? Int else { throw OpError.bad("key needs int code") }
-    let cmd = (req["cmd"] as? Bool) ?? false
-    let flags: CGEventFlags = cmd ? .maskCommand : []
+    let code = try inputInteger(req, "code", lower: 0, upper: 65535)
+    let cmd = try inputBool(req, "cmd")
+    let flags = try inputModifiers(req, legacyCmd: cmd)
+    let duration = try inputDuration(req, maximum: 10000)
     guard let down = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(code), keyDown: true),
           let up = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(code), keyDown: false)
     else { throw OpError.bad("could not create key event") }
     down.flags = flags
     up.flags = flags
-    down.post(tap: .cghidEventTap)
-    up.post(tap: .cghidEventTap)
-    return ["key": code, "cmd": cmd]
+    let modifier: CGEventFlags
+    switch code {
+    case 54, 55: modifier = .maskCommand
+    case 56, 60: modifier = .maskShift
+    case 58, 61: modifier = .maskAlternate
+    case 59, 62: modifier = .maskControl
+    default: modifier = []
+    }
+    if !modifier.isEmpty {
+        down.type = .flagsChanged; up.type = .flagsChanged
+        down.flags.insert(modifier)
+        up.flags.subtract(modifier)
+    }
+    let modifiers = try inputModifierPairs(flags.subtracting(modifier))
+    pressModifiers(modifiers)
+    defer { releaseModifiers(modifiers) }
+    postInputEvent(down)
+    defer { postInputEvent(up) }
+    if duration > 0 { Thread.sleep(forTimeInterval: duration) }
+    return ["key": code, "cmd": flags.contains(.maskCommand)]
 }
 
 /// Move the cursor to (x, y) then post a vertical scroll of `dy` pixels (negative
 /// scrolls toward older content). Dispatch refuses it without the Accessibility
 /// grant instead of posting events macOS would silently drop.
 func scroll(_ req: [String: Any]) throws -> [String: Any] {
-    guard let x = numericDouble(req["x"]), let y = numericDouble(req["y"]),
-          let dy = req["dy"] as? Int
-    else { throw OpError.bad("scroll needs numeric x,y and int dy") }
-    if let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
-                          mouseCursorPosition: CGPoint(x: x, y: y), mouseButton: .left) {
-        move.post(tap: .cghidEventTap)
-    }
-    guard let ev = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
-                           wheelCount: 1, wheel1: Int32(dy), wheel2: 0, wheel3: 0)
+    let x = try inputNumber(req, "x"), y = try inputNumber(req, "y")
+    let dy = try inputInteger(req, "dy", lower: Int(Int32.min), upper: Int(Int32.max))
+    let dx = try inputInteger(req, "dx", lower: Int(Int32.min), upper: Int(Int32.max), defaultValue: 0)
+    let flags = try inputModifiers(req)
+    let move = try inputMouseEvent(.mouseMoved, CGPoint(x: x, y: y), .left, flags)
+    guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                             wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
     else { throw OpError.bad("could not create scroll event") }
-    ev.post(tap: .cghidEventTap)
-    return ["scrolled": dy]
+    event.flags = flags
+    let modifiers = try inputModifierPairs(flags)
+    pressModifiers(modifiers)
+    defer { releaseModifiers(modifiers) }
+    postInputEvent(move)
+    postInputEvent(event)
+    return ["scrolled": dy, "dx": dx]
+}
+
+func mouseMove(_ req: [String: Any]) throws -> [String: Any] {
+    let x = try inputNumber(req, "x"), y = try inputNumber(req, "y")
+    let flags = try inputModifiers(req)
+    let event = try inputMouseEvent(.mouseMoved, CGPoint(x: x, y: y), .left, flags)
+    let modifiers = try inputModifierPairs(flags)
+    pressModifiers(modifiers)
+    defer { releaseModifiers(modifiers) }
+    postInputEvent(event)
+    return ["moved": ["x": x, "y": y]]
+}
+
+func cursorPosition() throws -> [String: Any] {
+    guard let event = CGEvent(source: nil) else { throw OpError.bad("could not read cursor position") }
+    return ["x": event.location.x, "y": event.location.y]
 }
 
 /// Report the geometry of an app's normal (layer-0) window via the window-server
@@ -665,6 +983,7 @@ func screenSize(_ req: [String: Any]) throws -> [String: Any] {
 /// The computer-use gate matches this against its denied-app keywords before
 /// letting a click/type/key/scroll through.
 func frontmostApp() -> [String: Any] {
+    refreshAppKit()
     let app = NSWorkspace.shared.frontmostApplication
     return ["app": app?.localizedName ?? ""]
 }
@@ -689,6 +1008,7 @@ func typeText(_ req: [String: Any]) throws -> [String: Any] {
 /// accessibility tree. Dispatch refuses it without the Accessibility grant
 /// instead of making an accessibility-tree request that macOS would deny.
 func axWindowInfo(_ req: [String: Any]) throws -> [String: Any] {
+    refreshAppKit()
     guard let appName = req["app"] as? String else { throw OpError.bad("ax_window_info needs string app") }
     let running = NSWorkspace.shared.runningApplications.first {
         $0.localizedName == appName || $0.bundleIdentifier == appName
@@ -757,6 +1077,7 @@ private var axEnabledPids: Set<pid_t> = []
 private struct AXEntry {
     let element: AXUIElement
     let sig: String
+    let window: AXUIElement
 }
 
 /// Raw ids ("1", "2", ...) of the last walks; the client maps them to its own
@@ -905,6 +1226,7 @@ private func axPickWindow(_ axApp: AXUIElement) -> (window: AXUIElement?, count:
 /// Walk one window (or, with `scope`, the subtree under an id from the last
 /// walk) breadth-first and return the raw node list.
 func axTree(_ req: [String: Any]) throws -> [String: Any] {
+    refreshAppKit()
     guard let appName = req["app"] as? String else { throw OpError.bad("ax_tree needs string app") }
     guard let app = NSWorkspace.shared.runningApplications.first(where: {
         $0.localizedName == appName || $0.bundleIdentifier == appName
@@ -932,10 +1254,13 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
     ]
 
     let root: AXUIElement
+    let originalWindow: AXUIElement
     let scopeFingerprint = req["scope_fp"] as? String
     if let scopeID = numericDouble(req["scope"]).map({ Int($0) }) {
-        guard let scoped = axElementTable[scopeID]?.element
+        guard let scopedEntry = axElementTable[scopeID]
         else { throw OpError.bad("unknown scope \(scopeID): the element table was replaced by a later walk") }
+        let scoped = scopedEntry.element
+        originalWindow = scopedEntry.window
         guard scopeFingerprint != nil else { throw OpError.bad("a scoped ax_tree needs scope_fp") }
         var scopedPid: pid_t = 0
         guard AXUIElementGetPid(scoped, &scopedPid) == .success, scopedPid == app.processIdentifier
@@ -951,6 +1276,7 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
         }
         AXUIElementSetMessagingTimeout(window, messagingTimeout)
         root = window
+        originalWindow = window
     }
 
     let started = Date()
@@ -970,7 +1296,7 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
         let role = axString(values[0])
         let id = axNextElementID
         axNextElementID += 1
-        axElementTable[id] = AXEntry(element: element, sig: axSignature(role: role, values: values))
+        axElementTable[id] = AXEntry(element: element, sig: axSignature(role: role, values: values), window: originalWindow)
 
         // Path fingerprint: parent fingerprint + role + discriminator + the
         // ordinal among same-keyed siblings. It survives value edits and
@@ -1026,6 +1352,64 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
     return meta
 }
 
+// Suggested additions to main.swift, integrated by the shared native owner.
+// NSString ranges are UTF-16 offsets; do not derive offsets from String.count.
+private func axSelectionRange(_ req: [String: Any], value: String) throws -> CFRange {
+    guard let text = req["text"] as? String, !text.isEmpty else {
+        throw OpError.bad("select_text needs nonempty string text")
+    }
+    let prefix: String
+    if let raw = req["prefix"] {
+        guard let string = raw as? String else { throw OpError.bad("prefix must be a string") }
+        prefix = string
+    } else { prefix = "" }
+    let suffix: String
+    if let raw = req["suffix"] {
+        guard let string = raw as? String else { throw OpError.bad("suffix must be a string") }
+        suffix = string
+    } else { suffix = "" }
+    let selection: String
+    if let raw = req["selection_type"] {
+        guard let string = raw as? String else { throw OpError.bad("selection_type must be a string") }
+        selection = string
+    } else { selection = "text" }
+    guard ["text", "cursor_before", "cursor_after"].contains(selection) else {
+        throw OpError.bad("selection_type must be text, cursor_before or cursor_after")
+    }
+    guard [text, prefix, suffix].allSatisfy({ $0.unicodeScalars.count <= 10_000 }) else {
+        throw OpError.bad("text and context must not exceed 10000 characters")
+    }
+    let source = value as NSString
+    let needleLength = (text as NSString).length
+    let prefixLength = (prefix as NSString).length
+    let suffixLength = (suffix as NSString).length
+    var found: NSRange?
+    var cursor = 0
+    while cursor <= source.length - needleLength {
+        let candidate = source.range(of: text, options: .literal,
+            range: NSRange(location: cursor, length: source.length - cursor))
+        if candidate.location == NSNotFound { break }
+        let end = NSMaxRange(candidate)
+        let prefixMatches = candidate.location >= prefixLength && source.compare(prefix, options: .literal,
+            range: NSRange(location: candidate.location - prefixLength, length: prefixLength)) == .orderedSame
+        let suffixMatches = end + suffixLength <= source.length && source.compare(suffix, options: .literal,
+            range: NSRange(location: end, length: suffixLength)) == .orderedSame
+        if prefixMatches && suffixMatches {
+            guard found == nil else { throw OpError.bad("text selection is ambiguous; add prefix or suffix") }
+            found = candidate
+        }
+        // Advance by one UTF-16 code unit to include overlapping matches.
+        cursor = candidate.location + 1
+    }
+    guard let match = found else { throw OpError.bad("text selection has no exact match") }
+    switch selection {
+    case "cursor_before": return CFRange(location: match.location, length: 0)
+    case "cursor_after": return CFRange(location: NSMaxRange(match), length: 0)
+    default: return CFRange(location: match.location, length: match.length)
+    }
+}
+
+
 private let axActionTable: [String: String] = [
     "press": kAXPressAction, "show_menu": kAXShowMenuAction,
 ]
@@ -1040,6 +1424,7 @@ private let axActionTable: [String: String] = [
 /// Anything else (no such action, attribute not settable, AX error) throws.
 /// The value of `set_value` is written and never echoed or logged.
 func axAct(_ req: [String: Any]) throws -> [String: Any] {
+    refreshAppKit()
     guard let appName = req["app"] as? String, let action = req["action"] as? String,
           let rawID = numericDouble(req["id"]).map({ Int($0) })
     else { throw OpError.bad("ax_act needs string app, string action and numeric id") }
@@ -1053,6 +1438,19 @@ func axAct(_ req: [String: Any]) throws -> [String: Any] {
     guard AXUIElementGetPid(entry.element, &elementPid) == .success, elementPid == app.processIdentifier
     else { return stale }
     AXUIElementSetMessagingTimeout(entry.element, timeout)
+    AXUIElementSetMessagingTimeout(entry.window, timeout)
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(axApp, timeout)
+    var currentWindows: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &currentWindows) == .success,
+          axElements(currentWindows as AnyObject?).contains(where: { CFEqual($0, entry.window) })
+    else { return stale }
+    if !CFEqual(entry.element, entry.window) {
+        var elementWindow: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(entry.element, kAXWindowAttribute as CFString, &elementWindow) == .success,
+              let elementWindow = elementWindow, CFEqual(elementWindow, entry.window)
+        else { return stale }
+    }
     guard let values = axBatch(entry.element, axTreeAttributes) else { return stale }
     let role = axString(values[0])
     guard axSignature(role: role, values: values) == entry.sig else { return stale }
@@ -1066,6 +1464,27 @@ func axAct(_ req: [String: Any]) throws -> [String: Any] {
             throw OpError.bad("element does not offer \(name) (it offers: \(offered.joined(separator: ", ")))")
         }
         status = AXUIElementPerformAction(entry.element, name as CFString)
+    case "perform_action":
+        guard let name = req["native_action"] as? String, !name.isEmpty else {
+            throw OpError.bad("perform_action needs nonempty string native_action")
+        }
+        guard axActionNames(entry.element).contains(name) else {
+            throw OpError.bad("element does not offer requested native_action")
+        }
+        status = AXUIElementPerformAction(entry.element, name as CFString)
+    case "select_text":
+        guard axString(values[1]) != "AXSecureTextField" else {
+            throw OpError.bad("text selection is unavailable on secure fields")
+        }
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(entry.element, kAXSelectedTextRangeAttribute as CFString,
+                                            &settable) == .success, settable.boolValue else {
+            throw OpError.bad("element selected-text range is not settable")
+        }
+        guard let value = values[4] as? String else { throw OpError.bad("element has no string text value") }
+        var range = try axSelectionRange(req, value: value)
+        guard let rangeValue = AXValueCreate(.cfRange, &range) else { throw OpError.bad("could not create selected-text range") }
+        status = AXUIElementSetAttributeValue(entry.element, kAXSelectedTextRangeAttribute as CFString, rangeValue)
     case "focus":
         status = AXUIElementSetAttributeValue(entry.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     case "set_value":
@@ -1662,7 +2081,7 @@ private let rootKeeper = RootKeeper()
 func dispatch(_ req: [String: Any]) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
-    let axGatedMethods: Set<String> = ["click", "drag", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
+    let axGatedMethods: Set<String> = ["click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
     if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
         return ["id": id as Any, "ok": false, "error": axGrantError]
     }
@@ -1671,17 +2090,23 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "native_input_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
         case "file_read": result = try fileRead(req)
+        case "list_apps": result = listApps()
+        case "list_windows": result = try listWindows(req)
+        case "focus_app": result = try focusApp(req)
+        case "screencapture_window": result = try screencaptureWindow(req)
         case "screencapture_region": result = try screencaptureRegion(req)
         case "click": result = try click(req)
         case "drag": result = try drag(req)
         case "type": result = try typeText(req)
         case "key": result = try key(req)
         case "scroll": result = try scroll(req)
+        case "move": result = try mouseMove(req)
+        case "cursor_position": result = try cursorPosition()
         case "ax_window_info": result = try axWindowInfo(req)
         case "ax_tree": result = try axTree(req)
         case "ax_act": result = try axAct(req)
