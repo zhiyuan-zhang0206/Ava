@@ -4,6 +4,7 @@ Every outermost wrapped SDK call emits by default, including external Python and
 framework callers. Live sampling policy affects events only. ``recording()``
 collects a full tally for an execute_code result; it never gates instrumentation.
 Semantic details come from real calls via ``annotate()``, never source scanning.
+Each call retains the explicit caller-identity snapshot its recorder supplied.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
-from contextvars import ContextVar, Token
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -39,17 +40,6 @@ class _CallFrame:
 
 _frames: ContextVar[tuple[_CallFrame, ...]] = ContextVar("sdk_frames", default=())
 _tally: ContextVar[dict[str, int] | None] = ContextVar("sdk_tally", default=None)
-_identity: ContextVar[dict[str, Any] | None] = ContextVar("sdk_identity", default=None)
-
-
-def set_identity(identity: dict[str, Any] | None) -> Token[dict[str, Any] | None]:
-    """Set the current caller identity, returning a token for `reset_identity`."""
-    return _identity.set(identity)
-
-
-def reset_identity(token: Token[dict[str, Any] | None]) -> None:
-    """Restore the caller identity ContextVar to its state before the paired `set_identity`."""
-    _identity.reset(token)
 
 
 @contextlib.contextmanager
@@ -81,6 +71,7 @@ def emit(
     detail: Mapping[str, Any] | None = None,
     duration: float | None = None,
     *,
+    identity: Mapping[str, Any],
     sampling_policy: SamplingPolicy | None = None,
 ) -> None:
     """Write one ``sdk_call`` event. Pure side channel — a broken log sink never raises
@@ -107,7 +98,7 @@ def emit(
             extra["duration"] = duration
         from base import telemetry
 
-        telemetry.emit("telemetry", SDK_CALL_EVENT, attributes=extra, **(_identity.get() or {}))
+        telemetry.emit("telemetry", SDK_CALL_EVENT, attributes=extra, **identity)
     except Exception as exc:
         from base.telemetry import report_sink_failure
 
@@ -124,7 +115,7 @@ def _event_capture_admission() -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def _measure(fn: str) -> Generator[None, None, None]:
+def _measure(fn: str, identity: Mapping[str, Any]) -> Generator[None, None, None]:
     frames = _frames.get()
     # Reinstalled recorders around plugin layers share one public call frame.
     # Keep semantic annotations from the original function, without duplicate rows.
@@ -134,6 +125,7 @@ def _measure(fn: str) -> Generator[None, None, None]:
     from base.agents.sdk.call_policy import policy
 
     snapshot = policy() if not frames else None
+    caller_identity = dict(identity)
     # A controller may close while this call is in its body.  Admit before
     # entering it, then retain that admission through the `finally` emission
     # so the local receipt cannot seal between the call and its sdk_call row.
@@ -149,20 +141,33 @@ def _measure(fn: str) -> Generator[None, None, None]:
                 tally = _tally.get()
                 if tally is not None:
                     tally[fn] = tally.get(fn, 0) + 1
-                emit(fn, frame.detail, duration=time.monotonic() - t0, sampling_policy=snapshot)
+                emit(
+                    fn,
+                    frame.detail,
+                    duration=time.monotonic() - t0,
+                    identity=caller_identity,
+                    sampling_policy=snapshot,
+                )
 
 
-def run_metered(fn: str, original: Callable[..., Any], args: Any, kwargs: Any) -> Any:
+def run_metered(
+    fn: str, original: Callable[..., Any], args: Any, kwargs: Any, *, identity: Mapping[str, Any]
+) -> Any:
     """Validate policy before execution, then preserve the invocation's outcome."""
-    with _measure(fn):
+    with _measure(fn, identity):
         return original(*args, **kwargs)
 
 
 async def run_metered_async(
-    fn: str, original: Callable[..., Awaitable[Any]], args: Any, kwargs: Any
+    fn: str,
+    original: Callable[..., Awaitable[Any]],
+    args: Any,
+    kwargs: Any,
+    *,
+    identity: Mapping[str, Any],
 ) -> Any:
     """Validate policy when awaited, preserving cancellation and the call's outcome."""
-    with _measure(fn):
+    with _measure(fn, identity):
         return await original(*args, **kwargs)
 
 
