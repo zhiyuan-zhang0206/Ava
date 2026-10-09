@@ -16370,63 +16370,6 @@
         "title": "RunTimelineMessage",
         "description": "One raw message of the stitched history, split into its parts.\n\n`context_tokens` is what the message occupies in the context (None while no request has read it),\n`estimated` whether that is a share rather than the provider's own number (None with it)."
       },
-      "RunTimelineMessageBar": {
-        "properties": {
-          "idx": {
-            "type": "integer",
-            "title": "Idx"
-          },
-          "start": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Start"
-          },
-          "end": {
-            "type": "string",
-            "format": "date-time",
-            "title": "End"
-          },
-          "session": {
-            "type": "integer",
-            "title": "Session"
-          },
-          "context_tokens": {
-            "type": "integer",
-            "title": "Context Tokens"
-          },
-          "estimated": {
-            "type": "boolean",
-            "title": "Estimated"
-          },
-          "context_total": {
-            "type": "integer",
-            "title": "Context Total"
-          },
-          "request": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunTimelineUsage"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "idx",
-          "start",
-          "end",
-          "session",
-          "context_tokens",
-          "estimated",
-          "context_total",
-          "request"
-        ],
-        "title": "RunTimelineMessageBar",
-        "description": "One message the Messages row shows, weighed for the two context rows (one bar per message).\n\n`start` / `end` are the extent of the block(s) that show the message, so its bars sit exactly\nunder them. `context_tokens` is what the message itself occupies in the context and `estimated`\nwhether that is a share rather than the provider's own number; `context_total` is the context\nthrough this message: its session's head and every message up to it, at the weight each was\nread with (before an AIMessage, the `input_tokens` of the request that produced it). `session`\nis the zero-based compaction segment (the total starts over in each). `request` is the usage of\nthe LLM request this AIMessage was (input, output, cache, cost), None for any other message.\nOnly messages a request has read are served."
-      },
       "RunTimelineMessagePart": {
         "properties": {
           "kind": {
@@ -16632,13 +16575,6 @@
             },
             "type": "array",
             "title": "Events"
-          },
-          "messages": {
-            "items": {
-              "$ref": "#/components/schemas/RunTimelineMessageBar"
-            },
-            "type": "array",
-            "title": "Messages"
           }
         },
         "type": "object",
@@ -16648,11 +16584,10 @@
           "lifetime",
           "nodes",
           "units",
-          "events",
-          "messages"
+          "events"
         ],
         "title": "RunTimelineResponse",
-        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent. `messages` are the weighed messages whose\nblocks intersect the window (the two context rows)."
+        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent."
       },
       "RunTimelineUnit": {
         "properties": {
@@ -16744,6 +16679,31 @@
               }
             ],
             "title": "Estimated"
+          },
+          "session": {
+            "type": "integer",
+            "title": "Session"
+          },
+          "context_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Total"
+          },
+          "request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunTimelineUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -16758,10 +16718,13 @@
           "parent",
           "context_tokens",
           "generation_tokens",
-          "estimated"
+          "estimated",
+          "session",
+          "context_total",
+          "request"
         ],
         "title": "RunTimelineUnit",
-        "description": "One layer-0 block (see `base.agents.history.hierarchy.units`).\n\nA message unit, except that a work unit is served as its parts: `thinking` (the model's\ngeneration for the turn), `call` (an instant at the end of the stream) and `output` (the\nexecution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the\ninclusive message-index span of the block's unit. Blocks without a time are not served.\n`parent` is the level-1 node whose span holds the block's first message, None for a block no\nnode covers (a compaction segment's head, the not yet summarized tail).\n\n`context_tokens` is what the block occupies in the context (None while no request has read\nit), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether\nany of that was a share rather than the provider's own number (None with `context_tokens`).\nA thinking / output(text) / call block is its share of the turn's AIMessage, so estimated."
+        "description": "One layer-0 block (see `base.agents.history.hierarchy.units`).\n\nA message unit, except that a work unit is served as its parts: `thinking` (the model's\ngeneration for the turn), `call` (an instant at the end of the stream) and `output` (the\nexecution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the\ninclusive message-index span of the block's unit. Blocks without a time are not served.\n`parent` is the level-1 node whose span holds the block's first message, None for a block no\nnode covers (a compaction segment's head, the not yet summarized tail).\n\n`context_tokens` is what the block occupies in the context (None while no request has read\nit), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether\nany of that was a share rather than the provider's own number (None with `context_tokens`).\nA thinking / output(text) / call block is its share of the turn's AIMessage, so estimated.\n\n`context_total` is the context through this block (what the Context size row draws; None while\nno request has read it): its session's head and everything up to and including the block, each\nmessage at the weight it was read with. The blocks of one AIMessage each add their share, so the\nfirst one starts from the `input_tokens` of the request that produced the message and the last\nends at the context through the whole message. `session` is the zero-based compaction segment\n(the total starts over in each). `request` is the usage of the LLM request the block's AIMessage\nwas (input, output, cache, cost), repeated on each of its turn blocks; None on any other block."
       },
       "RunTimelineUsage": {
         "properties": {
