@@ -391,3 +391,4 @@ async def test_llm_usage_event_carries_latency_ms(loguru_records, ledger: LlmLed
     lat = usage[0]["extra"]["latency_ms"]
     assert lat is not None and lat > 0, f"latency_ms should be a positive ms float, got {lat!r}"
     assert usage[0]["extra"]["model"] == "deepseek-flash"
+    assert usage[0]["extra"]["agent_id"] == 7
