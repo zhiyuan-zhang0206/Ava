@@ -45,10 +45,11 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
-from services.agent_runner.agent_host import settlement
-from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.runtime import TurnOutcome
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+
+from .. import settlement
+from ..host import AgentHost
+from ..runtime import TurnOutcome
 
 
 def _host(**kwargs: Any) -> AgentHost:
@@ -243,7 +244,7 @@ class _Publisher:
     def __init__(self, _redis: object, _channel: str, *, agent_id: int) -> None:
         self.agent_id = agent_id
 
-    async def start(self) -> None: ...
+    async def start(self, _tasks: asyncio.TaskGroup) -> None: ...
 
     async def aclose(self) -> None: ...
 
@@ -519,7 +520,8 @@ class TestPoolIsolation:
     ) -> None:
         """Admitting more agents must not expand either database client pool."""
         from base.db import Database
-        from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
+
+        from ..pools import build_control_pool, build_shared_pool
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", turn_limit)
         monkeypatch.setattr(settings.daemon, "host_db_pool_max_size", 12)
