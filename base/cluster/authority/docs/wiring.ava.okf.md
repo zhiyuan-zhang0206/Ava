@@ -87,9 +87,15 @@ What a bundle carries and who shares it:
   `check_invariant` (read-only grantees such as `grafana_ro`); a home
   with no ledger is refused before any native effect.
 - **Launch**: the root launcher delivers `AVA_DB_URL` + `AVA_DB_GENERATION` per
-  service class; `base/dotenv_boot` keeps a delivery naming this home's
-  endpoint and consumes the gateway login for an admitted operator process;
-  otherwise the first dial raises `NoDatabaseAuthorityError`.
+  service class; `base/host/env/dotenv_boot` keeps a delivery naming this home's
+  endpoint and consumes the gateway login for an admitted operator process.
+  Environment loading and runner bootstrap return an immutable `EnvBootResult`.
+  The existing config boot retains it through lite-to-full upgrade; each
+  `DbConfig` copies its refusal together with its connection facts. A later
+  delivery or data-plane refresh cannot authorize an earlier refused handle.
+  The first credential-free dial raises `NoDatabaseAuthorityError`; environment
+  loading itself still permits commands that need no database. These runtime
+  facts are excluded from config dumps and have no environment alias.
 - **Monitoring** is not delivered: the collector's PostgreSQL receiver
   (`cli/commands/observability/otel_collector.py`) dials the owner-only socket as
   `ava_monitor` by `peer`, so its rendered config names no credential.
