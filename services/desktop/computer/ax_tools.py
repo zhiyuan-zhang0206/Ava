@@ -17,13 +17,13 @@ from __future__ import annotations
 import re
 from typing import Any, Literal, NamedTuple, cast
 
-from services.desktop.computer import ax_gap
-from services.desktop.computer.ax_gap import Frame
-from services.desktop.computer.ax_ids import AxSession
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.screen import _current_scale
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import AxNode, AxTreeResult
+from ..permissions_helper import client as helper
+from ..permissions_helper.client import AxNode, AxTreeResult
+from . import ax_gap
+from .ax_gap import Frame
+from .ax_ids import AxSession
+from .errors import ComputerUseError
+from .screen import _current_scale
 
 Mode = Literal["interactive", "text", "full"]
 _MODES: tuple[str, ...] = ("interactive", "text", "full")
@@ -51,10 +51,6 @@ _INTERACTIVE_ROLES = frozenset(
         "AXColorWell",
         "AXSwitch",
     }
-)
-# AXShowMenu is deliberately absent: many non-controls (rows, cells) list it.
-_INTERACTIVE_ACTIONS = frozenset(
-    {"AXPress", "AXIncrement", "AXDecrement", "AXConfirm", "AXPick", "AXOpen"}
 )
 _TEXT_ROLES = frozenset({"AXStaticText", "AXHeading", "AXTextField", "AXTextArea"})
 _CONTAINER_ROLES = frozenset(
@@ -89,7 +85,9 @@ def _is_interactive(node: AxNode) -> bool:
         return True
     if "selected" in node and node.get("role") == "AXRow":
         return True
-    return any(a in _INTERACTIVE_ACTIONS for a in node.get("actions", ()))
+    # A reported action is a platform capability, not a model-input enum.
+    # AXShowMenu alone is common on non-controls (rows and cells).
+    return any(action != "AXShowMenu" for action in node.get("actions", ()))
 
 
 def _rank(node: AxNode, mode: Mode) -> int | None:
@@ -225,10 +223,9 @@ def _line(node: AxNode, scale: float, mode: Mode) -> str:
     value = node.get("value")
     if value and value != label and node.get("role") not in ("AXStaticText", "AXHeading"):
         parts.append(f"val={_quote(value)}")
-    if mode == "full":
-        if "ident" in node:
-            parts.append("#" + node["ident"])
-        parts.extend(node.get("actions", ()))
+    if mode == "full" and "ident" in node:
+        parts.append("#" + node["ident"])
+    parts.extend(node.get("actions", ()))
     return " ".join(parts)
 
 

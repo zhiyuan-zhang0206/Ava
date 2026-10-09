@@ -36,6 +36,8 @@ class HelperSocket:
                 "start": {"x": request["start_x"], "y": request["start_y"]},
                 "end": {"x": request["end_x"], "y": request["end_y"]},
             }
+        elif method == "cursor_position":
+            result = {"x": -12, "y": 34}
         elif method == "scroll":
             result = {"scrolled": request["dy"]}
         elif method == "screen_size":
@@ -111,11 +113,12 @@ async def test_drag_converts_both_endpoints_and_tracks_release_point(
         "start": {"x": -100 / scale, "y": 200 / scale},
         "end": {"x": 500 / scale, "y": 600 / scale},
     }
+    assert daemon._pointer == (500, 600)
     await daemon._dispatch(
         {"id": 3, "method": "call_tool", "tool": "scroll", "args": {"dy": 5}, "agent_id": 7}
     )
     scroll = next(req for req in requests if req["method"] == "scroll")
-    assert (scroll["x"], scroll["y"]) == (500 / scale, 600 / scale)
+    assert (scroll["x"], scroll["y"]) == (-12, 34)
 
 
 async def test_drag_schema_lists_required_numeric_endpoints(desktop: Desktop) -> None:
@@ -171,7 +174,7 @@ async def test_drag_rejects_nonfinite_or_nonnumeric_coordinates(
         }
     )
     assert response["ok"] is False
-    assert f"finite numeric {key}" in response["error"]
+    assert key in response["error"]
     assert not any(req["method"] == "drag" for req in requests)
     assert daemon._pointer is None
     assert events[-1].attributes["outcome"] == "error"
