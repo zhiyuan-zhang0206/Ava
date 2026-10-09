@@ -18,6 +18,7 @@ from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
 from services.derived.insights.run_timeline import context
 from services.derived.insights.run_timeline.history import HistoryView
+from services.derived.insights.run_timeline.tokens import MessageBar, message_bars
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -60,12 +61,9 @@ def two_sessions() -> HistoryView:
     return HistoryView.of(history, units, MessageUsage(messages), read)
 
 
-def test_requests_carry_their_session_input_size_and_send_time() -> None:
+def test_requests_carry_their_session_and_send_time() -> None:
     requests = context.llm_requests(two_sessions())
-    assert [(r.idx, r.session, r.input_tokens, r.output_tokens) for r in requests] == [
-        (2, 0, 100, 1),
-        (4, 1, 40, 1),
-    ]
+    assert [(r.idx, r.session) for r in requests] == [(2, 0), (4, 1)]
     # A request is sent when the message before it was read.
     assert requests[0].ts == T0
     assert requests[1].ts == T0 + timedelta(minutes=10)
@@ -105,27 +103,36 @@ def three_requests_then_a_session() -> HistoryView:
     return HistoryView.of(history, units, MessageUsage(messages), read)
 
 
-def test_a_request_adds_what_entered_the_context_since_the_previous_one() -> None:
-    view = three_requests_then_a_session()
-    requests = context.llm_requests(view)
-    assert [r.idx for r in requests] == [2, 5, 7, 9]
-    # The previous reply is re-sent, so its output counts: 5 + the two asks make up the whole growth.
-    assert requests[1].added_tokens == 160 - 100
-    assert requests[1].added_estimated is True  # the asks share a provider total
-    assert requests[2].added_tokens == 190 - 160
-    assert requests[2].added_estimated is False  # reply two and one ask: both anchored exactly
-    assert requests[2].added_tokens == sum(t.context_tokens or 0 for t in view.tokens[5:7])
+def bars_by_idx(view: HistoryView) -> dict[int, MessageBar]:
+    return {bar.idx: bar for bar in message_bars(view)}
 
 
-def test_a_sessions_first_request_adds_its_first_messages_without_the_system_prompt() -> None:
+def test_the_context_before_a_reply_is_the_input_of_the_request_that_made_it() -> None:
     view = three_requests_then_a_session()
-    requests = context.llm_requests(view)
-    # Session 0 starts at the first ask (the prompt, message 0, is the head); session 1 at its own first message.
-    assert requests[0].added_tokens == view.tokens[1].context_tokens
-    assert requests[0].added_tokens < requests[0].input_tokens
-    assert requests[3].added_tokens == view.tokens[8].context_tokens
-    # The previous session's last reply is not re-sent after a compaction.
-    assert requests[3].added_tokens != sum(t.context_tokens or 0 for t in view.tokens[7:9])
+    bars = bars_by_idx(view)
+    inputs = {2: 100, 5: 160, 7: 190, 9: 40}
+    for idx, input_tokens in inputs.items():
+        # The total through the message before the reply is what that request sent.
+        assert bars[idx - 1].context_total == input_tokens
+        assert bars[idx].request is not None and bars[idx].request.input == input_tokens
+    # A message adds its own weight, and the reply's output is re-sent after it.
+    assert bars[5].context_total == 160 + 7
+    assert bars[2].context_total == 100 + 5
+    assert bars[3].context_total == bars[2].context_total + (view.tokens[3].context_tokens or 0)
+
+
+def test_the_context_total_starts_over_after_a_compaction() -> None:
+    bars = bars_by_idx(three_requests_then_a_session())
+    assert (bars[8].session, bars[9].session) == (1, 1)
+    # Session 1 holds its own head and first message only: the previous session's replies are gone.
+    assert bars[9].context_total < bars[7].context_total
+    assert bars[8].context_total == 40
+
+
+def test_a_message_that_is_not_a_reply_carries_no_request() -> None:
+    bars = bars_by_idx(three_requests_then_a_session())
+    assert bars[1].request is None and bars[3].request is None
+    assert bars[2].request is not None and bars[2].request.output == 5
 
 
 def test_a_point_resolves_to_the_next_request_else_the_last() -> None:
@@ -192,11 +199,3 @@ def test_an_agent_with_no_request_has_no_context(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(HTTPException) as caught:
         call(view, 0, monkeypatch)
     assert caught.value.status_code == 404
-
-
-def test_a_request_reports_the_message_range_its_addition_covers() -> None:
-    view = three_requests_then_a_session()
-    requests = context.llm_requests(view)
-    # Half-open, ending at the request's own AIMessage; later requests start at the previous reply (re-sent).
-    assert [(r.added_from, r.added_to) for r in requests] == [(1, 2), (2, 5), (5, 7), (8, 9)]
-    assert all(r.added_to == r.idx for r in requests)

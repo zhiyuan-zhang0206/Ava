@@ -12,7 +12,11 @@ canvas, selection and keyboard model.
 
 Axis: time only. A token (hybrid) axis was built first and removed after review
 (no use for it in the view; its code, control and strings are gone). Context bars
-default to added.
+default to added. Both context rows draw one bar per message, not per request: the
+request was a batching of messages by read time that stretched a bar over idle
+hours (a heartbeat after a 3 h idle), while a message has its own block extent
+and its own count. Request facts (input, cache, output, cost) live in the details
+panel. Instants get a 3 px minimum drawn width on the linear axis, in every row.
 
 Mechanics: each agent is read by the existing per-agent `run-timeline` endpoint,
 so no new cluster route. A selection is `{agent, selection}` because node ids and

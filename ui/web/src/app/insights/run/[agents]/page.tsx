@@ -20,7 +20,7 @@ import {
   levelsTopFirst,
   nodeAncestors,
   nodeChildren,
-  requestSelection,
+  messageSelection,
   viewportOf,
   type Highlight,
   type Selection,
@@ -149,9 +149,9 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const mine = selection !== null && selection.agent === focus ? selection.selection : null;
   const selectedNode =
     mine?.kind === "node" ? focusData?.nodes.find((node) => node.id === mine.id) : undefined;
-  // A selected request shows the details of the block of the AIMessage that made it.
+  // A selected message shows the details of the block that shows it.
   const unitTarget: Selection | null =
-    mine?.kind === "request" ? requestSelection({ idx: mine.idx }, focusData?.units ?? []) : mine;
+    mine?.kind === "message" ? messageSelection(mine.idx, focusData?.units ?? []) : mine;
   const selectedUnit =
     unitTarget?.kind === "unit"
       ? focusData?.units.find(
@@ -160,8 +160,11 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
         )
       : undefined;
 
+  // The AIMessage behind the details: the selected message, or the message a selected turn block is a part of.
+  const turnBlock = selectedUnit?.kind === "thinking" || selectedUnit?.kind === "text" || selectedUnit?.kind === "call";
+  const detailMessage = turnBlock ? focusData?.messages.find((bar) => bar.idx === selectedUnit.i0) : undefined;
   // The context card follows the selected block, else the last LLM request in view.
-  const contextAt = focusData && view ? contextPoint(mine, focusData.nodes, focusData.requests, view) : undefined;
+  const contextAt = focusData && view ? contextPoint(mine, focusData.nodes, focusData.messages, view) : undefined;
   const categoryHighlight: CategoryHighlight = {
     active: highlight === null ? null : classCategory(highlight.cls),
     has: (category) => categoryClass(category) !== null,
@@ -244,6 +247,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
       agentId={focus ?? 0}
       unit={selectedUnit}
       parent={focusData?.nodes.find((node) => node.id === selectedUnit.parent) ?? null}
+      message={detailMessage}
       onSelectNode={focus === undefined ? () => undefined : select(focus)}
     />
   ) : (

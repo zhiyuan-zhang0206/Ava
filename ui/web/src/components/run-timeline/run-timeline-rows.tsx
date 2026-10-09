@@ -34,7 +34,7 @@ import {
   UNITS_ROW,
   levelRowId,
   navRowIds,
-  SELECTION_MIN_PX,
+  SELECTION_LINE_BELOW_PX,
   selectionRoles,
   revealView,
   type NavKey,
@@ -59,7 +59,7 @@ const PINCH_ZOOM_RATE = 0.01;
 const LEVEL_ROW_PX = 32;
 const UNIT_ROW_PX = 24;
 const CONTEXT_ROW_PX = 40;
-const EMPTY_DATA = { nodes: [], units: [], requests: [] };
+const EMPTY_DATA = { nodes: [], units: [], messages: [] };
 
 /** One agent of the view: its data once read, else what is shown in its place. */
 export type AgentEntry =
@@ -98,7 +98,7 @@ export function RunTimelineRows({
 }) {
   const t = useTranslations("runTimeline");
   const [hover, setHover] = useState<AgentSelection | null>(null);
-  // The row the selection was made in: a request's bar and its message block select the same thing.
+  // The row the selection was made in: a message's two bars select the same thing.
   const [navRow, setNavRow] = useState<string | null>(null);
   const choose = (agent: number, row: string, target: AgentSelection["selection"]) => {
     setNavRow(row);
@@ -142,25 +142,24 @@ export function RunTimelineRows({
     selected?.rows,
   );
   // The primary item (the cursor's) gets one strong frame; what is linked to it one light frame per row around the whole batch.
-  // A frame hugs the drawn item (bars exactly, the rest at least 6 px wide); a primary item narrower than 6 px also gets a hairline.
+  // A frame hugs the drawn item; a primary item narrower than 6 px also gets a hairline.
   const boxesOf = (agent: number, row: string, keys: Iterable<string>) => {
     const boxes = layouts.get(agent)?.get(row)?.boxes;
     return [...keys].flatMap((key) => boxes?.get(key) ?? []);
   };
   const primaryBoxes =
     roles.primary === null || selection === null ? [] : boxesOf(selection.agent, roles.primary.row, [roles.primary.key]);
-  const primaryRaw = frameOf(primaryBoxes, 0, trackPx);
-  const lineX = primaryRaw !== null && primaryRaw.width < SELECTION_MIN_PX ? primaryRaw.left + primaryRaw.width / 2 : null;
+  const primaryRaw = frameOf(primaryBoxes, trackPx);
+  const lineX = primaryRaw !== null && primaryRaw.width < SELECTION_LINE_BELOW_PX ? primaryRaw.left + primaryRaw.width / 2 : null;
   const decoFor = (agent: number, row: string): RowDeco => {
-    const minPx = row === INPUT_ROW || row === ADDED_ROW ? 0 : SELECTION_MIN_PX;
     const mine = selection?.agent === agent;
     const primaryHere = mine && roles.primary?.row === row ? roles.primary.key : null;
     const linkedKeys = mine ? (roles.linked.get(row) ?? new Set<string>()) : new Set<string>();
     return {
       primaryKey: primaryHere,
       linkedKeys,
-      primary: primaryHere === null ? null : frameOf(boxesOf(agent, row, [primaryHere]), minPx, trackPx),
-      linked: frameOf(boxesOf(agent, row, linkedKeys), minPx, trackPx),
+      primary: primaryHere === null ? null : frameOf(boxesOf(agent, row, [primaryHere]), trackPx),
+      linked: frameOf(boxesOf(agent, row, linkedKeys), trackPx),
       lineX,
     };
   };
@@ -296,7 +295,7 @@ export function RunTimelineRows({
     return {
       selection: selection?.agent === agent.id ? selection.selection : null,
       hover: mine,
-      lit: hoverLit(mine, agent.data.nodes, agent.data.units, agent.data.requests),
+      lit: hoverLit(mine, agent.data.nodes, agent.data.units),
       highlight,
     };
   };

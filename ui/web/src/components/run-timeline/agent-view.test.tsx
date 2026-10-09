@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RunTimelineNode, RunTimelineRequest, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineNode, RunTimelineMessageBar, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 const { getRunTimeline, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings, useMediaQuery } =
   vi.hoisted(() => ({
@@ -57,16 +57,15 @@ const unit = (i0: number, from: number, to: number, parent: string): RunTimeline
   estimated: null,
 });
 
-const request = (idx: number, minutes: number): RunTimelineRequest => ({
+const bar = (idx: number, minutes: number, total: number, request: boolean): RunTimelineMessageBar => ({
   idx,
-  ts: at(minutes),
+  start: at(minutes),
+  end: at(minutes + 5),
   session: 0,
-  input_tokens: 100,
-  output_tokens: 10,
-  added_tokens: 50,
-  added_estimated: false,
-  added_from: 0,
-  added_to: idx,
+  context_tokens: 50,
+  estimated: false,
+  context_total: total,
+  request: request ? { calls: 1, input: total - 50, cache_read: 0, output: 50, cache_write: 0, cost_usd: 0, cost_calls: 0 } : null,
 });
 
 const response = (agent: number, window: [number, number], tree: boolean): RunTimelineResponse => ({
@@ -78,7 +77,7 @@ const response = (agent: number, window: [number, number], tree: boolean): RunTi
     : [node("l", 1, window[0], window[1], null)],
   units: [unit(0, window[0] + 5, window[0] + 10, "l"), unit(1, window[0] + 20, window[0] + 25, "l")],
   events: [],
-  requests: [request(1, window[0] + 12)],
+  messages: [bar(0, window[0] + 5, 100, false), bar(1, window[0] + 20, 200, true)],
 });
 
 // Agent 7 runs 0-60 min with a two-level tree, agent 8 runs 30-120 min with one level.
@@ -209,21 +208,21 @@ describe("agent view", () => {
     await paintFrame();
     const live = () => screen.getByTestId("run-timeline-selection-live").textContent;
     // The request bar of agent 7, in its last row (Added context).
-    const x = itemX(BY_AGENT[7], "added", "r1", 1000, BASE_78);
+    const x = itemX(BY_AGENT[7], "added", "m1", 1000, BASE_78);
     fireEvent.click(within(group(7)).getByTestId("run-timeline-canvas-added"), { clientX: x });
     expect(live()).toContain("Agent #7");
-    expect(live()).toContain("LLM request");
+    expect(live()).toContain("Message 1");
     fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(live()).toContain("Agent #8");
     expect(live()).toContain("node l");
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(live()).toContain("Agent #7");
-    expect(live()).toContain("LLM request");
+    expect(live()).toContain("Message 1");
     // Within an agent, up stays in the agent's own rows: Context size, then the Messages row.
     fireEvent.keyDown(window, { key: "ArrowUp" });
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(live()).toContain("Agent #7");
-    expect(live()).not.toContain("LLM request");
+    expect(live()).not.toContain("Message 1");
   });
 
   it("does not name an agent in the readout when the view holds one", async () => {
