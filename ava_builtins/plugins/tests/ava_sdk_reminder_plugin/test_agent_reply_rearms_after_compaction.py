@@ -53,7 +53,7 @@ async def test_agent_reply_user_inbound_is_noop(_loaded: Any):
     state = _state(
         [
             AIMessage(content="prev", id="a0"),
-            inbound_message(content="hi", source="user", inbound_id=2),
+            inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
         ]
     )
     result = await hook(state, _runtime(), _config())
@@ -151,7 +151,7 @@ async def test_agent_reply_every_time_user_inbound_is_noop(
     state = _state(
         [
             AIMessage(content="prev", id="a0"),
-            inbound_message(content="hi", source="user", inbound_id=2),
+            inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
         ]
     )
     assert await hook(state, _runtime(), _config()) is None
@@ -367,7 +367,9 @@ def test_tail_has_agent_inbound_first_turn_agent_only_true():
 
 def test_tail_has_agent_inbound_user_only_no_ai_false():
     """Only a user inbound, no AIMessage -> False."""
-    msgs: list[AnyMessage] = [inbound_message(content="hi", source="user", inbound_id=2)]
+    msgs: list[AnyMessage] = [
+        inbound_message(content="hi", source="user", inbound_id=2, body_start=0)
+    ]
     assert tail_has_agent_inbound(msgs) is False
 
 
