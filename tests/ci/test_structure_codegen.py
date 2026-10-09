@@ -239,10 +239,7 @@ def test_required_job_identity_and_unconditional_lint() -> None:
     assert JOB["name"] == "backend structure (pre-commit lint + codegen freshness)"
     assert JOB["timeout-minutes"] == 25
     assert JOB["needs"] == ["classify"]
-    assert JOB["if"] == (
-        "${{ needs.classify.outputs.frontend == 'true' || "
-        "needs.classify.outputs.backend == 'true' }}"
-    )
+    assert JOB["if"] == "${{ needs.classify.result == 'success' }}"
     assert "if" not in LINT
     assert "continue-on-error" not in JOB
     assert "continue-on-error" not in LINT
