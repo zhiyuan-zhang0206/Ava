@@ -356,7 +356,7 @@ select = [
     "ERA",          # commented-out code
     "DTZ",          # datetime timezone
     "S",            # bandit security
-    "TID",          # tidy imports
+    "TID251", "TID253",  # banned imports; package-relative style has a separate owner
     "LOG",          # logging
     "PL",           # pylint
     "TRY",          # tryceratops (try/except best practices)
@@ -1145,6 +1145,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/post_deploy_visual/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/structure/imports/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
