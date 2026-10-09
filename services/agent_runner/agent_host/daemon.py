@@ -72,6 +72,7 @@ from pydantic import BaseModel
 
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
+from ava.sdk_surface.install import Installation
 from ava.sdk_surface.process_context import process_clients
 from base import paths
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
@@ -96,7 +97,6 @@ from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus
 from base.log import init_gateway_process, logger
-from base.packages.plugins.extensions import ExtensionRegistry
 from base.sessions.helper_chain_guard import parent_chain_intact
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.force_termination import kill_terminating_agent_shells
@@ -354,17 +354,20 @@ def _background_loops(
     }
 
 
-def _load_plugin_registry() -> ExtensionRegistry:
-    """The full plugin load: the registry of the plugins admitted and declared.
+def _load_plugin_installation() -> Installation:
+    """Load one installation: its registry feeds the graph and its configs feed each turn.
 
-    The load also installs the plugins' SDK surface into this process's `ava`. One value handed to the checkpoint serde (state classes), the graph (hooks, state fields) and
-    the host (prompt sections, notes), so all three see the same plugin set. A plugin changed after
-    this point takes effect on the next host start (`_plugins_fingerprint`): the graph is compiled
-    once and cannot take a new registry.
+    The shared graph is built once and cannot take a new registry. The host
+    retains this installation's boot image until its normal process restart.
     """
     from agent.extensions import load_extensions
+    from ava.sdk_surface.install import installed
 
-    return load_extensions().registry
+    load_extensions()
+    installation = installed()
+    if installation is None:
+        raise RuntimeError("the plugin load did not install its SDK surface")
+    return installation
 
 
 async def _build_checkpointer(
@@ -489,9 +492,9 @@ async def run() -> None:
     try:
         local_machine = machine_name()
         await _open_host_pools(workload_pool, control_pool, local_machine)
-        extensions = _load_plugin_registry()
+        installation = _load_plugin_installation()
         checkpointer = await _build_checkpointer(
-            workload_pool, [cls for _plugin, cls in extensions.state_classes()]
+            workload_pool, [cls for _plugin, cls in installation.registry.state_classes()]
         )
         # The dynamic state class the graph builds is process-global, and the reason there is
         # ONE graph here rather than one per agent (services/agent_runner/agent_host/host.py explains the cost).
@@ -499,12 +502,13 @@ async def run() -> None:
             pool=workload_pool,
             control_pool=control_pool,
             checkpointer=checkpointer,
-            graph=build_graph(checkpointer, extensions),
+            graph=build_graph(checkpointer, installation.registry),
             machine=local_machine,
             bus=bus,
             db=db,
             clients=process_clients(database=lambda: db),
-            extensions=extensions,
+            extensions=installation.registry,
+            plugin_configs=installation.configs,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long

@@ -171,9 +171,13 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     agent_identity.assert_self_action("restart")
     payload_json: str | None = None
     if config_overlay:
+        from ava.sdk_surface.install import installed
         from base.packages.plugins.config_registration import validate_config_overlay
 
-        validate_config_overlay(config_overlay)
+        installation = installed()
+        validate_config_overlay(
+            config_overlay, None if installation is None else installation.configs
+        )
         # Settle a withdrawn llm_model before it is stored (task #4306): the
         # rewrite is reported in this agent's own log — the spawner-visible
         # receipt for the self-restart path.
