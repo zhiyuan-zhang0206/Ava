@@ -398,7 +398,9 @@ def _list_tools(server: str) -> list[ToolInfo]:
         # must propagate, not be silently retried on a freshly-spawned local
         # session, which would mask the error and double-run side effects.
         with suppress(MCPConnectError, OSError):
-            return remote.list_tools(server)
+            return remote.list_tools(
+                server, timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds
+            )
 
     cached = _read_cache(server)
     if cached is not None:
@@ -435,7 +437,9 @@ def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
         # (MCPCallError / MCPToolNotFound) propagates rather than being silently
         # retried locally (which would double-run a side-effectful tool).
         with suppress(MCPConnectError, OSError):
-            return remote.call_tool(server, tool, args)
+            return remote.call_tool(
+                server, tool, args, timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds
+            )
         # The daemon attempt may have outlived the borrowed lease.
         agent_identity.validate_external_identity()
 
