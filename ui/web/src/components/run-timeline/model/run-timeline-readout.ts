@@ -2,11 +2,10 @@
 
 import type { useTranslations } from "next-intl";
 
-import { formatTokensCompact } from "@/lib/format/format-number";
+import { approx, formatTokensCompact } from "@/lib/format/format-number";
 import { formatShort } from "@/lib/format/time";
 import type {
   RunTimelineNode,
-  RunTimelineMessageBar,
   RunTimelineResponse,
   RunTimelineUnit,
 } from "@/lib/contracts/types";
@@ -16,16 +15,6 @@ import { firstLine, type Hover } from "./timeline-model";
 const PREVIEW_CHARS = 80;
 
 type Translate = ReturnType<typeof useTranslations<"runTimeline">>;
-
-export function messageReadout(t: Translate, message: RunTimelineMessageBar): string {
-  return t("readoutMessage", {
-    idx: message.idx,
-    session: message.session + 1,
-    time: formatShort(message.start),
-    tokens: `${t("readoutUnitTokens", { tokens: formatTokensCompact(message.context_tokens) })}${message.estimated ? ` ${t("estimatedSuffix")}` : ""}`,
-    total: formatTokensCompact(message.context_total),
-  });
-}
 
 function nodeReadout(t: Translate, node: RunTimelineNode): string {
   const line = t("readoutNode", {
@@ -39,8 +28,7 @@ function nodeReadout(t: Translate, node: RunTimelineNode): string {
     output: formatTokensCompact(node.usage.output),
   });
   if (node.context_tokens === null) return line;
-  const tokens = t("readoutUnitTokens", { tokens: formatTokensCompact(node.context_tokens) });
-  return `${line} · ${tokens}${node.estimated ? ` ${t("estimatedSuffix")}` : ""}`;
+  return `${line} · ${t("readoutUnitTokens", { tokens: `${approx(node.estimated)}${formatTokensCompact(node.context_tokens)}` })}`;
 }
 
 /** The readout of what is hovered, or null when nothing is (or it is no longer in the data). */
@@ -55,10 +43,6 @@ export function readoutText(
 ): string | null {
   const { data, t } = ctx;
   if (target === null) return null;
-  if (target.kind === "message") {
-    const message = data.messages.find((candidate) => candidate.idx === target.idx);
-    return message === undefined ? null : messageReadout(t, message);
-  }
   if (target.kind === "node") {
     const node = data.nodes.find((candidate) => candidate.id === target.id);
     return node === undefined ? null : nodeReadout(t, node);
@@ -75,6 +59,7 @@ export function readoutText(
     preview: firstLine(unit.preview, PREVIEW_CHARS),
   });
   if (unit.context_tokens === null) return line;
-  const tokens = t("readoutUnitTokens", { tokens: formatTokensCompact(unit.context_tokens) });
-  return `${line} · ${tokens}${unit.estimated ? ` ${t("estimatedSuffix")}` : ""}`;
+  const tokens = t("readoutUnitTokens", { tokens: `${approx(unit.estimated)}${formatTokensCompact(unit.context_tokens)}` });
+  const context = unit.context_total === null ? "" : ` · ${t("readoutUnitContext", { total: formatTokensCompact(unit.context_total) })}`;
+  return `${line} · ${tokens}${context}`;
 }
