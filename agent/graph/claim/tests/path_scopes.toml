@@ -1,0 +1,5 @@
+# Fixture modules retained when these tests moved from agent/graph/tests/.
+"tests.path_scoped.agent_tests" = [
+    "test_claim_dispatch_guards.py",
+    "test_claim_multimodal.py",
+]
