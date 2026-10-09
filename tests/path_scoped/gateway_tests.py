@@ -48,7 +48,6 @@ def _local_spawn_in_process(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
-    model_catalog: ModelCatalog,
 ) -> None:
     # The integration tests take this fixture from here (imported into their module).
     async def _in_process_forward(
@@ -58,7 +57,11 @@ def _local_spawn_in_process(
         # DB); the runner's ops daemon dispatches launch_agent_op in-process —
         # mirror that here so a forwarded local launch produces a real child.
         return await launch_agent_op(
-            database, event_bus, body, app.state.db_pool, catalog=model_catalog
+            database,
+            event_bus,
+            body,
+            app.state.db_pool,
+            catalog=cast(ModelCatalog, app.state.catalog),
         )
 
     monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
@@ -99,7 +102,6 @@ def _local_lifecycle_in_process(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
-    model_catalog: ModelCatalog,
 ) -> None:
     async def _in_process_lifecycle(
         _db: object, target: str, path: str, json_body: dict[str, Any]
@@ -111,7 +113,12 @@ def _local_lifecycle_in_process(
         # mirrors the daemon serializing the response model onto the wire dict.
         return (
             await lifecycle_op(
-                database, event_bus, path, json_body, app.state.db_pool, catalog=model_catalog
+                database,
+                event_bus,
+                path,
+                json_body,
+                app.state.db_pool,
+                catalog=cast(ModelCatalog, app.state.catalog),
             )  # pyright: ignore[reportUnknownArgumentType]
         ).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
 
