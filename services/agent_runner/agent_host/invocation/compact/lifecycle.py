@@ -21,7 +21,7 @@ from base.agents.messages.native_restart import (
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import HostedTurnResources
 
 
 async def settle_original_restart(
@@ -33,6 +33,7 @@ async def settle_original_restart(
     recover: Callable[[RuntimeIncarnation], Awaitable[None]],
     *,
     incarnation: RuntimeIncarnation | None = None,
+    resources: HostedTurnResources | None,
 ) -> bool:
     """Return whether this exact original invocation ended through restart.
 
@@ -88,7 +89,7 @@ async def settle_original_restart(
             raise CompactHeldError("original compact restart lacks replaced-target proof")
         await require_receiver(conn, command, incarnation)
     drop_agent(agent_id)
-    return await _apply_original(pool, bus, original, command_id, recover)
+    return await _apply_original(pool, bus, original, command_id, recover, resources=resources)
 
 
 async def _apply_original(
@@ -97,23 +98,22 @@ async def _apply_original(
     original: RuntimeIncarnation,
     command_id: int,
     recover: Callable[[RuntimeIncarnation], Awaitable[None]],
+    *,
+    resources: HostedTurnResources | None,
 ) -> bool:
-    # The outer resource tail has left the original graph context; authority
-    # was checked above before reconstructing only this exact closed owner.
-    with bind_turn_identity(original.agent_id, incarnation=original):
-        while True:
-            try:
-                kind = await apply_hosted_lifecycle(
-                    pool, original, bus=bus, expected_command_id=command_id
-                )
-                break
-            except (psycopg.OperationalError, PoolTimeout):
-                kind = await completed_hosted_lifecycle_kind(pool, original, command_id)
-                if kind == "restart":
-                    break
-                await recover(original)
-        if kind is None:
+    while True:
+        try:
+            kind = await apply_hosted_lifecycle(
+                pool, original, bus=bus, expected_command_id=command_id, resources=resources
+            )
+            break
+        except (psycopg.OperationalError, PoolTimeout):
             kind = await completed_hosted_lifecycle_kind(pool, original, command_id)
-        if kind != "restart":
-            raise CompactHeldError("original compact restart remains pending its canonical owner")
-        return True
+            if kind == "restart":
+                break
+            await recover(original)
+    if kind is None:
+        kind = await completed_hosted_lifecycle_kind(pool, original, command_id)
+    if kind != "restart":
+        raise CompactHeldError("original compact restart remains pending its canonical owner")
+    return True

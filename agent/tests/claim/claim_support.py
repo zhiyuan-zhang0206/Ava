@@ -10,6 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+import ava
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.db import Database
@@ -43,7 +44,10 @@ def _make_runtime(
     mock to assert `pub.emit.call_args_list`.
 
     """
+    retained = ava.context
     ctx = AvaContext(
+        clients=retained.clients,
+        original_incarnation=retained.original_incarnation,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm(),

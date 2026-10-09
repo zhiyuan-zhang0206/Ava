@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -29,9 +30,7 @@ from agent.tests.test_compact import (
     _reminder_state,
     _runtime_with_llm,
 )
-from agent.tests.test_compact import (
-    _ava_compact_loaded as _ava_compact_loaded,
-)
+from agent.tests.test_compact import _ava_compact_loaded as _ava_compact_loaded
 from base.agents.context import AvaContext
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -367,12 +366,13 @@ async def test_compact_with_super_long_summary_in_claim(
 
 
 async def test_terminate_preserves_pending_summary_without_wiping_history(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
 ):
     """Lifecycle acceptance is serial; a summary cannot run in the exiting owner."""
     from agent.ownership.hosted import apply_hosted_lifecycle
     from agent.tests.claim.test_inbound_ownership import _admit, _agent
-    from base.native_process.turn_identity import bind_turn_identity
 
     tid = _agent(db_conn)
     old = await _admit(aops_pool, tid)
@@ -391,10 +391,19 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
         *(HumanMessage(content=f"h-{i}") for i in range(8)),
     ]
     state = AgentState(messages=initial_msgs)
-
-    with bind_turn_identity(tid, incarnation=old):
-        cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
-        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus)
+    cmd = await claim_node(
+        state,
+        Runtime(
+            context=replace(
+                _make_runtime(aops_pool).context,
+                original_incarnation=old,
+                hosted_resources=None,
+                native_work=None,
+            )
+        ),
+        _config(tid),
+    )
+    await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None)
 
     assert cmd.goto == END
     assert "context_reset" not in cmd.update  # type: ignore[operator]
@@ -410,12 +419,13 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
 
 
 async def test_compact_in_same_batch_as_restart(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
 ):
     """The admitted successor, not the exiting owner, consumes the same summary."""
     from agent.ownership.hosted import apply_hosted_lifecycle
     from agent.tests.claim.test_inbound_ownership import _admit, _agent
-    from base.native_process.turn_identity import bind_turn_identity
 
     tid = _agent(db_conn)
     old = await _admit(aops_pool, tid)
@@ -435,10 +445,19 @@ async def test_compact_in_same_batch_as_restart(
         *(HumanMessage(content=f"h-{i}") for i in range(8)),
     ]
     state = AgentState(messages=initial_msgs)
-
-    with bind_turn_identity(tid, incarnation=old):
-        cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
-        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus)
+    cmd = await claim_node(
+        state,
+        Runtime(
+            context=replace(
+                _make_runtime(aops_pool).context,
+                original_incarnation=old,
+                hosted_resources=None,
+                native_work=None,
+            )
+        ),
+        _config(tid),
+    )
+    await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None)
 
     assert cmd.goto == END
     assert "context_reset" not in cmd.update  # type: ignore[operator]
@@ -458,8 +477,18 @@ async def test_compact_in_same_batch_as_restart(
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (restart_id,)
     ).fetchone() == ("done", True)
-    with bind_turn_identity(tid, incarnation=successor):
-        resumed = await claim_node(state, _make_runtime(aops_pool), _config(tid))
+    resumed = await claim_node(
+        state,
+        Runtime(
+            context=replace(
+                _make_runtime(aops_pool).context,
+                original_incarnation=successor,
+                hosted_resources=None,
+                native_work=None,
+            )
+        ),
+        _config(tid),
+    )
     tail = _compact_tail(resumed.update)
     assert tail[0].content == compose_summary_message(summary_text)  # pyright: ignore[reportUnknownMemberType]
     assert resumed.goto == "init_context"

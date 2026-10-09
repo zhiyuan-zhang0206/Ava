@@ -9,7 +9,6 @@ from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import bind_turn_identity
 from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
 
 
@@ -22,8 +21,10 @@ async def test_generic_dead_letter_leaves_fixed_command_claimed(
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
     command_id = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        assert [i.id for i in await claim_inbound_batch(aops_pool, agent_id)] == [command_id]
+    assert [
+        i.id
+        for i in await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation, work=None)
+    ] == [command_id]
     chat_id = insert_inbound_message(
         db_conn, agent_id, "old chat", "cli", bus=event_bus, database=database
     )

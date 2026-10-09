@@ -82,21 +82,20 @@ def test_sits_in_the_stable_cache_band(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot renders and the dev REPL have no identity; the note declines
     rather than producing a head fragment out of context."""
+    context = _context(None)
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert timezone_note(_context(None)) is None
+    assert timezone_note(context) is None
 
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """The explicit host context works without binding the shared SDK."""
-    from base.native_process.turn_identity import bind_turn_identity
 
+    context = _context(29)
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-
-    with bind_turn_identity(97):
-        note = timezone_note(_context(29))
+    note = timezone_note(context)
 
     assert note is not None
     assert "Asia/Shanghai" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

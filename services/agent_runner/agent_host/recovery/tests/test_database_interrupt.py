@@ -12,7 +12,6 @@ from agent import state as states
 from base.agents.observation.db_wait import DatabaseWaits
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
 
@@ -56,17 +55,17 @@ async def test_recovery_retries_promptly_but_does_not_execute_or_ack_control(
 
     monkeypatch.setattr(db_recovery, "flush_checkpoint", unavailable_once)
     monkeypatch.setattr(db_recovery, "_INITIAL_BACKOFF_SECONDS", 0.15 if persistent_failure else 30)
-    with bind_turn_identity(agent, incarnation=incarnation):
-        original = asyncio.create_task(
-            db_recovery.recover_database(
-                pool=aops_pool,
-                checkpointer=saver,
-                graph=graph,
-                incarnation=incarnation,
-                database_waits=DatabaseWaits(),
-                peek_lock=asyncio.Lock(),
-            )
+    original = asyncio.create_task(
+        db_recovery.recover_database(
+            pool=aops_pool,
+            checkpointer=saver,
+            graph=graph,
+            incarnation=incarnation,
+            database_waits=DatabaseWaits(),
+            peek_lock=asyncio.Lock(),
+            work=None,
         )
+    )
     try:
         if persistent_failure:
             await asyncio.wait_for(retried.wait(), 1)

@@ -2,7 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -23,7 +23,7 @@ from base.agents.messages.native_cancel import accept_native_cancel, observe_nat
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_owner
 from services.agent_runner.agent_host.invocation import native_work as work_owner
 from services.agent_runner.agent_host.settlement import close_hosted_turn
@@ -94,6 +94,7 @@ async def test_original_invocation_settles_once_after_database_fault(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     site: str,
+    database: Database,
 ) -> None:
     pool: ConnectionPool
     incarnation, initial = await managed_work(db_conn, aops_pool)
@@ -122,40 +123,51 @@ async def test_original_invocation_settles_once_after_database_fault(
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=database,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
-        db=Database.from_settings(),
+        db=database,
         bus=EventBus.from_settings(),
     )
     faults = _install_faults(monkeypatch, agent, site)
-    with bind_turn_identity(agent, incarnation=incarnation):
-        running = asyncio.create_task(host._invoke_until_done(agent, ctx))
-        try:
-            await asyncio.wait_for(entered.wait(), 10)
-            with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-                target = await asyncio.to_thread(observe_native_work, pool, agent)
-                assert target is not None and target.work_id != initial.work_id
-                accepted = await asyncio.to_thread(
-                    accept_native_cancel, pool, "original-work", agent, target
-                )
-                repeated = await asyncio.to_thread(
-                    accept_native_cancel, pool, "original-work", agent, target
-                )
-                assert repeated == accepted
-            queued = _insert(db_conn, agent)
-            release.set()
-            outcome = await asyncio.wait_for(running, 15)
-        finally:
-            release.set()
-            if not running.done():
-                running.cancel()
-            await asyncio.gather(running, return_exceptions=True)
+    running = asyncio.create_task(
+        host._invoke_until_done(
+            agent,
+            replace(ctx, original_incarnation=incarnation, hosted_resources=HostedTurnResources()),
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 10)
+        with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
+            target = await asyncio.to_thread(observe_native_work, pool, agent)
+            assert target is not None and target.work_id != initial.work_id
+            accepted = await asyncio.to_thread(
+                accept_native_cancel, pool, "original-work", agent, target
+            )
+            repeated = await asyncio.to_thread(
+                accept_native_cancel, pool, "original-work", agent, target
+            )
+            assert repeated == accepted
+        queued = _insert(db_conn, agent)
+        release.set()
+        outcome = await asyncio.wait_for(running, 15)
+    finally:
+        release.set()
+        if not running.done():
+            running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
     await close_hosted_turn(
-        aops_pool, aops_pool, ctx.require_db(), ctx.require_bus(), saver, incarnation, outcome
+        aops_pool,
+        aops_pool,
+        ctx.require_db(),
+        ctx.require_bus(),
+        saver,
+        incarnation,
+        outcome,
+        resources=None,
     )
     assert faults.injected
     assert faults.invocations == 1

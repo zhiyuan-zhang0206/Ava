@@ -159,7 +159,6 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     from agent.ownership.inbound import RuntimeOwnershipLostError
     from base.agents.incarnation.resources import ResourceBirth
     from base.db import insert_inbound_message
-    from base.native_process.turn_identity import bind_turn_identity
 
     aid = _park(db_conn, status="idling")
     if managed:
@@ -170,15 +169,23 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
         db_conn.commit()
     owner = uuid4()
     old = await admit_hosted_runtime(
-        aops_pool, aid, machine_name(), owner, expected_from="idling", db=database
+        aops_pool,
+        aid,
+        machine_name(),
+        owner,
+        expected_from="idling",
+        db=database,
     )
     assert old is not None
     command = insert_inbound_message(
         db_conn, aid, "", "self", kind="terminate", bus=event_bus, database=database
     )
-    with bind_turn_identity(aid, incarnation=old):
-        assert [item.id for item in await claim_inbound_batch(aops_pool, aid)] == [command]
-        assert await apply_hosted_lifecycle(aops_pool, old, bus=event_bus) == "terminate"
+    assert [
+        item.id for item in await claim_inbound_batch(aops_pool, aid, incarnation=old, work=None)
+    ] == [command]
+    assert (
+        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None) == "terminate"
+    )
     trigger = insert_inbound_message(
         db_conn, aid, "continue", "user", bus=event_bus, database=database
     )
@@ -191,16 +198,23 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
         trigger_inbound_kind=InboundKind.CHAT if guarded else None,
     )
     successor = await admit_hosted_runtime(
-        aops_pool, aid, machine_name(), owner, expected_from="idling", db=database
+        aops_pool,
+        aid,
+        machine_name(),
+        owner,
+        expected_from="idling",
+        db=database,
     )
     assert successor is not None and successor.generation != old.generation
-    with bind_turn_identity(aid, incarnation=old), pytest.raises(RuntimeOwnershipLostError):
-        await claim_inbound_batch(aops_pool, aid)
-    with bind_turn_identity(aid, incarnation=successor):
-        assert {item.kind for item in await claim_inbound_batch(aops_pool, aid)} == {
-            "chat",
-            "resurrect",
-        }
+    with pytest.raises(RuntimeOwnershipLostError):
+        await claim_inbound_batch(aops_pool, aid, incarnation=old, work=None)
+    assert {
+        item.kind
+        for item in await claim_inbound_batch(aops_pool, aid, incarnation=successor, work=None)
+    } == {
+        "chat",
+        "resurrect",
+    }
 
 
 # ── relaxed trigger guard: system-reaped crash rows (task #3617) ─────────────

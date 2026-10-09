@@ -8,13 +8,11 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
 from base.agents.observation.db_wait import DatabaseWaits
-from base.native_process.runtime_incarnation import current_incarnation
-
-from ..db_recovery import recover_database
-from ..runtime import TurnOutcome
-from .compact.apply import CompactGraph
-from .compact.execute import run_compact
-from .compact.lifecycle import settle_original_restart
+from services.agent_runner.agent_host.db_recovery import recover_database
+from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
+from services.agent_runner.agent_host.invocation.compact.execute import run_compact
+from services.agent_runner.agent_host.invocation.compact.lifecycle import settle_original_restart
+from services.agent_runner.agent_host.runtime import TurnOutcome
 
 
 async def drive_context(
@@ -81,22 +79,21 @@ async def _drive_work(
     drop_agent: Callable[[int], None],
 ) -> TurnOutcome:
     """Run compact continuation and ordinary work in the admitted context."""
-    incarnation = current_incarnation(agent_id)
-    if incarnation is None:
-        raise RuntimeError("compact host continuation lacks admitted identity")
+    incarnation = ctx.require_original_incarnation(agent_id)
     if not await run_compact(
         pool,
         saver,
         graph,
         incarnation,
         ctx,
-        lambda: recover_database(
+        lambda work: recover_database(
             pool=pool,
             checkpointer=saver,
             graph=graph,
             incarnation=incarnation,
             database_waits=database_waits,
             peek_lock=peek_lock,
+            work=work,
         ),
     ):
         return TurnOutcome(exited=False, crashed=False, native_held=True)
@@ -113,8 +110,10 @@ async def _drive_work(
             incarnation=token,
             database_waits=database_waits,
             peek_lock=peek_lock,
+            work=ctx.native_work,
         ),
         incarnation=incarnation,
+        resources=ctx.hosted_resources,
     )
     if restarted:
         return TurnOutcome(exited=False, crashed=False)

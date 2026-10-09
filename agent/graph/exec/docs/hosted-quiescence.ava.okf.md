@@ -20,8 +20,11 @@ Task cancellation; accepted force remains visible to existing durable interrupt
 checks. An idle force wake uses the same original-host serialized pump without
 admitting another runtime.
 
-`base/native_process/turn_identity.py` carries a turn-local resource scope alongside identity.
-Copied graph contexts share actual disposable exec domains and request evidence.
+The host explicitly supplies the original `RuntimeIncarnation`, current
+`NativeWorkTarget`, and `HostedTurnResources` through `AvaContext`. The scope in
+`base/native_process/turn_identity.py` belongs to the actual turn Task, while
+the reusable model cache retains no scope. Copied graph contexts share actual
+disposable exec domains, request evidence, and the original admission reference.
 Only successful close/root/reap/reader results remove the exact entry. Formatting
 an `ExecTeardownError` into a tool failure does not erase the evidence. Unknown
 POSIX members are errors, not proof that the process group is empty.

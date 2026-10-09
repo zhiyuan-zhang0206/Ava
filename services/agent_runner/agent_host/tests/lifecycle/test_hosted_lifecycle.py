@@ -1,6 +1,7 @@
 """Hosted application waits for graph return, then uses the durable command."""
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -26,7 +27,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import HostedTurnResources
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.force_termination import kill_terminating_agent_shells
 from services.agent_runner.agent_host.host import AgentHost
@@ -79,7 +80,7 @@ async def _assert_restart_observed_by_next_admission(
     agent_id: int,
     inbound: int,
 ) -> None:
-    assert not await settle_hosted_runtime(pool, old, bus=event_bus)
+    assert not await settle_hosted_runtime(pool, old, bus=event_bus, resources=None)
     new = await admit_hosted_runtime(
         pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database
     )
@@ -98,7 +99,10 @@ async def test_hosted_applies_only_after_continuation_returns(
     event_bus: EventBus,
 ) -> None:
     agent_id = _agent(db_conn)
-    old = await _admit(aops_pool, agent_id)
+    old = await _admit(
+        aops_pool,
+        agent_id,
+    )
     inbound = _command(db_conn, agent_id, kind)
     entered, release = asyncio.Event(), asyncio.Event()
     host = AgentHost(
@@ -110,30 +114,36 @@ async def test_hosted_applies_only_after_continuation_returns(
         db=Database.from_settings(),
     )
     host._runtimes[agent_id] = Mock()
-    with bind_turn_identity(agent_id, incarnation=old):
-        assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
-        assert db_conn.execute(
-            "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
-        ).fetchone() == ("claimed",)
-        task = asyncio.create_task(
-            host._invoke_until_done(
-                agent_id,
+    assert [
+        row.id for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=old, work=None)
+    ] == [inbound]
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
+    ).fetchone() == ("claimed",)
+    task = asyncio.create_task(
+        host._invoke_until_done(
+            agent_id,
+            replace(
                 AvaContext(
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
                 ),
-            )
+                original_incarnation=old,
+                hosted_resources=None,
+                native_work=None,
+            ),
         )
-        await asyncio.wait_for(entered.wait(), 2)
-        try:
-            _assert_command_unapplied_while_continuation_runs(
-                db_conn, host, old, agent_id=agent_id, inbound=inbound
-            )
-        finally:
-            release.set()
-            await asyncio.wait_for(task, 3)
+    )
+    await asyncio.wait_for(entered.wait(), 2)
+    try:
+        _assert_command_unapplied_while_continuation_runs(
+            db_conn, host, old, agent_id=agent_id, inbound=inbound
+        )
+    finally:
+        release.set()
+        await asyncio.wait_for(task, 3)
     assert agent_id not in host._runtimes
     record = db_conn.execute(
         "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (inbound,)
@@ -160,7 +170,10 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
     event_bus: EventBus,
 ) -> None:
     agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(
+        aops_pool,
+        agent_id,
+    )
     inbound = _command(db_conn, agent_id, "terminate")
     graph = Mock()
     graph.ainvoke = AsyncMock(
@@ -195,48 +208,55 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         await apply_hosted_lifecycle(pool, token, **kwargs)
         raise RuntimeError("injected post-commit crash")
 
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        with monkeypatch.context() as patch:
-            if crash == "after_cache_drop":
-                patch.setattr(host, "drop_agent", fail_drop)
-            elif crash == "before_observe":
-                patch.setattr(psycopg.AsyncConnection, "execute", fail_observe)
-            else:
-                patch.setattr(
-                    "services.agent_runner.agent_host.host.apply_hosted_lifecycle",
-                    fail_after_commit,
-                )
-            with pytest.raises(RuntimeError, match="injected"):
-                await host._invoke_until_done(
-                    agent_id,
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    with monkeypatch.context() as patch:
+        if crash == "after_cache_drop":
+            patch.setattr(host, "drop_agent", fail_drop)
+        elif crash == "before_observe":
+            patch.setattr(psycopg.AsyncConnection, "execute", fail_observe)
+        else:
+            patch.setattr(
+                "services.agent_runner.agent_host.host.apply_hosted_lifecycle",
+                fail_after_commit,
+            )
+        with pytest.raises(RuntimeError, match="injected"):
+            await host._invoke_until_done(
+                agent_id,
+                replace(
                     AvaContext(
                         ops_pool=aops_pool,
                         agent=AgentSlices.resolve(),
                         db=Database.from_settings(),
                         bus=EventBus.from_settings(),
                     ),
-                )
-        state = db_conn.execute(
-            "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
-            "FROM inbound_messages WHERE id=%s",
-            (inbound,),
-        ).fetchone()
-        assert state == (
-            ("done", True, True) if crash == "after_commit" else ("claimed", False, False)
-        )
-        db_conn.commit()
-        if crash != "after_commit":
-            # Same admitted continuation can retry; cache absence is not a new owner.
-            assert await host._invoke_until_done(
-                agent_id,
+                    original_incarnation=owner,
+                    hosted_resources=None,
+                    native_work=None,
+                ),
+            )
+    state = db_conn.execute(
+        "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
+        "FROM inbound_messages WHERE id=%s",
+        (inbound,),
+    ).fetchone()
+    assert state == (("done", True, True) if crash == "after_commit" else ("claimed", False, False))
+    db_conn.commit()
+    if crash != "after_commit":
+        # Same admitted continuation can retry; cache absence is not a new owner.
+        assert await host._invoke_until_done(
+            agent_id,
+            replace(
                 AvaContext(
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
                 ),
-            )
+                original_incarnation=owner,
+                hosted_resources=None,
+                native_work=None,
+            ),
+        )
     assert db_conn.execute(
         "SELECT lifecycle_command_id,status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (None, "terminated")
@@ -249,11 +269,16 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
 ) -> None:
     agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(
+        aops_pool,
+        agent_id,
+    )
     inbound = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
-    assert await settle_hosted_runtime(aops_pool, owner, bus=event_bus)
+    assert [
+        row.id
+        for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    ] == [inbound]
+    assert await settle_hosted_runtime(aops_pool, owner, bus=event_bus, resources=None)
     host = AgentHost(
         pool=aops_pool,
         checkpointer=Mock(),
@@ -306,7 +331,9 @@ def _record_kills(
     return calls
 
 
-async def _run_terminating_turn(aops_pool: AsyncConnectionPool, agent_id: int) -> None:
+async def _run_terminating_turn(
+    aops_pool: AsyncConnectionPool, agent_id: int, *, incarnation: RuntimeIncarnation
+) -> None:
     graph = Mock()
     graph.ainvoke = AsyncMock(
         return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
@@ -323,6 +350,8 @@ async def _run_terminating_turn(aops_pool: AsyncConnectionPool, agent_id: int) -
     assert await host._invoke_until_done(
         agent_id,
         AvaContext(
+            original_incarnation=incarnation,
+            hosted_resources=HostedTurnResources(),
             ops_pool=aops_pool,
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
@@ -339,12 +368,14 @@ async def test_hosted_terminate_kills_requested_shell_sessions_before_the_death(
     requested: bool,
 ) -> None:
     agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(
+        aops_pool,
+        agent_id,
+    )
     _terminate_command(db_conn, agent_id, kill=requested)
     kills = _record_kills(monkeypatch)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        await _run_terminating_turn(aops_pool, agent_id)
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner)
     # The kill ran after the last step returned, before `terminated` committed.
     assert kills == ([(agent_id, "running")] if requested else [])
     assert db_conn.execute(
@@ -358,13 +389,18 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
     """The agent's own terminate won acceptance; the operator's kill-requesting
     terminate queued behind it still takes the sessions with the death."""
     agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(
+        aops_pool,
+        agent_id,
+    )
     own = _terminate_command(db_conn, agent_id, source="self")
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [own]
-        await _run_terminating_turn(aops_pool, agent_id)
+    assert [
+        row.id
+        for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    ] == [own]
+    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner)
     assert kills == [(agent_id, "running")]
 
 
@@ -376,12 +412,14 @@ async def test_hosted_failed_kill_still_applies_the_termination(
 ) -> None:
     """A session-kill failure is an ERROR, never a crashed turn: the death applies."""
     agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(
+        aops_pool,
+        agent_id,
+    )
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch, fail=True)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        await _run_terminating_turn(aops_pool, agent_id)
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner)
     assert kills == [(agent_id, "running")]
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)

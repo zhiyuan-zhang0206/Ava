@@ -18,7 +18,7 @@ from base.agents.history.checkpoint import latest_checkpoint_id_in_transaction
 from base.agents.messages.kwargs import AvaMsgType
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import hosted_resources_settled
+from base.native_process.turn_identity import HostedTurnResources, hosted_resources_settled
 from services.agent_runner.agent_host.invocation.compact.checkpoint import (
     cold_application,
     cold_reader,
@@ -33,11 +33,13 @@ async def acknowledge(
     saver: AsyncPostgresSaver,
     command: CompactCommand,
     incarnation: RuntimeIncarnation,
+    *,
+    resources: HostedTurnResources | None,
 ) -> bool:
     checkpoint_id = await cold_application(saver, command)
     if checkpoint_id is None:
         return False
-    if not hosted_resources_settled():
+    if not hosted_resources_settled(resources):
         raise CompactHeldError("compact application still has unresolved native resources")
     async with async_write_transaction(pool) as conn:
         await require_receiver(conn, command, incarnation)
@@ -58,7 +60,7 @@ async def apply_prepared(
     ctx: AvaContext,
 ) -> bool:
     """Intermediate reset is resumed without wiping/re-generating the result again."""
-    if await acknowledge(pool, saver, command, incarnation):
+    if await acknowledge(pool, saver, command, incarnation, resources=ctx.hosted_resources):
         return True
     if not await authorize(pool, command, incarnation):
         return False
@@ -105,7 +107,7 @@ async def apply_prepared(
     # standing head; END prevents ordinary claim/model work before cold ACK.
     await graph.ainvoke(None, config=config, context=ctx)  # pyright: ignore[reportUnknownMemberType]
     await flush_checkpoint(saver, incarnation.agent_id)
-    if not await acknowledge(pool, saver, command, incarnation):
+    if not await acknowledge(pool, saver, command, incarnation, resources=ctx.hosted_resources):
         raise CompactHeldError(
             "compact replacement has no committed materialized application proof"
         )

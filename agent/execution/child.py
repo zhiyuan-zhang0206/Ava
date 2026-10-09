@@ -493,13 +493,13 @@ def _bind_identity(request: RequestPayload) -> None:
     import ava
     from ava.sdk_surface import process_context
 
-    ava.bind_context(process_context.context_from_description(request.context))
+    ava.bind_context(
+        process_context.context_from_description(
+            request.context, original_incarnation=request.incarnation
+        )
+    )
     if request.agent_id is None:
         return
-    if request.incarnation is not None:
-        from base.native_process.runtime_incarnation import bind_child_incarnation
-
-        bind_child_incarnation(request.incarnation)
     _init_logger(request.agent_id)
     # No eager OTLP warmup: the backend comes up lazily on the first export
     # (`_ensure()` in base/telemetry/otlp/telemetry_otlp.py), so a zero-record

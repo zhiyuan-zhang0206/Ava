@@ -19,7 +19,7 @@ from base.agents.incarnation.lifecycle_acceptance import (
     LifecycleIntent,
     accept_lifecycle_command_async,
 )
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _OBSERVE_RESTART = (
     "UPDATE inbound_messages i SET observed_at=clock_timestamp(),status='done', "
@@ -41,7 +41,7 @@ class LifecycleNoopResult(TypedDict):
 
 
 async def accept_lifecycle_intent(
-    conn: psycopg.AsyncConnection, agent_id: int
+    conn: psycopg.AsyncConnection, agent_id: int, *, incarnation: RuntimeIncarnation | None
 ) -> LifecycleIntent | None:
     """Accept the oldest lifecycle request, or return the unfinished pointer.
 
@@ -51,8 +51,8 @@ async def accept_lifecycle_intent(
     """
     if conn.info.transaction_status != TransactionStatus.INTRANS:
         raise RuntimeError("lifecycle acceptance requires an explicit transaction")
-    await lock_inbound_owner(conn, agent_id)
-    token = current_incarnation(agent_id)
+    await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
+    token = incarnation
     if token is None:
         raise RuntimeError("lifecycle acceptance requires an admitted runtime incarnation")
     return await accept_lifecycle_command_async(conn, token)

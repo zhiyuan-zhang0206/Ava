@@ -1,43 +1,24 @@
-"""Run every local agent through one shared host and graph.
+"""Run local agents through one shared graph and explicit per-turn context.
 
-The dispatcher owns per-agent single-flight and wake delivery. This driver binds an admitted
-incarnation, resolves its framework/plugin configuration, and invokes the graph until idle
-or native lifecycle return. The agent identity and configuration travel through
-`Runtime[AvaContext]`; native admission/resource scopes remain separate from SDK
-identity and ordinary log attribution. Configuration travels as its `AgentSlices`
-on the graph context, and managed exec children receive the same pins through their
-existing environment projection.
+The dispatcher owns single-flight; the daemon owns pools and checkpointer.
+Agent identity/configuration travel through Runtime[AvaContext]. Original
+incarnation, work and resource references remain distinct from SDK identity.
+Cold admission repairs checkpoints before preparing the cached model.
 
-The daemon shares workload/control pools, one thread-keyed checkpointer and one compiled graph.
-Graph construction loads process-global plugin definitions; per-agent compilation would corrupt
-concurrent turns. Chat models and startup reconciliation invalidate their per-agent caches on
-birth/overlay fingerprint changes. LLM retry follows each agent's own schedule
-(`agent/graph/llm/_retry.py`).
-
-Cold admission repairs claimed inbound/checkpoint disagreements and dangling tool
-pairs, and establishes the workspace. Watchers are shell sessions, with no host tracking or
-restart; see `docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md`.
-
-Native restart/terminate flushes the final checkpoint and applies its exact-owner
-command before releasing single-flight. Normal maintenance waits for continuation
-and managed-resource settlement. Explicit force cancellation stays fenced until
-those resources close. Database outages retain the original task; recovery checks
-its ownership before repairing and continuing, without creating a new inbound.
-
-Completed invocations flush their checkpoint before linking the current trace.
-Provider/compaction failures halt; settled abort immediately reconciles claimed inbounds
-(`host_abort_reconcile_enabled`). Unexpected errors propagate. Configuration rejection
-keeps pending work durable until a later scan with corrected configuration.
+Restart/terminate flushes the original command before releasing single-flight.
+Maintenance and force cancellation retain continuation/resource settlement fences.
+Database recovery repairs that same task without accepting new inbound work.
+Expected graph failures halt and settle their checkpoint; unknown errors propagate.
 """
 
 from __future__ import annotations
 
 import asyncio
 import secrets
-import time
 from collections import OrderedDict
 from collections.abc import Mapping
 from datetime import datetime
+from functools import partial
 from uuid import uuid4
 
 import psycopg
@@ -68,11 +49,7 @@ from agent.ownership.hosted import (
 from agent.ownership.hosted_completion import (
     completed_hosted_lifecycle_kind,
 )
-from agent.process_boot import boot_agent_scope
-from agent.startup import (
-    reconcile_claimed_inbounds_at_startup,
-    repair_dangling_tool_use_at_startup,
-)
+from agent.startup import reconcile_claimed_inbounds_at_startup, repair_dangling_tool_use_at_startup
 from agent.state import BaseAgentState
 from agent.turn.runloop import (
     PendingTurnFailure,
@@ -98,8 +75,8 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from base.native_process.turn_identity import bind_native_work, bind_turn_identity
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
@@ -117,11 +94,11 @@ from services.agent_runner.agent_host.invocation import (
     recover_completed_work,
     returned_lifecycle_request,
 )
+from services.agent_runner.agent_host.invocation.driver import drive_context
 from services.agent_runner.agent_host.invocation.native_work import (
     NativeWorkContinuation,
-    halt_before_reinvoke,
     hold_native_cancel,
-    prepare_native_invocation,
+    invoke_prepared_graph,
     recover_native_cancel,
     settle_native_invocation,
 )
@@ -131,13 +108,19 @@ from services.agent_runner.agent_host.runtime import (
     TurnOutcome,
     _AgentRuntime,
     admit_stored_model,
+    build_runtime,
     cached_runtime,
     evict_runtimes,
     read_last_active_at,
+    refresh_cached_runtime,
 )
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
 from services.agent_runner.agent_host.scheduling.pending_wakes import scan_candidates
-from services.agent_runner.agent_host.settlement import close_hosted_turn
+from services.agent_runner.agent_host.settlement import (
+    close_hosted_turn,
+    wait_retained_resources,
+    wait_shielded_task,
+)
 from services.agent_runner.agent_host.stall_guard import run_invocation_with_stall_guard
 from services.agent_runner.agent_host.wake_screening import _is_runnable, _read_stored_config
 
@@ -209,12 +192,9 @@ class AgentHost:
         Durable interrupts still stop cooperative LLM/exec work. Repeated outer
         cancellation must not release this agent to a concurrent successor.
         """
-        from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
-
         resources = HostedTurnResources()
-        with bind_hosted_resources(resources):
-            self.turn_fingerprints.pop(agent_id, None)
-            work = asyncio.create_task(self._run_turn(agent_id))
+        self.turn_fingerprints.pop(agent_id, None)
+        work = asyncio.create_task(self._run_turn(agent_id, resources=resources))
         cancelled = False
         try:
             while not work.done():
@@ -239,12 +219,7 @@ class AgentHost:
                     agent_id=agent_id,
                     requests=[str(path) for path in resources.unresolved],
                 )
-                while resources.unresolved:
-                    resources.changed.clear()
-                    try:
-                        await resources.changed.wait()
-                    except asyncio.CancelledError:
-                        cancelled = True
+                cancelled = await wait_retained_resources(resources) or cancelled
                 self._in_flight.discard(agent_id)
             # The exclusive pump also covers no-task wakes.
             if cancelled:
@@ -273,13 +248,10 @@ class AgentHost:
                     self.drop_agent,
                     self.database_waits,
                     self._peek_lock,
+                    work=None,
                 )
             )
-            while not settlement.done():
-                try:
-                    await asyncio.shield(settlement)
-                except asyncio.CancelledError:
-                    cancelled = True
+            cancelled = await wait_shielded_task(settlement) or cancelled
             settlement.result()
         if cancelled:
             raise asyncio.CancelledError
@@ -293,7 +265,7 @@ class AgentHost:
             self._control_pool, agent_id, self._owner, self._machine, command_id=command_id
         )
 
-    async def _run_turn(self, agent_id: int) -> None:
+    async def _run_turn(self, agent_id: int, *, resources: HostedTurnResources | None) -> None:
         """Run `agent_id` until it has nothing left to claim, then return.
 
         One read decides everything: whether this agent is ours to run, and what
@@ -320,14 +292,17 @@ class AgentHost:
         self.turn_fingerprints[agent_id] = stored.fingerprint
 
         if await maintenance_receipts.run_held(
-            agent_id, stored.status, self._maintenance_failed, self._run_held_controls
+            agent_id,
+            stored.status,
+            self._maintenance_failed,
+            partial(self._run_held_controls, resources=resources),
         ):
             return
 
         # An active external lease owns decisions; no native graph or plugin
         # initialization may start on a dispatcher wake or a host restart.
         if await active_lease(self._control_pool, agent_id):
-            await self._run_held_controls(agent_id, stored.status)
+            await self._run_held_controls(agent_id, stored.status, resources=resources)
             return
 
         async with self.admission.admit(agent_id):
@@ -369,7 +344,9 @@ class AgentHost:
                 # Admission may have waited for prepare's real row lock.
                 # Its only permitted continuation now is the owned control;
                 # do not build a new runtime or run initialization hooks.
-                await self._apply_held_controls(agent_id, incarnation)
+                await self._apply_held_controls(
+                    agent_id, incarnation, work=None, resources=resources
+                )
                 return
             outcome = TurnOutcome(exited=False, crashed=False)
             # Admission is durable before its optional live announce; every await
@@ -380,10 +357,7 @@ class AgentHost:
                 # The identity and the recovery scope wrap the whole turn; the agent's
                 # configuration travels as its slices (the exec child gets it via the
                 # re-emitted overlay env — see the module docstring).
-                with (
-                    bind_turn_identity(agent_id, incarnation=incarnation),
-                    recovery_reconstruction_scope(self._checkpointer, str(agent_id)),
-                ):
+                with recovery_reconstruction_scope(self._checkpointer, str(agent_id)):
                     await publish_agent_updated(self._bus, agent_id)
                     slices = AgentSlices.resolve(
                         pins, plugin_pins, plugin_configs=self._plugin_configs
@@ -392,10 +366,18 @@ class AgentHost:
 
                     compact_continuation = await resumable_compact(self._control_pool, incarnation)
                     if compact_continuation is not None or await recover_native_cancel(
-                        self._control_pool, self._checkpointer, self._graph, incarnation
+                        self._control_pool,
+                        self._checkpointer,
+                        self._graph,
+                        incarnation,
+                        resources=resources,
                     ):
-                        runtime = await self._runtime_for(agent_id, stored.fingerprint, slices)
-                        outcome = await self._drive_turns(agent_id, runtime, slices)
+                        runtime = await self._runtime_for(
+                            agent_id, stored.fingerprint, slices, incarnation=incarnation
+                        )
+                        outcome = await self._drive_turns(
+                            agent_id, runtime, slices, incarnation=incarnation, resources=resources
+                        )
                     else:
                         self.drop_agent(agent_id)
                         outcome = TurnOutcome(exited=False, crashed=False, native_held=True)
@@ -414,7 +396,7 @@ class AgentHost:
                 outcome = TurnOutcome(exited=False, crashed=True)
                 raise
             finally:
-                self._cache_after_turn(agent_id)
+                refresh_cached_runtime(self._runtimes, self._in_flight, agent_id, self._evict)
                 await close_hosted_turn(
                     self._pool,
                     self._control_pool,
@@ -423,9 +405,12 @@ class AgentHost:
                     self._checkpointer,
                     incarnation,
                     outcome,
+                    resources=resources,
                 )
 
-    async def _run_held_controls(self, agent_id: int, status: str) -> None:
+    async def _run_held_controls(
+        self, agent_id: int, status: str, *, resources: HostedTurnResources | None
+    ) -> None:
         """Maintain ownership and apply admin intent without touching the graph."""
 
         incarnation = await admit_hosted_runtime(
@@ -439,50 +424,63 @@ class AgentHost:
         if incarnation is None:
             return
         async with force_termination_stop(self._control_pool, incarnation):
-            await self._apply_held_controls(agent_id, incarnation)
+            await self._apply_held_controls(agent_id, incarnation, work=None, resources=resources)
 
-    async def _apply_held_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
+    async def _apply_held_controls(
+        self,
+        agent_id: int,
+        incarnation: RuntimeIncarnation,
+        *,
+        work: NativeWorkTarget | None,
+        resources: HostedTurnResources | None,
+    ) -> None:
         from agent.db import claim_inbound_batch
 
-        with bind_turn_identity(agent_id, incarnation=incarnation):
-            # An active external lease owns decisions and its claim gate never
-            # runs while held, so the held-controls wake is the lease's only
-            # native relay-supervision point. Hot path: one native_status read
-            # plus known relay exit/heartbeat checks (recovery handles confirmed
-            # exit or stale heartbeat — provision, spawn, rate-limited stamp; no model
-            # calls, no polling). A supervision failure rides the existing
-            # held-wake error path (record_failure is a no-op outside a
-            # maintenance hold) and the next wake re-drives.
-            session = await native_status(self._db, self._bus, agent_id)
-            await supervise_relay(self._db, self._bus, session, agent_id, self.relays)
-            # An earlier ordinary failure can leave a buffered tail. Preserve
-            # it before accepting maintenance intent, without replaying graph work.
-            await flush_checkpoint(self._checkpointer, agent_id)
-            batch = await claim_inbound_batch(self._control_pool, agent_id, lifecycle_only=True)
-            if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
-                raise RuntimeError("held control claim returned an unaccepted command")
-            kind = await apply_hosted_lifecycle(
-                self._control_pool,
-                incarnation,
-                bus=self._bus,
-                kill_shell_sessions=kill_terminating_agent_shells,
+        # An active external lease owns decisions and its claim gate never
+        # runs while held, so the held-controls wake is the lease's only
+        # native relay-supervision point. Hot path: one native_status read
+        # plus known relay exit/heartbeat checks (recovery handles confirmed
+        # exit or stale heartbeat — provision, spawn, rate-limited stamp; no model
+        # calls, no polling). A supervision failure rides the existing
+        # held-wake error path (record_failure is a no-op outside a
+        # maintenance hold) and the next wake re-drives.
+        session = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
+        await supervise_relay(
+            self._db, self._bus, session, agent_id, self.relays, incarnation=incarnation
+        )
+        # An earlier ordinary failure can leave a buffered tail. Preserve
+        # it before accepting maintenance intent, without replaying graph work.
+        await flush_checkpoint(self._checkpointer, agent_id)
+        batch = await claim_inbound_batch(
+            self._control_pool,
+            agent_id,
+            lifecycle_only=True,
+            incarnation=incarnation,
+            work=work,
+        )
+        if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
+            raise RuntimeError("held control claim returned an unaccepted command")
+        kind = await apply_hosted_lifecycle(
+            self._control_pool,
+            incarnation,
+            bus=self._bus,
+            kill_shell_sessions=kill_terminating_agent_shells,
+            resources=resources,
+        )
+        if kind is None:
+            await settle_hosted_runtime(
+                self._control_pool, incarnation, bus=self._bus, resources=resources
             )
-            if kind is None:
-                await settle_hosted_runtime(self._control_pool, incarnation, bus=self._bus)
-            else:
-                self.drop_agent(agent_id)
-
-    def _cache_after_turn(self, agent_id: int) -> None:
-        """Refresh retained runtime recency and return excess idle entries."""
-        cached = self._runtimes.get(agent_id)
-        if cached is not None:
-            cached.last_used = time.monotonic()
-            self._runtimes.move_to_end(agent_id)
-        self._in_flight.discard(agent_id)
-        self._evict()
+        else:
+            self.drop_agent(agent_id)
 
     async def _runtime_for(
-        self, agent_id: int, fingerprint: str, slices: AgentSlices
+        self,
+        agent_id: int,
+        fingerprint: str,
+        slices: AgentSlices,
+        *,
+        incarnation: RuntimeIncarnation,
     ) -> _AgentRuntime:
         """Build a cold/stale model from this turn's slices, or retain its cache."""
         return await cached_runtime(
@@ -491,18 +489,28 @@ class AgentHost:
             agent_id,
             fingerprint,
             slices,
-            self._build_runtime,
+            partial(self._build_runtime, incarnation=incarnation),
             self._evict,
         )
 
     async def _build_runtime(
-        self, agent_id: int, fingerprint: str, slices: AgentSlices
+        self,
+        agent_id: int,
+        fingerprint: str,
+        slices: AgentSlices,
+        *,
+        incarnation: RuntimeIncarnation | None,
     ) -> _AgentRuntime:
         """Repair checkpoint/inbound state, then prepare the model."""
-        await reconcile_claimed_inbounds_at_startup(self._pool, self._checkpointer, agent_id)
+        await reconcile_claimed_inbounds_at_startup(
+            self._pool, self._checkpointer, agent_id, incarnation=incarnation
+        )
         await repair_dangling_tool_use_at_startup(self._graph, agent_id)
-        llm, binding = await boot_agent_scope(agent_id, slices.brain.llm_model, slices.overrides)
-        return _AgentRuntime(fingerprint=fingerprint, llm=llm, binding=binding)
+        return await build_runtime(
+            agent_id,
+            fingerprint,
+            slices,
+        )
 
     def _evict(self) -> None:
         """Evict settled runtimes by idle age and least-recent use."""
@@ -528,7 +536,13 @@ class AgentHost:
     # ── the turn loop ────────────────────────────────────────────────────────
 
     async def _drive_turns(
-        self, agent_id: int, runtime: _AgentRuntime, slices: AgentSlices
+        self,
+        agent_id: int,
+        runtime: _AgentRuntime,
+        slices: AgentSlices,
+        *,
+        incarnation: RuntimeIncarnation,
+        resources: HostedTurnResources | None,
     ) -> TurnOutcome:
         """Build this invocation's context; the driver owns its publisher lifecycle."""
         event_publisher = AgentEventPublisher(
@@ -547,11 +561,11 @@ class AgentHost:
             relays=self.relays,
             recall_log_key=self._recall_log_key,
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
+            original_incarnation=incarnation,
+            hosted_resources=resources,
             clients=self._clients,
             # The dispatcher owns subscriptions; an empty claim ends this task.
         )
-        from services.agent_runner.agent_host.invocation.driver import drive_context
-
         return await drive_context(
             self._control_pool,
             self._checkpointer,
@@ -563,6 +577,16 @@ class AgentHost:
             self._invoke_until_done,
             self.drop_agent,
         )
+
+    async def _invoke_native_graph(
+        self, agent_id: int, config: RunnableConfig, ctx: AvaContext, initial: dict[str, object]
+    ) -> dict[str, object] | PendingTurnFailure:
+        try:
+            return await run_invocation_with_stall_guard(
+                self._graph, agent_id, ctx, config, initial
+            )
+        except (FatalLLMStreamError, FatalProviderError, CompactionFailedError) as exc:
+            return PendingTurnFailure(exc)
 
     async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:
         """Run to idle or lifecycle completion, settling each returned invocation."""
@@ -578,10 +602,7 @@ class AgentHost:
             turn += 1
             pending: PendingWorkResult | None = None
             work = NativeWorkContinuation(uuid4())
-            with (
-                turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn),
-                bind_native_work(work.work_id),
-            ):
+            with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
                 # Retain the result and trace; recovery cannot claim the next work.
                 while True:
                     try:
@@ -599,7 +620,19 @@ class AgentHost:
                         prepared = (
                             pending.result
                             if pending is not None
-                            else await self._invoke_prepared_graph(agent_id, ctx, config, work)
+                            else await invoke_prepared_graph(
+                                self._control_pool,
+                                self._checkpointer,
+                                self._graph,
+                                agent_id,
+                                ctx,
+                                config,
+                                work,
+                                db=self._db,
+                                bus=self._bus,
+                                relays=self.relays,
+                                invoke=partial(self._invoke_native_graph, agent_id, config),
+                            )
                         )
                         if isinstance(prepared, PendingTurnFailure):
                             pending_failure = prepared
@@ -611,9 +644,7 @@ class AgentHost:
                             return outcome
                         break
                     except (psycopg.OperationalError, PoolTimeout):
-                        incarnation = current_incarnation(agent_id)
-                        if incarnation is None:
-                            raise
+                        incarnation = ctx.require_original_incarnation(agent_id)
                         kind = await self._recover_completed_work(incarnation, pending, work.target)
                         failure_recovered = pending_failure is not None
                         if kind is not None:
@@ -623,7 +654,9 @@ class AgentHost:
                         self.drop_agent(agent_id)
                         return TurnOutcome(exited=False, crashed=False, native_held=True)
                     except Exception as exc:
-                        ended = await force_termination_outcome(exc, self._control_pool, agent_id)
+                        ended = await force_termination_outcome(
+                            exc, self._control_pool, agent_id, incarnation=ctx.original_incarnation
+                        )
                         if ended is not None:
                             self.drop_agent(agent_id)
                             return ended
@@ -637,54 +670,6 @@ class AgentHost:
                     finally:
                         flush_node_exit_aggregate(agent_id)
 
-    async def _invoke_prepared_graph(
-        self,
-        agent_id: int,
-        ctx: AvaContext,
-        config: RunnableConfig,
-        work: NativeWorkContinuation,
-    ) -> dict[str, object] | PendingTurnFailure:
-        incarnation = current_incarnation(agent_id)
-        if incarnation is None:
-            raise RuntimeError("native graph preparation has no admitted incarnation")
-        async with database_phase():
-            halted = await halt_before_reinvoke(
-                self._control_pool,
-                self._checkpointer,
-                self._graph,
-                incarnation,
-                work.target,
-                config,
-            )
-            if halted is not None:
-                return halted
-            await settle_checkpoint(
-                self._graph,
-                self._db,
-                self._bus,
-                agent_id,
-                self.relays,
-                activate_accepted=False,
-            )
-            await prepare_native_invocation(self._control_pool, work, incarnation)
-        try:
-            return await run_invocation_with_stall_guard(
-                self._graph,
-                agent_id,
-                ctx,
-                config,
-                {  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-                    "turn_active": False,
-                    "exit_requested": False,
-                    "turn_idle": False,
-                    "restart_requested": False,
-                    "native_work": work.target,
-                    "native_cancel": None,
-                },
-            )
-        except (FatalLLMStreamError, FatalProviderError, CompactionFailedError) as exc:
-            return PendingTurnFailure(exc)
-
     async def _finish_completed_invocation(
         self, agent_id: int, ctx: AvaContext, pending: PendingWorkResult
     ) -> TurnOutcome | None:
@@ -694,9 +679,7 @@ class AgentHost:
                 await flush_checkpoint(self._checkpointer, agent_id)
                 pending.checkpoint_flushed = True
             if not pending.native_settled:
-                incarnation = current_incarnation(agent_id)
-                if incarnation is None:
-                    raise RuntimeError("native invocation settlement has no incarnation")
+                incarnation = ctx.require_original_incarnation(agent_id)
                 pending.native_cancelled = await settle_native_invocation(
                     self._control_pool,
                     self._checkpointer,
@@ -704,15 +687,16 @@ class AgentHost:
                     incarnation,
                     pending.native_work,
                     {"configurable": {"thread_id": str(agent_id)}},
+                    resources=ctx.hosted_resources,
                 )
                 pending.native_settled = True
             if not pending.trace_attached:
                 await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
                 pending.trace_attached = True
-        if await returned_lifecycle_request(self._control_pool, agent_id, pending):
-            incarnation = current_incarnation(agent_id)
-            if incarnation is None:
-                raise RuntimeError("hosted lifecycle return has no admitted incarnation")
+        if await returned_lifecycle_request(
+            self._control_pool, agent_id, pending, incarnation=ctx.original_incarnation
+        ):
+            incarnation = ctx.require_original_incarnation(agent_id)
             self.drop_agent(agent_id)
             async with database_phase():
                 if pending.lifecycle_command_id is None:
@@ -723,6 +707,7 @@ class AgentHost:
                     bus=self._bus,
                     kill_shell_sessions=kill_terminating_agent_shells,
                     expected_command_id=pending.lifecycle_command_id,
+                    resources=ctx.hosted_resources,
                 )
                 if kind is None:
                     kind = await completed_hosted_lifecycle_kind(
@@ -737,7 +722,15 @@ class AgentHost:
             return TurnOutcome(exited=kind == "terminate", crashed=False)
         if pending.native_cancelled or pending.result["turn_idle"]:
             async with database_phase():
-                await settle_checkpoint(self._graph, self._db, self._bus, agent_id, self.relays)
+                await settle_checkpoint(
+                    self._graph,
+                    self._db,
+                    self._bus,
+                    agent_id,
+                    self.relays,
+                    incarnation=ctx.original_incarnation,
+                    resources=ctx.hosted_resources,
+                )
             return TurnOutcome(exited=False, crashed=False)
         return None
 
@@ -755,6 +748,7 @@ class AgentHost:
                 incarnation=incarnation,
                 database_waits=self.database_waits,
                 peek_lock=self._peek_lock,
+                work=native_work,
             ),
             self._control_pool,
             incarnation,

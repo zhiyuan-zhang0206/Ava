@@ -209,7 +209,7 @@ async def test_claim_pool_timeout_uses_bound_and_releases_borrow() -> None:
     pool = cast(AsyncConnectionPool[Any], cast(object, fake))
 
     with pytest.raises(PoolTimeout, match="injected claim timeout"):
-        await claim_inbound_batch(pool, 42)
+        await claim_inbound_batch(pool, 42, incarnation=None, work=None)
 
     assert fake.timeout == db._claim_db_acquire_timeout_s()
     assert fake.held == 0

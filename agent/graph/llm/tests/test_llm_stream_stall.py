@@ -30,11 +30,7 @@ from langgraph.runtime import Runtime
 from agent.graph.llm._retry import Attempt
 from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_timeout
 from agent.graph.llm.node import llm_attempt
-from agent.graph.llm_errors import (
-    LlmLedger,
-    LLMRetryBudgetExceededError,
-    LLMStreamStallPairError,
-)
+from agent.graph.llm_errors import LlmLedger, LLMRetryBudgetExceededError, LLMStreamStallPairError
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
@@ -43,7 +39,6 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.registry import ModelSpec
-from base.native_process.turn_identity import bind_turn_identity
 from tests.fixtures.model_catalog import AddModels
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -425,17 +420,25 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
 
     spent = settings.lm.llm_retry_max_total_seconds + 5.0
     ledger = LlmLedger()
-    with bind_turn_identity(7):
-        ledger.record_stall_pair_streak("7", 1)
-        result = await _one_try(
-            state, _make_runtime(fake_llm), attempt=2, started_ago=spent, ledger=ledger
-        )
-        assert result is not None
-        ledger.reset_stall_pair_streak("7")
+    ledger.record_stall_pair_streak("7", 1)
+    result = await _one_try(
+        state,
+        _make_runtime(fake_llm),
+        attempt=2,
+        started_ago=spent,
+        ledger=ledger,
+    )
+    assert result is not None
+    ledger.reset_stall_pair_streak("7")
 
-        # Control: no active streak -> the same elapsed time trips the budget.
-        with pytest.raises(LLMRetryBudgetExceededError):
-            await _one_try(state, _make_runtime(fake_llm), attempt=2, started_ago=spent)
+    # Control: no active streak -> the same elapsed time trips the budget.
+    with pytest.raises(LLMRetryBudgetExceededError):
+        await _one_try(
+            state,
+            _make_runtime(fake_llm),
+            attempt=2,
+            started_ago=spent,
+        )
 
 
 _STREAM_BOUNDS = {

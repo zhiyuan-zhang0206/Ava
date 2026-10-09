@@ -9,6 +9,8 @@ import pytest
 
 from base.config import settings
 from base.lm.factory import validate_model_config
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import dispatcher, settlement
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.runtime import _config_fingerprint
@@ -42,7 +44,7 @@ class TestRejectedModelConfig:
         def _record_error(_message: str, *, event: str, **_details: object) -> None:
             error_events.append(event)
 
-        monkeypatch.setattr(host_mod, "boot_agent_scope", _record_boot)
+        monkeypatch.setattr(runtime_mod, "boot_agent_scope", _record_boot)
         monkeypatch.setattr(host_mod.logger, "error", _record_error)
         host, graph, _ = wired({1: _Row(overlay={"llm_model": "fable"})})
 
@@ -59,7 +61,6 @@ class TestRejectedModelConfig:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A valid replacement clears the rejection note and resumes the turn."""
-        import services.agent_runner.agent_host.host as host_mod
         import services.agent_runner.agent_host.runtime as runtime_mod
 
         boot_calls: list[int] = []
@@ -75,7 +76,7 @@ class TestRejectedModelConfig:
             return _Model(llm_model), None
 
         monkeypatch.setattr(runtime_mod, "validate_model_config", _validate_model)
-        monkeypatch.setattr(host_mod, "boot_agent_scope", _record_boot)
+        monkeypatch.setattr(runtime_mod, "boot_agent_scope", _record_boot)
         rows = {1: _Row(overlay={"llm_model": "fable"})}
         host, graph, _ = wired(rows)
 
@@ -270,7 +271,10 @@ class TestBounds:
 
         # Exercise admission directly so a pre-fix Semaphore(0) can be
         # cancelled during cleanup without bypassing run_turn's resource shield.
-        tasks = [asyncio.create_task(host._run_turn(agent_id)) for agent_id in agents]
+        tasks = [
+            asyncio.create_task(host._run_turn(agent_id, resources=HostedTurnResources()))
+            for agent_id in agents
+        ]
         try:
             await asyncio.wait_for(
                 asyncio.gather(*(graph.arrival(agent_id).wait() for agent_id in agents)), 2
@@ -427,7 +431,9 @@ class TestSchedulerIntegration:
         def _capture(_msg: str, **kw: object) -> None:
             records.append(kw)
 
-        async def _explode(_agent_id: int, _fingerprint: str, _model: str) -> None:
+        async def _explode(
+            _agent_id: int, _fingerprint: str, _model: str, *, incarnation: RuntimeIncarnation
+        ) -> None:
             raise ValueError("runtime build failed")
 
         monkeypatch.setattr(dispatcher.logger, "exception", _capture)

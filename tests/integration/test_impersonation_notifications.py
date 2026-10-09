@@ -2,6 +2,7 @@
 
 import sys
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any, cast
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -28,14 +29,10 @@ from base.db import Database, create_agent, pool
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
 from ops.agents.wake import resurrect_agent
-from ops.lifecycle.termination import (
-    _enqueue_termination_inbounds,
-    _force_terminate_transaction,
-)
+from ops.lifecycle.termination import _enqueue_termination_inbounds, _force_terminate_transaction
 from tests.impersonation_support import recorded_tree
 
 
@@ -181,11 +178,17 @@ async def _terminate_native(
 ) -> None:
     config: RunnableConfig = {"configurable": {"thread_id": str(owner.agent_id)}}
     state = BaseAgentState(impersonation_request_id=f"{session['id']}:1")
-    with pool(max_size=2) as ops_pool, bind_turn_identity(owner.agent_id, incarnation=owner):
+    with pool(
+        max_size=2,
+    ) as ops_pool:
         if mode == "force":
             _force_terminate_transaction(owner.agent_id, ops_pool, source="user")
             assert await original_host_force(
-                aops_pool, owner.agent_id, owner.owner, machine_name(), quiescent=True
+                aops_pool,
+                owner.agent_id,
+                owner.owner,
+                machine_name(),
+                quiescent=True,
             )
         else:
             terminate_id = _enqueue_termination_inbounds(
@@ -201,11 +204,15 @@ async def _terminate_native(
                 assert accepted.goto == "__end__"
                 assert "Termination was accepted" in str(accepted.update)
             else:
-                batch = await claim_inbound_batch(aops_pool, owner.agent_id, lifecycle_only=True)
+                batch = await claim_inbound_batch(
+                    aops_pool, owner.agent_id, lifecycle_only=True, incarnation=owner, work=None
+                )
                 assert [item.id for item in batch] == [terminate_id]
             assert _native_notices(db_conn, owner.agent_id) == []
             assert (
-                await apply_hosted_lifecycle(aops_pool, owner, bus=EventBus.from_settings())
+                await apply_hosted_lifecycle(
+                    aops_pool, owner, bus=EventBus.from_settings(), resources=None
+                )
                 == "terminate"
             )
     notices = _native_notices(db_conn, owner.agent_id)
@@ -238,6 +245,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             identity=AgentIdentity(agent_id=owner.agent_id, owns_loop=True),
+            original_incarnation=owner,
         )
     )
     await _terminate_native(db_conn, aops_pool, owner, session, runtime, mode)
@@ -245,13 +253,18 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         _age_and_sweep_notices(db_conn, owner.agent_id)
     resurrect_agent(database, event_bus, owner.agent_id, resurrected_by="user")
     successor = await admit_hosted_runtime(
-        aops_pool, owner.agent_id, machine_name(), uuid4(), expected_from="idling", db=database
+        aops_pool,
+        owner.agent_id,
+        machine_name(),
+        uuid4(),
+        expected_from="idling",
+        db=database,
     )
     assert successor is not None
-    with bind_turn_identity(owner.agent_id, incarnation=successor):
-        resumed = await claim_node(
-            BaseAgentState(), runtime, {"configurable": {"thread_id": str(owner.agent_id)}}
-        )
+    runtime = Runtime(context=replace(runtime.context, original_incarnation=successor))
+    resumed = await claim_node(
+        BaseAgentState(), runtime, {"configurable": {"thread_id": str(owner.agent_id)}}
+    )
     update = cast(dict[str, Any], resumed.update)
     assert isinstance(update, dict)
     messages = cast(list[BaseMessage], update["messages"])

@@ -13,7 +13,7 @@ from agent.state import CompactState
 from base.agents.compaction.history import ADMISSION_SQL, PENDING_HISTORY_SQL
 from base.agents.compaction.models import CompactTarget
 from base.agents.incarnation.native_work import NativeWorkRecord, load_work, managed_resources
-from base.agents.incarnation.native_work_models import NativeWorkPhase
+from base.agents.incarnation.native_work_models import NativeWorkPhase, NativeWorkTarget
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
 from base.agents.observation.db_wait import DatabaseWaits
 from base.config import settings
@@ -194,25 +194,26 @@ async def finish_force_and_compact(
     drop_agent: Callable[[int], None],
     database_waits: DatabaseWaits,
     peek_lock: asyncio.Lock,
+    *,
+    work: NativeWorkTarget | None,
 ) -> None:
     """Both proof tails share the original shielded owned settlement task."""
     await force
     await finish_compact_pump(pool, saver, graph, agent_id, owner, resources)
-    from base.native_process.turn_identity import bind_hosted_resources
-
-    with bind_hosted_resources(resources):
-        await settle_original_restart(
-            pool,
-            bus,
-            agent_id,
-            owner,
-            drop_agent,
-            lambda token: recover_database(
-                pool=pool,
-                checkpointer=saver,
-                graph=graph,
-                incarnation=token,
-                database_waits=database_waits,
-                peek_lock=peek_lock,
-            ),
-        )
+    await settle_original_restart(
+        pool,
+        bus,
+        agent_id,
+        owner,
+        drop_agent,
+        lambda token: recover_database(
+            pool=pool,
+            checkpointer=saver,
+            graph=graph,
+            incarnation=token,
+            database_waits=database_waits,
+            peek_lock=peek_lock,
+            work=work,
+        ),
+        resources=resources,
+    )

@@ -287,7 +287,6 @@ def test_personal_index_uses_hosted_turn_identity(
 ) -> None:
     from ava_builtins.plugins.ava_memory import notes
     from base.config import settings
-    from base.native_process.turn_identity import bind_turn_identity
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
@@ -299,8 +298,7 @@ def test_personal_index_uses_hosted_turn_identity(
     index.parent.mkdir(parents=True)
     index.write_text("- [Current rule](current-rule.md) — Agent 29's own rule\n")
 
-    with bind_turn_identity(97):
-        note = notes.per_agent_memory_note(_context(29))
+    note = notes.per_agent_memory_note(_context(29))
 
     assert note is not None
     assert "Agent 29's own rule" in note.text

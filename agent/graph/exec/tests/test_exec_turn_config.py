@@ -20,7 +20,6 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
 
 
 def _plugin(unit_home: Path) -> None:
@@ -44,6 +43,7 @@ def _plugin(unit_home: Path) -> None:
 async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     unit_home: Path,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     _plugin(unit_home)
     # unit_home sets this process's Settings; the real child imports Settings
@@ -72,9 +72,11 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             AgentState(),
             AvaContext(
                 agent=slices or AgentSlices.resolve(),
-                db=Database.from_settings(),
+                db=database,
                 bus=EventBus.from_settings(),
-                clients=process_clients(),
+                clients=process_clients(
+                    database=lambda: database,
+                ),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             ),
             agent_id,
@@ -95,8 +97,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             {"llm_model": "deepseek-v4-pro", "llm_stream_ttft_timeout_seconds": timeout},
         )
         slices = AgentSlices.resolve(pins, {"exec_config_probe": {"exec_probe_marker": marker}})
-        with bind_turn_identity(agent_id):
-            tasks.append(asyncio.create_task(execute(agent_id, slices)))
+        tasks.append(asyncio.create_task(execute(agent_id, slices)))
     assert await asyncio.gather(*tasks) == [
         ["deepseek-v4-pro", 3.0, "agent-a", "GONE"],
         ["deepseek-v4-flash-vision-exp", 7.0, "agent-b", "GONE"],

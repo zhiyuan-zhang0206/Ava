@@ -22,7 +22,6 @@ from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import daemon, db_recovery
 from services.agent_runner.agent_host.dispatcher import (
     InboundWakeDispatcher,
@@ -87,19 +86,19 @@ def _recovery_run(
     cancelled: asyncio.Event,
 ) -> Callable[[int], Awaitable[None]]:
     """A turn body that waits in real DB recovery, then parks until cancelled."""
-    agent = incarnation.agent_id
 
     async def run(_agent: int) -> None:
+        assert _agent == incarnation.agent_id
         try:
-            with bind_turn_identity(agent, incarnation=incarnation):
-                await db_recovery.recover_database(
-                    pool=control,
-                    graph=graph,
-                    checkpointer=saver,
-                    incarnation=incarnation,
-                    database_waits=waits,
-                    peek_lock=asyncio.Lock(),
-                )
+            await db_recovery.recover_database(
+                pool=control,
+                graph=graph,
+                checkpointer=saver,
+                incarnation=incarnation,
+                database_waits=waits,
+                peek_lock=asyncio.Lock(),
+                work=None,
+            )
             recovered.set()
             await asyncio.Event().wait()
         finally:

@@ -1,5 +1,6 @@
 """Relay binding and failure paths for cooperative impersonation leases."""
 
+from collections.abc import Callable
 from typing import Any
 
 from psycopg.rows import dict_row
@@ -311,3 +312,26 @@ def abort_lease(
             assert ended is not None  # noqa: S101 — locked overhead row exists
     wake_agent(db, bus, lease["agent_id"], roster_changed=True)
     return public(parse_lease(ended))
+
+
+def stamp_relay_failure(
+    db: Database,
+    session: dict[str, Any],
+    agent_id: int,
+    record_relay_failure: Callable[[Database, str, RuntimeIncarnation], bool],
+    *,
+    incarnation: RuntimeIncarnation | None,
+) -> None:
+    if incarnation is None:
+        return
+    try:
+        stamped = record_relay_failure(db, session["id"], incarnation)
+    except (ImpersonationError, RuntimeError):
+        return
+    if stamped:
+        logger.error(
+            "impersonation relay heartbeat stale and it cannot be respawned here",
+            agent_id=agent_id,
+            lease_id=str(session["id"]),
+            relay_provider=session["relay_provider"],
+        )

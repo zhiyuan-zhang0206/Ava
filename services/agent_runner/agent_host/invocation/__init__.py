@@ -20,7 +20,7 @@ from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_restart import original_guarded_restart_id
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.native_work import (
     completed_native_cancel,
@@ -63,20 +63,24 @@ async def finish_pending_failure(
                 agent_id,
                 ctx.relays,
                 activate_accepted=False,
+                incarnation=ctx.original_incarnation,
+                resources=ctx.hosted_resources,
             )
         await settle_turn_failure(graph, checkpointer, config, ctx, agent_id, pending)
         if native_work is not None:
-            incarnation = current_incarnation(agent_id)
-            if (
-                incarnation is None
-                or ctx.ops_pool is None
-                or not isinstance(checkpointer, AsyncPostgresSaver)
-            ):
+            incarnation = ctx.require_original_incarnation(agent_id)
+            if ctx.ops_pool is None or not isinstance(checkpointer, AsyncPostgresSaver):
                 raise RuntimeError(
                     "native failure settlement requires the original saver and incarnation"
                 )
             await settle_native_invocation(
-                ctx.ops_pool, checkpointer, graph, incarnation, native_work, config
+                ctx.ops_pool,
+                checkpointer,
+                graph,
+                incarnation,
+                native_work,
+                config,
+                resources=ctx.hosted_resources,
             )
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
     return TurnOutcome(exited=False, crashed=True, aborted=True)
@@ -111,7 +115,11 @@ async def recover_completed_work(
 
 
 async def returned_lifecycle_request(
-    pool: AsyncConnectionPool, agent_id: int, pending: PendingWorkResult
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    pending: PendingWorkResult,
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> bool:
     """An exact guarded receipt may survive a cancel return with legacy flags clear."""
     if not pending.checkpoint_flushed or not pending.native_settled:
@@ -123,7 +131,8 @@ async def returned_lifecycle_request(
             )
     requested = bool(pending.result["exit_requested"] or pending.result["restart_requested"])
     if pending.lifecycle_command_id is None and requested:
-        incarnation = current_incarnation(agent_id)
+        if incarnation is not None:
+            incarnation.require_agent(agent_id)
         if incarnation is None:
             raise RuntimeError("hosted lifecycle return has no admitted incarnation")
         pending.lifecycle_command_id = await pending_hosted_lifecycle_id(pool, incarnation)

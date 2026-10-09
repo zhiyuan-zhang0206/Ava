@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest import mock
 
 import pytest
 
+import ava
+from base.agents.context.identity import AgentIdentity
 from base.log import _message_to_params
-from base.native_process.turn_identity import bind_turn_identity
 
 
 class _FakeMessage:
@@ -31,13 +33,13 @@ def _agent_id_of(extra: dict[str, object]) -> int | None:
 
 
 def test_unannotated_log_has_no_agent() -> None:
-    with bind_turn_identity(42):
-        assert _agent_id_of({"agent_id": "-", "event": "log"}) is None
+    ava.context = replace(ava.context, identity=AgentIdentity(42, True))
+    assert _agent_id_of({"agent_id": "-", "event": "log"}) is None
 
 
 def test_explicit_agent_id_is_preserved() -> None:
-    with bind_turn_identity(42):
-        assert _agent_id_of({"agent_id": "99", "event": "log"}) == 99
+    ava.context = replace(ava.context, identity=AgentIdentity(42, True))
+    assert _agent_id_of({"agent_id": "99", "event": "log"}) == 99
 
 
 def test_missing_required_log_field_fails() -> None:
@@ -64,6 +66,7 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
     import base.log as slog
 
     monkeypatch.setattr(slog, "_init_done", False)
+    ava.context = replace(ava.context, identity=AgentIdentity(42, True))
     with (
         mock.patch.object(slog.logger, "add"),
         mock.patch.object(slog, "_add_file_sink"),
@@ -74,9 +77,10 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
         mock.patch.object(slog, "_machine_name_lazy", return_value="machine-a"),
         mock.patch.object(slog.logger, "info") as boot_log,
         mock.patch.object(slog.logger, "configure") as configure,
-        bind_turn_identity(42),
     ):
-        slog.init_gateway_process(name="agent_host")
+        slog.init_gateway_process(
+            name="agent_host",
+        )
 
     configure.assert_called_once_with(extra={"agent_id": "-"})
     init_pipeline.assert_called_once_with(process="agent_host")

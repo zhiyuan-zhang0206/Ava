@@ -15,6 +15,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from psycopg_pool import AsyncConnectionPool
 
+from agent.process_boot import boot_agent_scope
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.factory import validate_model_config
@@ -302,3 +303,32 @@ async def read_last_active_at(pool: AsyncConnectionPool, agent_id: int) -> datet
             await conn.execute("SELECT last_active_at FROM agents_meta WHERE id = %s", (agent_id,))
         ).fetchone()
     return None if row is None else row[0]
+
+
+async def build_runtime(
+    agent_id: int,
+    fingerprint: str,
+    slices: AgentSlices,
+) -> _AgentRuntime:
+    """Build the retained model binding after the host repaired its original admission."""
+    llm, binding = await boot_agent_scope(
+        agent_id,
+        slices.brain.llm_model,
+        slices.overrides,
+    )
+    return _AgentRuntime(fingerprint=fingerprint, llm=llm, binding=binding)
+
+
+def refresh_cached_runtime(
+    runtimes: OrderedDict[int, _AgentRuntime],
+    in_flight: set[int],
+    agent_id: int,
+    evict: Callable[[], None],
+) -> None:
+    """Refresh the retained model's recency after the owned turn has finished."""
+    cached = runtimes.get(agent_id)
+    if cached is not None:
+        cached.last_used = time.monotonic()
+        runtimes.move_to_end(agent_id)
+    in_flight.discard(agent_id)
+    evict()
