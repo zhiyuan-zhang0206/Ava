@@ -11,9 +11,11 @@ tags:
 
 `scripts/ci/file_shard_shadow.py` is an opt-in pytest plugin for evaluating
 collection before sharding. Planning and ordinary checking require `--collect-only`.
-An explicit `--file-shard-execute` opts into running a checked group for runtime
-proof, requiring a per-worker runtime report. Loading the plugin without its
-options leaves collection unchanged. Required CI routing remains unchanged.
+An explicit `--file-shard-execute` runs a checked group, requiring a per-worker
+runtime report. Loading the plugin without its options leaves collection unchanged.
+
+Required CI uses fresh per-runner plans; see
+[[required-ci.ava.okf.md]] for its execution contract.
 
 ## Snapshot and ownership
 
@@ -112,9 +114,10 @@ must match, and losing any baseline covered line fails the proof. Additional
 covered lines remain visible in its report. Missing artifacts, crashes, fixture
 changes and coverage loss cannot produce a successful comparison artifact.
 
-This proof is not a required-gate migration. A successful Linux run, fresh
-complete timings and review of actual file-group execution balance are needed
-before changing the regular backend shards. Plans remain disposable snapshots;
+Paired execution certifies migration separately from the routine required shards.
+A successful complete Linux run, fresh timings and review of actual file-group
+balance remain the evidence for a grouping change. A single baseline-first pair
+does not establish a stable whole-CI latency reduction. Plans remain disposable;
 never reuse a successful old plan after source changes.
 
 Infrastructure owner: [[scripts/docs/scripts.ava.okf.md]].
