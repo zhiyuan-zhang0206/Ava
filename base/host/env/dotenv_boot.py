@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Collection
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -58,10 +59,16 @@ _RUNNER_LOGIN = re.compile(r"ava_runner|ava_g(?:0|[1-9][0-9]*)_runner")
 _GENERATION_ENV = "AVA_DB_GENERATION"
 _API_TOKEN_ENV = "AVA_API_TOKEN"  # noqa: S105 — env key name, not a credential
 
-# Why this process holds no database authority, when a home with a write-
-# generation ledger delivered none to it: `base.db.connections._guard_db_url`
-# turns a dial of the credential-free endpoint into a named refusal.
-_db_authority_refusal: str | None = None
+
+@dataclass(frozen=True, slots=True)
+class EnvBootResult:
+    """Authority facts from one environment delivery, retained by its boot owner.
+
+    A refusal is reported only when that owner's credential-free DB URL is
+    dialed. Later environment deliveries cannot change this result.
+    """
+
+    db_authority_refusal: str | None = None
 
 
 def resolve_ava_home() -> Path:
@@ -171,7 +178,7 @@ def _load_dotenv_layer(path: Path) -> None:
         os.environ["UV_DEFAULT_INDEX"] = selected
 
 
-def load_ava_env() -> None:
+def load_ava_env() -> EnvBootResult:
     """Load this process's `$AVA_HOME/.env` (then `mirror.env`) into os.environ.
 
     Pins AVA_HOME to the resolved home, so every descendant inherits it;
@@ -193,7 +200,7 @@ def load_ava_env() -> None:
     os.environ.setdefault("AVA_HOME", str(home))
     _load_dotenv_layer(home / ".env")
     _load_dotenv_layer(home / "mirror.env")
-    _enforce_cluster_env_authority(home)
+    return _enforce_cluster_env_authority(home)
 
 
 def _identity_env_only() -> frozenset[str]:
@@ -367,7 +374,7 @@ def _drop_undeclared(keys: Collection[str], file_vals: dict[str, str | None]) ->
             os.environ.pop(key, None)
 
 
-def _enforce_cluster_env_authority(home: Path) -> None:
+def _enforce_cluster_env_authority(home: Path) -> EnvBootResult:
     """Force this unit's derived env keys from its own `.env`, overriding a polluted parent
     environment.
 
@@ -488,7 +495,7 @@ def _enforce_cluster_env_authority(home: Path) -> None:
     if os.environ.get("AVA_PROCESS_PROFILE") == "agent":
         for key in ADMIN_DATA_PLANE_ALIASES:
             os.environ.pop(key, None)
-    _deliver_operator_authority(file_vals.get("AVA_DB_URL"))
+    return _deliver_operator_authority(file_vals.get("AVA_DB_URL"))
 
 
 def _keeps_injected_db_url(file_url: str | None) -> bool:
@@ -544,19 +551,15 @@ def operator_db_delivery(endpoint: str | None, *, api: bool) -> dict[str, str] |
         return str(exc)
 
 
-def _deliver_operator_authority(endpoint: str | None) -> None:
-    """Give an operator process on a write-generation home its gateway login
-    (`operator_db_delivery`). A delivery it carries stays; a refused process
-    keeps the credential-free endpoint and records why, so its first dial names it."""
-    global _db_authority_refusal  # noqa: PLW0603 — per-process boot authority result
-    _db_authority_refusal = None
+def _deliver_operator_authority(endpoint: str | None) -> EnvBootResult:
+    """Deliver the operator login, returning this boot's authority result."""
     if os.environ.get(_GENERATION_ENV):
-        return
+        return EnvBootResult()
     delivery = operator_db_delivery(endpoint, api=bool(os.environ.get("AVA_CLUSTER_SECRET")))
     if isinstance(delivery, str):
-        _db_authority_refusal = delivery
-    else:
-        os.environ.update(delivery)
+        return EnvBootResult(db_authority_refusal=delivery)
+    os.environ.update(delivery)
+    return EnvBootResult()
 
 
 def _keeps_undeclared_db_url(value: str | None) -> bool:
@@ -576,47 +579,38 @@ def is_delivered_unit_login() -> bool:
     return is_delivered_login(home, os.environ.get("AVA_DB_URL"), generation)
 
 
-def deliver_unit_authority() -> None:
-    """Give a pure agent-runner process its database login and API token before
-    the bootstrap fetch (which serves only the credential-free endpoint and
-    authenticates with that token).
+def deliver_unit_authority() -> EnvBootResult:
+    """Deliver the runner's login and API token before its bootstrap fetch.
 
     A launcher delivery of this home's installed capability is kept. An
-    operator process (the `ava` CLI, a script) with no launcher context
-    consumes the installed capability only while it runs the home's admitted
-    runtime. Anything else keeps the credential-free endpoint and records why,
-    so its first dial fails with that reason (`db_authority_refusal`).
+    admitted operator consumes the installed capability. A refused process
+    keeps the credential-free endpoint and returns its first-dial reason.
     """
-    global _db_authority_refusal  # noqa: PLW0603 — per-process boot authority result
-    _db_authority_refusal = None
     if is_delivered_unit_login():
-        return
+        return EnvBootResult()
     home = resolve_ava_home().expanduser().resolve()
     context = launcher_context()
     if context is not None:
-        _db_authority_refusal = (
-            f"this {context}-profile agent-runner process was launched without its unit's "
-            "database login; only the root launcher delivers it"
+        return EnvBootResult(
+            db_authority_refusal=(
+                f"this {context}-profile agent-runner process was launched without its unit's "
+                "database login; only the root launcher delivers it"
+            )
         )
-        return
     from base.cluster.authority import AuthorityRefusedError
     from base.cluster.authority.unit import consume_unit
 
     try:
         capability = consume_unit(home)
     except (AuthorityRefusedError, ValueError, OSError) as exc:
-        _db_authority_refusal = f"no database authority for this agent-runner process: {exc}"
-        return
+        return EnvBootResult(
+            db_authority_refusal=f"no database authority for this agent-runner process: {exc}"
+        )
     os.environ["AVA_DB_URL"] = capability.dsn
     os.environ[_GENERATION_ENV] = str(capability.generation.number)
     if capability.api is not None:
         os.environ[_API_TOKEN_ENV] = capability.api.token
-
-
-def db_authority_refusal() -> str | None:
-    """Why this process holds no database login for its write-generation home,
-    or None (a login was delivered, or the home keeps no ledger)."""
-    return _db_authority_refusal
+    return EnvBootResult()
 
 
 def _is_gateway_process() -> bool:

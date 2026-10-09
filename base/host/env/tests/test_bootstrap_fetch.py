@@ -25,8 +25,10 @@ def test_inject_config_updates_environ(
         lambda *_a, **_k: {"AVA_DB_URL": "postgresql://injected/x"},  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.delitem(os.environ, "AVA_DB_URL", raising=False)
-    bootstrap.inject_config_from_gateway()
+    result = bootstrap.inject_config_from_gateway()
     assert os.environ["AVA_DB_URL"] == "postgresql://injected/x"
+    assert result.db_authority_refusal is not None
+    assert "no database authority" in result.db_authority_refusal
 
 
 def test_inject_derives_missing_gateway_health_url(

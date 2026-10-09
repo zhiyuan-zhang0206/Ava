@@ -18,8 +18,8 @@ bytes travel the private network; an authenticated gateway requires a bearer,
 which this presents from the unit's machine API token (`AVA_API_TOKEN`, from
 its installed capability); a unit never holds the human cluster secret.
 Intentionally imports nothing from base.config (it runs DURING base.config
-import) — only stdlib + base.host.net.predicates at import; base.host.env.dotenv_boot loads at
-the fetch decision and the httpx / base.cluster.auth / base.host.net.http_dial
+import) — only stdlib and the settings-free EnvBootResult at import;
+the httpx / base.cluster.auth / base.host.net.http_dial
 pieces lazily at fetch time (all config-free, so they're safe this early in
 boot).
 """
@@ -32,6 +32,8 @@ import os
 import time
 from pathlib import Path
 from typing import Any, cast
+
+from base.host.env.dotenv_boot import EnvBootResult
 
 # An agent boots by fetching this. The timeout must cover a slow-but-healthy
 # fetch under load (the whole boot -- fetch + import + claim -- has to finish
@@ -527,7 +529,7 @@ def resolve_bootstrap_values() -> dict[str, str]:
     return values
 
 
-def inject_config_from_gateway() -> None:
+def inject_config_from_gateway() -> EnvBootResult:
     """Fetch the cluster's config from the gateway and inject it into os.environ.
 
     Runs at Settings construction on a pure agent-runner (see
@@ -550,6 +552,7 @@ def inject_config_from_gateway() -> None:
     from base.host.env.dotenv_boot import deliver_unit_authority
 
     base_url = _gateway_base_url()
-    deliver_unit_authority()
+    result = deliver_unit_authority()
     values = resolve_bootstrap_values()
     _apply_bootstrap_values(base_url, values)
+    return result
