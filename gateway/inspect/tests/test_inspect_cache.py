@@ -9,6 +9,45 @@ import pytest
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 
 
+@pytest.mark.parametrize("failed", [False, True])
+@pytest.mark.parametrize("next_key", ["same", "other"])
+def test_shared_completion_allows_immediate_zero_ttl_load(failed: bool, next_key: str) -> None:
+    """A woken follower sees a retired claim and available admission capacity."""
+    cache = InspectQueryCache[str, str](max_entries=2, max_inflight=1, max_concurrent_loads=1)
+    started, release = threading.Event(), threading.Event()
+    observed: list[str | BaseException] = []
+
+    def load() -> str:
+        started.set()
+        assert release.wait(timeout=2)
+        if failed:
+            raise RuntimeError("first load failed")
+        return "first"
+
+    def on_completion(_future: object) -> None:
+        try:
+            observed.append(cache.get_or_load(next_key, lambda: "next", ttl_s=0, now=lambda: 0))
+        except BaseException as exc:
+            observed.append(exc)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        leader = executor.submit(cache.get_or_load, "same", load, ttl_s=0, now=lambda: 0)
+        try:
+            assert started.wait(timeout=1)
+            # Run at publication itself, before the native worker can return.
+            cache._inflight["same"].add_done_callback(on_completion)
+        finally:
+            release.set()
+        if failed:
+            with pytest.raises(RuntimeError, match="first load failed"):
+                leader.result(timeout=1)
+        else:
+            assert leader.result(timeout=1) == "first"
+
+    assert observed == ["next"]
+    assert cache.get_or_load("after", lambda: "available", ttl_s=0, now=lambda: 0) == "available"
+
+
 def test_inspect_cache_admission_bounds_concurrent_loads() -> None:
     """A distinct-key leader is rejected at capacity, while its follower shares the load."""
     cache = InspectQueryCache[str, str](
