@@ -1,10 +1,10 @@
 """Unit tests for ava/sdk_surface/metering.py — the per-call SDK usage recorder.
 
 The recorder wraps every public `ava.*` callable to emit one `sdk_call` event per
-top-level invocation (summed by the Grafana call-frequency ranking). These tests pin the two
+public entry (summed by the Grafana call-frequency ranking). These tests pin the two
 things that make it safe to bolt onto the whole SDK surface: it is byte-for-byte
 transparent to `ava.help` / signatures, and it is a pure side channel over the call
-(records once, at the top level, and never perturbs args / return / exceptions).
+(records each entry independently, and never perturbs args / return / exceptions).
 """
 
 from __future__ import annotations
@@ -13,18 +13,21 @@ import contextlib
 import inspect
 import io
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
+from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
 
 import ava
 from ava.sdk_surface import install, metering
+from base.agents.context import AvaContext
 from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
+from base.agents.sdk.tally import SdkCallTally
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
@@ -33,6 +36,21 @@ from base.packages.plugins.extensions import (
     SdkWrap,
 )
 from tests.fixtures.pin_agent import pin_agent
+
+
+@contextlib.contextmanager
+def _execution_tally() -> Generator[SdkCallTally, None, None]:
+    """A test execution explicitly owns its SDK tally through the local context."""
+    previous = getattr(ava, "context", None)
+    tally = SdkCallTally()
+    ava.bind_context(replace(previous or AvaContext(), sdk_calls=tally))
+    try:
+        yield tally
+    finally:
+        if previous is None:
+            ava.unbind_context()
+        else:
+            ava.bind_context(previous)
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
@@ -173,7 +191,7 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     assert "self.MACHINE_SPEC" not in fqs
 
 
-# ── recorder wrapping (agent side; frame / emit logic is in test_sdk_telemetry) ───
+# ── recorder wrapping (agent side; call / emit logic is in test_sdk_telemetry) ───
 
 
 def test_plugin_wrapped_signature_survives_and_counts_once(
@@ -199,22 +217,22 @@ def test_plugin_wrapped_signature_survives_and_counts_once(
     assert rec.__name__ == "spawn"
     assert rec.__module__ == "ava.agents"
     assert "label" in inspect.signature(rec).parameters
-    with sdk_usage_telemetry.recording():
+    with _execution_tally():
         assert rec(1, 2, label="x") == (1, 2)
     assert len(calls) == 1
     assert calls[0][:2] == ("agents.spawn", {})
     assert calls[0][2] is not None and calls[0][2] >= 0
 
 
-def test_recorder_feeds_the_recording_tally(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The wrapped surface bumps the recording's full tally (two calls count two),
+def test_recorder_feeds_the_execution_tally(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wrapped surface bumps the execution's full tally (two calls count two),
     independent of the emit sampler."""
     _spy_emit(monkeypatch)
     rec = metering._make_recorder(lambda: "ok", "ns.fn")
-    with sdk_usage_telemetry.recording() as tally:
+    with _execution_tally() as tally:
         assert rec() == "ok"
         assert rec() == "ok"
-    assert tally == {"ns.fn": 2}
+    assert tally.snapshot() == {"ns.fn": 2}
 
 
 def test_recorder_recognized_by_identity_not_copied_dict() -> None:
@@ -243,14 +261,14 @@ def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPat
         return {"server": server, "tool": tool}
 
     rec = metering._make_mcp_recorder(_fake_call)
-    with sdk_usage_telemetry.recording():
+    with _execution_tally():
         assert rec("chrome", "navigate", url="x") == {"server": "chrome", "tool": "navigate"}
     assert len(calls) == 1
     assert calls[0][:2] == ("mcps.chrome.navigate", {})
     assert calls[0][2] is not None and calls[0][2] >= 0
 
     calls.clear()
-    rec("chrome", "navigate")  # outside recording()
+    rec("chrome", "navigate")  # without an execution tally
     assert calls[0][0] == "mcps.chrome.navigate"
 
 
@@ -335,7 +353,7 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_async_calls_measure_execution_and_isolate_concurrent_frames(
+async def test_async_calls_measure_each_concurrent_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import asyncio
@@ -343,7 +361,6 @@ async def test_async_calls_measure_execution_and_isolate_concurrent_frames(
     calls = _spy_emit(monkeypatch)
 
     async def body(label: str) -> str:
-        sdk_usage_telemetry.annotate(label=label)
         await asyncio.sleep(0)
         return label
 
@@ -352,7 +369,8 @@ async def test_async_calls_measure_execution_and_isolate_concurrent_frames(
     a, b = wrapped("a"), wrapped("b")
     assert calls == []
     assert await asyncio.gather(a, b) == ["a", "b"]
-    assert [row[1] for row in calls] == [{"label": "a"}, {"label": "b"}]
+    assert [row[0] for row in calls] == ["plugin.async_call", "plugin.async_call"]
+    assert all(row[2] is not None for row in calls)
 
 
 @pytest.mark.parametrize("async_call", [False, True])
@@ -415,7 +433,7 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     monkeypatch: pytest.MonkeyPatch, async_wrapper: bool
 ) -> None:
     import asyncio
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable
 
     calls = _spy_emit(monkeypatch)
     clock = [0.0]
@@ -424,7 +442,6 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     async def body() -> str:
         await asyncio.sleep(0)
         clock[0] += 2.0
-        sdk_usage_telemetry.annotate(body=True)
         return "ok"
 
     def passthrough(inner: Callable[[], Awaitable[str]]) -> Awaitable[str]:
@@ -456,7 +473,7 @@ async def test_plugin_wrap_preserves_awaited_single_event(
         pending = call()
         assert calls == []
         assert await pending == "ok"
-        assert calls == [("self.review_async_test", {"body": True}, 2.0)]
+        assert calls == [("self.review_async_test", {}, 2.0)]
     finally:
         install.uninstall()
 
@@ -527,17 +544,83 @@ async def test_awaited_calls_retain_their_entry_identity(
         await release.wait()
 
     pin_agent(41)
+    first_tally = SdkCallTally()
+    ava.bind_context(replace(ava.context, sdk_calls=first_tally))
     first = asyncio.create_task(metering._make_recorder(held, "probe.held")())
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
         pin_agent(42)
+        second_tally = SdkCallTally()
+        ava.bind_context(replace(ava.context, sdk_calls=second_tally))
         metering._make_recorder(lambda: None, "probe.next")()
         release.set()
         await first
     finally:
         release.set()
         await first
+    assert first_tally.snapshot() == {"probe.held": 1}
+    assert second_tally.snapshot() == {"probe.next": 1}
     assert [(row["attributes"]["fn"], row["agent_id"], row["source"]) for row in rows] == [
         ("probe.next", 42, "agent:42"),
         ("probe.held", 41, "agent:41"),
     ]
+
+
+def test_public_fanout_counts_each_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _spy_emit(monkeypatch)
+    inner = metering._make_recorder(lambda: "done", "probe.inner")
+    outer = metering._make_recorder(inner, "probe.outer")
+    with _execution_tally() as tally:
+        assert outer() == "done"
+    assert tally.snapshot() == {"probe.inner": 1, "probe.outer": 1}
+    assert [row[0] for row in calls] == ["probe.inner", "probe.outer"]
+
+
+def test_recursive_public_entry_counts_each_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _spy_emit(monkeypatch)
+
+    def body(depth: int) -> int:
+        return recursive(depth - 1) + 1 if depth else 0
+
+    recursive = metering._make_recorder(body, "probe.recursive")
+    with _execution_tally() as tally:
+        assert recursive(2) == 2
+    assert tally.snapshot() == {"probe.recursive": 3}
+    assert len(calls) == 3
+
+
+def test_plugin_reload_and_multi_call_wrap_have_one_final_recorder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_emit(monkeypatch)
+    bodies: list[str] = []
+
+    def body() -> int:
+        bodies.append("body")
+        return 1
+
+    def twice(inner: Callable[[], int]) -> int:
+        return inner() + inner()
+
+    registry = ExtensionRegistry(
+        (
+            (
+                "probe",
+                PluginContributions(
+                    sdk_members=(SdkMember("self", "multi_probe_test", body),),
+                    sdk_wraps=(
+                        SdkWrap("self.multi_probe_test", twice),
+                        SdkWrap("self.multi_probe_test", twice),
+                    ),
+                ),
+            ),
+        )
+    )
+    for _ in range(2):
+        install.install(registry)
+        with _execution_tally() as tally:
+            assert cast(Callable[[], int], ava.self.multi_probe_test)() == 4
+        assert tally.snapshot() == {"self.multi_probe_test": 1}
+        install.uninstall()
+    assert bodies == ["body"] * 8
+    assert [row[0] for row in calls] == ["self.multi_probe_test"] * 2
