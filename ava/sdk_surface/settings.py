@@ -4,14 +4,14 @@
 function needs from this process's settings; the connections a process holds live on its bound
 `AvaContext` (`ava.context.sql` / `.redis` / `.gateway`, `base.agents.context.clients`).
 
-URL source: `base.config.settings` single source of truth. Settings' infra-pointing fields
-(db_url / redis_url) have no default; when env is missing, Settings() instantiation throws
-ValidationError immediately, not reaching here.
+URL source: `base.config.settings` is the single source of truth. An empty SQL URL names no
+process resource; the default database factory refuses it before a connection can reach libpq.
 """
 
 from collections.abc import Mapping
 from typing import Any
 
+from base.agents.context.clients import DatabaseHandle
 from base.config import settings
 
 # DB_URL / REDIS_URL / GATEWAY_URL are exposed via module __getattr__ (PEP
@@ -42,10 +42,12 @@ def __getattr__(name: str) -> Any:
 # live-events stacks into every exec child (task #3816).
 
 
-def database() -> "Database":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def database() -> DatabaseHandle:
     """The cluster database, as this process's settings name it."""
     from base.db import Database
 
+    if not settings.data_plane.db_url:
+        raise RuntimeError("AVA_DB_URL not set — SQL ops should not be called in container mode")
     return Database.from_settings()
 
 
