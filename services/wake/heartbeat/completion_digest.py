@@ -7,15 +7,14 @@ notice never resurrects a terminated owner (`ops.lifecycle.resurrect_if_terminat
 so the digest waits in the owner's queue like any other framework notification.
 
 The delivery key `completion-digest:<agent>:<hour>` makes a crash between the delivery
-and the mark exactly once: the retry meets the existing receipt. One bad digest is
-logged and retried on the next tick without blocking the others; any other exception
-ends the loop and, through the service's `TaskGroup`, the process.
+and the mark exactly once: the retry meets the existing receipt. Unknown delivery
+errors propagate through this caller to the heartbeat service's
+`TaskGroup`; a later service restart reconciles the same durable key.
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import UTC, datetime, timedelta
 
 from psycopg_pool import ConnectionPool
@@ -32,8 +31,6 @@ from base.daemon.schedules.completion_notices import (
 from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.agents.delivery import deliver_chat_inbound
-
-_log = logging.getLogger(__name__)
 
 FLUSH_INTERVAL_S = 60.0
 _SOURCE = "system:completion-digest"
@@ -75,38 +72,23 @@ async def flush_once(
     digests = await asyncio.to_thread(_pending, pool, moment)
     delivered = 0
     for digest in digests:
-        try:
-            delivery = await deliver_chat_inbound(
-                pool,
-                db,
-                bus,
-                digest.agent_id,
-                prepare=lambda _conn, digest=digest: format_digest(
-                    agent_id=digest.agent_id,
-                    window_start=digest.window_start,
-                    notices=digest.notices,
-                ),
-                source=_SOURCE,
-                client_message_id=_digest_key(digest),
-            )
-            if delivery.inbound_id is None:
-                _log.warning(
-                    "completion-notice digest delivery returned no inbound receipt for agent %s, "
-                    "hour %s",
-                    digest.agent_id,
-                    digest.window_start.isoformat(),
-                )
-                continue
-            await asyncio.to_thread(_mark_delivered, pool, digest, delivery.inbound_id)
-        except Exception:
-            _log.warning(
-                "completion-notice digest delivery failed for agent %s, hour %s",
-                digest.agent_id,
-                digest.window_start.isoformat(),
-                exc_info=True,
-            )
-        else:
-            delivered += 1
+        delivery = await deliver_chat_inbound(
+            pool,
+            db,
+            bus,
+            digest.agent_id,
+            prepare=lambda _conn, digest=digest: format_digest(
+                agent_id=digest.agent_id,
+                window_start=digest.window_start,
+                notices=digest.notices,
+            ),
+            source=_SOURCE,
+            client_message_id=_digest_key(digest),
+        )
+        if delivery.inbound_id is None:
+            raise RuntimeError("completion-notice digest delivery returned no inbound receipt")
+        await asyncio.to_thread(_mark_delivered, pool, digest, delivery.inbound_id)
+        delivered += 1
     await asyncio.to_thread(_prune_delivered, pool, moment - _EVENT_RETENTION)
     return delivered
 
