@@ -627,6 +627,16 @@ jobs:
           git fetch --depth=1 origin "$base"
           echo "LINT_STRUCTURE_BASELINE_BASE=$(git rev-parse FETCH_HEAD^{commit})" >> "$GITHUB_ENV"
 
+      - name: Fetch comparison ancestry for manual structure guard
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # Manual refs are source commits, not synthesized PR merge refs.
+          # Fetch their full ancestry to compare against the actual common base.
+          git fetch --unshallow origin "$(git rev-parse HEAD)" \
+            refs/heads/main:refs/remotes/origin/main
+          base="$(git merge-base -- HEAD refs/remotes/origin/main)"
+          echo "LINT_STRUCTURE_BASELINE_BASE=$base" >> "$GITHUB_ENV"
+
       - name: Restore pre-commit environments
         id: precommit-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
