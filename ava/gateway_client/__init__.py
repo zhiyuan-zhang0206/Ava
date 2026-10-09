@@ -241,7 +241,7 @@ def send_message(
     from ava.sdk_surface import agent_identity
     from ava.sdk_surface import settings as sdk_settings
     from base.agents.messages import delivery_outbox
-    from base.agents.messages.delivery_retry import retryable_response
+    from base.agents.messages.delivery.retry import retryable_response
 
     origin_agent_id = agent_identity.agent_id()
     sender = sdk_settings.delivery_sender_config()

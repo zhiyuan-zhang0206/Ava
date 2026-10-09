@@ -66,7 +66,7 @@ Owners: [[base/agents/messages/docs/caller_protocol.ava.okf.md]] and
 
 ## Retry consumers
 
-`delivery_retry.retryable_response` owns the gateway policy shared by SDK
+`delivery.retry.retryable_response` owns the gateway policy shared by SDK
 transport and SDK/CLI outbox interception: 429/502/503/504 remain eligible for
 bounded recovery. A structured `retryable=false` or `committed=true` refuses
 automatic replay, and HTTP 500 exposes the original response once. Its durable
