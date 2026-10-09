@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.structure import placement, service_units
+from scripts.structure import imports, placement, service_units
 from scripts.structure.tests.patch_repo import make_repo
 
 
@@ -80,11 +80,13 @@ def test_production_import_edges_resolve_cross_unit_module_members(
     assert not graph.can_import(target, source)
 
 
-def test_an_invalid_relative_import_does_not_create_a_root_unit_edge(tmp_path: Path) -> None:
+def test_an_invalid_relative_import_fails_when_unit_edges_are_read(tmp_path: Path) -> None:
     root = make_repo(
         tmp_path,
         {"services/wake/heartbeat/daemon.py": "from ....base.net import retry"},
     )
     graph = placement.unit_graph(root)
-    assert graph.empirical["services.wake.heartbeat", "base"] == 0
-    assert not graph.can_import("services.wake.heartbeat", "base")
+    with pytest.raises(
+        imports.InvalidRelativeImportError, match=r"services/wake/heartbeat/daemon\.py:1:"
+    ):
+        _ = graph.empirical

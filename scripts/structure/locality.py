@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import ambient_state, baseline_shards, path_imports
+from scripts.structure import ambient_state, baseline_shards, imports, path_imports
 
 SECTIONS = ("private_imports", "owner_bypasses", "patch_targets")
 STRICT_SECTIONS = ("private_imports", "owner_bypasses", path_imports.SECTION)
@@ -31,11 +31,6 @@ Sites = dict[str, list[int]]
 
 def _is_private(part: str) -> bool:
     return part.startswith("_") and not part.startswith("__")
-
-
-def _package_of(rel_path: str) -> list[str]:
-    """Dotted package parts a module file lives in (`__init__.py` is its own package)."""
-    return rel_path.removesuffix(".py").split("/")[:-1]
 
 
 @functools.cache
@@ -63,46 +58,6 @@ def _is_module(dotted: str, repo_root: Path) -> bool:
     return _exists_exact(path.with_name(f"{path.name}.py"), directory=False) or _exists_exact(
         path, directory=True
     )
-
-
-def _import_base(node: ast.ImportFrom, rel_path: str) -> str | None:
-    if node.level == 0:
-        return node.module or ""
-    package = _package_of(rel_path)
-    if node.level > len(package):
-        return None
-    anchor = package[: len(package) - (node.level - 1)]
-    return ".".join([*anchor, *([node.module] if node.module else [])])
-
-
-def _import_candidates(node: ast.Import | ast.ImportFrom, rel_path: str) -> list[str]:
-    if isinstance(node, ast.Import):
-        return [alias.name for alias in node.names]
-    base = _import_base(node, rel_path)
-    if base is None:
-        return []
-    return [base, *(f"{base}.{alias.name}" for alias in node.names if alias.name != "*")]
-
-
-def _module_aliases(
-    node: ast.Import | ast.ImportFrom, rel_path: str, repo_root: Path
-) -> dict[str, str]:
-    """Local names this import binds to a module or package (not to a function or class)."""
-    if isinstance(node, ast.Import):
-        return {
-            alias.asname or alias.name.split(".")[0]: alias.name
-            if alias.asname
-            else alias.name.split(".")[0]
-            for alias in node.names
-        }
-    base = _import_base(node, rel_path)
-    if not base:
-        return {}
-    return {
-        alias.asname or alias.name: f"{base}.{alias.name}"
-        for alias in node.names
-        if alias.name != "*" and _is_module(f"{base}.{alias.name}", repo_root)
-    }
 
 
 def _attribute_target(node: ast.Attribute, aliases: dict[str, str], repo_root: Path) -> str | None:
@@ -169,7 +124,7 @@ def private_imports(
 ) -> Sites:
     """Imports of, or attribute reach-ins to, a `_`-prefixed module or name from
     outside the package that owns it."""
-    reach = _Reach(rel_path, ".".join(_package_of(rel_path)), roots, repo_root)
+    reach = _Reach(rel_path, ".".join(imports.package_of(rel_path)), roots, repo_root)
     aliases: dict[str, str] = {}
     rebound: set[str] = set()
     attributes: list[ast.Attribute] = []
@@ -179,8 +134,9 @@ def private_imports(
             attributes.append(node)
             inner.add(id(node.value))
         elif isinstance(node, ast.Import | ast.ImportFrom):
-            aliases.update(_module_aliases(node, rel_path, repo_root))
-            reach.record(node.lineno, _import_candidates(node, rel_path))
+            clause = imports.normalize(node, rel_path)
+            aliases.update(clause.module_aliases(lambda target: _is_module(target, repo_root)))
+            reach.record(node.lineno, clause.candidates)
         elif isinstance(node, ast.arg) or (
             isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
         ):
