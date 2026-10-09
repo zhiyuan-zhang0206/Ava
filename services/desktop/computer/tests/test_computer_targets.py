@@ -115,3 +115,12 @@ def test_window_frame_requires_both_native_identity_fields() -> None:
     frame = CaptureFrame(CoordinateSpace.REGION_PIXELS, 0, 0, 2, 400, 200).as_dict()
     with pytest.raises(ComputerUseError, match="require a target"):
         CaptureFrame.parse({**frame, "coordinate_space": CoordinateSpace.WINDOW_PIXELS.value})
+
+
+def test_frame_refuses_numeric_overflow_before_native_input() -> None:
+    frame = CaptureFrame(CoordinateSpace.REGION_PIXELS, 0, 0, 2, 400, 200).as_dict()
+    with pytest.raises(ComputerUseError, match="finite"):
+        CaptureFrame.parse({**frame, "origin": {"x": 10**1000, "y": 0}})
+    tiny_scale = CaptureFrame(CoordinateSpace.REGION_PIXELS, 0, 0, 5e-324, 400, 200)
+    with pytest.raises(ComputerUseError, match="mapped x"):
+        tiny_scale.global_point(1, 1)

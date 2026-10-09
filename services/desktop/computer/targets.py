@@ -105,9 +105,15 @@ class ObservationFrame(TypedDict):
 
 
 def _number(value: Any, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ComputerUseError(f"{name} must be a finite number")
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        raise ComputerUseError(f"{name} must be a finite number") from None
+    if not isfinite(number):
+        raise ComputerUseError(f"{name} must be a finite number")
+    return number
 
 
 @dataclass(frozen=True)
@@ -174,4 +180,7 @@ class CaptureFrame:
         px, py = _number(x, "x"), _number(y, "y")
         if not (0 <= px < self.width and 0 <= py < self.height):
             raise ComputerUseError("point is outside the observation frame")
-        return self.x + px / self.scale, self.y + py / self.scale
+        return (
+            _number(self.x + px / self.scale, "mapped x"),
+            _number(self.y + py / self.scale, "mapped y"),
+        )
