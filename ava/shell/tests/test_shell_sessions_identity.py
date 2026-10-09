@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 
 _PROBE = (
     "import ava.shell.sessions as sessions\n"
@@ -37,7 +37,7 @@ def _run_probe(home: Path, *, agent_id: int | None) -> str:
     return result.stdout.strip().splitlines()[-1]
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions require POSIX")
+@pytest.mark.skipif(is_windows(), reason="PTY sessions require POSIX")
 def test_exec_child_without_identity_is_refused_before_any_backend_or_database(
     tmp_path: Path,
 ) -> None:
@@ -45,7 +45,7 @@ def test_exec_child_without_identity_is_refused_before_any_backend_or_database(
     assert line.startswith("REFUSED=Cannot use shell sessions: this process has no agent identity")
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions require POSIX")
+@pytest.mark.skipif(is_windows(), reason="PTY sessions require POSIX")
 def test_exec_child_with_the_identity_the_launcher_passes_reaches_the_backend(
     tmp_path: Path,
 ) -> None:
@@ -66,7 +66,7 @@ class _CapturingBackend:
         return []
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions require POSIX")
+@pytest.mark.skipif(is_windows(), reason="PTY sessions require POSIX")
 def test_created_session_carries_the_owners_identity(tmp_path: Path) -> None:
     """Every session names its owner: a script run in it constructs the owner's complete
     AvaContext from the environment (ruling 2026-10-04, source 2)."""
