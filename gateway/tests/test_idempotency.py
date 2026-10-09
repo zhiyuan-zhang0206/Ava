@@ -220,7 +220,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A receipt survives model/upload changes after the original commit."""
-    from base.agents.uploads import agent_upload_dir
+    from base.agents.upload_delivery.paths import agent_upload_dir
     from base.lm import factory
 
     upload_dir = agent_upload_dir(agent_id)
