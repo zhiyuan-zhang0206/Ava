@@ -20,7 +20,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - Injects the skill and MCP server index — **once**. `# Capabilities` is the sole index; the expanded SDK reference's `*` skips `ava.skills` / `ava.mcps` (`_CAPABILITY_SURFACES`) so it renders call contracts only, never a second capability listing
 
 ### Plugin Declaration (`PluginContributions.system_prompt_sections`)
-- A plugin declares sections in `contribute()`; the `ExtensionRegistry` reaches this build as `AvaContext.extensions` ([[okf/plugins/declared-contributions.ava.okf.md]])
+- A plugin declares sections in `contribute()`; the `ExtensionRegistry` reaches this build as `AvaContext.extensions` ([[docs/plugins/declared-contributions.ava.okf.md]])
 - Signature `(slices: AgentSlices) -> str`; `""` means no contribution
 - Declaration order (plugins by name) is priority
 - Framework's built-in sections are grouped: SDK detail → Conversation → Conduct → Capabilities

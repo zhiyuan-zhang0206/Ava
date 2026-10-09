@@ -41,5 +41,5 @@ inputs; the metrics distinguish packaging checks, proxies, and live execution.
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — created things land in this mechanism
-- [[okf/plugins/plugins.ava.okf.md|Plugin system]] — boundary between skill and plugin
+- [[docs/plugins/plugins.ava.okf.md|Plugin system]] — boundary between skill and plugin
 - [[ava_builtins/skills/platform/ava-self-evolution/docs/ava-self-evolution.ava.okf.md|Self-evolution]] — existing trace replay, isolation limits, and proxy scoring
