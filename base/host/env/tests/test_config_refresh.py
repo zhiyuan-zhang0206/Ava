@@ -57,6 +57,7 @@ def _restore_data_plane(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     from base.config import settings
 
     old = settings.data_plane
+    monkeypatch.setattr(settings, "env_boot", settings.env_boot)
     yield
     settings.data_plane = old
 

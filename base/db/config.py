@@ -23,6 +23,8 @@ class DbConfig:
     db_pool_max_size: int
     # Whether the access URL names a pooler, which the direct (admin-plane) dial must bypass.
     pgbouncer_enabled: bool
+    # The authority result that was delivered with this connection slice.
+    db_authority_refusal: str | None = field(default=None, repr=False)
 
 
 def db_config_from_settings() -> DbConfig:
@@ -34,4 +36,5 @@ def db_config_from_settings() -> DbConfig:
         db_pool_min_size=settings.data_plane.db_pool_min_size,
         db_pool_max_size=settings.data_plane.db_pool_max_size,
         pgbouncer_enabled=settings.data_plane.pgbouncer_enabled,
+        db_authority_refusal=settings.env_boot.db_authority_refusal,
     )

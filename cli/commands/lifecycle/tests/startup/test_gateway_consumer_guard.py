@@ -504,7 +504,20 @@ def _kind_closure(roots: tuple[str, ...]) -> set[Path]:
 
 
 def _closure_domains(closure: set[Path]) -> set[str]:
-    """The set of `settings.<domain>` domains read anywhere in `closure`."""
+    """Config-domain reads, excluding declared aggregate runtime facts.
+
+    Unknown aggregate attributes still enter the matrix and fail its profile
+    check; only dump-excluded Settings fields outside the domain registry are
+    classified as non-domain facts.
+    """
+    from base.config import Settings
+    from base.host.env.config_registry import DOMAIN_ATTRS
+
+    aggregate_facts = {
+        name
+        for name, field in Settings.model_fields.items()
+        if field.exclude is True and name not in DOMAIN_ATTRS
+    }
     domains: set[str] = set()
     for py_file in closure:
         try:
@@ -512,8 +525,20 @@ def _closure_domains(closure: set[Path]) -> set[str]:
         except OSError:
             continue
         for domain, _field in _extract_settings_reads(src_text):
-            domains.add(domain)
+            if domain not in aggregate_facts:
+                domains.add(domain)
     return domains
+
+
+def test_profile_consumption_distinguishes_runtime_facts_from_domains(tmp_path: Path) -> None:
+    """Declared boot facts are not domains; an unknown domain stays visible."""
+    source = tmp_path / "consumer.py"
+    source.write_text(
+        "settings.env_boot.db_authority_refusal\n"
+        "settings.data_plane.db_url\n"
+        "settings.undeclared_domain.value\n"
+    )
+    assert _closure_domains({source}) == {"data_plane", "undeclared_domain"}
 
 
 def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyPatch) -> None:
