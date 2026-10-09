@@ -56,7 +56,9 @@ jobs:
           cases = ET.parse("root-lifetime.xml").findall(".//testcase")
           assert len(cases) == 3, f"expected three native lifetime cases, got {len(cases)}"
           for case in cases:
-              assert not list(case), f"native lifetime case did not pass: {case.attrib}"
+              assert all(case.find(tag) is None for tag in ("failure", "error", "skipped")), (
+                  f"native lifetime case did not pass: {case.attrib}"
+              )
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

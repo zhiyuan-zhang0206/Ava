@@ -553,7 +553,24 @@ def _require_native_systemd() -> None:
         pytest.skip("this host has its own ava-boot unit; the test would act on it")
 
 
+@pytest.fixture
+def native_systemd_unit(tmp_path_factory: pytest.TempPathFactory) -> Generator[None]:
+    """Serialize the fixed unit's safety check, lifecycle and cleanup across workers."""
+    if sys.platform != "linux":
+        pytest.skip("native Linux systemd required")
+
+    import fcntl
+
+    # xdist worker basetemps are siblings under the same test-run directory.
+    lock_path = tmp_path_factory.getbasetemp().parent / "ava-boot-test.lock"
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        _require_native_systemd()
+        yield
+
+
 @pytest.mark.parametrize("failure", ["", "before", "after"])
+@pytest.mark.usefixtures("native_systemd_unit")
 def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     """Actual manager handoff, root TERM closure, and data sibling retention.
 
@@ -563,7 +580,6 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     """
     from base.host.system import boot_unit
 
-    _require_native_systemd()
     ctx = _systemd_test_context(tmp_path / "home")
     ctx.home.mkdir()
     run_dir = ctx.home / "root"
