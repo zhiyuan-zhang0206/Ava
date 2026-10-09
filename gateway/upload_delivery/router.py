@@ -13,7 +13,7 @@ from base.agents.upload_delivery.models import (
     UploadDeliveryConflictError,
     UploadQuotaExceededError,
 )
-from base.agents.uploads import render_safe_headers
+from base.agents.upload_delivery.paths import render_safe_headers
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
