@@ -61,7 +61,7 @@ from playwright.sync_api import Page, expect
 from base.agents import AgentStatus
 from base.config import settings
 from tests.components.base.poll_until import poll_until
-from tests.e2e._db import wait_for_status
+from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_compact_history_off, pin_expand_runs_all
 from tests.e2e.fakes.scenarios.parked_compact import (
@@ -166,9 +166,7 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
         page.wait_for_function(f"location.href.includes('agent_id={agent_b}')", timeout=15_000)
 
         # ── 3. compact A while it is parked (same call as the UI button) ──
-        resp = httpx.post(f"{gateway_url}/api/agents/{agent_a}/compact", timeout=30.0)
-        resp.raise_for_status()
-        assert resp.json()["status"] == "enqueued"
+        enqueue_compact_history_fixture(agent_a)
         _wait_kind(gateway_url, agent_a, "inbound_compact_request")
         wait_for_status(agent_a, AgentStatus.IDLING.value)
 

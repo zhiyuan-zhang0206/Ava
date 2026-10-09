@@ -15,8 +15,6 @@ imports back into ``llm/node.py``.
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.lm.errors import ErrorClass, classify_error, emit_provider_error
@@ -153,29 +151,8 @@ class FatalProviderError(Exception):
 
 
 def _parse_provider_error_type(exc: BaseException) -> str | None:
-    """Extract the error `type` from a provider SDK exception's response body.
-
-    Both OpenAI and Anthropic Python SDKs carry `body` on their API error
-    classes (RateLimitError, APIStatusError, etc.), structured as
-    ``{"error": {"type": "...", "message": "..."}}``.  This extracts that
-    `error.type` string so callers can decide whether it signals a fatal
-    condition (e.g. ``"engine_overloaded_error"``) vs a transient one.
-
-    Returns ``None`` when:
-    - ``exc`` has no ``body`` attribute, or ``body`` is not a dict
-    - ``body["error"]`` is missing or not a dict
-    - ``body["error"]["type"]`` is missing or not a string
-    """
-    body = getattr(exc, "body", None)
-    if not isinstance(body, dict):
-        return None
-    error = cast(dict[str, Any], body).get("error")
-    if not isinstance(error, dict):
-        return None
-    error_type = cast(dict[str, Any], error).get("type")
-    if isinstance(error_type, str) and error_type:
-        return error_type
-    return None
+    """Read a provider type only through the shared trusted-error classifier."""
+    return classify_error(exc).error_type
 
 
 def _is_fatal_provider_error_type(exc: BaseException, llm_policy: LlmCallPolicy) -> bool:
@@ -199,14 +176,14 @@ def _classify_and_log_provider_error(
 ) -> FatalProviderError | None:
     """Classify a provider exception, emit the structured postmortem log, and
     return a `FatalProviderError` to raise when the turn must fail fast — else None
-    so the caller re-raises the original for the node's retry loop to retry.
+    so the caller re-raises the original for the node's explicit retry predicate.
 
     Two fail-fast triggers fold together here (see `FatalProviderError`): the
     `classify_error` `PERMANENT` class (400/401/402/403/404/422 — deterministic
     rejection) and a configured fatal error *type* (`llm_fatal_provider_error_types`,
     e.g. Kimi K3's transient-but-in-turn-futile `engine_overloaded_error`). The
-    structured log fires for every class — including TRANSIENT/UNKNOWN that go on
-    to retry — so the `error_class` / `provider` payload keys /
+    structured log fires for every class, including UNKNOWN errors that propagate
+    once, so the `error_class` / `provider` payload keys /
     `->>'status'` are queryable in a postmortem instead of scraping the message.
 
     `billing` / `vendor` / `model` ride the same log because an out-of-credit key
@@ -255,10 +232,8 @@ class LLMStreamCorruptedError(LLMStreamError):
       it as idle.
     - terminal reason claims a tool call but no tool_calls survived (bug 169).
 
-    fail-fast: validate immediately after chunks assemble final_msg; missing
-    field raises, langgraph `arun_with_retry` retries the entire llm_node
-    (re-streaming, server may not miss this time). Full failure goes through
-    the graph crash path.
+    Validate immediately after chunks assemble final_msg. Missing fields raise
+    once through the graph failure path without automatically re-streaming.
 
     The thinking-block drift (#167/#168: signature_delta sent but thinking_delta
     missed) is no longer in this class — `_sanitize_thinking_blocks` repairs it
@@ -307,10 +282,9 @@ class LLMStreamSilentIdleError(LLMStreamError):
 class LLMStreamUnexpectedStopReasonError(LLMStreamError):
     """LLM stream finished but the terminal reason is not in the normal-completion set.
 
-    All non-normal terminal reasons are non-idle abnormal states; framework has
-    no explicit handling path — always fail-fast: raise → langgraph
-    `arun_with_retry` retries; retry failure goes through turn_end ok=False +
-    Error event publish, visible to frontend rather than silent halt.
+    All non-normal terminal reasons are non-idle abnormal states. With no
+    continuation contract, raise once through turn_end ok=False and Error event
+    publication; do not automatically re-stream the request.
 
     Known non-normal terminal reasons (across providers):
     - truncation: server output budget exhausted. See subclass `LLMStreamTruncatedError`.
@@ -363,7 +337,7 @@ class LlmLedger:
 
     Three records:
 
-    - **Consecutive same errors.** The last ``LLMStreamError`` type per thread across retries. If
+    - **Consecutive stalls.** The last owned ``LLMStreamStallTimeoutError`` type per thread. If
       the same type is raised N times in a row (N = ``llm_retry_max_consecutive_same_error``), the
       next attempt raises ``FatalLLMStreamError`` instead -- a deterministic error cannot be fixed
       by retry; fail fast with an ERROR event rather than silently exhausting every retry. Reset on
@@ -415,15 +389,17 @@ class LlmLedger:
     def record_consecutive_error(self, thread_id: str, exc: BaseException) -> None:
         """Update the consecutive-error record after a stream error.
 
-        Only tracks LLMStreamError subclasses; other exceptions are transient
-        (network jitter / rate-limit) and should always be retried. Stall pairs
-        are excluded: their retry bound is the delayed-schedule streak, and
+        Only tracks retryable stream stalls. Protocol errors fail once and
+        must not pre-empt a later user turn. Stall pairs are excluded:
+        their retry bound is the delayed-schedule streak, and
         letting this record's cap (default 3) count them would fail the turn
         before the schedule's 4th grant.
         """
         if settings.lm.llm_retry_max_consecutive_same_error <= 0:
             return
-        if not isinstance(exc, LLMStreamError) or isinstance(exc, LLMStreamStallPairError):
+        if not isinstance(exc, LLMStreamStallTimeoutError) or isinstance(
+            exc, LLMStreamStallPairError
+        ):
             return
         exc_name = type(exc).__name__
         entry = self._consecutive_errors.get(thread_id)

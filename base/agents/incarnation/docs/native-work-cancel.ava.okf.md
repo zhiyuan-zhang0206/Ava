@@ -35,8 +35,9 @@ integer protocol 1. Missing, boolean, floating-point and unknown protocols fail
 at the raw boundary. Same-key replay reads its immutable original receipt before
 mutable work or owner state; changed tuple conflicts. A different fresh key for
 the same work conflicts rather than replacing the first command. Acceptance
-returns a command identity, not evidence that execution stopped. No SDK/UI
-activation, automatic retries, legacy fallback or client outbox is introduced.
+returns a command identity, not evidence that execution stopped. Automatic ambiguous transport retries, fallback ingress and a client outbox
+are not supported. UI and CLI consumers observe and submit exact targets; see
+[[gateway/agents/docs/control-acceptance.ava.okf.md]].
 
 ## Original execution and settlement
 
@@ -117,8 +118,8 @@ The protocol does not promise safe old/new concurrent execution during rolling
 replacement. The SDK offers explicit observed-work control through
 [[ava/agents/docs/work-control.ava.okf.md]]; it does not replace legacy controls
 or automatically submit commands. The same operator activation prerequisite
-applies. UI, CLI and MCP controls remain separate; there is no fallback or
-deployment in the SDK consumer change.
+applies. UI and CLI now use that same observed-work protocol. MCP activation remains
+separate; repository consumer changes do not deploy or activate a running fleet.
 
 Owners: `services/agent_runner/agent_host/invocation/native_work.py`,
 `agent/ownership/native_cancel.py`, `agent/ownership/hosted.py`, and

@@ -43,11 +43,12 @@ reply have already succeeded.
 If the forward fails after creation, the gateway conditionally records a typed
 launch failure on the row and responds 502 `agent_launch_failed` with
 `agent_id`, actual `state.status`, projected availability, and a legal
-`retry_launch_path`. The browser selects that agent and offers Retry launch.
-`POST /api/agents/{id}/retry-launch` rotates `last_launch_attempt_id`, reuses
-the stored machine/config/birth stamp, and forwards the same identity without
-another inbound. Within one attempt, `spawn-launch-v2` keeps its canonical RPC
-dedupe key; a new attempt is a repeatable wake. Admission racing a failed
+`retry_launch_path` pointing to the guarded route. The browser selects that
+committed agent. `POST /api/keyed/v1/agents/{id}/retry-launch` requires an explicit
+observed prior attempt and principal-scoped key. It fixes one new attempt in an
+immutable receipt and reconciles only that attempt's wake; replay cannot rotate
+another attempt or insert another inbound. The old unversioned retry route is
+removed. See [[gateway/agents/docs/launch-retry.ava.okf.md]]. Admission racing a failed
 forward wins and produces an accepted receipt. A failure-state DB read/write
 outage still returns the committed ID with an unknown state. A caller may supply `Idempotency-Key` to `POST /api/agents`. The immutable
 request hash and key commit on the agent row with the fork marker and first

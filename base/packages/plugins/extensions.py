@@ -153,7 +153,7 @@ class PluginContributions:
     sdk_expansions: tuple[str, ...] = ()
     # One frozen BaseModel bound once from `$AVA_HOME/configs/<plugin>/config.json`.
     config: type[BaseModel] | None = None
-    # Fully qualified `<domain>.<field>` core settings the plugin may read through `read_flag`.
+    # Fully qualified `<domain>.<field>` Core dependencies, validated on admission.
     flags: tuple[str, ...] = ()
 
     def merged(self, other: PluginContributions) -> PluginContributions:

@@ -16,7 +16,6 @@ from pathlib import Path
 from base.agents.tasks.priority import Priority
 from gateway.agents.schemas import (
     AgentRow,
-    CompactEnqueued,
     MessageEnqueued,
     NewThread,
     NoticeItem,
@@ -146,15 +145,6 @@ def test_new_thread_wire_shape() -> None:
 def test_message_enqueued_wire_shape() -> None:
     m = MessageEnqueued(agent_id=7, status="enqueued")
     assert json.loads(m.model_dump_json()) == {"agent_id": 7, "status": "enqueued"}
-
-
-def test_compact_enqueued_wire_shape() -> None:
-    m = CompactEnqueued(agent_id=3, status="enqueued")
-    assert json.loads(m.model_dump_json()) == {
-        "agent_id": 3,
-        "status": "enqueued",
-        "inbound_id": None,
-    }
 
 
 def test_user_message_in_strips_and_rejects_empty() -> None:

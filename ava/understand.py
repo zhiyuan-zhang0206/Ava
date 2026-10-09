@@ -104,10 +104,11 @@ def _slugify(text: str, max_len: int = 40) -> str:
 
 class UnderstandError(Exception):
     """`ava.understand` failure — API key not set, a file that is not valid
-    UTF-8 text, media over the 20MB inline cap, upstream call failure, or an
+    UTF-8 text, media over the 20MB inline cap, typed provider call failure, or an
     empty (safety-blocked) response. Catch it as
     `ava.understand.UnderstandError`. Filesystem errors (missing path,
-    permissions) raise their usual exception types instead."""
+    permissions) and unknown model-invocation errors retain their original
+    exception types; unknown errors are not retried."""
 
 
 @overload

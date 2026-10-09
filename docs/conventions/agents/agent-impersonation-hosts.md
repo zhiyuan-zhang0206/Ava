@@ -19,7 +19,7 @@ adapters do not acknowledge messages or renew leases. Process supervision stays
 with the existing owner for each provider, as described below.
 
 This page is the operator and mechanism side. The executor's side of each host
-is its host guide under `.agents/skills/impersonator-guide/reference/`
+is its host guide under `ava_builtins/skills/platform/impersonator-guide/reference/`
 (`claude_code.md`, `codex.md`, `deepseek_harness.md`).
 
 The relay is part of the takeover, not a manual step. The request records the

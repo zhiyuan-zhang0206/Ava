@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.exceptions import ModelRateLimitError
 from pydantic import SecretStr
 
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
@@ -338,10 +339,34 @@ def test_media_raises_on_empty_response(mock_gemini: dict[str, Any], fake_image:
         understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
 
 
-def test_text_wraps_upstream_error(mock_deepseek: dict[str, Any]) -> None:
-    mock_deepseek["llm"].invoke.side_effect = RuntimeError("rate limit")
-    with pytest.raises(understand_mod.UnderstandError, match="rate limit"):
+def test_text_wraps_upstream_error(
+    monkeypatch: pytest.MonkeyPatch, mock_deepseek: dict[str, Any]
+) -> None:
+    monkeypatch.setattr(settings.lm, "llm_invoke_retry_attempts", 0)
+    error = ModelRateLimitError("rate limit")
+    mock_deepseek["llm"].invoke.side_effect = error
+    with pytest.raises(understand_mod.UnderstandError, match="rate limit") as raised:
         understand_mod.understand([{"prompt": "x", "text": "some text"}])
+    assert raised.value.__cause__ is error
+    mock_deepseek["llm"].invoke.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("invalid callback input"),
+        ValueError("invalid response"),
+        RuntimeError("rate limit"),
+    ],
+)
+def test_unknown_model_error_preserves_identity_without_retry(
+    mock_deepseek: dict[str, Any], error: Exception
+) -> None:
+    mock_deepseek["llm"].invoke.side_effect = error
+    with pytest.raises(type(error)) as raised:
+        understand_mod.understand([{"prompt": "x", "text": "some text"}])
+    assert raised.value is error
+    mock_deepseek["llm"].invoke.assert_called_once()
 
 
 # ── paths mode (files, ONE model call) ─────────────────────────────────────

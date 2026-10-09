@@ -6,22 +6,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from base.agents import CancelResult, TerminateResult
-from ops.rpc_schemas import CancelRequested, LaunchAgentRequest, OpResponse, OpStatus
+from ops.rpc_schemas import LaunchAgentRequest, OpResponse, OpStatus
 from ops.rpc_schemas.billing_recovery import (
     BillingRecoveryMode,
     BillingRecoveryRunOutcome,
     BillingResurrectResponse,
 )
-
-
-@pytest.mark.parametrize("result", list(CancelResult))
-def test_cancel_is_its_own_shared_domain(result: CancelResult) -> None:
-    assert CancelResult is not TerminateResult
-    assert CancelRequested.model_fields["status"].annotation is CancelResult
-    response = CancelRequested.model_validate({"status": result.value})
-    assert response.status is result
-    assert response.model_dump(mode="json") == {"status": result.value, "inbound_id": None}
 
 
 @pytest.mark.parametrize("status", list(OpStatus))
@@ -59,9 +49,7 @@ def test_billing_run_domains_preserve_independent_wire_sets(
 
 
 @pytest.mark.parametrize("raw", ["pending", None, ""])
-def test_unknown_cancel_and_op_status_fail_at_wire_boundary(raw: object) -> None:
-    with pytest.raises(ValidationError):
-        CancelRequested.model_validate({"status": raw})
+def test_unknown_op_status_fails_at_wire_boundary(raw: object) -> None:
     with pytest.raises(ValidationError):
         OpResponse.model_validate({"status": raw, "result": {}})
 
@@ -71,7 +59,6 @@ def test_generated_http_schema_resolves_the_same_exact_wire_domains() -> None:
         "components"
     ]["schemas"]
     for model, field, owner in [
-        ("CancelRequested", "status", CancelResult),
         ("BillingResurrectResponse", "mode", BillingRecoveryMode),
         ("BillingResurrectResponse", "outcome", BillingRecoveryRunOutcome),
     ]:

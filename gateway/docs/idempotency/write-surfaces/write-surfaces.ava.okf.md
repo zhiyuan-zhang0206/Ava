@@ -18,6 +18,7 @@ Versioned routes: [[guarded-creation.ava.okf.md]], [[guarded-pages.ava.okf.md]] 
 Preset/schedule receipts are optional; their routes remain `NON_IDEMPOTENT`.
 Keyless calls stay legacy. Ambiguous retry activation awaits negotiation; older
 gateways may ignore keys.
+Observed lifecycle routes: [[guarded-lifecycle.ava.okf.md]].
 Owners:
 [[gateway/routers/docs/resource-creation.ava.okf.md]] and
 [[gateway/schedules/docs/schedule-convergence.ava.okf.md]].
@@ -26,7 +27,6 @@ Owners:
 |---|---|---|
 | `PATCH /api/agents/{agent_id}` | natural | label patch — CAS update |
 | `POST /api/agents` | keyed | immutable creation identity commits with birth and first prompt; SDK ambiguous retry stays gated for older gateways |
-| `POST /api/agents/{agent_id}/retry-launch` | one-shot | explicit same-ID launch retry rotates the attempt key; each call dispatches once |
 | `POST /api/alerts` | natural | Grafana Alertmanager webhook — upsert per (fingerprint, starts_at); a 503 exhausts Grafana retries and the alert is lost |
 | `POST /api/auth/login` | natural | login — repeats just mint a fresh cookie |
 | `POST /api/auth/logout` | natural | clear session cookie — idempotent |
@@ -48,9 +48,6 @@ Owners:
 | `POST /api/guide/draft` | one-shot | creates an agent, commits its first prompt and forwards its launch |
 | `PUT /api/inventory` | natural | full inventory replace — PUT is idempotent |
 | `POST /api/agents/{agent_id}/impersonation/force-expire` | natural | observed-session CAS close — repeated or stale requests leave the lease unchanged |
-| `POST /api/agents/{agent_id}/compact` | one-shot | each request enqueues a new compact command; no durable command receipt |
-| `POST /api/keyed/v1/agents/{agent_id}/compact-history` | keyed | [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md|guarded manual compact owner]]; no automatic retry |
-| `POST /api/cancel` | one-shot | each request enqueues cancel; a delayed retry can cancel later work |
 | `POST /api/agents/{agent_id}/terminate` | one-shot | termination is not bound to the observed incarnation |
 | `POST /api/agents/{agent_id}/resurrect` | one-shot | resurrection is not bound to the observed incarnation |
 | `POST /api/agents/resurrect-billing` | one-shot | billing resurrection has no durable operation receipt; preview alone is read-only |

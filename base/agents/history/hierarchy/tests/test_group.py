@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from langchain_core.exceptions import ModelAPIError
 from langchain_core.messages import AIMessage
 
 from base.agents.history.hierarchy.generate import GenerateError
@@ -218,7 +219,7 @@ def test_must_close_is_passed_to_the_prompt_and_the_check() -> None:
 
 
 def test_a_provider_error_is_recorded_and_raised() -> None:
-    llm = _Llm(RuntimeError("boom"))
+    llm = _Llm(ModelAPIError("boom"))
     calls: list[GroupCall] = []
     with pytest.raises(GenerateError):
         generate_groups(
@@ -231,6 +232,25 @@ def test_a_provider_error_is_recorded_and_raised() -> None:
             on_call=calls.append,
         )
     assert len(calls) == 1 and calls[0].response is None and "boom" in (calls[0].error or "")
+
+
+@pytest.mark.parametrize("error", [TypeError("bad code"), ValueError("bad input")])
+def test_unknown_group_invocation_error_is_recorded_once_and_preserved(error: Exception) -> None:
+    llm = _Llm(error)
+    calls: list[GroupCall] = []
+    with pytest.raises(type(error)) as raised:
+        generate_groups(
+            llm,
+            _nodes(5),
+            model="m",
+            corrections=2,
+            clock=Clock.from_settings(),
+            retry_attempts=2,
+            on_call=calls.append,
+        )
+    assert raised.value is error
+    assert len(llm.seen) == len(calls) == 1
+    assert calls[0].response is None and calls[0].error == str(error)
 
 
 def test_an_unclosed_group_tag_is_refused_not_merged() -> None:

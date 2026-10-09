@@ -6,6 +6,7 @@ No DB / LangGraph state needed — just construct messages and verify metadata s
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, exec_output_message, inbound_message, system_note_message
+from base.agents.messages.kwargs import ExecStatus
 
 
 class TestInboundMessageMetadata:
@@ -64,7 +65,13 @@ class TestMessageCreatedAtStamp:
         from agent.messages import exec_output_message
 
         dt = datetime(2026, 6, 19, 15, 30, tzinfo=UTC)
-        msg = exec_output_message(content="out", tool_call_id="t1", created_at=dt)
+        msg = exec_output_message(
+            content="out",
+            tool_call_id="t1",
+            created_at=dt,
+            status=ExecStatus.COMPLETED,
+            body_start=0,
+        )
         assert msg.additional_kwargs["ava_created_at"] == "2026-06-19T15:30:00+00:00"  # pyright: ignore[reportUnknownMemberType]
 
     def test_system_note_message_stamps_when_given(self):
@@ -182,7 +189,9 @@ class TestPickedUpAtStamp:
         from agent.messages import attach_message
 
         now = datetime.now(UTC)
-        prior = exec_output_message(content="o", tool_call_id="t", created_at=now)
+        prior = exec_output_message(
+            content="o", tool_call_id="t", created_at=now, status=ExecStatus.COMPLETED, body_start=0
+        )
         note = system_note_message(content="n", tag=NoteTag.MEMORY, created_at=now)
         attach = attach_message(blocks=[], text="a", created_at=now)
         inbound = inbound_message(
@@ -199,5 +208,11 @@ class TestPickedUpAtStamp:
     def test_exec_output_has_no_picked_up(self):
         from datetime import UTC, datetime
 
-        msg = exec_output_message(content="o", tool_call_id="t", created_at=datetime.now(UTC))
+        msg = exec_output_message(
+            content="o",
+            tool_call_id="t",
+            created_at=datetime.now(UTC),
+            status=ExecStatus.COMPLETED,
+            body_start=0,
+        )
         assert "ava_picked_up_at" not in msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]

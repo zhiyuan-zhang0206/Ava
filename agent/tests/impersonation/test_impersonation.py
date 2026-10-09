@@ -14,6 +14,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
@@ -23,6 +24,7 @@ from agent.graph.exec.protocol import read_request, write_request
 from agent.state import BaseAgentState
 from agent.tests._fakes import placeholder_runtime
 from base.agents.context import AvaContext
+from base.agents.incarnation.resources import ResourceProcess
 from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
 from base.db import Database
@@ -722,6 +724,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
+    exited_host: ResourceProcess,
 ) -> None:
     """Issue #2052: a lease released between hosted restart and the first
     native_status must not write the dead incarnation back into agents_meta.
@@ -755,9 +758,10 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     leases.accept(database, event_bus, lease["id"], agent_id, first, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], first)
     db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second' "
+        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second', "
+        "incarnation_resources=jsonb_set(incarnation_resources,'{host_process}',%s) "
         "WHERE id=%s",
-        (agent_id,),
+        (Jsonb(exited_host.model_dump(mode="json")), agent_id),
     )
     db_conn.commit()
     successor = await admit_hosted_runtime(

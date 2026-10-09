@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from langchain_core.exceptions import ModelAPIError, ModelInvalidRequestError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from base.agents.history.hierarchy.chunk_generate import (
@@ -16,6 +17,7 @@ from base.agents.history.hierarchy.chunk_generate import (
     build_chunk_instruction,
     generate_chunk,
 )
+from base.agents.history.hierarchy.chunks import ChunkCall
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.history.hierarchy.units import divide_units
@@ -35,14 +37,21 @@ def _inbound(text: str, at: str | None = "2026-10-05T03:04:05+00:00") -> HumanMe
     return HumanMessage(content=text, additional_kwargs=kwargs)
 
 
+_HEADER = "Code execution output after running for 1min 53s [2026-10-05 Mon 11:04:05]:\n\n"
+
+
 def _turn(code: str, n: int, result: str = "ok", **result_kwargs: Any) -> list[BaseMessage]:
     call = {"name": "execute_code", "args": {"code": code}, "id": f"tc{n}"}
     return [
         AIMessage(content="", tool_calls=[call]),
         ToolMessage(
-            content=f"Code execution output [2026-10-05 Mon 11:04:05]:\n\n{result}",
+            content=f"{_HEADER}{result}",
             tool_call_id=f"tc{n}",
-            additional_kwargs={"ava_msg_type": "exec_output", **result_kwargs},
+            additional_kwargs={
+                "ava_msg_type": "exec_output",
+                "ava_exec_body_start": len(_HEADER),
+                **result_kwargs,
+            },
         ),
     ]
 
@@ -61,9 +70,13 @@ def _think_turn(think: str, code: str, n: int, result: str = "ok", **kw: Any) ->
     return [
         AIMessage(content=[{"type": "thinking", "thinking": think}], tool_calls=[call]),
         ToolMessage(
-            content=f"Code execution output [x]:\n\n{result}",
+            content=f"{_HEADER}{result}",
             tool_call_id=f"tc{n}",
-            additional_kwargs={"ava_msg_type": "exec_output", **kw},
+            additional_kwargs={
+                "ava_msg_type": "exec_output",
+                "ava_exec_body_start": len(_HEADER),
+                **kw,
+            },
         ),
     ]
 
@@ -135,9 +148,9 @@ def test_the_turns_text_is_its_own_line_before_its_work_line() -> None:
         tool_calls=[call],
     )
     result = ToolMessage(
-        content="Code execution output [x]:\n\nfiles",
+        content=f"{_HEADER}files",
         tool_call_id="t",
-        additional_kwargs={"ava_msg_type": "exec_output"},
+        additional_kwargs={"ava_msg_type": "exec_output", "ava_exec_body_start": len(_HEADER)},
     )
     chunk: list[BaseMessage] = [turn, result]
     assert build_catalog(chunk, divide_units(chunk)).splitlines() == [
@@ -253,7 +266,9 @@ class _Recorder:
     """A chat model double: records the bound tools and the request it receives."""
 
     def __init__(self, replies: list[AIMessage]) -> None:
-        self.replies, self.requests, self.bound = replies, [], None
+        self.replies = replies
+        self.requests: list[list[Any]] = []
+        self.bound: list[Any] | None = None
 
     def bind_tools(self, tools: list[Any]) -> _Recorder:
         self.bound = tools
@@ -358,7 +373,7 @@ def test_a_provider_error_in_a_correction_fails_the_call_and_is_recorded() -> No
         def invoke(self, messages: list[Any]) -> AIMessage:
             if self.replies:
                 return super().invoke(messages)
-            raise ValueError("500")
+            raise ModelAPIError("500")
 
     seen: list[Any] = []
     with pytest.raises(GenerateError):
@@ -385,12 +400,28 @@ def test_every_provider_call_is_reported_including_the_failed_one() -> None:
 
     class Boom(_Recorder):
         def invoke(self, messages: list[Any]) -> AIMessage:
-            raise ValueError("400 bad request")
+            raise ModelInvalidRequestError("400 bad request")
 
     failed: list[Any] = []
     with pytest.raises(GenerateError):
         _gen(Boom([]), retry_attempts=0, on_call=failed.append)
     assert len(failed) == 1 and failed[0].response is None and "400" in failed[0].error
+
+
+@pytest.mark.parametrize("error", [TypeError("bad code"), ValueError("bad input")])
+def test_unknown_chunk_invocation_error_is_recorded_once_and_preserved(error: Exception) -> None:
+    class Broken(_Recorder):
+        def invoke(self, messages: list[Any]) -> AIMessage:
+            self.requests.append(list(messages))
+            raise error
+
+    llm = Broken([])
+    calls: list[ChunkCall] = []
+    with pytest.raises(type(error)) as raised:
+        _gen(llm, corrections=2, retry_attempts=2, on_call=calls.append)
+    assert raised.value is error
+    assert len(llm.requests) == len(calls) == 1
+    assert calls[0].response is None and calls[0].error == str(error)
 
 
 def test_a_chunk_is_numbered_from_its_own_first_unit() -> None:
