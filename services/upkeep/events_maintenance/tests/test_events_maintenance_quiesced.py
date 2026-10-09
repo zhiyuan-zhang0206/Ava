@@ -16,15 +16,18 @@ from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.daemon import events_maintenance_db
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 
-_Loop = Callable[[Any, LoopProgress, EventsMaintenanceConfig], Coroutine[Any, Any, None]]
+_Loop = Callable[..., Coroutine[Any, Any, None]]
 
 
-def _rollup(pool: Any, progress: LoopProgress, config: EventsMaintenanceConfig) -> Any:
+def _rollup(
+    pool: Any, progress: LoopProgress, config: EventsMaintenanceConfig, *, tasks: asyncio.TaskGroup
+) -> Any:
     return daemon._dispatch_loop(
         pool,
         progress,
         config,
         events_maintenance_db(),
+        tasks=tasks,
     )
 
 
@@ -51,7 +54,9 @@ async def test_a_quiesced_unit_runs_no_pass(
     entered = asyncio.Event()
     suspended = asyncio.Event()
 
-    async def held_pass(pool: Any, _progress: LoopProgress, run: Any) -> None:
+    async def held_pass(
+        pool: Any, _progress: LoopProgress, run: Any, *, tasks: asyncio.TaskGroup
+    ) -> None:
         run(pool)
         entered.set()
         await suspended.wait()
@@ -64,13 +69,15 @@ async def test_a_quiesced_unit_runs_no_pass(
     # racing a fixed delay against worker-thread completion.
     monkeypatch.setattr(daemon, "_maintenance_with_liveness", held_pass)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", short_sleep)
-    task = asyncio.create_task(
-        loop(object(), LoopProgress("t", timeout_s=5.0), events_maintenance_config())
-    )
-    try:
-        await asyncio.wait_for(entered.wait(), timeout=2.0)
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+    async with asyncio.TaskGroup() as tasks:
+        task = tasks.create_task(
+            loop(
+                object(), LoopProgress("t", timeout_s=5.0), events_maintenance_config(), tasks=tasks
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2.0)
+        finally:
+            task.cancel()
     assert task.cancelled(), "the loop must propagate cancellation"
     assert bool(passes) is (not quiesced)
