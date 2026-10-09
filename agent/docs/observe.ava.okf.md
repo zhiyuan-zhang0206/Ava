@@ -9,8 +9,9 @@ tags: []
 
 ## What it is
 `agent/llm/usage.py` preserves the main-conversation `log_llm_usage()` entry point
-and delegates accounting to `base/lm/usage.py`. The shared emitter records
-input tokens, cache hits, output tokens, reasoning tokens, usage-time price,
+and delegates accounting to `base/lm/usage.py`. The completed graph turn supplies
+its required `agent_id`; cost accounting does not infer an owner from ordinary logs.
+The shared emitter records input tokens, cache hits, output tokens, reasoning tokens, usage-time price,
 and `usage_kind` for every metered LLM path.
 
 ## Core Responsibilities
@@ -24,7 +25,7 @@ and `usage_kind` for every metered LLM path.
 - [[gateway-cli.ava.okf.md]] — gateway stats dashboard consumes model info in logs for cost accounting
 
 ## Entry Points
-- `agent/llm/usage.py:log_llm_usage(msg, model)` — called after each LLM invocation
+- `agent/llm/usage.py:log_llm_usage(msg, model, agent_id=...)` — called after each LLM invocation
 
 ## Notes
 - Log format uses `[bracket]` prefix convention for easy grep
