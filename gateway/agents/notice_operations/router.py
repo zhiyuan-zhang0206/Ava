@@ -3,7 +3,7 @@
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request
 
 from gateway.agents.notice_operations.current import (
     GuardedNoticeEdit,
@@ -11,11 +11,29 @@ from gateway.agents.notice_operations.current import (
     mutate,
     operation_key,
 )
-from gateway.agents.notices import _publish_response_required_hint
-from gateway.agents.schemas import NoticeItem
+from gateway.agents.notices import _publish_response_required_hint, post_notice_resolve
+from gateway.agents.schemas import AgentMessageEnqueued, NoticeItem, ResolveNoticeIn
 from ops import lifecycle
 
 router = APIRouter()
+
+
+@router.post(
+    "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve",
+    status_code=201,
+    dependencies=[Depends(operation_key)],
+)
+async def resolve_observed(
+    agent_id: int,
+    notice_id: int,
+    body: ResolveNoticeIn,
+    request: Request,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
+) -> AgentMessageEnqueued:
+    """Resolve the explicit global row using verified transactional recovery."""
+    # Admission validates principal scope; the existing owner scopes the raw
+    # key against this concrete path and commits the resolution plus receipt.
+    return await post_notice_resolve(agent_id, notice_id, body, request, idempotency_key)
 
 
 @router.patch("/api/agents/{agent_id}/notices/current/guarded-v1")

@@ -15,7 +15,7 @@ import type { OpenNotice } from "@/lib/contracts/types";
 // vi.hoisted so the fn exists before the hoisted vi.mock factory runs.
 const { resolveNotice } = vi.hoisted(() => ({
   resolveNotice:
-    vi.fn<(agentId: number, noticeId: number, body: unknown) => Promise<{ status: string }>>(),
+    vi.fn<(agentId: number, noticeId: number, body: unknown, key?: string) => Promise<{ status: string }>>(),
 }));
 vi.mock("@/lib/transport/api", () => ({ api: { resolveNotice } }));
 
@@ -82,7 +82,7 @@ describe("OpenNoticeDetail — require_response", () => {
     fireEvent.click(screen.getByLabelText("Send answer"));
 
     await waitFor(() =>
-      expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", reply: "ship it" }),
+      expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", reply: "ship it" }, expect.any(String)),
     );
     await waitFor(() => expect(onResolved).toHaveBeenCalled());
   });
@@ -103,7 +103,7 @@ describe("OpenNoticeDetail — require_response", () => {
     fireEvent.click(screen.getByText("Dismiss"));
 
     await waitFor(() =>
-      expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "dismiss" }),
+      expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "dismiss" }, expect.any(String)),
     );
     await waitFor(() => expect(onResolved).toHaveBeenCalled());
   });
@@ -122,6 +122,46 @@ describe("OpenNoticeDetail — require_response", () => {
 });
 
 describe("OpenNoticeDetail — FYI", () => {
+  it("reuses the original read-reply key on a manual retry after response loss", async () => {
+    resolveNotice.mockRejectedValueOnce(new TypeError("response lost"))
+      .mockResolvedValueOnce({ status: "idling" });
+    const onResolved = vi.fn();
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} onResolved={onResolved} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "noted" } });
+    fireEvent.click(screen.getByText("Mark read"));
+    await waitFor(() => expect(screen.getByText(/response lost/)).toBeTruthy());
+    expect(resolveNotice).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText("Mark read"));
+    await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
+    expect(resolveNotice.mock.calls[1]).toEqual(resolveNotice.mock.calls[0]);
+    expect(resolveNotice.mock.calls[0][3]).toEqual(expect.any(String));
+  });
+
+  it("allocates a new key when the reply changes after a failed submission", async () => {
+    resolveNotice.mockRejectedValueOnce(new TypeError("response lost"))
+      .mockResolvedValueOnce({ status: "idling" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "first" } });
+    fireEvent.click(screen.getByText("Mark read"));
+    await waitFor(() => expect(screen.getByText(/response lost/)).toBeTruthy());
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "second" } });
+    fireEvent.click(screen.getByText("Mark read"));
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledTimes(2));
+    expect(resolveNotice.mock.calls[1][3]).not.toBe(resolveNotice.mock.calls[0][3]);
+    expect(resolveNotice.mock.calls[1][2]).toEqual({ action: "read", reply: "second" });
+  });
+
+  it("sends one request while repeated Enter events arrive during a pending reply", () => {
+    resolveNotice.mockImplementation(() => new Promise(() => {
+      // Keep the request unresolved while repeated keyboard events arrive.
+    }));
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "noted" } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    expect(resolveNotice).toHaveBeenCalledTimes(1);
+  });
+
   it("mark read: sends action=read with no reply when empty, and shows no Send button", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     const onResolved = vi.fn();
@@ -137,7 +177,7 @@ describe("OpenNoticeDetail — FYI", () => {
     expect(screen.getByText("FYI")).toBeTruthy();
     fireEvent.click(screen.getByText("Mark read"));
 
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read" }));
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read" }, expect.any(String)));
     await waitFor(() => expect(onResolved).toHaveBeenCalled());
   });
 
@@ -157,7 +197,7 @@ describe("OpenNoticeDetail — FYI", () => {
 
     fireEvent.click(screen.getByText("Mark read"));
 
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read" }));
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read" }, expect.any(String)));
     await waitFor(() => expect(onResolved).toHaveBeenCalled());
     expect(screen.queryByText("This notice was already read.")).toBeNull();
     expect(screen.queryByText(/failed/i)).toBeNull();
@@ -171,7 +211,7 @@ describe("OpenNoticeDetail — FYI", () => {
     fireEvent.click(screen.getByText("Mark read"));
 
     await waitFor(() =>
-      expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read", reply: "noted" }),
+      expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read", reply: "noted" }, expect.any(String)),
     );
   });
 });
