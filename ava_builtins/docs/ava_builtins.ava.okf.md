@@ -16,5 +16,5 @@ extension mechanisms.
 - [[ava_builtins/mcps/docs/mcps.ava.okf.md]] — bundled MCP integrations.
 
 Shared package wiring is described by [[ava_builtins/docs/extensions.ava.okf.md]].
-Mechanism contracts live in [[okf/plugins/plugins.ava.okf.md]],
-[[okf/skills/skills.ava.okf.md]] and [[okf/mcps/mcps.ava.okf.md]].
+Mechanism contracts live in [[docs/plugins/plugins.ava.okf.md]],
+[[docs/skills/skills.ava.okf.md]] and [[docs/mcps/mcps.ava.okf.md]].

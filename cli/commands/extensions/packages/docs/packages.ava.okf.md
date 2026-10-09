@@ -62,10 +62,10 @@ It answers two questions nothing else could: *what can a plugin extend* (for an
 agent writing one, which otherwise means reading framework source) and *what is
 this machine's agent actually composed of*. Both halves read the plugins' declarations
 (`PluginContributions.as_records`, `base/packages/plugins/extensions.py`), so nothing
-here is transcribed. [[okf/plugins/plugins.ava.okf.md|Detail]].
+here is copied. [[docs/plugins/plugins.ava.okf.md|Detail]].
 Building the catalog means importing the plugins, so it can only report what was
 DECLARED; how often each row actually FIRED is a `note` line pointing at the
-`plugin_activation` events [[okf/plugins/activation-telemetry.ava.okf.md]].
+`plugin_activation` events [[docs/plugins/activation-telemetry.ava.okf.md]].
 
 Reading registrations means loading the plugins, which means importing them — so
 a **disabled** plugin is listed with its enable-state and nothing else, rather
@@ -149,5 +149,5 @@ vendor's README works as-is.
 ## Key Dependencies
 
 - [[install_registry.ava.okf.md]] — the registry these verbs write, and the scanner gate
-- [[okf/mcps/mcps.ava.okf.md|MCP integration]] — the MCP domain node
-- [[okf/plugins/plugins]] — the plugin system
+- [[docs/mcps/mcps.ava.okf.md|MCP integration]] — the MCP domain node
+- [[docs/plugins/plugins]] — the plugin system
