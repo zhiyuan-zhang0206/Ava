@@ -51,7 +51,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 
 | Piece | What exists | Where |
 |---|---|---|
-| Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/extensions/skills_sync.py`, `okf/skills/load-directory-sync.ava.okf.md` |
+| Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/extensions/skills_sync.py`, `docs/skills/load-directory-sync.ava.okf.md` |
 | Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit detection), `enabled`, schema `version` field as a migration anchor | `base/packages/extensions/install_registry.py` |
 | Explicit update verbs | `ava skill update [name...]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name>`, `ava mcp upgrade` — a differing local copy is replaced (reported), with staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
 | Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `cli/commands/extensions/skills_sync.py`, `plugins.py`, `base/packages/plugins/enable_config.py` |
@@ -324,7 +324,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Registry schema v2: `UpdateState` / `ChannelState` fields, lazy migration (retired, batch b5 2026-09-20: a v1 file is refused), defaults resolution from settings (`base/config/domains/packages.py`: per-class default mode/interval, base tick, master switch).
 - `ava packages status` (read-only) + `--json` — including the host version and each package's declared range (§5.5).
 - Version plumbing: optional manifest support for skill packages; the core-content CI check (declared ranges must include the repo's current version); the derived host-version policy recorded in [`docs/conventions/engineering/host-versioning.md`](../../../docs/conventions/engineering/host-versioning.md) (no bump discipline; `[project].version` remains only as the wheel-mode fallback).
-- Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/extensions/packages/docs/packages.ava.okf.md`, and the `ava-guide.modification-layers` / `ava-guide.plugins.develop` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
+- Docs: the ruling entry + this elaboration (landed together); update `docs/skills/load-directory-sync.ava.okf.md`, `cli/commands/extensions/packages/docs/packages.ava.okf.md`, and the `ava-guide.modification-layers` / `ava-guide.plugins.develop` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
 - Acceptance at landing: v1 file loads, migrates on next write, defaults visible in status; no behavior change elsewhere (test lock: registry round-trip + migration) — the v1 leg later retired, batch b5 2026-09-20: v1 files are refused.
 
 ### P1 — skills fast lane (the POC; the deliverable the user can feel) — **landed: PR #2368**
@@ -395,7 +395,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 
 ## Appendix A — current-state evidence (for reviewers)
 
-- Load dir sync + R5 bootstrap-only: `cli/commands/extensions/skills_sync.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
+- Load dir sync + R5 bootstrap-only: `cli/commands/extensions/skills_sync.py` docstring; `docs/skills/load-directory-sync.ava.okf.md`.
 - Explicit update verbs (they replace and report a differing copy): `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
 - Builtin skill sync (bootstrap-only, missing copies): `cli/commands/converge/host.py:_converge_skills_step` -> `cli/commands/extensions/skills_sync.py:converge_skills` (superseded the pre-unified-lifecycle updater's `_update_local`/`_update_agent_runner` rollout legs).
 - Registry model: `base/packages/extensions/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
@@ -407,7 +407,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Four-layer model / builtin-plugin ruling: `docs/decisions/extensions/skills/2026-08-19-four-layer-modification-model.md` (revised in part: builtin plugins stay *authored* in the kernel but are *delivered* via the content channel).
 - Historical incident class: skill edit merged to main, runtime stale for two days (2026-08-27). R5 background: task #1013.
 - Plugin load-context incidents (2026-08-28: a relative import crashed under a top-level exec; 2026-09-10: a hand-placed plugin stopped agent starts). The pause they triggered was lifted 2026-09-11 10:06; the standing red line: never hand-place code into a production load path.
-- Loader unification (the current contract): `okf/plugins/module-loading/module-loading.ava.okf.md` + `okf/plugins/module-loading/fail-closed-boundaries.ava.okf.md`; task #2985 (done 2026-09-11; PRs #2201, #2206) — one contract for boot + graph build, `plugins.<name>` namespace chain for external plugins, fail-soft containment on every load site.
+- Loader unification (the current contract): `docs/plugins/module-loading/module-loading.ava.okf.md` + `docs/plugins/module-loading/fail-closed-boundaries.ava.okf.md`; task #2985 (done 2026-09-11; PRs #2201, #2206) — one contract for boot + graph build, `plugins.<name>` namespace chain for external plugins, fail-soft containment on every load site.
 - Host version evidence: `pyproject.toml` `[project].version = 0.1.5`, set at the initial public release and never changed since (deploys pin commits; nothing reads it in the deploy path). Release machinery (dated tags `vX.Y.Z-YYYYMMDD[-HHMM]`, daily/weekly cut) was dormant at the time and is now deleted ([decision](../../../docs/decisions/runtime/updates/release/2026-10-03-delete-dated-release-tag-cadence.md)); no setting or update path selects a dated tag — last dated tag 2026-08-08; origin carries no dated tags; recent releases were manual milestones (v0.2…v0.7).
 
 ## Appendix B — worked example (the P1 acceptance narrative)

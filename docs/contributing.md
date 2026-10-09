@@ -7,7 +7,7 @@ discuss unresolved design, contract or dependency choices with the user. Follow
 
 ## Find the owner
 
-Read the relevant component's local `docs/` and the [OKF index](../okf/index.ava.okf.md).
+Read the relevant component's local `docs/` and the [OKF index](index.ava.okf.md).
 Use `scripts/audit/where_used.py` before changing a symbol or contract so the
 change includes real consumers, tests, patch targets and current documentation.
 Cross-cutting rules live in [conventions](conventions/README.md); historical
