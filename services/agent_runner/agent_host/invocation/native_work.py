@@ -1,6 +1,7 @@
 """Original native work settlement and cold cancel recovery; no graph replay."""
 
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
@@ -9,7 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 from pydantic import ValidationError
 
-from agent.impersonation import flush_checkpoint
+from agent.impersonation import flush_checkpoint, settle_checkpoint
 from agent.ownership.native_cancel import halt_for_native_cancel
 from agent.state import BaseAgentState
 from base.agents.context import AvaContext
@@ -23,10 +24,14 @@ from base.agents.incarnation.native_work_models import (
     NativeWorkUncertainError,
 )
 from base.agents.messages.native_cancel import finish_native_cancel, require_cancel_receiver
+from base.agents.observation.relay_supervision import RelaySupervision
+from base.db import Database
 from base.db.transaction import async_write_transaction
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import hosted_resources_settled
+from base.native_process.turn_identity import HostedTurnResources, hosted_resources_settled
+from services.agent_runner.agent_host.db_recovery import database_phase
 
 _Graph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 
@@ -150,6 +155,8 @@ async def settle_native_invocation(
     incarnation: RuntimeIncarnation,
     target: NativeWorkTarget | None,
     config: RunnableConfig,
+    *,
+    resources: HostedTurnResources | None,
 ) -> bool:
     """Settle only the original returned/unwound work before claiming another."""
     if target is None:
@@ -160,7 +167,7 @@ async def settle_native_invocation(
     marker, outcome = command
     if outcome in (NativeCancelOutcome.APPLIED, NativeCancelOutcome.RECOVERED_STOPPED):
         return True
-    if not hosted_resources_settled():
+    if not hosted_resources_settled(resources):
         raise NativeWorkUncertainError("native continuation has unresolved owned resources")
     checkpoint_id = await cold_cancel_checkpoint(saver, marker)
     if checkpoint_id is None:
@@ -177,7 +184,7 @@ async def settle_native_invocation(
         )
         await flush_checkpoint(saver, target.agent_id)
         checkpoint_id = await cold_cancel_checkpoint(saver, marker)
-    if checkpoint_id is None or not hosted_resources_settled():
+    if checkpoint_id is None or not hosted_resources_settled(resources):
         raise NativeWorkUncertainError("native halt checkpoint has not durably settled")
     async with async_write_transaction(pool) as conn:
         await finish_native_cancel(
@@ -259,8 +266,8 @@ async def _pause_certified_successor(
     return tuple_.checkpoint["id"]
 
 
-def _require_settled_continuation() -> None:
-    if not hosted_resources_settled():
+def _require_settled_continuation(*, resources: HostedTurnResources | None) -> None:
+    if not hosted_resources_settled(resources):
         raise NativeWorkUncertainError(
             "native recovery continuation has unresolved owned resources"
         )
@@ -271,6 +278,8 @@ async def recover_native_cancel(
     saver: AsyncPostgresSaver,
     graph: _Graph,
     incarnation: RuntimeIncarnation,
+    *,
+    resources: HostedTurnResources | None,
 ) -> bool:
     """Before startup writes: ACK exact marker or certify only predecessor stop."""
     async with pool.connection() as conn:
@@ -296,7 +305,7 @@ async def recover_native_cancel(
         return False
 
     try:
-        _require_settled_continuation()
+        _require_settled_continuation(resources=resources)
         checkpoint_id = await cold_cancel_checkpoint(saver, marker)
         outcome = (
             NativeCancelOutcome.APPLIED
@@ -308,7 +317,7 @@ async def recover_native_cancel(
             if checkpoint_id is None
             else None
         )
-        _require_settled_continuation()
+        _require_settled_continuation(resources=resources)
         async with async_write_transaction(pool) as conn:
             await finish_native_cancel(
                 conn,
@@ -349,11 +358,15 @@ async def halt_before_reinvoke(
     incarnation: RuntimeIncarnation,
     target: NativeWorkTarget | None,
     config: RunnableConfig,
+    *,
+    resources: HostedTurnResources | None,
 ) -> dict[str, object] | None:
     """Recovery resumes the original accepted halt and its lifecycle flags."""
     if target is None or await command_for_work(pool, target) is None:
         return None
-    await settle_native_invocation(pool, saver, graph, incarnation, target, config)
+    await settle_native_invocation(
+        pool, saver, graph, incarnation, target, config, resources=resources
+    )
     reader = AsyncPostgresSaver(saver.conn, serde=saver.serde)
     tuple_ = await reader.aget_tuple({"configurable": {"thread_id": str(target.agent_id)}})
     if tuple_ is None:
@@ -374,3 +387,55 @@ async def hold_native_cancel(pool: AsyncConnectionPool, target: NativeWorkTarget
         command = await command_for_work(pool, target)
         if command is not None:
             await _mark_uncertain(pool, command[0])
+
+
+async def invoke_prepared_graph[T](
+    control_pool: AsyncConnectionPool,
+    checkpointer: AsyncPostgresSaver,
+    graph: _Graph,
+    agent_id: int,
+    ctx: AvaContext,
+    config: RunnableConfig,
+    work: NativeWorkContinuation,
+    *,
+    db: Database,
+    bus: EventBus,
+    relays: RelaySupervision,
+    invoke: Callable[[AvaContext, dict[str, object]], Awaitable[T]],
+) -> dict[str, object] | T:
+    """Execute the prepared original work within its retained resource scope."""
+    incarnation = ctx.require_original_incarnation(agent_id)
+    async with database_phase():
+        halted = await halt_before_reinvoke(
+            control_pool,
+            checkpointer,
+            graph,
+            incarnation,
+            work.target,
+            config,
+            resources=ctx.hosted_resources,
+        )
+        if halted is not None:
+            return halted
+        await settle_checkpoint(
+            graph,
+            db,
+            bus,
+            agent_id,
+            relays,
+            activate_accepted=False,
+            incarnation=ctx.original_incarnation,
+            resources=ctx.hosted_resources,
+        )
+        await prepare_native_invocation(control_pool, work, incarnation)
+    return await invoke(
+        replace(ctx, native_work=work.target),
+        {
+            "turn_active": False,
+            "exit_requested": False,
+            "turn_idle": False,
+            "restart_requested": False,
+            "native_work": work.target,
+            "native_cancel": None,
+        },
+    )

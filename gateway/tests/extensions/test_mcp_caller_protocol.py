@@ -10,7 +10,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.graph.claim._chat_inbound import build_chat_inbound
 from base.config import settings
-from base.native_process.turn_identity import bind_turn_identity
 from gateway.app import app
 from gateway.tests.extensions.test_mcp_endpoint import _ACCEPT, _initialize, _tool_call
 from tests.components.gateway.test_caller_protocol_path import (
@@ -49,8 +48,9 @@ async def test_token_derived_mcp_source_reaches_real_claim(
             },
         )
         assert not _failed(result), result
-    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
-        claimed = await claim_inbound_batch(aops_pool, incarnation.agent_id)
+    claimed = await claim_inbound_batch(
+        aops_pool, incarnation.agent_id, incarnation=incarnation, work=None
+    )
     assert len(claimed) == 1
     assert claimed[0].source == f"external_agent:mcp:{credential['id']}"
     assert claimed[0].payload == {

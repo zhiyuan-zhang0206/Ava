@@ -11,7 +11,6 @@ from psycopg_pool import AsyncConnectionPool, PoolClosed
 from agent.impersonation import flush_checkpoint
 from base.config import settings
 from base.log import logger
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host.daemon import _build_checkpointer
 
 
@@ -61,11 +60,7 @@ async def test_shared_saver_reports_each_failed_write_owner_without_swallowing(
                 assert "configurable" in config
                 await flush_checkpoint(saver, int(config["configurable"]["thread_id"]))
 
-        # A misleading enclosing turn must not replace either write's owner.
-        with bind_turn_identity(999):
-            errors = await asyncio.gather(
-                *(fail(config) for config in configs), return_exceptions=True
-            )
+        errors = await asyncio.gather(*(fail(config) for config in configs), return_exceptions=True)
         assert len(errors) == 2 and all(isinstance(error, PoolClosed) for error in errors)
         assert sorted(record["agent_id"] for record in records) == [101, 202]
         assert {record["method"] for record in records} == {

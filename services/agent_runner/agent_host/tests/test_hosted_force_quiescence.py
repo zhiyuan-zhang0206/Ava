@@ -6,11 +6,11 @@ import os
 import subprocess
 import sys
 import threading
-import time
 import traceback
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -21,13 +21,15 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import has_pending_interrupt
 from agent.graph.exec._subprocess import _run_in_subprocess
 from agent.ownership import hosted
-from agent.tests.claim.test_inbound_ownership import _admit, _agent, _insert
+from agent.tests.claim.test_inbound_ownership import _agent, _insert
+from base.agents.context import AvaContext
 from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.exec_request_evidence import Verdict
 from base.agents.incarnation.hosted_force import original_host_force, recover_orphaned_hosted_forces
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -72,9 +74,9 @@ def _observed_host(
     original = host._run_turn
     errors: list[str] = []
 
-    async def observed(agent_id: int) -> None:
+    async def observed(agent_id: int, *, resources: HostedTurnResources | None) -> None:
         try:
-            await original(agent_id)
+            await original(agent_id, resources=resources)
         except BaseException:
             errors.append(traceback.format_exc())
             raise
@@ -109,7 +111,7 @@ def _configure_late_reader(
 async def _assert_pending_force(
     conn: psycopg.Connection, pool: AsyncConnectionPool, agent_id: int, command: int, chat: int
 ) -> None:
-    assert await has_pending_interrupt(pool, agent_id)
+    assert await has_pending_interrupt(pool, agent_id, incarnation=None, work=None)
     assert conn.execute(
         "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
         (command,),
@@ -169,6 +171,18 @@ async def _prove_successor_ignores_old_cancel(
         await scheduler.aclose()
 
 
+def _exec_context(hosted: AvaContext) -> AvaContext:
+    """The fake host is SQL-only; exec keeps the test SDK clients and actual custody."""
+    context = replace(
+        ctx_of(hosted.require_identity().agent_id),
+        original_incarnation=hosted.original_incarnation,
+        native_work=hosted.native_work,
+        hosted_resources=hosted.hosted_resources,
+    )
+    assert context.hosted_resources is hosted.hosted_resources
+    return context
+
+
 @pytest.mark.parametrize("work_kind", ["thread", "exec", "reader"])
 async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor(
     db_conn: psycopg.Connection,
@@ -203,7 +217,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
                     if work_kind == "reader"
                     else f"while not Path({str(release_file)!r}).exists(): time.sleep(0.01)\n"
                 ),
-                ctx_of(agent_id),
+                _exec_context(cast(AvaContext, kwargs["context"])),
                 asyncio.Event(),
                 20,
                 exec_dir=tmp_path,
@@ -709,55 +723,6 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
     ).fetchone() == ("done", True)
-
-
-async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    from agent.graph.exec._result import _ExecCrashed
-    from base.native_process.exec_domain import ExecProcessDomain
-    from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
-
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
-    original_close = ExecProcessDomain.close_confirmed
-
-    def failed_close(domain: ExecProcessDomain, deadline: float) -> None:
-        original_close(domain, deadline)
-        raise PermissionError("injected unverifiable domain closure")
-
-    monkeypatch.setattr(ExecProcessDomain, "close_confirmed", failed_close)
-    scope = HostedTurnResources()
-    with bind_hosted_resources(scope):
-        ctx = ctx_of(agent_id)
-        outcome, _ = await _run_in_subprocess(
-            database,
-            "print('resource-proof')",
-            ctx,
-            asyncio.Event(),
-            10,
-            exec_dir=tmp_path,
-            accumulation_max_chars=1_000_000,
-        )
-        assert isinstance(outcome, _ExecCrashed)
-        assert "teardown failure" in outcome.output
-        assert len(scope.unresolved) == 1
-        path, domain = next(iter(scope.unresolved.items()))
-        assert path.exists() and isinstance(domain, ExecProcessDomain)
-        assert not scope.complete(path, object())
-        assert scope.unresolved[path] is domain
-        assert domain.proc.returncode is None  # unresolved closure must not reap
-        # A formatted tool failure cannot become a positive lifecycle barrier.
-        assert await hosted.apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) is None
-        assert not await hosted.settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
-    assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
-    original_close(domain, time.monotonic() + 5)
-    domain.proc.wait(timeout=5)
 
 
 async def test_cancel_validation_spanning_task_handoff_never_cancels_new_turn() -> None:

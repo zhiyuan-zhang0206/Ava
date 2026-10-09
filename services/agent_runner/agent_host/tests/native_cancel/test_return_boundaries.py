@@ -1,6 +1,7 @@
 """Native cancellation settles the original returned failure/lifecycle work."""
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -25,7 +26,7 @@ from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
@@ -62,29 +63,36 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
 
     graph, _saver, host, ctx = await _blocked_host(aops_pool, model)
     faults = _install_faults(monkeypatch, initial.agent_id, "after_ack")
-    with bind_turn_identity(initial.agent_id, incarnation=incarnation):
-        running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
-        try:
-            await asyncio.wait_for(entered.wait(), 5)
-            command = None
-            if ending != "provider_failure":
-                command = _command(db_conn, initial.agent_id, ending)
-                async with async_write_transaction(aops_pool) as conn:
-                    assert await accept_lifecycle_intent(conn, initial.agent_id) is not None
-            with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-                target = await asyncio.to_thread(observe_native_work, pool, initial.agent_id)
-                assert target is not None
-                accepted = await asyncio.to_thread(
-                    accept_native_cancel, pool, "return-boundary", initial.agent_id, target
+    running = asyncio.create_task(
+        host._invoke_until_done(
+            initial.agent_id,
+            replace(ctx, original_incarnation=incarnation, hosted_resources=HostedTurnResources()),
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        command = None
+        if ending != "provider_failure":
+            command = _command(db_conn, initial.agent_id, ending)
+            async with async_write_transaction(aops_pool) as conn:
+                assert (
+                    await accept_lifecycle_intent(conn, initial.agent_id, incarnation=incarnation)
+                    is not None
                 )
-            queued = _insert(db_conn, initial.agent_id)
-            release.set()
-            outcome = await asyncio.wait_for(running, 10)
-        finally:
-            release.set()
-            if not running.done():
-                running.cancel()
-            await asyncio.gather(running, return_exceptions=True)
+        with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
+            target = await asyncio.to_thread(observe_native_work, pool, initial.agent_id)
+            assert target is not None
+            accepted = await asyncio.to_thread(
+                accept_native_cancel, pool, "return-boundary", initial.agent_id, target
+            )
+        queued = _insert(db_conn, initial.agent_id)
+        release.set()
+        outcome = await asyncio.wait_for(running, 10)
+    finally:
+        release.set()
+        if not running.done():
+            running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
     assert faults.injected and faults.invocations == 1
     assert not outcome.native_held and outcome.exited == (ending == "terminate")
     assert db_conn.execute(

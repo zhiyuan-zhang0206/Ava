@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -24,7 +25,7 @@ from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
@@ -72,6 +73,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     hops: int,
+    database: Database,
 ) -> None:
     pool: ConnectionPool
     agent = _agent(db_conn)
@@ -126,7 +128,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
                     agent,
                     "claim-test",
                     uuid4(),
-                    db=Database.from_settings(),
+                    db=database,
                     expected_from="running",
                 )
         assert (
@@ -146,7 +148,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
             agent,
             "claim-test",
             uuid4(),
-            db=Database.from_settings(),
+            db=database,
             expected_from="running",
         )
         assert incarnation is not None
@@ -156,7 +158,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
         _assert_exit_chain(proof, target, hops)
         replies: list[str] = []
         graph, saver, config, _history = await _prepare_graph(aops_pool, agent, 1, replies)
-        assert await recover_native_cancel(aops_pool, saver, graph, incarnation)
+        assert await recover_native_cancel(aops_pool, saver, graph, incarnation, resources=None)
         assert db_conn.execute(
             "SELECT outcome,checkpoint_id FROM native_cancel_commands WHERE work_id=%s",
             (target.work_id,),
@@ -183,7 +185,8 @@ async def test_real_child_exit_certificate_and_commit_rollback(
 
 
 async def test_actual_force_observation_then_admission_recovered_stop(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
 ) -> None:
     target, successor, force = await _force_successor(db_conn, aops_pool)
     proof = db_conn.execute(
@@ -193,7 +196,7 @@ async def test_actual_force_observation_then_admission_recovered_stop(
     assert proof[0][0]["proof"]["lifecycle_command_id"] == force
     replies: list[str] = []
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, replies)
-    assert await recover_native_cancel(aops_pool, saver, graph, successor)
+    assert await recover_native_cancel(aops_pool, saver, graph, successor, resources=None)
     assert db_conn.execute(
         "SELECT outcome FROM native_cancel_commands WHERE work_id=%s", (target.work_id,)
     ).fetchone() == ("recovered_stopped",)
@@ -248,34 +251,38 @@ async def _assert_successor_turns(
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
     )
-    with bind_turn_identity(target.agent_id, incarnation=successor):
-        outcome = await host._invoke_until_done(target.agent_id, ctx)
-        assert not outcome.native_held and not outcome.crashed
-        assert replies == expected_first
-        new_work = db_conn.execute(
-            "SELECT native_work_id FROM agents_meta WHERE id=%s", (target.agent_id,)
+    outcome = await host._invoke_until_done(
+        target.agent_id,
+        replace(ctx, original_incarnation=successor, hosted_resources=HostedTurnResources()),
+    )
+    assert not outcome.native_held and not outcome.crashed
+    assert replies == expected_first
+    new_work = db_conn.execute(
+        "SELECT native_work_id FROM agents_meta WHERE id=%s", (target.agent_id,)
+    ).fetchone()
+    assert new_work is not None and new_work[0] != target.work_id
+    _insert(db_conn, target.agent_id)
+    outcome = await host._invoke_until_done(
+        target.agent_id,
+        replace(ctx, original_incarnation=successor, hosted_resources=HostedTurnResources()),
+    )
+    assert not outcome.native_held and not outcome.crashed
+    assert replies == [*expected_first, "continued"]
+    # Terminal replay does not project the old work over a newer checkpoint.
+    latest = await graph.aget_state(config)
+    assert await recover_native_cancel(aops_pool, saver, graph, successor, resources=None)
+    assert (await graph.aget_state(config)).config == latest.config
+    assert (
+        db_conn.execute(
+            "SELECT checkpoint_id,recovery_checkpoint_id FROM native_cancel_commands WHERE work_id=%s",
+            (target.work_id,),
         ).fetchone()
-        assert new_work is not None and new_work[0] != target.work_id
-        _insert(db_conn, target.agent_id)
-        outcome = await host._invoke_until_done(target.agent_id, ctx)
-        assert not outcome.native_held and not outcome.crashed
-        assert replies == [*expected_first, "continued"]
-        # Terminal replay does not project the old work over a newer checkpoint.
-        latest = await graph.aget_state(config)
-        assert await recover_native_cancel(aops_pool, saver, graph, successor)
-        assert (await graph.aget_state(config)).config == latest.config
-        assert (
-            db_conn.execute(
-                "SELECT checkpoint_id,recovery_checkpoint_id FROM native_cancel_commands WHERE work_id=%s",
-                (target.work_id,),
-            ).fetchone()
-            == receipt
-        )
+        == receipt
+    )
 
 
 async def _force_successor(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> tuple[NativeWorkTarget, Any, int]:
     pool: ConnectionPool
     original, target = await managed_work(db_conn, aops_pool)

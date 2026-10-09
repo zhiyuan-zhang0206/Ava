@@ -7,6 +7,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.db import has_pending_interrupt
+from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -30,11 +31,17 @@ class RecoveryInterrupt:
     """
 
     def __init__(
-        self, pool: AsyncConnectionPool, incarnation: RuntimeIncarnation, peek_lock: asyncio.Lock
+        self,
+        pool: AsyncConnectionPool,
+        incarnation: RuntimeIncarnation,
+        peek_lock: asyncio.Lock,
+        *,
+        work: NativeWorkTarget | None,
     ) -> None:
         """`peek_lock` is the host's one lock for `pool`, shared by every observer of it."""
         self._pool = pool
         self._incarnation = incarnation
+        self._work = work
         self._observed = False
         self._peek_lock = peek_lock
 
@@ -55,7 +62,10 @@ class RecoveryInterrupt:
                         asyncio.timeout(min(_QUERY_TIMEOUT_SECONDS, remaining)),
                     ):
                         pending = await has_pending_interrupt(
-                            self._pool, self._incarnation.agent_id
+                            self._pool,
+                            self._incarnation.agent_id,
+                            incarnation=self._incarnation,
+                            work=self._work,
                         )
                 except (psycopg.OperationalError, PoolTimeout, TimeoutError):
                     # This optional read cannot prevent the next repair attempt.

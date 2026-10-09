@@ -18,7 +18,6 @@ from base.agents.incarnation.native_work_models import (
 )
 from base.agents.messages.native_cancel import accept_native_cancel, finish_native_cancel
 from base.db.transaction import async_write_transaction
-from base.native_process.turn_identity import bind_native_work, bind_turn_identity
 from services.agent_runner.agent_host.invocation.native_work import (
     cold_cancel_checkpoint,
     recover_native_cancel,
@@ -43,11 +42,9 @@ async def test_checkpoint_flush_ack_and_retained_terminal_receipt(
             accept_native_cancel, pool, "checkpoint-original", target.agent_id, target
         )
     marker = NativeCancelMarker(command_id=accepted.command_id, target=target)
-    with (
-        bind_turn_identity(target.agent_id, incarnation=incarnation),
-        bind_native_work(target.work_id),
-    ):
-        assert await settle_native_invocation(aops_pool, saver, graph, incarnation, target, config)
+    assert await settle_native_invocation(
+        aops_pool, saver, graph, incarnation, target, config, resources=None
+    )
     cold = _cold_reader(aops_pool)
     cold.serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
     checkpoint_id = await cold_cancel_checkpoint(cold, marker)
@@ -122,7 +119,7 @@ async def test_cold_original_without_marker_or_transfer_is_uncertain(
         await asyncio.to_thread(
             accept_native_cancel, pool, "no-stop-proof", target.agent_id, target
         )
-    assert not await recover_native_cancel(aops_pool, saver, graph, incarnation)
+    assert not await recover_native_cancel(aops_pool, saver, graph, incarnation, resources=None)
     unchanged = await graph.aget_state(config)
     assert unchanged.config == original.config
     assert unchanged.values["halted"] is False
@@ -139,16 +136,14 @@ async def test_no_protected_command_never_adds_cold_startup_hold(
 ) -> None:
     incarnation, target = await managed_work(db_conn, aops_pool)
     graph, saver, _config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
-    assert await recover_native_cancel(aops_pool, saver, graph, incarnation)
+    assert await recover_native_cancel(aops_pool, saver, graph, incarnation, resources=None)
 
 
 async def test_empty_database_set_does_not_override_live_continuation_resource(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    tmp_path: Path,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, tmp_path: Path
 ) -> None:
     pool: ConnectionPool
-    from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
+    from base.native_process.turn_identity import HostedTurnResources
 
     incarnation, target = await managed_work(db_conn, aops_pool)
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
@@ -158,8 +153,10 @@ async def test_empty_database_set_does_not_override_live_continuation_resource(
         )
     scope = HostedTurnResources(unresolved={tmp_path / "live-domain": object()})
     original = await graph.aget_state(config)
-    with bind_hosted_resources(scope), pytest.raises(NativeWorkUncertainError, match="unresolved"):
-        await settle_native_invocation(aops_pool, saver, graph, incarnation, target, config)
+    with pytest.raises(NativeWorkUncertainError, match="unresolved"):
+        await settle_native_invocation(
+            aops_pool, saver, graph, incarnation, target, config, resources=scope
+        )
     assert (await graph.aget_state(config)).config == original.config
     assert db_conn.execute(
         "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
@@ -168,9 +165,7 @@ async def test_empty_database_set_does_not_override_live_continuation_resource(
 
 @pytest.mark.parametrize("missing", [True, False])
 async def test_lost_or_misaligned_pointer_holds_pending_original_command(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    missing: bool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, missing: bool
 ) -> None:
     pool: ConnectionPool
     from services.agent_runner.agent_host.invocation.native_work import (
@@ -188,7 +183,7 @@ async def test_lost_or_misaligned_pointer_holds_pending_original_command(
     )
     db_conn.commit()
     original = await graph.aget_state(config)
-    assert not await recover_native_cancel(aops_pool, saver, graph, incarnation)
+    assert not await recover_native_cancel(aops_pool, saver, graph, incarnation, resources=None)
     assert (await graph.aget_state(config)).config == original.config
     with pytest.raises(NativeWorkUncertainError, match="must settle"):
         await prepare_native_invocation(aops_pool, NativeWorkContinuation(uuid4()), incarnation)

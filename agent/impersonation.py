@@ -15,7 +15,7 @@ import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import psutil
@@ -29,18 +29,22 @@ from psycopg_pool import AsyncConnectionPool
 from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.impersonation.relay import stamp_relay_failure as _stamp_relay_failure
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.messages.envelope import inbound_head
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
+from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
+from base.agents.observation.relay_supervision import terminate_relay as _terminate_relay
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from base.native_process.turn_identity import hosted_resources_settled
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources, hosted_resources_settled
 
 
-async def native_status(db: Database, bus: EventBus, agent_id: int) -> dict[str, Any] | None:
+async def native_status(
+    db: Database, bus: EventBus, agent_id: int, *, incarnation: RuntimeIncarnation | None
+) -> dict[str, Any] | None:
     """Read authoritative lease state only for an admitted native runtime."""
-    incarnation = current_incarnation(agent_id)
     if incarnation is None:
         return None
     from base.agents.impersonation import native_status as read_status
@@ -76,16 +80,16 @@ async def claim_gate(
     state: _state.AgentState, agent_id: int, ctx: AvaContext
 ) -> Command[NodeName] | None:
     """Present consent once, or end the invocation without claiming input."""
+    incarnation = ctx.original_incarnation
     db, bus = ctx.require_db(), ctx.require_bus()
-    session = await native_status(db, bus, agent_id)
-    await supervise_relay(db, bus, session, agent_id, ctx.relays)
+    session = await native_status(db, bus, agent_id, incarnation=incarnation)
+    await supervise_relay(db, bus, session, agent_id, ctx.relays, incarnation=incarnation)
     if session is None:
         return None
     if session["status"] == ImpersonationStatus.REQUESTED and session["automatic"]:
         from agent.impersonation_handoff import start_update
         from base.agents.impersonation import accept
 
-        incarnation = current_incarnation(agent_id)
         assert incarnation is not None  # noqa: S101 — native_status requires it
         brief = session["reason"] or "Continue the agent's work from its saved state."
         await asyncio.to_thread(accept, db, bus, session["id"], agent_id, incarnation, brief)
@@ -151,6 +155,7 @@ def protect_native_hooks(
                 runtime.context.require_db(),
                 runtime.context.require_bus(),
                 agent_id_from_config(config),
+                incarnation=runtime.context.original_incarnation,
             )
             if session is not None and session["status"] != ImpersonationStatus.REQUESTED:
                 return Command(update={"turn_idle": True}, goto=END)
@@ -176,12 +181,14 @@ async def _activate_accepted(
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
+    *,
+    resources: HostedTurnResources | None,
 ) -> dict[str, Any] | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
     from base.agents.impersonation import activate
 
     # Continuations and managed exec resources must settle before activation.
-    if not hosted_resources_settled():
+    if not hosted_resources_settled(resources):
         raise RuntimeError("cannot activate impersonation with unresolved native exec resources")
     from agent.impersonation_handoff import ensure_start_marker
 
@@ -235,17 +242,20 @@ async def settle_checkpoint(
     relays: RelaySupervision,
     *,
     activate_accepted: bool = True,
+    incarnation: RuntimeIncarnation | None,
+    resources: HostedTurnResources | None,
 ) -> bool:
     """After invocation+flush, activate; apply terminal deltas exactly once."""
-    session = await native_status(db, bus, agent_id)
+    session = await native_status(db, bus, agent_id, incarnation=incarnation)
     if session is None or session["status"] == ImpersonationStatus.REQUESTED:
         return False
-    incarnation = current_incarnation(agent_id)
     assert incarnation is not None  # noqa: S101 — native_status requires it
     if session["status"] == ImpersonationStatus.ACCEPTED:
         if not activate_accepted:
             return False
-        activated = await _activate_accepted(graph, db, bus, session, incarnation, relays)
+        activated = await _activate_accepted(
+            graph, db, bus, session, incarnation, relays, resources=resources
+        )
         if activated is None:
             return False
         session = activated
@@ -346,29 +356,6 @@ def _register_relay(
 
     identity = OwnedProcess.capture(psutil.Process(process.pid))
     record_relay_identity(db, lease_id, incarnation, token, asdict(identity))
-
-
-def _terminate_relay(child: RelayChild) -> None:
-    process = child.process
-    if process.poll() is not None:
-        return
-    process.terminate()
-    try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
-
-
-def _heartbeat_fresh(heartbeat: datetime | None, *, now: datetime | None = None) -> bool:
-    from base.agents.impersonation import RELAY_HEARTBEAT_STALE_SECONDS
-
-    current = now or datetime.now(UTC)
-    if heartbeat is None:
-        return False
-    if heartbeat.tzinfo is None:
-        heartbeat = heartbeat.replace(tzinfo=UTC)
-    return heartbeat >= current - timedelta(seconds=RELAY_HEARTBEAT_STALE_SECONDS)
 
 
 def establish_relay(
@@ -535,11 +522,12 @@ async def _abort_for_death(
     agent_id: int,
     component: str,
     detail: str,
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> bool:
     """Stop the lease after a core-component death; emits impersonation_aborted."""
     from base.agents.impersonation import ImpersonationError, abort_lease
 
-    incarnation = current_incarnation(agent_id)
     if incarnation is None:
         return False
     try:
@@ -568,6 +556,8 @@ async def supervise_relay(
     session: dict[str, Any] | None,
     agent_id: int,
     relays: RelaySupervision,
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> None:
     """Supervise executor authority separately from recoverable relay delivery.
 
@@ -595,14 +585,16 @@ async def supervise_relay(
         return
     if session["status"] != ImpersonationStatus.ACTIVE:
         return
-    if await _executor_verdict_stops(db, bus, session, agent_id, relays):
+    if await _executor_verdict_stops(db, bus, session, agent_id, relays, incarnation=incarnation):
         return
     exited = await asyncio.to_thread(
         relay_exited, child, session.get("relay_identity"), provider=session["relay_provider"]
     )
     if not exited and _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
-    await _handle_stale_relay(db, bus, session, agent_id, child, relays, confirmed_exit=exited)
+    await _handle_stale_relay(
+        db, bus, session, agent_id, child, relays, confirmed_exit=exited, incarnation=incarnation
+    )
 
 
 async def _executor_verdict_stops(
@@ -611,6 +603,8 @@ async def _executor_verdict_stops(
     session: dict[str, Any],
     agent_id: int,
     _relays: RelaySupervision,
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> bool:
     """Component A: the executor's recorded process chain. True when supervision ends here."""
     states = _provider_anchor_states(session.get("process_metadata")) or ["unknown"]
@@ -618,12 +612,17 @@ async def _executor_verdict_stops(
         return False
     if set(states) <= {"dead", "reused"}:
         await _abort_for_death(
-            db, bus, session, agent_id, "executor", "the executor process is gone"
+            db,
+            bus,
+            session,
+            agent_id,
+            "executor",
+            "the executor process is gone",
+            incarnation=incarnation,
         )
         return True
     from base.agents.impersonation.relay import record_degradation
 
-    incarnation = current_incarnation(agent_id)
     if incarnation is not None:
         await asyncio.to_thread(
             record_degradation,
@@ -644,11 +643,11 @@ async def _handle_stale_relay(
     relays: RelaySupervision,
     *,
     confirmed_exit: bool = False,
+    incarnation: RuntimeIncarnation | None,
 ) -> None:
     """Retire the previous sender before claiming a replacement generation."""
     from base.agents.impersonation.relay import record_degradation
 
-    incarnation = current_incarnation(agent_id)
     if incarnation is None:
         return
     if session["relay_provider"] != "codex":
@@ -747,7 +746,14 @@ async def _reprovision_relay(
         if minted is None:
             return
     except (ImpersonationError, RuntimeError):
-        await asyncio.to_thread(_stamp_relay_failure, db, session, agent_id, record_relay_failure)
+        await asyncio.to_thread(
+            _stamp_relay_failure,
+            db,
+            session,
+            agent_id,
+            record_relay_failure,
+            incarnation=incarnation,
+        )
         return
     spawned_at = time.monotonic()
     relays.children[agent_id] = RelayChild(
@@ -772,28 +778,3 @@ async def _reprovision_relay(
         agent_id=agent_id,
         lease_id=str(session["id"]),
     )
-
-
-def _stamp_relay_failure(
-    db: Database,
-    session: dict[str, Any],
-    agent_id: int,
-    record_relay_failure: Callable[[Database, str, RuntimeIncarnation], bool],
-) -> None:
-    from base.agents.impersonation import ImpersonationError
-    from base.log import logger
-
-    incarnation = current_incarnation(agent_id)
-    if incarnation is None:
-        return
-    try:
-        stamped = record_relay_failure(db, session["id"], incarnation)
-    except (ImpersonationError, RuntimeError):
-        return
-    if stamped:
-        logger.error(
-            "impersonation relay heartbeat stale and it cannot be respawned here",
-            agent_id=agent_id,
-            lease_id=str(session["id"]),
-            relay_provider=session["relay_provider"],
-        )

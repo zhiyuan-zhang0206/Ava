@@ -9,9 +9,10 @@ import pytest
 
 import ava
 from ava.sdk_surface import agent_identity
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.host.proc import run_bounded
-from base.native_process.turn_identity import bind_turn_identity
-from tests.fixtures.pin_agent import exec_context, pin_agent, pin_no_identity
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
@@ -21,23 +22,26 @@ def _reset_process_slots(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_turn_metadata_cannot_override_a_local_sdk_binding() -> None:
-    pin_agent(11, owns_loop=True)
-    with bind_turn_identity(22):
-        assert agent_identity.agent_id() == 11
-        assert agent_identity.require_actor() == "agent:11"
+    pin_agent(
+        11,
+        owns_loop=True,
+    )
+    turn = AvaContext(identity=AgentIdentity(22, True))
+    assert agent_identity.require_agent_id(turn) == 22
+    assert agent_identity.agent_id() == 11
+    assert agent_identity.require_actor() == "agent:11"
     assert agent_identity.require_agent_id() == 11
 
 
 def test_host_identity_requires_the_callers_explicit_context() -> None:
-    context = exec_context(33)
-    with bind_turn_identity(33):
-        assert agent_identity.agent_id() is None
-        with pytest.raises(RuntimeError, match="no established agent identity"):
-            agent_identity.require_agent_id()
-        with pytest.raises(RuntimeError, match="established agent identity"):
-            agent_identity.assert_self_action("terminate")
-        assert agent_identity.require_agent_id(context) == 33
-        assert agent_identity.require_actor(context) == "agent:33"
+    context = AvaContext(identity=AgentIdentity(33, True))
+    assert agent_identity.agent_id() is None
+    with pytest.raises(RuntimeError, match="no established agent identity"):
+        agent_identity.require_agent_id()
+    with pytest.raises(RuntimeError, match="established agent identity"):
+        agent_identity.assert_self_action("terminate")
+    assert agent_identity.require_agent_id(context) == 33
+    assert agent_identity.require_actor(context) == "agent:33"
     assert getattr(ava, "context", None) is None
 
 
@@ -123,14 +127,20 @@ def test_turn_metadata_cannot_grant_a_launched_script_loop_ownership(
 ) -> None:
     monkeypatch.setenv("AVA_AGENT_ID", "5")
     assert agent_identity.is_launched_child() is True
-    with bind_turn_identity(5), pytest.raises(RuntimeError, match="background script"):
+    turn = AvaContext(identity=AgentIdentity(5, True))
+    assert agent_identity.require_agent_id(turn) == 5
+    with pytest.raises(RuntimeError, match="background script"):
         agent_identity.assert_self_action("restart")
 
 
 def test_explicit_actor_is_independent_of_turn_metadata() -> None:
-    pin_agent(None, actor="schedule:7")
-    with bind_turn_identity(9):
-        assert agent_identity.require_actor() == "schedule:7"
+    pin_agent(
+        None,
+        actor="schedule:7",
+    )
+    turn = AvaContext(identity=AgentIdentity(9, True))
+    assert agent_identity.require_actor(turn) == "agent:9"
+    assert agent_identity.require_actor() == "schedule:7"
 
 
 def test_sdk_threads_use_one_local_binding_without_patching_thread_start() -> None:

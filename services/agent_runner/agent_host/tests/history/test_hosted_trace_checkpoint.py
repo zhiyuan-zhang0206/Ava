@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 
 import psycopg
 import pytest
@@ -23,7 +24,6 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import host as host_module
 
 
@@ -33,7 +33,10 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     traces: list[str] = []
     provider = TracerProvider()
     tracer = provider.get_tracer(__name__)
@@ -74,23 +77,30 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
             bus=EventBus.from_settings(),
             db=Database.from_settings(),
         )
-        with bind_turn_identity(agent_id, incarnation=incarnation):
-            assert not (
-                await host._invoke_until_done(
-                    agent_id,
+        assert not (
+            await host._invoke_until_done(
+                agent_id,
+                replace(
                     AvaContext(
                         ops_pool=aops_pool,
                         agent=AgentSlices.resolve(),
                         db=Database.from_settings(),
                         bus=EventBus.from_settings(),
                     ),
-                )
-            ).exited
+                    original_incarnation=incarnation,
+                    hosted_resources=None,
+                    native_work=None,
+                ),
+            )
+        ).exited
 
     assert len(traces) == 1
     # This is the actual gateway trace-content reader, using fresh connections.
     checkpoint_id, messages = await asyncio.to_thread(
-        load_checkpoint_messages_by_trace, Database.from_settings(), agent_id, traces[0]
+        load_checkpoint_messages_by_trace,
+        Database.from_settings(),
+        agent_id,
+        traces[0],
     )
     assert checkpoint_id is not None
     assert [message.text for message in messages] == ["prior question", "final response"]

@@ -34,6 +34,7 @@ def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[s
         context=context.describe(),
         timeout_s=30,
         state={"messages": [], "halted": False},
+        incarnation=None,
     )
     env = os.environ | {
         "AVA_HOME": str(tmp_path / "home"),

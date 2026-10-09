@@ -75,7 +75,9 @@ async def _recrashed_row(
         (agent_id,),
     )
     db_conn.commit()
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=EventBus.from_settings())
+    assert await settle_hosted_runtime(
+        aops_pool, incarnation, bus=EventBus.from_settings(), resources=None
+    )
     return agent_id, incarnation
 
 
@@ -381,7 +383,7 @@ async def test_grace_reap_commits_a_marked_wake_that_passes_the_notice_gate(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
-    await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
+    await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
     db_conn.execute(
         "UPDATE agents_meta SET status = 'idling', runtime_owner = %s, "
         "lease_expires_at = NULL, last_turn_fatal_at = now() - interval '16 minutes' "
@@ -434,7 +436,12 @@ async def test_corpse_stamp_failure_keeps_its_traceback(
     assert incarnation is not None
 
     settlement = await settle_and_stamp_turn(
-        aops_pool, incarnation, bus=EventBus.from_settings(), exited=False, crashed=True
+        aops_pool,
+        incarnation,
+        bus=EventBus.from_settings(),
+        exited=False,
+        crashed=True,
+        resources=None,
     )
 
     assert settlement.stamp is None

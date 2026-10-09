@@ -21,8 +21,11 @@ from base.agents.incarnation.resources import ResourceBirth
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import host as host_module
+from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 
@@ -87,7 +90,9 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
     monkeypatch.setattr(saver, "aget_delta_channel_history", counted)
     monkeypatch.setattr(host_module, "admit_stored_model", Mock(return_value=True))
     monkeypatch.setattr(host_module, "publish_agent_updated", AsyncMock())
-    monkeypatch.setattr(host_module, "boot_agent_scope", AsyncMock(return_value=(object(), None)))
+    monkeypatch.setattr(
+        runtime_module, "boot_agent_scope", AsyncMock(return_value=(object(), None))
+    )
     monkeypatch.setattr(host_module, "close_hosted_turn", AsyncMock())
     host = AgentHost(
         pool=aops_pool,
@@ -97,14 +102,21 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
         db=Database.from_settings(),
     )
 
-    async def drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
+    async def drive(
+        _agent: int,
+        _runtime: Any,
+        _slices: object,
+        *,
+        incarnation: RuntimeIncarnation | None,
+        resources: HostedTurnResources | None,
+    ) -> TurnOutcome:
         # Recovery can nest inside this turn without dropping or duplicating its cache.
         with recovery_reconstruction_scope(saver, str(agent)):
             await graph.ainvoke({}, config=config)
         return TurnOutcome(exited=False, crashed=False)
 
     monkeypatch.setattr(host, "_drive_turns", drive)
-    await host._run_turn(agent)
+    await host._run_turn(agent, resources=None)
     assert reads == (2 if needs_repair else 1)
     assert any(isinstance(m, ToolMessage) for m in observed) is needs_repair
     assert host.stats.cache_misses == 1

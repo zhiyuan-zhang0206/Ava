@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 # Envelope schema versions — bumped only on a breaking shape change.
 REQUEST_VERSION = 1
@@ -213,6 +213,7 @@ def write_request(
     context: dict[str, Any],
     timeout_s: float,
     state: dict[str, Any] | None,
+    incarnation: RuntimeIncarnation | None,
 ) -> None:
     """Write the request envelope (0600). `context` is the host context's `describe()`; `state`
     is a model dump, serialized as a typed blob so langchain messages / plugin models survive."""
@@ -225,8 +226,8 @@ def write_request(
         "context": context,
         "timeout_s": timeout_s,
     }
-    incarnation = current_incarnation(agent_id) if agent_id is not None else None
     if incarnation is not None:
+        incarnation.require_agent(agent_id)
         envelope["incarnation"] = {
             "generation": str(incarnation.generation),
             "owner": str(incarnation.owner),

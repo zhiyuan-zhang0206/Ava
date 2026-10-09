@@ -12,7 +12,6 @@ from agent.db import claim_inbound_batch
 from base.agents.compaction.commands import accept, observe
 from base.agents.compaction.models import CompactConflictError, CompactHeldError
 from base.agents.compaction.tests.helpers import source
-from base.native_process.turn_identity import bind_turn_identity
 
 
 async def test_fresh_concurrent_acceptance_and_changed_body(
@@ -84,11 +83,10 @@ async def test_pending_compact_fences_generic_claim_without_consuming_chat(
         (target.source.agent_id,),
     )
     db_conn.commit()
-    with (
-        bind_turn_identity(target.source.agent_id, incarnation=incarnation),
-        pytest.raises(CompactHeldError, match="before generic"),
-    ):
-        await claim_inbound_batch(aops_pool, target.source.agent_id)
+    with pytest.raises(CompactHeldError, match="before generic"):
+        await claim_inbound_batch(
+            aops_pool, target.source.agent_id, incarnation=incarnation, work=None
+        )
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s", (target.source.agent_id,)
     ).fetchall() == [("pending",)]

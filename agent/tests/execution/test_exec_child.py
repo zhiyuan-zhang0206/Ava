@@ -1,8 +1,6 @@
 """Direct-spawn tests for the exec child entry (`agent/execution/child.py`) —
-child-side behaviors the parent machinery cannot observe on its own: the
-SIGTERM -> TimeoutError -> timed_out envelope path, the watchdog hard-exit,
-the state-slot injection (plugin namespace reads the snapshot), the
-plugin-delta round-trip, and the lifecycle envelope.
+Child-only contracts include SIGTERM timeout envelopes, watchdog hard exit,
+state-slot injection, plugin-delta round trips, and lifecycle envelopes.
 
 Each test spawns a real child with a tmp AVA_HOME, so `import ava` + plugin
 load costs ~1s per spawn — keep the count low and each spawn meaningful.
@@ -82,7 +80,14 @@ def _spawn(
     result_path = make_result_path(exec_dir, agent_id=_AGENT_ID)
     if write_request_file:
         desc = context or exec_context(_AGENT_ID).describe()
-        write_request(request_path, code=code, context=desc, timeout_s=timeout_s, state=state)
+        write_request(
+            request_path,
+            code=code,
+            context=desc,
+            timeout_s=timeout_s,
+            state=state,
+            incarnation=None,
+        )
     proc = subprocess.run(
         [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
         capture_output=True,
@@ -494,6 +499,7 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
         context=exec_context(_AGENT_ID).describe(),
         timeout_s=60.0,
         state=None,
+        incarnation=None,
     )
     env = _child_env(tmp_path, request_path, result_path)
     proc = subprocess.Popen(

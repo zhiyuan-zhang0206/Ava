@@ -36,6 +36,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     work-task cancellation at that await must still settle the same incarnation
     to ``idling``; its live host lease must not preserve a false running row.
     """
+    from base.native_process.turn_identity import HostedTurnResources
     from services.agent_runner.agent_host.host import AgentHost
 
     agent_id = _agent(db_conn)
@@ -77,7 +78,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     # Exercise the owned work task itself. ``run_turn`` deliberately shields
     # this inner task from scheduler cancellation; injecting cancellation at
     # the exact inner boundary proves that boundary is independently clean.
-    task = asyncio.create_task(host._run_turn(agent_id))
+    task = asyncio.create_task(host._run_turn(agent_id, resources=HostedTurnResources()))
     await asyncio.wait_for(announce_entered.wait(), timeout=2.0)
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
@@ -116,7 +117,7 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
     )
     assert original is not None
     if status == "idling":
-        assert await settle_hosted_runtime(aops_pool, original, bus=event_bus)
+        assert await settle_hosted_runtime(aops_pool, original, bus=event_bus, resources=None)
     host = AgentHost(
         pool=aops_pool,
         checkpointer=Mock(),

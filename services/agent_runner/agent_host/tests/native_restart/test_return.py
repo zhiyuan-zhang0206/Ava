@@ -1,6 +1,7 @@
 """A returned original invocation settles cancel before its accepted restart."""
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 import psycopg
@@ -13,7 +14,7 @@ from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
@@ -43,47 +44,47 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
         return Command(update={"halted": True, "turn_idle": True}, goto="__end__")
 
     graph, _saver, host, ctx = await _blocked_host(aops_pool, model)
+    ctx = replace(ctx, original_incarnation=incarnation, hosted_resources=HostedTurnResources())
     faults = _install_faults(monkeypatch, initial.agent_id, fault_site)
-    with bind_turn_identity(initial.agent_id, incarnation=incarnation):
-        running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
-        try:
-            await asyncio.wait_for(entered.wait(), 5)
-            with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-                target = await asyncio.to_thread(observe_native_work, pool, initial.agent_id)
-                assert target is not None
+    running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
+            target = await asyncio.to_thread(observe_native_work, pool, initial.agent_id)
+            assert target is not None
 
-                async def cancel() -> Any:
-                    return await asyncio.to_thread(
-                        accept_native_cancel, pool, "original-cancel", initial.agent_id, target
-                    )
-
-                async def restart() -> Any:
-                    return await asyncio.to_thread(
-                        accept_native_restart,
-                        pool,
-                        "original-restart",
-                        initial.agent_id,
-                        NativeRestartRequest(target=target),
-                        lambda _request: None,
-                    )
-
-                if first == "cancel":
-                    cancelled = await cancel()
-                    accepted = await restart()
-                else:
-                    accepted = await restart()
-                    cancelled = await cancel()
-                queued = _insert(db_conn, initial.agent_id)
-                release.set()
-                outcome = await asyncio.wait_for(running, 10)
-                progress = await asyncio.to_thread(
-                    native_restart_progress, pool, initial.agent_id, accepted.command_id
+            async def cancel() -> Any:
+                return await asyncio.to_thread(
+                    accept_native_cancel, pool, "original-cancel", initial.agent_id, target
                 )
-        finally:
+
+            async def restart() -> Any:
+                return await asyncio.to_thread(
+                    accept_native_restart,
+                    pool,
+                    "original-restart",
+                    initial.agent_id,
+                    NativeRestartRequest(target=target),
+                    lambda _request: None,
+                )
+
+            if first == "cancel":
+                cancelled = await cancel()
+                accepted = await restart()
+            else:
+                accepted = await restart()
+                cancelled = await cancel()
+            queued = _insert(db_conn, initial.agent_id)
             release.set()
-            if not running.done():
-                running.cancel()
-            await asyncio.gather(running, return_exceptions=True)
+            outcome = await asyncio.wait_for(running, 10)
+            progress = await asyncio.to_thread(
+                native_restart_progress, pool, initial.agent_id, accepted.command_id
+            )
+    finally:
+        release.set()
+        if not running.done():
+            running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
     assert faults.injected and calls == 1
     assert not outcome.exited and not outcome.native_held
     assert progress is not None and progress.outcome == "applied"
@@ -122,6 +123,7 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
         return Command(update={"halted": True, "turn_idle": True}, goto="__end__")
 
     _graph, _saver, host, ctx = await _blocked_host(aops_pool, model)
+    ctx = replace(ctx, original_incarnation=incarnation, hosted_resources=HostedTurnResources())
 
     async def interrupted_apply(pool: AsyncConnectionPool, token: Any, **kwargs: Any) -> Any:
         nonlocal injected
@@ -140,32 +142,31 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
         return await apply_hosted_lifecycle(pool, token, **kwargs)
 
     monkeypatch.setattr(host_owner, "apply_hosted_lifecycle", interrupted_apply)
-    with bind_turn_identity(initial.agent_id, incarnation=incarnation):
-        running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
-        try:
-            await asyncio.wait_for(entered.wait(), 5)
-            with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-                target = await asyncio.to_thread(observe_native_work, pool, initial.agent_id)
-                assert target is not None
-                accepted = await asyncio.to_thread(
-                    accept_native_restart,
-                    pool,
-                    "original-completion",
-                    initial.agent_id,
-                    NativeRestartRequest(target=target),
-                    lambda _request: None,
-                )
-                queued = _insert(db_conn, initial.agent_id)
-                release.set()
-                outcome = await asyncio.wait_for(running, 10)
-                progress = await asyncio.to_thread(
-                    native_restart_progress, pool, initial.agent_id, accepted.command_id
-                )
-        finally:
+    running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
+            target = await asyncio.to_thread(observe_native_work, pool, initial.agent_id)
+            assert target is not None
+            accepted = await asyncio.to_thread(
+                accept_native_restart,
+                pool,
+                "original-completion",
+                initial.agent_id,
+                NativeRestartRequest(target=target),
+                lambda _request: None,
+            )
+            queued = _insert(db_conn, initial.agent_id)
             release.set()
-            if not running.done():
-                running.cancel()
-            await asyncio.gather(running, return_exceptions=True)
+            outcome = await asyncio.wait_for(running, 10)
+            progress = await asyncio.to_thread(
+                native_restart_progress, pool, initial.agent_id, accepted.command_id
+            )
+    finally:
+        release.set()
+        if not running.done():
+            running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
     assert injected and calls == 1
     assert not outcome.exited and not outcome.crashed
     assert progress is not None and progress.outcome == (

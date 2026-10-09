@@ -9,6 +9,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
@@ -35,7 +36,7 @@ async def test_pending_external_interrupt_shortens_backoff_without_claiming(
         db_conn, agent, "", "user", kind=kind, bus=event_bus, database=database
     )
     db_conn.commit()
-    interrupt = RecoveryInterrupt(aops_pool, incarnation, asyncio.Lock())
+    interrupt = RecoveryInterrupt(aops_pool, incarnation, asyncio.Lock(), work=None)
 
     await asyncio.wait_for(interrupt.wait_backoff(30), timeout=1)
 
@@ -61,13 +62,19 @@ async def test_interrupt_arriving_during_backoff_is_observed(
         database, event_bus, spawner="user", machine=machine_name()
     )
     interrupt = RecoveryInterrupt(
-        aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()), asyncio.Lock()
+        aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()), asyncio.Lock(), work=None
     )
     checked = asyncio.Event()
     original = recovery_interrupt.has_pending_interrupt
 
-    async def observe(pool: AsyncConnectionPool, agent_id: int) -> bool:
-        result = await original(pool, agent_id)
+    async def observe(
+        pool: AsyncConnectionPool,
+        agent_id: int,
+        *,
+        incarnation: RuntimeIncarnation | None,
+        work: NativeWorkTarget | None,
+    ) -> bool:
+        result = await original(pool, agent_id, incarnation=incarnation, work=work)
         checked.set()
         return result
 
@@ -105,7 +112,7 @@ async def test_self_control_does_not_shorten_backoff(
     )
     db_conn.commit()
     interrupt = RecoveryInterrupt(
-        aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()), asyncio.Lock()
+        aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()), asyncio.Lock(), work=None
     )
     started = time.monotonic()
     await interrupt.wait_backoff(0.04)
@@ -119,7 +126,9 @@ async def test_unavailable_control_pool_does_not_extend_backoff_or_leak_borrower
         max_size=1,
         kwargs={"autocommit": True},
     ) as pool:
-        interrupt = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()), asyncio.Lock())
+        interrupt = RecoveryInterrupt(
+            pool, RuntimeIncarnation(1, uuid4(), uuid4()), asyncio.Lock(), work=None
+        )
         async with pool.connection():
             started = time.monotonic()
             await asyncio.wait_for(interrupt.wait_backoff(0.04), 0.5)
@@ -135,7 +144,9 @@ async def test_external_cancellation_unwinds_the_inline_control_query() -> None:
         max_size=1,
         kwargs={"autocommit": True},
     ) as pool:
-        interrupt = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()), asyncio.Lock())
+        interrupt = RecoveryInterrupt(
+            pool, RuntimeIncarnation(1, uuid4(), uuid4()), asyncio.Lock(), work=None
+        )
         async with pool.connection():
             waiter = asyncio.create_task(interrupt.wait_backoff(30))
             await asyncio.sleep(0.01)
@@ -152,7 +163,13 @@ async def test_optional_observers_share_one_pool_slot_without_queueing(
     entered, release = asyncio.Event(), asyncio.Event()
     queried_agents: list[int] = []
 
-    async def held_read(pool: AsyncConnectionPool, agent_id: int) -> bool:
+    async def held_read(
+        pool: AsyncConnectionPool,
+        agent_id: int,
+        *,
+        incarnation: RuntimeIncarnation | None,
+        work: NativeWorkTarget | None,
+    ) -> bool:
         queried_agents.append(agent_id)
         async with pool.connection():
             entered.set()
@@ -168,8 +185,12 @@ async def test_optional_observers_share_one_pool_slot_without_queueing(
     ) as pool:
         await pool.wait()
         peek_lock = asyncio.Lock()
-        first = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()), peek_lock)
-        second = RecoveryInterrupt(pool, RuntimeIncarnation(2, uuid4(), uuid4()), peek_lock)
+        first = RecoveryInterrupt(
+            pool, RuntimeIncarnation(1, uuid4(), uuid4()), peek_lock, work=None
+        )
+        second = RecoveryInterrupt(
+            pool, RuntimeIncarnation(2, uuid4(), uuid4()), peek_lock, work=None
+        )
         waiting = asyncio.create_task(first.wait_backoff(30))
         try:
             await asyncio.wait_for(entered.wait(), 1)

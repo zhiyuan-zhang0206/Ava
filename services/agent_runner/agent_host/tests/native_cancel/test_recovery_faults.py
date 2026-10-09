@@ -77,7 +77,7 @@ async def test_pause_fault_cannot_ack_then_resume_original_conversation(
         patch.setattr(owner, "flush_checkpoint", flush)
         patch.setattr(owner, "async_write_transaction", transaction)
         with pytest.raises(psycopg.OperationalError):
-            await owner.recover_native_cancel(aops_pool, saver, graph, successor)
+            await owner.recover_native_cancel(aops_pool, saver, graph, successor, resources=None)
     assert injected and replies == []
     state = db_conn.execute(
         "SELECT outcome,checkpoint_id,recovery_checkpoint_id FROM native_cancel_commands WHERE work_id=%s",
@@ -87,7 +87,7 @@ async def test_pause_fault_cannot_ack_then_resume_original_conversation(
     assert state[0] == ("recovered_stopped" if site == "after_ack" else "accepted")
     if site != "after_ack":
         assert state[2] is None
-    assert await owner.recover_native_cancel(aops_pool, saver, graph, successor)
+    assert await owner.recover_native_cancel(aops_pool, saver, graph, successor, resources=None)
     await _assert_successor_turns(
         db_conn,
         aops_pool,

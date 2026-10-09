@@ -25,7 +25,6 @@ from base.db import PG_KEEPALIVE_KWARGS, Database, create_agent
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -62,9 +61,9 @@ def _die(conn: psycopg.Connection, agent_id: int) -> None:
     conn.commit()
 
 
-async def _admit(pool: AsyncConnectionPool, agent_id: int) -> RuntimeIncarnation:
+async def _admit(pool: AsyncConnectionPool, agent_id: int, *, db: Database) -> RuntimeIncarnation:
     owner = await admit_hosted_runtime(
-        pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=Database.from_settings()
+        pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=db
     )
     assert owner is not None
     return owner
@@ -97,7 +96,7 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
 ) -> None:
     """The incident: a delayed earlier terminate must not kill the new incarnation."""
     agent_id = _agent(db_conn)
-    await _admit(aops_pool, agent_id)
+    await _admit(aops_pool, agent_id, db=database)
     stale = _command(db_conn, agent_id, "terminate")
     _die(db_conn, agent_id)
 
@@ -114,18 +113,17 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
         (agent_id,),
     ).fetchone() == (epoch, None)
 
-    owner = await _admit(aops_pool, agent_id)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        batch = await claim_inbound_batch(aops_pool, agent_id)
+    owner = await _admit(aops_pool, agent_id, db=database)
+    batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     assert [item.kind for item in batch] == ["resurrect"]
-    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) is None
+    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None) is None
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("running",)
 
 
 async def test_acceptance_settles_a_command_that_committed_after_the_epoch(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database: Database
 ) -> None:
     """Commit-order race: inserted before the resurrect, committed after it.
 
@@ -145,10 +143,9 @@ async def test_acceptance_settles_a_command_that_committed_after_the_epoch(
     )
     db_conn.commit()
 
-    owner = await _admit(aops_pool, agent_id)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        async with async_write_transaction(aops_pool) as conn:
-            assert await accept_lifecycle_intent(conn, agent_id) is None
+    owner = await _admit(aops_pool, agent_id, db=database)
+    async with async_write_transaction(aops_pool) as conn:
+        assert await accept_lifecycle_intent(conn, agent_id, incarnation=owner) is None
     assert _command_row(db_conn, stale) == (
         "done",
         None,
@@ -167,17 +164,17 @@ async def test_a_command_created_after_the_resurrect_still_applies(
 ) -> None:
     """The fence supersedes the past, not the future: a later kill still lands."""
     agent_id = _agent(db_conn)
-    await _admit(aops_pool, agent_id)
+    await _admit(aops_pool, agent_id, db=database)
     _command(db_conn, agent_id, "terminate")
     _die(db_conn, agent_id)
     resurrect_agent(database, event_bus, agent_id, resurrected_by="user")
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(aops_pool, agent_id, db=database)
     newer = _command(db_conn, agent_id, "terminate")
-
-    with bind_turn_identity(agent_id, incarnation=owner):
-        batch = await claim_inbound_batch(aops_pool, agent_id)
+    batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     assert [item.kind for item in batch] == ["terminate"]
-    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) == "terminate"
+    assert (
+        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None) == "terminate"
+    )
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("terminated",)
@@ -194,11 +191,10 @@ async def test_an_accepted_but_unapplied_command_is_superseded_not_deferred(
 ) -> None:
     """A claimed command that never applied has no external effect to preserve."""
     agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(aops_pool, agent_id, db=database)
     command = _command(db_conn, agent_id, "terminate")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        async with async_write_transaction(aops_pool) as conn:
-            intent = await accept_lifecycle_intent(conn, agent_id)
+    async with async_write_transaction(aops_pool) as conn:
+        intent = await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
     assert intent is not None and intent.id == command
     _die(db_conn, agent_id)
 
@@ -253,11 +249,10 @@ async def test_refused_resurrect_leaves_no_fence_or_marker_for_the_retry(
     the already-applied command is never rewritten.
     """
     agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(aops_pool, agent_id, db=database)
     command = _command(db_conn, agent_id, "terminate")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        async with async_write_transaction(aops_pool) as conn:
-            assert await accept_lifecycle_intent(conn, agent_id) is not None
+    async with async_write_transaction(aops_pool) as conn:
+        assert await accept_lifecycle_intent(conn, agent_id, incarnation=owner) is not None
     db_conn.execute(
         "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s", (command,)
     )
@@ -301,7 +296,7 @@ async def test_reacceptance_is_idempotent_and_preserves_command_history(
     event_bus: EventBus,
 ) -> None:
     agent_id = _agent(db_conn)
-    await _admit(aops_pool, agent_id)
+    await _admit(aops_pool, agent_id, db=database)
     stale = db_conn.execute(
         "INSERT INTO inbound_messages (agent_id,content,kind,source,payload) "
         "VALUES (%s,'','terminate','user','{\"note\": \"drain\"}') RETURNING id",
@@ -314,11 +309,10 @@ async def test_reacceptance_is_idempotent_and_preserves_command_history(
     epoch = _epoch(db_conn, agent_id)
     settled = _command_row(db_conn, stale[0])
 
-    owner = await _admit(aops_pool, agent_id)
+    owner = await _admit(aops_pool, agent_id, db=database)
     for _ in range(2):
-        with bind_turn_identity(agent_id, incarnation=owner):
-            async with async_write_transaction(aops_pool) as conn:
-                assert await accept_lifecycle_intent(conn, agent_id) is None
+        async with async_write_transaction(aops_pool) as conn:
+            assert await accept_lifecycle_intent(conn, agent_id, incarnation=owner) is None
     assert _command_row(db_conn, stale[0]) == settled
     payload = db_conn.execute(
         "SELECT payload FROM inbound_messages WHERE id=%s", (stale[0],)

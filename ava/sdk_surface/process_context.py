@@ -15,6 +15,7 @@ from typing import Any
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 class SdkProcessPurpose(StrEnum):
@@ -83,10 +84,14 @@ def process_clients(
     )
 
 
-def context_from_description(description: dict[str, Any]) -> AvaContext:
+def context_from_description(
+    description: dict[str, Any], *, original_incarnation: RuntimeIncarnation | None = None
+) -> AvaContext:
     """Rebuild an execution context without copying its host's live clients or secrets."""
     return AvaContext.from_description(
-        description, clients=process_clients(gateway_url=description["gateway_url"])
+        description,
+        clients=process_clients(gateway_url=description["gateway_url"]),
+        original_incarnation=original_incarnation,
     )
 
 

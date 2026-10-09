@@ -24,7 +24,6 @@ from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
 
@@ -41,10 +40,17 @@ async def _admit(db: psycopg.Connection, pool: AsyncConnectionPool) -> RuntimeIn
     )
     db.commit()
     incarnation = await admit_hosted_runtime(
-        pool, agent_id, "host-test", uuid4(), expected_from="idling", db=Database.from_settings()
+        pool,
+        agent_id,
+        "host-test",
+        uuid4(),
+        expected_from="idling",
+        db=Database.from_settings(),
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(pool, incarnation, bus=EventBus.from_settings())
+    assert await settle_hosted_runtime(
+        pool, incarnation, bus=EventBus.from_settings(), resources=None
+    )
     return incarnation
 
 
@@ -102,13 +108,14 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
             ).status_code
             == 401
         )
-    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
-        claimed = await claim_inbound_batch(aops_pool, incarnation.agent_id)
-        assert len(claimed) == 1
-        item = claimed[0]
-        assert item.source == _SOURCE
-        assert item.payload == {"caller_identity": _CALLER}
-        message, _ = build_chat_inbound(item)
+    claimed = await claim_inbound_batch(
+        aops_pool, incarnation.agent_id, incarnation=incarnation, work=None
+    )
+    assert len(claimed) == 1
+    item = claimed[0]
+    assert item.source == _SOURCE
+    assert item.payload == {"caller_identity": _CALLER}
+    message, _ = build_chat_inbound(item)
     content = message.model_dump()["content"]
     assert isinstance(content, str)
     assert "External agent" in content and "codex" in content

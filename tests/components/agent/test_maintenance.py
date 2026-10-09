@@ -80,7 +80,7 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
         aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
     message = insert_inbound_message(
         db_conn, agent, "pending work", "user", bus=event_bus, database=database
     )

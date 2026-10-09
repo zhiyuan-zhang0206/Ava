@@ -22,7 +22,6 @@ from base.agents.incarnation.resources import IncarnationResources, ResourceProc
 from base.db import Database, create_agent, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -84,7 +83,7 @@ async def test_hosted_status_changes_publish_agent_updated(
     publish.assert_not_awaited()
 
     publish.reset_mock()
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
     publish.assert_awaited_once_with(ANY, agent_id)
 
     incarnation = await admit_hosted_runtime(
@@ -95,9 +94,11 @@ async def test_hosted_status_changes_publish_agent_updated(
         db_conn, agent_id, "", "user", "terminate", bus=event_bus, database=database
     )
     publish.reset_mock()
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        await claim_inbound_batch(aops_pool, agent_id)
-        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) == "terminate"
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation, work=None)
+    assert (
+        await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=None)
+        == "terminate"
+    )
     publish.assert_awaited_once_with(ANY, agent_id)
 
 
@@ -115,14 +116,15 @@ async def test_hosted_restart_releases_before_new_incarnation(
     insert_inbound_message(
         db_conn, agent_id, "", "user", "restart", bus=event_bus, database=database
     )
-    with bind_turn_identity(agent_id, incarnation=first):
-        await claim_inbound_batch(aops_pool, agent_id)
-        assert await apply_hosted_lifecycle(aops_pool, first, bus=event_bus) == "restart"
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=first, work=None)
+    assert (
+        await apply_hosted_lifecycle(aops_pool, first, bus=event_bus, resources=None) == "restart"
+    )
     second = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert second is not None and second.generation != first.generation
-    assert not await settle_hosted_runtime(aops_pool, first, bus=event_bus)
+    assert not await settle_hosted_runtime(aops_pool, first, bus=event_bus, resources=None)
 
 
 @pytest.mark.parametrize("command", ["restart", "terminate"])
@@ -145,9 +147,8 @@ async def test_lifecycle_apply_releases_the_advertisement(
     )
     db_conn.commit()
     insert_inbound_message(db_conn, agent_id, "", "user", command, bus=event_bus, database=database)
-    with bind_turn_identity(agent_id, incarnation=first):
-        await claim_inbound_batch(aops_pool, agent_id)
-        assert await apply_hosted_lifecycle(aops_pool, first, bus=event_bus) == command
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=first, work=None)
+    assert await apply_hosted_lifecycle(aops_pool, first, bus=event_bus, resources=None) == command
     assert _version(db_conn, agent_id) == 0
 
 
@@ -175,11 +176,10 @@ async def test_owner_beat_renews_a_mid_turn_row_and_the_guard_stays_green(
         (agent_id,),
     )
     db_conn.commit()
-    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
-        await native_status(database, event_bus, agent_id)
+    with pytest.raises(ImpersonationError):
+        await native_status(database, event_bus, agent_id, incarnation=incarnation)
     await renew_hosted_owner(aops_pool, "host-test", owner)  # one beat
     assert db_conn.execute(
         "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone() == (True,)
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        assert await native_status(database, event_bus, agent_id) is None
+    assert await native_status(database, event_bus, agent_id, incarnation=incarnation) is None

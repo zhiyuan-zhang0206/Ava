@@ -29,7 +29,6 @@ from base.deploy.maintenance import cohort, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from ops import lifecycle
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
@@ -416,9 +415,11 @@ async def _restarted(db: psycopg.Connection, pool: AsyncConnectionPool) -> int:
         database=Database.from_settings(),
     )
     db.commit()
-    with bind_turn_identity(aid, incarnation=owner):
-        await claim_inbound_batch(pool, aid)
-        assert await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings()) == "restart"
+    await claim_inbound_batch(pool, aid, incarnation=owner, work=None)
+    assert (
+        await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings(), resources=None)
+        == "restart"
+    )
     return aid
 
 
@@ -436,9 +437,11 @@ async def _managed_restarted(db: psycopg.Connection, pool: AsyncConnectionPool) 
         database=Database.from_settings(),
     )
     db.commit()
-    with bind_turn_identity(aid, incarnation=owner):
-        await claim_inbound_batch(pool, aid)
-        assert await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings()) == "restart"
+    await claim_inbound_batch(pool, aid, incarnation=owner, work=None)
+    assert (
+        await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings(), resources=None)
+        == "restart"
+    )
     assert isinstance(decode_resources(_resources(db, aid)), IncarnationResources)
     return aid
 

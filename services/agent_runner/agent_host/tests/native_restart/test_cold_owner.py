@@ -23,7 +23,6 @@ from base.agents.messages.native_restart import (
 )
 from base.db import Database
 from base.db.transaction import async_write_transaction
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host.tests.native_cancel.test_transfer import (
     _CHILD,
     _child_failure,
@@ -75,12 +74,11 @@ async def test_dead_original_host_is_superseded_without_new_restart_target(
                 expected_from="running",
             )
             assert successor is not None and successor.generation != target.generation
-            with bind_turn_identity(agent, incarnation=successor):
-                async with async_write_transaction(aops_pool) as conn:
-                    original = await accept_lifecycle_intent(conn, agent)
-                    assert original is not None and original.id == accepted.command_id
-                    assert original.generation == target.generation
-                    assert await settle_superseded_intent(conn, original)
+            async with async_write_transaction(aops_pool) as conn:
+                original = await accept_lifecycle_intent(conn, agent, incarnation=successor)
+                assert original is not None and original.id == accepted.command_id
+                assert original.generation == target.generation
+                assert await settle_superseded_intent(conn, original)
             progress = await asyncio.to_thread(
                 native_restart_progress, pool, agent, accepted.command_id
             )

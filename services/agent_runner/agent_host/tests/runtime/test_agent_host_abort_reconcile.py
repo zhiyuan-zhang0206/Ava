@@ -21,25 +21,28 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.config import settings
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import (
-    HostedTurnResources,
-    bind_hosted_resources,
-    current_turn_incarnation,
-)
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import settlement as settlement_mod
 
 
 class _ReconcileSpy:
-    """Records each pass, the incarnation bound around it, and fails on demand."""
+    """Records each pass, the explicit original incarnation, and fails on demand."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[object, object, int]] = []
         self.bound: list[RuntimeIncarnation | None] = []
         self.fail_with: BaseException | None = None
 
-    async def __call__(self, pool: object, checkpointer: object, agent_id: int) -> None:
+    async def __call__(
+        self,
+        pool: object,
+        checkpointer: object,
+        agent_id: int,
+        *,
+        incarnation: RuntimeIncarnation | None,
+    ) -> None:
         self.calls.append((pool, checkpointer, agent_id))
-        self.bound.append(current_turn_incarnation())
+        self.bound.append(incarnation)
         if self.fail_with is not None:
             raise self.fail_with
 
@@ -55,12 +58,15 @@ def _incarnation(agent_id: int = 42) -> RuntimeIncarnation:
     return RuntimeIncarnation(agent_id, uuid4(), uuid4())
 
 
-async def _run_pass(incarnation: RuntimeIncarnation) -> None:
+async def _run_pass(
+    incarnation: RuntimeIncarnation, *, resources: HostedTurnResources | None = None
+) -> None:
     """Invoke the pass with sentinel handles — only the patched spy sees them."""
     await settlement_mod.reconcile_inbounds_after_abort(
         cast(AsyncConnectionPool[Any], object()),
         cast(AsyncPostgresSaver, object()),
         incarnation,
+        resources=resources,
     )
 
 
@@ -98,8 +104,7 @@ async def test_unresolved_turn_resources_skip(
     discharge them, and the boot reconcile stays the fallback."""
     resources = HostedTurnResources()
     resources.unresolved[Path("hosted-resource/still-held")] = None
-    with bind_hosted_resources(resources):
-        await _run_pass(_incarnation())
+    await _run_pass(_incarnation(), resources=resources)
     assert reconcile_spy.calls == []
     assert [r["extra"]["reason"] for r in _skips(loguru_records)] == ["resources_unsettled"]
 

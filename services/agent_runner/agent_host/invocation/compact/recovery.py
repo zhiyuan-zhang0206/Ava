@@ -14,7 +14,7 @@ from base.agents.history.checkpoint import latest_checkpoint_id_in_transaction
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.invocation.compact.completion import close_terminal
@@ -66,20 +66,18 @@ async def settle_quiescent(
     async with async_write_transaction(pool) as conn:
         await require_receiver(conn, command, incarnation)
     if terminal:
-        with bind_hosted_resources(resources):
-            await close_terminal(pool, saver, graph, incarnation, command)
+        await close_terminal(pool, saver, graph, incarnation, command, resources=resources)
         return
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
-    with bind_hosted_resources(resources):
-        if (command.execution.generation, command.execution.owner) == (
-            incarnation.generation,
-            incarnation.owner,
-        ):
-            await settle_native_invocation(
-                pool, saver, graph, incarnation, command.execution, config
-            )
-        else:
-            await recover_native_cancel(pool, saver, graph, incarnation)
+    if (command.execution.generation, command.execution.owner) == (
+        incarnation.generation,
+        incarnation.owner,
+    ):
+        await settle_native_invocation(
+            pool, saver, graph, incarnation, command.execution, config, resources=resources
+        )
+    else:
+        await recover_native_cancel(pool, saver, graph, incarnation, resources=resources)
     checkpoint_id = await _pause_original(saver, graph, command, config)
     async with async_write_transaction(pool) as conn:
         await require_receiver(conn, command, incarnation)

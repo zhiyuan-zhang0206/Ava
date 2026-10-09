@@ -17,7 +17,6 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
@@ -47,18 +46,18 @@ def test_declares_the_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(None)
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert exec_timeout_note(_context(None)) is None
+    assert exec_timeout_note(context) is None
 
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """The explicit host context works without binding the shared SDK."""
+    context = _context(29)
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-
-    with bind_turn_identity(97):
-        note = exec_timeout_note(_context(29))
+    note = exec_timeout_note(context)
 
     assert note is not None
     assert "hard wall-clock timeout" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

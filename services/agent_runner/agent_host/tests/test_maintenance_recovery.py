@@ -1,6 +1,7 @@
 """Real durable restart ownership, journal failure and parked-intent preservation."""
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -32,7 +33,8 @@ from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from tests.factories.maintenance import WHEN, maintenance_agent, start_cluster_through_ready_gate
@@ -56,7 +58,12 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         db=Database.from_settings(),
     )
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), old._owner, expected_from="idling", db=database
+        aops_pool,
+        agent,
+        machine_name(),
+        old._owner,
+        expected_from="idling",
+        db=database,
     )
     assert incarnation is not None
     pause_owner.begin_maintenance("owner", WHEN)
@@ -67,10 +74,14 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         holder="owner",
         acquired_at=WHEN,
     )
-    with bind_turn_identity(agent, incarnation=incarnation):
-        batch = await claim_inbound_batch(aops_pool, agent, lifecycle_only=True)
-        assert [item.id for item in batch] == [hold.commands[agent]]
-        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) == "restart"
+    batch = await claim_inbound_batch(
+        aops_pool, agent, lifecycle_only=True, incarnation=incarnation, work=None
+    )
+    assert [item.id for item in batch] == [hold.commands[agent]]
+    assert (
+        await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=None)
+        == "restart"
+    )
     successor = AgentHost(
         pool=aops_pool,
         checkpointer=MagicMock(),
@@ -249,8 +260,17 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
     )
 
-    async def drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
-        return await successor._invoke_until_done(_agent, ctx)
+    async def drive(
+        _agent: int,
+        _runtime: Any,
+        _slices: object,
+        *,
+        incarnation: RuntimeIncarnation,
+        resources: HostedTurnResources | None,
+    ) -> TurnOutcome:
+        return await successor._invoke_until_done(
+            _agent, replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
+        )
 
     monkeypatch.setattr(successor, "_drive_turns", drive)
     await successor.run_turn(agent)
@@ -280,7 +300,12 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
         db=Database.from_settings(),
     )
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), host._owner, expected_from="idling", db=database
+        aops_pool,
+        agent,
+        machine_name(),
+        host._owner,
+        expected_from="idling",
+        db=database,
     )
     assert incarnation is not None
     pause_owner.begin_maintenance("commit-gap", WHEN)
@@ -300,10 +325,14 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
             holder="commit-gap",
             acquired_at=WHEN,
         )
-    with bind_turn_identity(agent, incarnation=incarnation):
-        batch = await claim_inbound_batch(aops_pool, agent, lifecycle_only=True)
-        assert len(batch) == 1
-        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) == "restart"
+    batch = await claim_inbound_batch(
+        aops_pool, agent, lifecycle_only=True, incarnation=incarnation, work=None
+    )
+    assert len(batch) == 1
+    assert (
+        await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=None)
+        == "restart"
+    )
     monkeypatch.setattr(pause_owner, "change_maintenance", original)
     hold = cohort.prepare(
         db_conn,
@@ -408,8 +437,17 @@ def _host_driving_invoke_until_done(
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
 
-    async def drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
-        return await host._invoke_until_done(_agent, ctx)
+    async def drive(
+        _agent: int,
+        _runtime: Any,
+        _slices: object,
+        *,
+        incarnation: RuntimeIncarnation,
+        resources: HostedTurnResources | None,
+    ) -> TurnOutcome:
+        return await host._invoke_until_done(
+            _agent, replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
+        )
 
     monkeypatch.setattr(host, "_drive_turns", drive)
     return host

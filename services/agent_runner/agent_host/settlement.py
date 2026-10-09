@@ -18,6 +18,8 @@ Split into its own module to keep `host.py` inside the file-size ceiling.
 
 from __future__ import annotations
 
+import asyncio
+
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
@@ -30,7 +32,10 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity, hosted_resources_settled
+from base.native_process.turn_identity import (
+    HostedTurnResources,
+    hosted_resources_settled,
+)
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 from services.agent_runner.agent_host.runtime import TurnOutcome
@@ -51,6 +56,8 @@ async def close_hosted_turn(
     checkpointer: AsyncPostgresSaver,
     incarnation: RuntimeIncarnation,
     outcome: TurnOutcome,
+    *,
+    resources: HostedTurnResources | None,
 ) -> None:
     """Settle the finished turn, dispose its claimed rows (the abort pass, or
     a finished turn's own pass), then prompt-reap a corpse that re-crashed
@@ -60,15 +67,20 @@ async def close_hosted_turn(
     (its lease fence), and the reap terminates that incarnation — so the reap
     runs last, after them."""
     settlement = await settle_and_stamp_turn(
-        control_pool, incarnation, bus=bus, exited=outcome.exited, crashed=outcome.crashed
+        control_pool,
+        incarnation,
+        bus=bus,
+        exited=outcome.exited,
+        crashed=outcome.crashed,
+        resources=resources,
     )
     if outcome.aborted:
-        await reconcile_inbounds_after_abort(pool, checkpointer, incarnation)
+        await reconcile_inbounds_after_abort(pool, checkpointer, incarnation, resources=resources)
     elif not outcome.crashed and not outcome.truncated and not outcome.native_held:
         # A truncated turn (an applied force terminate of its incarnation)
         # skips the pass too: the successor boundary that observes the force
         # owns its claimed rows.
-        await reconcile_inbounds_after_turn(pool, checkpointer, incarnation)
+        await reconcile_inbounds_after_turn(pool, checkpointer, incarnation, resources=resources)
     if outcome.crashed:
         await prompt_reap_after_recrash(control_pool, db, bus, incarnation, settlement)
 
@@ -135,6 +147,8 @@ async def reconcile_inbounds_after_abort(
     pool: AsyncConnectionPool,
     checkpointer: AsyncPostgresSaver,
     incarnation: RuntimeIncarnation,
+    *,
+    resources: HostedTurnResources | None,
 ) -> None:
     """Dispose the aborted turn's claimed inbounds at its settlement point.
 
@@ -153,8 +167,8 @@ async def reconcile_inbounds_after_abort(
     `settle_turn_failure` before `aborted` was returned), a fully discharged
     turn (`hosted_resources_settled`), and a live lease for this exact
     incarnation — the inbound owner lock fences on it, so a replacement already
-    in place makes the pass a no-op. The settle boundary runs outside the
-    turn's bind window, so re-establish the same incarnation around the call.
+    in place makes the pass a no-op. The settle boundary retains the same
+    explicit original incarnation and resource scope through the call.
     """
     agent_id = incarnation.agent_id
     if not settings.daemon.host_abort_reconcile_enabled:
@@ -165,7 +179,7 @@ async def reconcile_inbounds_after_abort(
             reason="disabled",
         )
         return
-    if not hosted_resources_settled():
+    if not hosted_resources_settled(resources):
         logger.warning(
             "host abort reconcile skipped: turn resources unresolved — "
             "the next cold admission disposes the claimed rows",
@@ -176,8 +190,9 @@ async def reconcile_inbounds_after_abort(
         return
     try:
         async with database_phase():
-            with bind_turn_identity(agent_id, incarnation=incarnation):
-                await reconcile_claimed_inbounds_at_startup(pool, checkpointer, agent_id)
+            await reconcile_claimed_inbounds_at_startup(
+                pool, checkpointer, agent_id, incarnation=incarnation
+            )
     except RuntimeOwnershipLostError:
         logger.warning(
             "host abort reconcile skipped: runtime ownership already replaced — "
@@ -198,6 +213,8 @@ async def reconcile_inbounds_after_turn(
     pool: AsyncConnectionPool,
     checkpointer: AsyncPostgresSaver,
     incarnation: RuntimeIncarnation,
+    *,
+    resources: HostedTurnResources | None,
 ) -> None:
     """Dispose the finished turn's claimed inbounds at its settlement point.
 
@@ -218,8 +235,8 @@ async def reconcile_inbounds_after_turn(
     `pending` for re-delivery, the same at-least-once call a cold admission
     would make. Fail-closed: any gap skips the pass and leaves the rows to
     the next cold admission, which retries the reconcile. The settle boundary
-    runs outside the turn's bind window, so re-establish the same incarnation
-    (the inbound owner lock fences on that lease) around the call.
+    passes the same original incarnation to the reconcile (the inbound owner
+    lock fences on that lease).
     """
     agent_id = incarnation.agent_id
     if not settings.daemon.host_turn_reconcile_enabled:
@@ -230,7 +247,7 @@ async def reconcile_inbounds_after_turn(
             reason="disabled",
         )
         return
-    if not hosted_resources_settled():
+    if not hosted_resources_settled(resources):
         # Expected fail-closed path (the event declares tier="noise"): the
         # claimed rows wait for the next cold admission, so this is INFO, not
         # a WARNING-level anomaly (2026-10-03 triage).
@@ -244,8 +261,9 @@ async def reconcile_inbounds_after_turn(
         return
     try:
         async with database_phase():
-            with bind_turn_identity(agent_id, incarnation=incarnation):
-                await reconcile_claimed_inbounds_at_startup(pool, checkpointer, agent_id)
+            await reconcile_claimed_inbounds_at_startup(
+                pool, checkpointer, agent_id, incarnation=incarnation
+            )
     except RuntimeOwnershipLostError:
         # Expected fail-closed path (the event declares tier="noise"): the
         # replacement runtime disposes the rows, so this is INFO, not a
@@ -263,3 +281,26 @@ async def reconcile_inbounds_after_turn(
             event="host_turn_reconcile_failed",
             agent_id=agent_id,
         )
+
+
+async def wait_shielded_task[T](task: asyncio.Task[T]) -> bool:
+    """Retain task custody through repeated caller cancellation; inspect its result at the root."""
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    return cancelled
+
+
+async def wait_retained_resources(resources: HostedTurnResources) -> bool:
+    """Keep exact unresolved domains until their existing completion owners discharge them."""
+    cancelled = False
+    while resources.unresolved:
+        resources.changed.clear()
+        try:
+            await resources.changed.wait()
+        except asyncio.CancelledError:
+            cancelled = True
+    return cancelled
