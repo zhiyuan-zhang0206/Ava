@@ -162,3 +162,62 @@ def test_import_removal_failure_leaves_same_value_retry(
     assert env.read_text() == "AVA_TASK_ESCALATE_N=9\n"
     assert import_legacy_config(owner(image)) is True
     assert "AVA_TASK_ESCALATE_N" not in env.read_text()
+
+
+def test_legacy_import_reconciles_old_schema_before_adopting_nondefault_values(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "config.json"
+    image.write_text('{"agent_standing_directives": []}\n')
+    env = runtime_config.env_file_path()
+    env.write_text("AVA_TASK_MAINTENANCE_ENABLED=false\nAVA_TASK_ESCALATE_N=9\nOTHER=preserved\n")
+
+    assert import_legacy_config(owner(image)) is True
+    adopted = read_authority_config("ava_fleet", FleetConfig, image)
+    assert adopted == FleetConfig(task_maintenance_enabled=False, task_escalate_n=9)
+    assert env.read_text() == "OTHER=preserved\n"
+    saved = image.read_bytes()
+    assert import_legacy_config(owner(image)) is False
+    assert image.read_bytes() == saved
+
+
+@pytest.mark.parametrize("stored", [7, "invalid"])
+def test_drifted_image_rejects_explicit_conflict_or_invalid_value_before_writing(
+    tmp_path: Path, stored: int | str
+) -> None:
+    image = tmp_path / "config.json"
+    image.write_text(json.dumps({"task_escalate_n": stored, "retired": "preserve on failure"}))
+    env = runtime_config.env_file_path()
+    env.write_text("AVA_TASK_ESCALATE_N=9\nOTHER=preserved\n")
+    image_before, env_before = image.read_bytes(), env.read_bytes()
+
+    error = ValueError if isinstance(stored, int) else InvalidConfigData
+    with pytest.raises(error):
+        import_legacy_config(owner(image))
+    assert image.read_bytes() == image_before
+    assert env.read_bytes() == env_before
+
+
+def test_drifted_image_import_removal_failure_keeps_nondefault_same_value_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from base.host.env import dotenv_file
+
+    image = tmp_path / "config.json"
+    image.write_text('{"agent_standing_directives": []}\n')
+    env = runtime_config.env_file_path()
+    env.write_text("AVA_TASK_MAINTENANCE_ENABLED=false\nOTHER=preserved\n")
+    before = env.read_bytes()
+
+    def fail_removal(*_args: object, **_kwargs: object) -> None:
+        raise OSError("remove failed")
+
+    with monkeypatch.context() as interception:
+        interception.setattr(dotenv_file, "remove_env", fail_removal)
+        with pytest.raises(OSError, match="remove failed"):
+            import_legacy_config(owner(image))
+    assert json.loads(image.read_text())["task_maintenance_enabled"] is False
+    assert env.read_bytes() == before
+    assert import_legacy_config(owner(image)) is True
+    assert env.read_text() == "OTHER=preserved\n"
+    assert import_legacy_config(owner(image)) is False
