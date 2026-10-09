@@ -274,6 +274,6 @@ def test_native_launch_ack_loss_recovers_same_attempt(
     assert retry.status_code == 201, retry.text
     assert len(calls) == 2
     assert all(call.launch_attempt_id == snapshot[2] for call in calls)
-    assert all(call.agent_id == retry.json()["id"] and call.prompt is None for call in calls)
+    assert all(call.agent_id == retry.json()["id"] for call in calls)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
     assert _snapshot(db_conn) == snapshot

@@ -62,7 +62,7 @@ def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
         assert repaired.status_code == 200
         assert repaired.json()["id"] == agent_id
         assert attempts[0].launch_attempt_id != attempts[1].launch_attempt_id
-        assert attempts[1].prompt is None
+        assert "prompt" not in attempts[1].model_dump()
         assert _inbound_rows(db_conn, agent_id) == [("Do the task", "chat", "user")]
         assert (
             client.get(f"/api/agents/{agent_id}").json()["availability"]["reason"]
