@@ -290,7 +290,9 @@ class TestTimelineDispatch:
         # Simulate the state.messages after the graph ran two rounds — msg_idx corresponds
         # one-to-one with enumeration position
         messages = [
-            inbound_message(content="envelope:msg 1", source="user", inbound_id=1),  # 0
+            inbound_message(
+                content="envelope:msg 1", source="user", inbound_id=1, body_start=0
+            ),  # 0
             AIMessage(  # 1
                 content=[
                     {"type": "thinking", "thinking": "thinking 1", "index": 0},
@@ -312,7 +314,9 @@ class TestTimelineDispatch:
                 tool_call_id="call_1",
                 additional_kwargs={"ava_msg_type": "exec_output"},
             ),
-            inbound_message(content="envelope:msg 2", source="user", inbound_id=2),  # 3
+            inbound_message(
+                content="envelope:msg 2", source="user", inbound_id=2, body_start=0
+            ),  # 3
             AIMessage(  # 4
                 content=[
                     {"type": "thinking", "thinking": "thinking 2", "index": 0},
@@ -386,7 +390,7 @@ class TestTimelineDispatch:
         db_conn.commit()
 
         messages = [
-            inbound_message(content="before", source="user", inbound_id=1),  # 0
+            inbound_message(content="before", source="user", inbound_id=1, body_start=0),  # 0
             system_note_message(  # 1 — system_note branch (lifecycle tag)
                 content="[system] You have been restarted",
                 tag=NoteTag.LIFECYCLE_RESTART,
@@ -434,7 +438,7 @@ class TestTimelineDispatch:
 
         messages = [
             SystemMessage(content="You are Ava."),  # 0
-            inbound_message(content="envelope:hi", source="user", inbound_id=1),  # 1
+            inbound_message(content="envelope:hi", source="user", inbound_id=1, body_start=0),  # 1
             AIMessage(content="hello back"),  # 2
         ]
         self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
