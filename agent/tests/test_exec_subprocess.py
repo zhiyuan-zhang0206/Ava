@@ -91,6 +91,7 @@ async def _run(
             chunk_publisher,
             state=state,
             exec_dir=tmp_path / "exec",
+            accumulation_max_chars=1_000_000,
         )
         return result
     finally:
@@ -407,6 +408,7 @@ async def test_outer_task_cancel_reaps_child_and_descendant(
             asyncio.Event(),
             60.0,
             exec_dir=tmp_path / "exec",
+            accumulation_max_chars=1_000_000,
         )
     )
     pids: list[int] = []

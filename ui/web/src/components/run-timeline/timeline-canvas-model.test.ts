@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RunTimelineNode, RunTimelineRequest, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineMessageBar, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
   aggregateColumns,
@@ -13,8 +13,8 @@ import {
   snap,
   type Place,
 } from "./timeline-canvas-model";
-import { buildAxisMap } from "./timeline-model";
-import { INPUT_ROW, UNITS_ROW } from "./timeline-nav";
+import { timeAxis } from "./timeline-model";
+import { ADDED_ROW, INPUT_ROW, UNITS_ROW } from "./timeline-nav";
 
 const place = (key: string, x0: number, x1: number, weight = 0): Place => ({ key, x0, x1, weight });
 
@@ -96,28 +96,68 @@ describe("row layouts", () => {
     id, level: 1, parent: null, start: iso(from), end: iso(to), span_start: 0, span_end: 1, summary: id,
     usage: { calls: 0, input: 0, cache_read: 0, output: 0, cache_write: 0, cost_usd: 0, cost_calls: 0 }, generation: null, context_tokens: null, estimated: null,
   });
-  const request = (idx: number, tokens: number, from: number): RunTimelineRequest => ({
-    idx, ts: iso(idx), session: 0, input_tokens: tokens, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: from, added_to: idx,
+  const message = (idx: number, from: number, to: number, own: number, total: number): RunTimelineMessageBar => ({
+    idx, start: iso(from), end: iso(to), session: 0, context_tokens: own, estimated: false, context_total: total, request: null,
   });
-  const data = { nodes: [node("a", 0, 100)], units: [unit(0, 0, 50), unit(1, 50, 100)], requests: [request(1, 10, 0), request(2, 30, 1)] };
+  const data = {
+    nodes: [node("a", 0, 100)],
+    units: [unit(0, 0, 50), unit(1, 50, 100)],
+    messages: [message(0, 0, 50, 4, 10), message(1, 50, 100, 16, 30)],
+  };
   const whole = { from: T, to: T + 100_000 };
-  const axis = buildAxisMap(data.units, whole, "time");
+  const axis = timeAxis(whole);
 
   it("keys items by what they select, and looks them up from the layout", () => {
     const layout = blockLayout(UNITS_ROW, data, axis, axis.viewU(whole), 1000);
     expect(layout.wide.map((p) => p.key)).toEqual(["utext-0-0", "utext-1-1"]);
     expect(layout.items.get("utext-1-1")?.selection).toEqual({ kind: "unit", i0: 1, i1: 1, unitKind: "text" });
     expect(selectionKey({ kind: "node", id: "a" })).toBe("na");
-    // A bar's frame hugs the box it is drawn in (the span less its gaps), not the message range it covers.
-    const bars = barLayout(INPUT_ROW, data, axis, axis.viewU(whole), 1000);
-    const bar = bars.wide.find((p) => p.key === "r1");
-    expect(bars.boxes.get("r1")).toEqual({ x0: bar?.x0, x1: bar?.x1 });
-    expect(selectionKey({ kind: "request", idx: 4 })).toBe("r4");
+    expect(selectionKey({ kind: "message", idx: 4 })).toBe("m4");
   });
 
-  it("lays bars out with their values, the taller standing for a crowded column", () => {
-    const layout = barLayout(INPUT_ROW, data, axis, axis.viewU(whole), 1000);
-    expect(layout.values?.get("r2")).toBe(30);
+  it("puts a message's bars exactly under the block that shows it, in both context rows", () => {
+    const view = axis.viewU(whole);
+    const units = blockLayout(UNITS_ROW, data, axis, view, 1000);
+    for (const row of [INPUT_ROW, ADDED_ROW]) {
+      const bars = barLayout(row, data, axis, view, 1000);
+      expect(bars.wide.map((p) => [p.x0, p.x1])).toEqual(units.wide.map((p) => [p.x0, p.x1]));
+      // A bar's frame hugs the box it is drawn in.
+      const bar = bars.wide.find((p) => p.key === "m1");
+      expect(bars.boxes.get("m1")).toEqual({ x0: bar?.x0, x1: bar?.x1 });
+    }
+  });
+
+  it("gives an instant message the minimum width at its time, in every row alike", () => {
+    const instant = { ...data, units: [unit(0, 20, 20)], messages: [message(0, 20, 20, 1, 1)] };
+    const view = axis.viewU(whole);
+    for (const row of [UNITS_ROW, INPUT_ROW, ADDED_ROW]) {
+      const layout = row === UNITS_ROW ? blockLayout(row, instant, axis, view, 1000) : barLayout(row, instant, axis, view, 1000);
+      // 20 s of 100 s on 1000 px: starts at 200 and is MIN_ITEM_PX wide (a narrow item: one painted run of columns).
+      const key = row === UNITS_ROW ? "utext-0-0" : "m0";
+      expect(layout.boxes.get(key)).toEqual({ x0: 200, x1: 203 });
+      expect(layout.cells).toEqual([{ x0: 200, x1: 203, key }]);
+    }
+  });
+
+  it("lets neighbouring instants inside one pixel column share it: one painted item, the heavier bar", () => {
+    const close = {
+      ...data,
+      units: [unit(0, 20, 20), unit(1, 20.1, 20.1)],
+      messages: [message(0, 20, 20, 1, 5), message(1, 20.1, 20.1, 1, 50)],
+    };
+    const view = axis.viewU(whole);
+    const units = blockLayout(UNITS_ROW, close, axis, view, 1000);
+    // Both blocks are drawn from their own times, overlapping, and each column is painted once.
+    expect(units.boxes.get("utext-1-1")?.x0).toBeCloseTo(201);
+    const columns = units.cells.flatMap((c) => Array.from({ length: c.x1 - c.x0 }, (_, i) => c.x0 + i));
+    expect(new Set(columns).size).toBe(columns.length);
+    const bars = barLayout(INPUT_ROW, close, axis, view, 1000);
+    expect(bars.cells.find((c) => c.x0 <= 201 && 201 < c.x1)?.key).toBe("m1");
+  });
+
+  it("lays bars out with their values: the context through the message, or its own weight by square root", () => {
+    expect(barLayout(INPUT_ROW, data, axis, axis.viewU(whole), 1000).values?.get("m1")).toBe(30);
+    expect(barLayout(ADDED_ROW, data, axis, axis.viewU(whole), 1000).values?.get("m1")).toBe(4);
     const crowded = barLayout(INPUT_ROW, data, axis, axis.viewU(whole), 3);
     expect(crowded.wide).toEqual([]);
     expect(crowded.cells.length).toBeGreaterThan(0);
@@ -125,24 +165,18 @@ describe("row layouts", () => {
 });
 
 describe("frameOf", () => {
-  it("hugs the union of the drawn boxes exactly when no minimum is asked for", () => {
-    expect(frameOf([{ x0: 10, x1: 14 }, { x0: 30, x1: 33 }], 0, 1000)).toEqual({ left: 10, width: 23 });
-    // A bar 3 px wide is framed at 3 px, not widened to the 6 px minimum of the other rows.
-    expect(frameOf([{ x0: 100, x1: 103 }], 0, 1000)).toEqual({ left: 100, width: 3 });
-  });
-
-  it("widens a thin item to the minimum around its middle and keeps the frame on the track", () => {
-    expect(frameOf([{ x0: 100, x1: 100.5 }], 6, 1000)).toEqual({ left: 97.25, width: 6 });
-    expect(frameOf([{ x0: 0, x1: 1 }], 6, 1000)?.left).toBe(0);
-    expect(frameOf([{ x0: 999, x1: 1000 }], 6, 1000)).toEqual({ left: 994, width: 6 });
-    expect(frameOf([], 6, 1000)).toBeNull();
+  it("hugs the union of the drawn boxes exactly", () => {
+    expect(frameOf([{ x0: 10, x1: 14 }, { x0: 30, x1: 33 }], 1000)).toEqual({ left: 10, width: 23 });
+    // A bar 3 px wide is framed at 3 px, never widened.
+    expect(frameOf([{ x0: 100, x1: 103 }], 1000)).toEqual({ left: 100, width: 3 });
+    expect(frameOf([], 1000)).toBeNull();
   });
 
   it("frames only the visible part of an item running past an edge, and nothing for one off the track", () => {
     // A bar from -26 to 141 is framed from 0 to 141, not shifted right to keep its full width.
-    expect(frameOf([{ x0: -26, x1: 141 }], 0, 860)).toEqual({ left: 0, width: 141 });
-    expect(frameOf([{ x0: 800, x1: 900 }], 0, 860)).toEqual({ left: 800, width: 60 });
-    expect(frameOf([{ x0: -40, x1: -10 }], 0, 860)).toBeNull();
-    expect(frameOf([{ x0: 900, x1: 950 }], 0, 860)).toBeNull();
+    expect(frameOf([{ x0: -26, x1: 141 }], 860)).toEqual({ left: 0, width: 141 });
+    expect(frameOf([{ x0: 800, x1: 900 }], 860)).toEqual({ left: 800, width: 60 });
+    expect(frameOf([{ x0: -40, x1: -10 }], 860)).toBeNull();
+    expect(frameOf([{ x0: 900, x1: 950 }], 860)).toBeNull();
   });
 });

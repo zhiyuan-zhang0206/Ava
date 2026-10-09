@@ -54,7 +54,7 @@
     "okf-graph": "OKF 图谱",
     "status": "状态",
     "ops": "Ops",
-    "run-timeline": "运行时间线",
+    "run-timeline": "Agent 视图",
     "language": "语言",
     "status-services": "服务",
     "status-gateway": "网关",

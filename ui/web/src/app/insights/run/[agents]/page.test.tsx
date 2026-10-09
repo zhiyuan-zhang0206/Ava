@@ -152,9 +152,12 @@ const lifetimeResponse: RunTimelineResponse = {
     },
   ],
   events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
-  requests: [
-    { idx: 2, ts: "2026-10-04T12:04:00.000000Z", session: 0, input_tokens: 1000, output_tokens: 50, added_tokens: 900, added_estimated: false, added_from: 0, added_to: 2 },
-    { idx: 7, ts: "2026-10-04T14:00:00.000000Z", session: 1, input_tokens: 400, output_tokens: 20, added_tokens: 380, added_estimated: true, added_from: 3, added_to: 7 },
+  // Messages 2 and 7 are LLM requests (7 in the second session, after a compaction); 3 is the tool result of 2.
+  messages: [
+    { idx: 1, start: "2026-10-04T12:00:00.123456Z", end: "2026-10-04T12:00:00.123456Z", session: 0, context_tokens: 100, estimated: true, context_total: 800, request: null },
+    { idx: 2, start: "2026-10-04T12:05:00.000000Z", end: "2026-10-04T12:05:00.000000Z", session: 0, context_tokens: 50, estimated: false, context_total: 1050, request: { calls: 1, input: 1000, cache_read: 400, output: 50, cache_write: 0, cost_usd: 0.0021, cost_calls: 1 } },
+    { idx: 3, start: "2026-10-04T12:05:00.000000Z", end: "2026-10-04T12:06:00.000000Z", session: 0, context_tokens: 300, estimated: false, context_total: 1350, request: null },
+    { idx: 7, start: "2026-10-04T14:00:00.000000Z", end: "2026-10-04T14:00:00.000000Z", session: 1, context_tokens: 20, estimated: true, context_total: 420, request: { calls: 1, input: 400, cache_read: 0, output: 20, cache_write: 0, cost_usd: 0, cost_calls: 0 } },
   ],
 };
 
@@ -191,7 +194,7 @@ function render() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return rtlRender(
     <QueryClientProvider client={queryClient}>
-      <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
+      <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
     </QueryClientProvider>,
   );
 }
@@ -243,7 +246,8 @@ beforeEach(() => {
   getContextBreakdown.mockResolvedValue(cbdFixture);
   getRunTimelineContext.mockReset();
   getRunTimelineContext.mockImplementation((_agent, at) => {
-    const request = lifetimeResponse.requests.find((candidate) => candidate.idx >= at) ?? lifetimeResponse.requests[1];
+    const requests = lifetimeResponse.messages.filter((candidate) => candidate.request !== null);
+    const request = requests.find((candidate) => candidate.idx >= at) ?? requests[1];
     return Promise.resolve({
       ...cbdFixture,
       categories: [
@@ -254,7 +258,7 @@ beforeEach(() => {
       request: request.idx,
       session: request.session,
       sessions: 2,
-      ts: request.ts,
+      ts: request.start,
     });
   });
 });
@@ -282,7 +286,6 @@ describe("the default window", () => {
       "run-timeline-row-level-2",
       "run-timeline-row-level-1",
       "run-timeline-row-units",
-      "run-timeline-row-context",
       "run-timeline-row-added",
     ]);
     // The rows are canvases: one per row, no element per node or block.
@@ -350,9 +353,9 @@ describe("selecting", () => {
     expect(within(detail).getAllByText("2.4k").length).toBeGreaterThan(0);
   });
 
-  it("names the agent in the page header with no present-state facts", async () => {
+  it("names the agent above its rows with no present-state facts", async () => {
     render();
-    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Run timeline");
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Agent view");
     await waitFor(() => expect(screen.getByTestId("run-timeline-agent").textContent).toBe("Agent #42 · planner"));
     expect(screen.queryByTestId("run-timeline-status")).toBeNull();
     expect(screen.queryByTestId("run-timeline-model")).toBeNull();
@@ -517,7 +520,7 @@ describe("failure and loading", () => {
   it("offers a retry when the read fails", async () => {
     getRunTimeline.mockRejectedValueOnce(new Error("boom"));
     render();
-    expect(await screen.findByText("Could not load the run timeline.")).toBeTruthy();
+    expect(await screen.findByText("Could not load the timeline of agent 42.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByTestId("run-timeline-chart");
   });
@@ -582,7 +585,6 @@ describe("failure and loading", () => {
       "run-timeline-canvas-level-2",
       "run-timeline-canvas-level-1",
       "run-timeline-canvas-units",
-      "run-timeline-canvas-input",
       "run-timeline-canvas-added",
     ]);
     const legend = screen.getByTestId("run-timeline-legend");
@@ -799,14 +801,14 @@ describe("context breakdown follows the point", () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 7));
-    // Zooming at the left edge leaves only the first request (12:04) in view.
+    // Zooming at the left edge leaves only the first request (12:05) in view.
     wheel(chart, { deltaY: -600, clientX: 100 });
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2));
     vi.restoreAllMocks();
   });
 
   it("says so when the agent has made no request", async () => {
-    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, requests: [] });
+    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, messages: [] });
     render();
     expect((await screen.findByTestId("context-breakdown-empty")).textContent).toContain("no LLM request");
     expect(getRunTimelineContext).not.toHaveBeenCalled();
@@ -814,23 +816,45 @@ describe("context breakdown follows the point", () => {
 });
 
 describe("context size row", () => {
-  it("draws one bar per request, scaled to the largest input, and reads its value on hover", async () => {
+  it("draws one bar per message, as tall as the context through it, and reads its value on hover", async () => {
     render();
     await screen.findByTestId("run-timeline-chart");
+    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "both" } });
     await paintFrame();
-    const bars = drawn("input").filter((d) => d.op === "fill");
-    expect(bars).toHaveLength(2);
-    expect(bars[1].h / bars[0].h).toBeCloseTo(0.4);
+    const key = (row: string, k: string) => ({ row, key: k });
+    const barAt = (k: string) => {
+      const x = xOf(key("input", k));
+      return drawn("input").filter((d) => d.op === "fill" && d.x <= x && x <= d.x + d.w).at(-1);
+    };
+    const first = barAt("m2");
+    const second = barAt("m7");
+    expect(second?.h ?? 0).toBeGreaterThan(0);
+    expect((second?.h ?? 0) / (first?.h ?? 1)).toBeCloseTo(420 / 1050);
     // Session 0 is blue, session 1 amber.
-    expect(bars[0].color).toContain("#3b82f6");
-    expect(bars[1].color).toContain("#f59e0b");
-    pointAt("input", bars[1].x + bars[1].w / 2);
-    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("LLM request · session 2");
-    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("400 input tokens · added 380 (estimated)");
+    expect(first?.color).toContain("#3b82f6");
+    expect(second?.color).toContain("#f59e0b");
+    pointAt("input", xOf(key("input", "m7")));
+    const readout = screen.getByTestId("run-timeline-readout").textContent;
+    expect(readout).toContain("Message 7 · session 2");
+    expect(readout).toContain("20 tokens (estimated) · context through it 420");
   });
 
-  it("has no row for an agent that made no request", async () => {
-    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, requests: [] });
+  it("shows the LLM request of an AIMessage in the details, not on the timeline", async () => {
+    render();
+    await screen.findByTestId("run-timeline-chart");
+    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "both" } });
+    await paintFrame();
+    clickAt("added", xOf({ row: "added", key: "m2" }));
+    const request = await screen.findByTestId("run-timeline-request");
+    expect(request.textContent).toContain("1.0k");
+    expect(request.textContent).toContain("$0.0021");
+    // A message that was no request has no such section.
+    clickAt("added", xOf({ row: "added", key: "m1" }));
+    await waitFor(() => expect(screen.queryByTestId("run-timeline-request")).toBeNull());
+  });
+
+  it("has no context rows for an agent with no weighed message", async () => {
+    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, messages: [] });
     render();
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();

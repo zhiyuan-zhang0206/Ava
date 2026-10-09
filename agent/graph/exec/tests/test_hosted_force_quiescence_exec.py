@@ -26,6 +26,7 @@ async def test_real_missing_executable_is_not_an_unresolved_child(
             asyncio.Event(),
             2,
             exec_dir=tmp_path,
+            accumulation_max_chars=1_000_000,
         )
     assert isinstance(outcome, _ExecCrashed)
     assert "could not be spawned" in outcome.output
