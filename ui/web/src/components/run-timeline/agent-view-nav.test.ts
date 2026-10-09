@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RunTimelineNode, RunTimelineRequest, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineMessageBar, RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import { navigateAcross, type ViewAgent } from "./agent-view-nav";
 import { timeAxis } from "./timeline-model";
@@ -40,26 +40,18 @@ const unit = (i0: number, from: number, to: number, tokens: number | null = null
   estimated: null,
 });
 
-const request: RunTimelineRequest = {
-  idx: 1,
-  ts: at(10),
-  session: 0,
-  input_tokens: 10,
-  output_tokens: 1,
-  added_tokens: 5,
-  added_estimated: false,
-  added_from: 0,
-  added_to: 1,
-};
+const message = (idx: number): RunTimelineMessageBar => ({
+  idx, start: at(0), end: at(10), session: 0, context_tokens: 5, estimated: false, context_total: 10, request: null,
+});
 
 const data = (over: Partial<RunTimelineResponse>) =>
-  ({ nodes: [], units: [], events: [], requests: [], ...over }) as RunTimelineResponse;
+  ({ nodes: [], units: [], events: [], messages: [], ...over }) as RunTimelineResponse;
 
 describe("row options", () => {
   const d = data({
     nodes: [node("a", 1, 0, 100), node("b", 2, 0, 100), node("c", 3, 0, 100)],
     units: [unit(0, 0, 100)],
-    requests: [request],
+    messages: [message(0)],
   });
 
   it("keeps the topmost levels", () => {
@@ -73,7 +65,7 @@ describe("row options", () => {
     expect(navRowIds(d, { levels: 0, context: "both" })[0]).toBe(UNITS_ROW);
   });
 
-  it("draws the context bars asked for, and none for an agent without requests", () => {
+  it("draws the context bars asked for, and none for an agent without weighed messages", () => {
     expect(navRowIds(d, { levels: null, context: "absolute" }).slice(-2)).toEqual([UNITS_ROW, INPUT_ROW]);
     expect(navRowIds(d, { levels: null, context: "added" }).slice(-2)).toEqual([UNITS_ROW, ADDED_ROW]);
     expect(navRowIds(d, { levels: null, context: "off" }).at(-1)).toBe(UNITS_ROW);

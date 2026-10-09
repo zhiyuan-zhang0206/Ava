@@ -5,7 +5,7 @@
 import type {
   RunTimelineMessagePart,
   RunTimelineNode,
-  RunTimelineRequest,
+  RunTimelineMessageBar,
   RunTimelineUnit,
 } from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
@@ -18,12 +18,12 @@ export interface TimelineWindow {
 export type Selection =
   | { kind: "node"; id: string }
   | { kind: "unit"; i0: number; i1: number; unitKind: RunTimelineUnit["kind"] }
-  /** An LLM request: its bar, and every block it read for the first time (`added_from`..`added_to`). */
-  | { kind: "request"; idx: number };
+  /** A message: its bar in the two context rows, and the block(s) that show it in the Messages row. */
+  | { kind: "message"; idx: number };
 
 export function isSelected(selection: Selection | null, candidate: Selection): boolean {
   if (selection?.kind === "node" && candidate.kind === "node") return selection.id === candidate.id;
-  if (selection?.kind === "request" && candidate.kind === "request") return selection.idx === candidate.idx;
+  if (selection?.kind === "message" && candidate.kind === "message") return selection.idx === candidate.idx;
   if (selection?.kind === "unit" && candidate.kind === "unit") {
     return (
       selection.i0 === candidate.i0 &&
@@ -41,15 +41,43 @@ export function unitKey(unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1">): stri
 }
 
 /**
+ * Whether a block shows the message `idx`: a turn block (thinking, text, call) shows its AIMessage;
+ * an output block the messages after the AIMessage that opened it; an inbound or note block its own.
+ */
+export function unitHasMessage(unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1">, idx: number): boolean {
+  if (unit.kind === "output") return unit.i1 > unit.i0 ? idx > unit.i0 && idx <= unit.i1 : idx === unit.i0;
+  if (unit.kind === "inbound" || unit.kind === "note") return idx >= unit.i0 && idx <= unit.i1;
+  return idx === unit.i0;
+}
+
+const TURN_BLOCK_ORDER: readonly RunTimelineUnit["kind"][] = ["thinking", "text", "call"];
+
+/** The blocks that show the message `idx`. */
+export function messageUnits(idx: number, units: readonly RunTimelineUnit[]): RunTimelineUnit[] {
+  return units.filter((unit) => unitHasMessage(unit, idx));
+}
+
+/**
+ * The block the details pane shows for a selected message: its AIMessage's thinking, else its text,
+ * else its call block; for another message the first block that shows it. Null when none does.
+ */
+export function messageSelection(idx: number, units: readonly RunTimelineUnit[]): Selection | null {
+  const own = messageUnits(idx, units);
+  const pick =
+    TURN_BLOCK_ORDER.map((kind) => own.find((unit) => unit.kind === kind)).find((unit) => unit !== undefined) ??
+    own.at(0);
+  return pick === undefined ? null : { kind: "unit", i0: pick.i0, i1: pick.i1, unitKind: pick.kind };
+}
+
+/**
  * The ids of the nodes a selection lights up: the selected node and every ancestor above it, or,
- * for a layer-0 block, the level-1 node covering it and every ancestor above that; for a request, the
- * same for every block it read. The chain stops where a parent is not in `nodes` (outside the loaded window).
+ * for a layer-0 block, the level-1 node covering it and every ancestor above that; for a message, the
+ * same for every block that shows it. The chain stops where a parent is not in `nodes` (outside the loaded window).
  */
 export function chainIds(
   selection: Selection | null,
   nodes: readonly RunTimelineNode[],
   units: readonly RunTimelineUnit[],
-  requests: readonly RunTimelineRequest[] = [],
 ): Set<string> {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const starts: (string | null)[] = [];
@@ -61,9 +89,8 @@ export function chainIds(
           unit.i0 === selection.i0 && unit.i1 === selection.i1 && unit.kind === selection.unitKind,
       )?.parent ?? null,
     );
-  } else if (selection?.kind === "request") {
-    const request = requests.find((candidate) => candidate.idx === selection.idx);
-    if (request !== undefined) starts.push(...requestUnits(request, units).map((unit) => unit.parent));
+  } else if (selection?.kind === "message") {
+    starts.push(...messageUnits(selection.idx, units).map((unit) => unit.parent));
   }
   const chain = new Set<string>();
   for (let next = starts.shift(); next !== undefined; next = starts.shift()) {
@@ -104,34 +131,20 @@ export function spanBox(
   return projectBox(Date.parse(start), Date.parse(end), viewportOf(window));
 }
 
-/** A block narrower than this would vanish; it may grow to it only into free space. */
-export const MIN_BLOCK_PX = 3;
-/** Below this a block has no visible body and is drawn as a thin marker instead. */
-export const MARKER_MIN_BODY_PX = 2;
-/** Width of a marker's visible line and of its (slightly larger) hit area, in pixels. */
-export const MARKER_LINE_PX = 2;
-export const MARKER_HIT_PX = 4;
-/** Markers that sit within this distance of each other are stacked in separate lanes along the row's top. */
-const MARKER_CLUSTER_PX = 3;
-export const MARKER_LANES = 5;
+/** No item is drawn narrower than this, in pixels: an instant (a call point, an inbound message) is as wide as this. */
+export const MIN_ITEM_PX = 3;
 
-export interface RowItem {
-  key: string;
-  start: string;
-  end: string;
-}
+/** An item drawn narrower than this gets no border or rounding: it is a fill, one per pixel column. */
+export const NARROW_DRAW_PX = 4;
 
-/** Where one block of a row is drawn, in pixels from the track's left edge. */
+/** Where one item of a row is drawn, in pixels from the track's left edge. */
 export interface RowPlacement {
   key: string;
   left: number;
   width: number;
-  /** No room for a body: drawn as a thin line at `left` (hit area `MARKER_HIT_PX` wide), in `lane`. */
-  marker: boolean;
-  lane: number;
 }
 
-/** One block of a row as a span of axis coordinates. */
+/** One item of a row as a span of axis coordinates. */
 export interface SpanItem {
   key: string;
   u0: number;
@@ -139,60 +152,26 @@ export interface SpanItem {
 }
 
 /**
- * Lays out one row of blocks on a track `trackPx` wide over an axis-coordinate view. A block's body
- * never reaches the next block's start: the minimum width only fills the free space before the next
- * block, and a block with no room at all becomes a marker (a thin line in its own lane) rather than
- * covering its neighbour.
+ * Lays out one row on a track `trackPx` wide over an axis-coordinate view. An item starts exactly where
+ * its time is; only its drawn width is at least `minPx` (the axis itself stays linear), so items closer
+ * than that overlap, which the row's column merge (`aggregateColumns`) resolves. An item running past an
+ * edge is cut there.
  */
 export function layoutSpans(
   items: readonly SpanItem[],
   view: Viewport,
   trackPx: number,
-  minPx: number = MIN_BLOCK_PX,
+  minPx: number = MIN_ITEM_PX,
 ): RowPlacement[] {
-  const boxes: { key: string; left: number; right: number }[] = [];
+  const placements: RowPlacement[] = [];
   for (const item of items) {
     const box = projectBox(item.u0, item.u1, view);
     if (box === null) continue;
     const left = (box.left / 100) * trackPx;
-    boxes.push({ key: item.key, left, right: left + (box.width / 100) * trackPx });
+    const width = Math.min(Math.max((box.width / 100) * trackPx, minPx), trackPx - left);
+    placements.push({ key: item.key, left, width });
   }
-  boxes.sort((a, b) => a.left - b.left || a.right - b.right);
-  const placements: RowPlacement[] = [];
-  let lastMarker: { left: number; lane: number } | null = null;
-  boxes.forEach((box, i) => {
-    const natural = box.right - box.left;
-    const limit = i + 1 < boxes.length ? boxes[i + 1].left : trackPx;
-    const room = Math.max(0, limit - box.left);
-    const width = Math.min(natural >= minPx ? natural : Math.max(natural, Math.min(minPx, room)), trackPx - box.left);
-    if (width >= MARKER_MIN_BODY_PX) {
-      placements.push({ key: box.key, left: box.left, width, marker: false, lane: 0 });
-      return;
-    }
-    const near = lastMarker !== null && box.left - lastMarker.left < MARKER_CLUSTER_PX;
-    const lane = near && lastMarker !== null ? (lastMarker.lane + 1) % MARKER_LANES : 0;
-    lastMarker = { left: box.left, lane };
-    placements.push({ key: box.key, left: box.left, width: 0, marker: true, lane });
-  });
-  return placements;
-}
-
-/** A block drawn narrower than this gets no border or rounding: it is drawn as a fill, one per pixel column. */
-export const NARROW_DRAW_PX = 4;
-
-/** `layoutSpans` for blocks given by time, over a time window. */
-export function layoutRow(
-  items: readonly RowItem[],
-  window: TimelineWindow,
-  trackPx: number,
-  minPx: number = MIN_BLOCK_PX,
-): RowPlacement[] {
-  return layoutSpans(
-    items.map((item) => ({ key: item.key, u0: Date.parse(item.start), u1: Date.parse(item.end) })),
-    viewportOf(window),
-    trackPx,
-    minPx,
-  );
+  return placements.sort((a, b) => a.left - b.left || a.width - b.width);
 }
 
 export function firstLine(text: string, max: number): string {
@@ -388,15 +367,10 @@ export function hoverLit(
   hover: Hover | null,
   nodes: readonly RunTimelineNode[],
   units: readonly RunTimelineUnit[],
-  requests: readonly RunTimelineRequest[] = [],
 ): { nodeIds: Set<string>; unitKeys: Set<string> } {
   if (hover === null) return { nodeIds: new Set(), unitKeys: new Set() };
-  if (hover.kind === "request") {
-    const request = requests.find((candidate) => candidate.idx === hover.idx);
-    const covered = request === undefined ? [] : requestUnits(request, units);
-    return { nodeIds: chainIds(hover, nodes, units, requests), unitKeys: new Set(covered.map(unitKey)) };
-  }
   const nodeIds = chainIds(hover, nodes, units);
+  if (hover.kind === "message") return { nodeIds, unitKeys: new Set(messageUnits(hover.idx, units).map(unitKey)) };
   const node = hover.kind === "node" ? nodes.find((candidate) => candidate.id === hover.id) : undefined;
   const covered =
     node === undefined ? [] : units.filter((unit) => unit.i0 >= node.span_start && unit.i0 <= node.span_end);
@@ -420,34 +394,35 @@ export function nodeChildren(node: RunTimelineNode, nodes: readonly RunTimelineN
 }
 
 /**
- * The message index the context breakdown follows: a selected block's own request (the first at or
- * after it), a selected node's first; with nothing selected, the last request sent inside the viewport
- * (else the last one before it, else the first). Null when the agent made no request.
+ * The message index the context breakdown follows: a selected message or block's own (the card reads the
+ * request at or after it), a selected node's first; with nothing selected, the last LLM request (an
+ * AIMessage with its usage) sent inside the viewport, else the last one before it, else the first.
+ * Null when the agent made no request.
  */
 export function contextPoint(
   selection: Selection | null,
   nodes: readonly RunTimelineNode[],
-  requests: readonly RunTimelineRequest[],
+  messages: readonly RunTimelineMessageBar[],
   view: Viewport,
 ): number | null {
-  if (selection?.kind === "request") return selection.idx;
+  if (selection?.kind === "message") return selection.idx;
   if (selection?.kind === "unit") return selection.i0;
   if (selection?.kind === "node") return nodes.find((node) => node.id === selection.id)?.span_start ?? null;
-  const sent = requests.map((request) => ({ request, at: Date.parse(request.ts) }));
+  const sent = messages.filter((message) => message.request !== null).map((message) => ({ message, at: Date.parse(message.start) }));
   const inside = sent.filter(({ at }) => at >= view.from && at <= view.to);
   const before = sent.filter(({ at }) => at < view.from);
   const pick = inside.at(-1) ?? before.at(-1) ?? sent.at(0);
-  return pick?.request.idx ?? null;
+  return pick?.message.idx ?? null;
 }
 
-/** The largest newly added context among the requests: what the added-context row scales to. */
-export function maxAdded(requests: readonly RunTimelineRequest[]): number {
-  return requests.reduce((top, request) => Math.max(top, request.added_tokens), 0);
+/** The largest context total among the messages: what the Context size row scales to. */
+export function maxContextTotal(messages: readonly RunTimelineMessageBar[]): number {
+  return messages.reduce((top, message) => Math.max(top, message.context_total), 0);
 }
 
-/** The largest input size among the requests: what the context-size row scales to. */
-export function maxInput(requests: readonly RunTimelineRequest[]): number {
-  return requests.reduce((top, request) => Math.max(top, request.input_tokens), 0);
+/** The largest single message among the messages: what the Added context row scales to. */
+export function maxContextTokens(messages: readonly RunTimelineMessageBar[]): number {
+  return messages.reduce((top, message) => Math.max(top, message.context_tokens), 0);
 }
 
 /** Where one block sits in axis coordinates. */
@@ -517,95 +492,8 @@ export function axisBox(
   return projectBox(axis.toU(Date.parse(start)), axis.toU(Date.parse(end)), viewU);
 }
 
-/** A request bar is never thinner than this, and keeps this gap to each side of the blocks it spans, in pixels. */
-export const BAR_MIN_PX = 2;
-export const BAR_GAP_PX = 1;
-
-/** Whether a request first read the block: the block starts inside its added message range. */
-export function requestCovers(request: Pick<RunTimelineRequest, "added_from" | "added_to">, unit: Pick<RunTimelineUnit, "i0">): boolean {
-  return request.added_from <= unit.i0 && unit.i0 < request.added_to;
-}
-
-const byFirstMessage = new WeakMap<readonly RunTimelineUnit[], RunTimelineUnit[]>();
-
-/** The blocks a request read for the first time, in message order (found by binary search over the blocks sorted once per data). */
-export function requestUnits(request: Pick<RunTimelineRequest, "added_from" | "added_to">, units: readonly RunTimelineUnit[]): RunTimelineUnit[] {
-  let sorted = byFirstMessage.get(units);
-  if (sorted === undefined) {
-    sorted = [...units].sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
-    byFirstMessage.set(units, sorted);
-  }
-  let lo = 0;
-  let hi = sorted.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (sorted[mid].i0 < request.added_from) lo = mid + 1;
-    else hi = mid;
-  }
-  const out: RunTimelineUnit[] = [];
-  for (let i = lo; i < sorted.length && sorted[i].i0 < request.added_to; i += 1) out.push(sorted[i]);
-  return out;
-}
-
-/** The request that first read a block, if it is among `requests`. */
-export function requestReading(unit: Pick<RunTimelineUnit, "i0">, requests: readonly RunTimelineRequest[]): RunTimelineRequest | undefined {
-  return requests.find((request) => requestCovers(request, unit));
-}
-
-/**
- * Where a request's bar sits in axis coordinates: from the start of the first block it read to the end of
- * the last, on either axis. A request with no block of its own in the data sits at its send time.
- */
-export function requestSpan(
-  request: RunTimelineRequest,
-  units: readonly RunTimelineUnit[],
-  axis: Pick<AxisMap, "toU" | "unitSpan">,
-  covered: readonly RunTimelineUnit[] = requestUnits(request, units),
-): AxisSpan {
-  if (covered.length === 0) {
-    const u = axis.toU(Date.parse(request.ts));
-    return { u0: u, u1: u };
-  }
-  let u0 = Infinity;
-  let u1 = -Infinity;
-  for (const unit of covered) {
-    const span = axis.unitSpan(unit);
-    u0 = Math.min(u0, span.u0);
-    u1 = Math.max(u1, span.u1);
-  }
-  return { u0, u1 };
-}
-
-/** A bar's left edge and width in pixels on a track `trackPx` wide showing `viewU`: the span less the gap each side, at least `BAR_MIN_PX`. */
-export function barBox(span: AxisSpan, viewU: { from: number; to: number }, trackPx: number): { left: number; width: number } {
-  const scale = trackPx / (viewU.to - viewU.from);
-  const left = (span.u0 - viewU.from) * scale;
-  const right = (span.u1 - viewU.from) * scale;
-  return { left: left + BAR_GAP_PX, width: Math.max(right - left - 2 * BAR_GAP_PX, BAR_MIN_PX) };
-}
-
-const REQUEST_UNIT_ORDER: readonly RunTimelineUnit["kind"][] = ["thinking", "text", "call"];
-
-/**
- * The block of the AIMessage that made a request (its thinking, else its text, else its call block):
- * what the details pane shows while the request is selected. Null when that message has no block.
- */
-export function requestSelection(request: Pick<RunTimelineRequest, "idx">, units: readonly RunTimelineUnit[]): Selection | null {
-  const own = units.filter((unit) => unit.i0 === request.idx);
-  const pick =
-    REQUEST_UNIT_ORDER.map((kind) => own.find((unit) => unit.kind === kind)).find((unit) => unit !== undefined) ??
-    units.find((unit) => unit.i0 <= request.idx && request.idx <= unit.i1);
-  return pick === undefined ? null : { kind: "unit", i0: pick.i0, i1: pick.i1, unitKind: pick.kind };
-}
-
-/** Whether a request's bar is lit: selected (itself, or a block it read) or hovered (the same). */
-export function requestLit(
-  request: Pick<RunTimelineRequest, "idx" | "added_from" | "added_to">,
-  selection: Selection | null,
-  hover: Hover | null,
-): { selected: boolean; hovered: boolean } {
-  const lit = (target: Selection | null) =>
-    (target?.kind === "request" && target.idx === request.idx) ||
-    (target?.kind === "unit" && requestCovers(request, { i0: target.i0 }));
-  return { selected: lit(selection), hovered: lit(hover) };
+/** Whether a message's bars are lit: it is hovered, or a block that shows it is. */
+export function messageLit(idx: number, hover: Hover | null): boolean {
+  if (hover?.kind === "message") return hover.idx === idx;
+  return hover?.kind === "unit" && unitHasMessage({ kind: hover.unitKind, i0: hover.i0, i1: hover.i1 }, idx);
 }

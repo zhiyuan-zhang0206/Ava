@@ -60,7 +60,6 @@
   "readoutNode": "Level {level} · {from} – {to} · {count, plural, one {# message} other {# messages}} · {summary} · {calls} calls · {input} in · {output} out",
   "readoutUnitTokens": "{tokens} tokens",
   "estimatedSuffix": "(estimated)",
-  "readoutRequest": "LLM request · session {session} · {time} · {tokens} input tokens · added {added}",
   "ancestorsHeading": "Ancestors",
   "childrenHeading": "Child nodes",
   "coveredByHeading": "Summary block",
@@ -84,5 +83,8 @@
   "contextAbsolute": "Absolute",
   "contextAdded": "Added",
   "contextBoth": "Both",
-  "readoutAgent": "Agent #{id} · {line}"
+  "readoutAgent": "Agent #{id} · {line}",
+  "requestHeading": "LLM request",
+  "requestSession": "Session",
+  "readoutMessage": "Message {idx} · session {session} · {time} · {tokens} · context through it {total}"
 }

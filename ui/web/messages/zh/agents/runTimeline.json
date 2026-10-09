@@ -60,7 +60,6 @@
   "readoutNode": "第 {level} 层 · {from} – {to} · {count} 条消息 · {summary} · {calls} 次调用 · 输入 {input} · 输出 {output}",
   "readoutUnitTokens": "{tokens} tokens",
   "estimatedSuffix": "(估算)",
-  "readoutRequest": "LLM 请求 · 第 {session} 个 session · {time} · 输入 {tokens} tokens · 新增 {added}",
   "ancestorsHeading": "祖先",
   "childrenHeading": "子节点",
   "coveredByHeading": "所属摘要块",
@@ -84,5 +83,8 @@
   "contextAbsolute": "仅 absolute",
   "contextAdded": "仅 added",
   "contextBoth": "两者",
-  "readoutAgent": "Agent #{id} · {line}"
+  "readoutAgent": "Agent #{id} · {line}",
+  "requestHeading": "LLM 请求",
+  "requestSession": "Session",
+  "readoutMessage": "消息 {idx} · session {session} · {time} · {tokens} · 到此为止的上下文 {total}"
 }
