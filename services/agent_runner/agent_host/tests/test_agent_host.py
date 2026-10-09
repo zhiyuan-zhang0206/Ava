@@ -45,10 +45,11 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
-from services.agent_runner.agent_host import settlement
-from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.runtime import TurnOutcome
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+
+from .. import settlement
+from ..host import AgentHost
+from ..runtime import TurnOutcome
 
 
 def _host(**kwargs: Any) -> AgentHost:
