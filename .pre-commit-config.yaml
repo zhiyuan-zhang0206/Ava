@@ -157,7 +157,7 @@ repos:
         entry: .venv/bin/python scripts/lint/patch_targets.py
         language: system
         require_serial: true
-        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(placement|import_cache|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
+        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(imports/.*|placement|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
 
       # The full scan of the hook above, at every push that touches Python, whatever the
       # diff (pre-commit's own file selection would never pass it the untouched tests whose
