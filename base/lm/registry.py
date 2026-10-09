@@ -1,7 +1,7 @@
 """Per-model facts and tunable defaults: `ModelSpec`, `ModelTuning` and their resolution.
 
 Every per-model fact and per-model tunable default lives in one ``ModelSpec`` per model id; the
-table of them is ``ModelCatalog.models`` (``base/lm/catalog.py``), built once per process by the
+table of them is ``ModelCatalog.models`` (``base/lm/catalog/__init__.py``), built once per process by the
 provider loader (``base/lm/plugin_providers.py:build_model_catalog``). Core registers no provider or
 model rows: provider plugins are the sole source of chat ``ModelSpec`` entries, per-provider
 bindings, and complete runtime price lattices. ``pricing_catalog_archive.json`` is the reviewed

@@ -198,7 +198,7 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # LM provider registration surface: the chat-model stack is a heavy
         # import on the exec-child boot path, which never uses the type
         # (annotation-only references; task #3633).
-        "base/lm/provider_contract.py",
+        "base/lm/catalog/provider_contract.py",
         "base/lm/factory.py",
         "ava_builtins/plugins/lm_alibaba/provider.py",
         "ava_builtins/plugins/lm_anthropic/provider.py",
