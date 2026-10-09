@@ -1,12 +1,8 @@
 """Tests for the `publish_best_effort` / `publish_best_effort_sync` primitives.
 
-These are the single never-raise wrapper for every fire-and-forget live-UI /
-lifecycle event publish (base/live_announce, base/labels,
-gateway/routers/pages, ops/lifecycle all route through them). The invariant
-they enforce: pub/sub is only a latency optimization, so a publish failure must
-never propagate into (crash / roll back) the caller — it returns None and logs,
-classified like the `base/db/__init__.py:publish_inbound_wake` template (NOPERM /
-ResponseError → WARNING, transient → DEBUG).
+Known Redis/network failures retain the bounded best-effort policy (NOPERM /
+ResponseError -> WARNING, transient -> DEBUG). Programming errors propagate to
+the calling owner; a committed DB row remains committed when its hint fails.
 """
 
 from __future__ import annotations
@@ -16,7 +12,7 @@ from typing import Any
 import pytest
 import redis
 from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import NoPermissionError, ResponseError
+from redis.exceptions import DataError, NoPermissionError, ResponseError
 
 from base.config import settings
 from base.events.live import redis_client
@@ -93,19 +89,10 @@ class TestPublishBestEffortSync:
         assert hits, "expected a best-effort DEBUG skip line"
         assert all(r["level"].no < 30 for r in hits), "transient failure must be DEBUG, not WARNING"  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    def test_non_transport_failure_warns_with_traceback(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],
-    ) -> None:
-        """An exception that is not a redis/transport error is a bug in the publish path:
-        swallowed → None (best-effort), but WARNING with the traceback, never DEBUG."""
+    def test_non_transport_failure_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(AttributeError("bug")))
-        result = _bus.publish_best_effort_sync("{}", channel="ava:bug", context="unit")
-        assert result is None
-        hits = [r for r in loguru_records if "failed unexpectedly" in r["message"]]
-        assert hits
-        assert all(r["level"].no >= 30 and r["exception"] is not None for r in hits)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        with pytest.raises(AttributeError, match="bug"):
+            _bus.publish_best_effort_sync("{}", channel="ava:bug", context="unit")
 
     def test_never_raises_and_warns_on_noperm(
         self,
@@ -224,9 +211,6 @@ async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_b
     now += 1.0
     assert await first.publish_best_effort("{}", channel=channel) is None
     assert first.publish_best_effort_sync("{}", channel=f"{channel}:other") is None
-    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(AttributeError("bug")))
-    assert first.publish_best_effort_sync("{}", channel=channel) is None
-    assert first.publish_best_effort_sync("{}", channel=channel) is None
 
     assert [r["level"].name for r in loguru_records] == [
         "WARNING",
@@ -235,8 +219,24 @@ async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_b
         "DEBUG",
         "WARNING",
         "WARNING",
-        "WARNING",
     ]
-    assert [r["exception"] is not None for r in loguru_records] == [False] * 6 + [True]
+    assert [r["exception"] is not None for r in loguru_records] == [False] * 6
     assert sum("rate-limited" in r["message"] for r in loguru_records) == 2
-    assert "failed unexpectedly" in loguru_records[-1]["message"]
+
+
+@pytest.mark.parametrize("failure", [AttributeError("bug"), DataError("invalid input")])
+async def test_unknown_publish_and_client_open_errors_propagate(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(failure))
+    with pytest.raises(type(failure)) as raised:
+        await _bus.publish_best_effort("{}")
+    assert raised.value is failure
+
+    def open_sync() -> Any:
+        raise failure
+
+    patch_sync_redis(monkeypatch, open_sync)
+    with pytest.raises(type(failure)) as raised:
+        _bus.publish_best_effort_sync("{}")
+    assert raised.value is failure

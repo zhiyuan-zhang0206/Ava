@@ -42,6 +42,19 @@ class ChatInboundReceipt:
     pending: bool
 
 
+class ChatInboundCommittedError(RuntimeError):
+    """Post-commit work failed; the attached receipt remains authoritative."""
+
+    def __init__(
+        self, receipt: ChatInboundReceipt, client_message_id: str | None, cause: Exception
+    ) -> None:
+        self.receipt = receipt
+        self.client_message_id = client_message_id
+        super().__init__(
+            f"Chat inbound {receipt.inbound_id} committed; post-commit work failed: {cause}"
+        )
+
+
 def _matching_receipt(
     row: tuple[object, ...],
     *,
@@ -142,10 +155,14 @@ def insert_chat_inbound_once(
             provenance=provenance,
         )
     db.commit()
-    if prepared_event is not None:
-        telemetry.emit_prepared(prepared_event)
-    if receipt.inserted:
-        publish_wake(agent_id, str(receipt.inbound_id))
+    try:
+        if prepared_event is not None:
+            telemetry.emit_prepared(prepared_event)
+        if receipt.inserted:
+            publish_wake(agent_id, str(receipt.inbound_id))
+    except Exception as exc:
+        # Preserve the committed fact while propagating the original failure.
+        raise ChatInboundCommittedError(receipt, client_message_id, exc) from exc
     return receipt
 
 
