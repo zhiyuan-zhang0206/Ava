@@ -251,14 +251,25 @@ describe("RunTimelineRows Messages heights", () => {
     expect(new Set(heights).size).toBe(1);
   });
 
-  it("draws a block as tall as the square root of its tokens, bottom-aligned, at least a few pixels", async () => {
+  it("draws a block at a floor plus the rest of the height by the square root of its tokens, bottom-aligned", async () => {
     renderRows({ units: withTokens([1, 400, 900]) }, null, "tokens");
     await paintFrame();
     const [small, mid, big] = fills("units");
-    expect(mid.h / big.h).toBeCloseTo(20 / 30);
-    expect(small.h).toBeGreaterThanOrEqual(4);
-    expect(small.h).toBeLessThan(mid.h);
+    // The row's drawing area is 32 px and the floor 6 px: 6 + 26 * sqrt(tokens / largest).
+    expect(big.h).toBeCloseTo(32);
+    expect(mid.h).toBeCloseTo(6 + 26 * (20 / 30));
+    expect(small.h).toBeCloseTo(6 + 26 * (1 / 30));
     for (const d of [small, mid]) expect(d.y + d.h).toBeCloseTo(big.y + big.h);
+  });
+
+  it("keeps blocks of 10, 100 and 300 tokens apart next to a 20k one", async () => {
+    renderRows({ units: withTokens([10, 100, 300]).map((u, i) => ({ ...u, context_tokens: [10, 100, 300][i] })).concat([{ ...unit("text", 3, 600, 700, 90), context_tokens: 21_000 }]) }, null, "tokens");
+    await paintFrame();
+    const [a, b, c, big] = fills("units");
+    expect(a.h).toBeGreaterThanOrEqual(6);
+    expect(b.h - a.h).toBeGreaterThan(1);
+    expect(c.h - b.h).toBeGreaterThan(1);
+    expect(big.h).toBeCloseTo(32);
   });
 
   it("clicks a small block anywhere in the row's height, and frames what is drawn", async () => {

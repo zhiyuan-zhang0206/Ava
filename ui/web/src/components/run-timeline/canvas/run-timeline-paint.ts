@@ -43,7 +43,8 @@ const BAR_MIN_PX = 3;
 const BLOCK_RADIUS = 4;
 const UNIT_RADIUS = 2;
 const UNIT_INSET = 4;
-const UNIT_MIN_PX = 4;
+// Every block of the Messages row stands at least this tall; its tokens add the rest of the row's height.
+const UNIT_FLOOR_PX = 6;
 const TEXT_PAD = 4;
 const MIN_LABEL_PX = 28;
 const NODE_LABEL_CHARS = 80;
@@ -181,7 +182,7 @@ export function paintNodes(p: PaintCtx, layout: RowLayout, state: PaintState, de
   paintDeco(p, deco, top, bottom);
 }
 
-/** How the Messages row draws a block's height: all alike, or by its tokens (square root, at least `UNIT_MIN_PX`). */
+/** How the Messages row draws a block's height: all alike, or by its tokens (a floor of `UNIT_FLOOR_PX` plus the rest of the height by the square root of its tokens). */
 export type UnitHeights = "equal" | "tokens";
 
 /** The Messages row: one colored block per message unit, bottom-aligned. `top` is the value of the tallest block. */
@@ -191,7 +192,7 @@ export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, de
   const heightOf = (key: string) =>
     heights === "equal" || !(top > 0)
       ? area
-      : Math.min(Math.max(((layout.values?.get(key) ?? 0) / top) * area, UNIT_MIN_PX), area);
+      : UNIT_FLOOR_PX + (area - UNIT_FLOOR_PX) * Math.min((layout.values?.get(key) ?? 0) / top, 1);
   const stateOf = (key: string) => {
     const unit = layout.items.get(key)?.unit;
     if (unit === undefined) return null;
@@ -217,7 +218,7 @@ export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, de
     fillBox(p, cell.x0, cell.x1, y1 - heightOf(cell.key), y1, tone(p, s, s.hoverLight ? mix(FOREGROUND, 0.3, unitColor(s.unit)) : unitColor(s.unit)));
   }
   // A frame reaches the top of the tallest block it surrounds, and no higher.
-  const topOf = (keys: ReadonlySet<string>) => y1 - Math.max(UNIT_MIN_PX, ...[...keys].map(heightOf));
+  const topOf = (keys: ReadonlySet<string>) => y1 - Math.max(UNIT_FLOOR_PX, ...[...keys].map(heightOf));
   paintDeco(p, deco, UNIT_INSET, y1, topOf);
 }
 
