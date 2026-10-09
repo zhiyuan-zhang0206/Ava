@@ -220,7 +220,7 @@ def _add_source_argument(*parsers: argparse.ArgumentParser) -> None:
 def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     agents_compact_p = sub.add_parser(
         "compact",
-        help="request conversation compaction (durable; consumed on the agent's next claim)",
+        help="request compaction of observed closed conversation history",
     )
     agents_compact_p.add_argument("agent_id", type=int, help="agent id to compact")
     agents_compact_p.set_defaults(func=_h_agents_compact)
@@ -244,7 +244,7 @@ def _add_resurrect_billing_parser(
 
 def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava agents` — operator lifecycle ops (thin client over the gateway's
-    # /api/agents + /api/cancel routes). Handlers defer runtime imports so
+    # creation + observed native control routes). Handlers defer runtime imports so
     # `ava --help` builds the parser without a configured .env. Verbs are ordered
     # by escalating force (cancel < restart < terminate < kill) plus ls.
     agents_p = sub.add_parser(

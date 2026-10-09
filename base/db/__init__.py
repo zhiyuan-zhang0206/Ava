@@ -649,23 +649,16 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
 def insert_compact_request_inbound(
     db: psycopg.Connection, agent_id: int, *, database: Database, bus: EventBus
 ) -> int:
-    """UI / admin call: insert one kind='compact_request' inbound —
-    the claim Node, on receiving, runs the backend Compaction LLM to
-    generate a summary that replaces messages.
+    """Insert the native compact envelope used by graph/history producers.
 
-    The new design (Step 2 cleanup) merges the old
-    framework_compact / agent_compact kinds: the user view no longer
-    distinguishes modes; backend LLM summary generation is the unified
-    path. Agent-initiated compact still goes through
-    ava.self.compact() -> kind='compact_summary' (agent writes its
-    own summary)."""
-    from base.agents.messages.control_delivery import insert_control_in_transaction
-    from base.agents.messages.inbound import InboundKind
+    Claim generates a summary and replaces messages. Public manual compaction
+    uses observed closed-history admission instead of this primitive.
+    Agent-authored summaries use ``ava.self.compact`` and ``compact_summary``.
+    """
+    from base.agents.messages.control_delivery import insert_compact_in_transaction
 
     with db.cursor() as cur:
-        inbound_id, compact_event = insert_control_in_transaction(
-            cur, agent_id, InboundKind.COMPACT_REQUEST
-        )
+        inbound_id, compact_event = insert_compact_in_transaction(cur, agent_id)
     db.commit()
     _emit_prepared_event(compact_event)
     # Publish to Redis for agent wake-up (see insert_inbound_message + the

@@ -6,7 +6,7 @@ SYSTEM_MARKER" alarm in the browser. PR #1796 fixed the tagging; this test
 locks the full flow in the real browser:
 
 1. user message → reply (conversation content to compress)
-2. POST /api/agents/{id}/compact (the exact call the UI compact button makes)
+2. Enqueue the native compact envelope through the history fixture
    → compact_request inbound → claim runs the Compaction LLM (script turn 2)
    → clean wipe → compact summary stamped ava_msg_type=compact_request
 3. assertions:
@@ -31,7 +31,7 @@ from playwright.sync_api import ConsoleMessage, Page
 from base.agents import AgentStatus
 from base.config import settings
 from tests.components.base.poll_until import poll_until
-from tests.e2e._db import wait_for_status
+from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fakes.scenarios.compact_flow import (
@@ -141,10 +141,8 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2E
     page.wait_for_selector(f"text={FIRST_REPLY}", timeout=30_000)
     wait_for_status(agent_id, AgentStatus.IDLING.value)
 
-    # ── 2. force compact (same call as the UI compact button) ──
-    resp = httpx.post(f"{e2e_env.gateway_url}/api/agents/{agent_id}/compact", timeout=30.0)
-    resp.raise_for_status()
-    assert resp.json()["status"] == "enqueued"
+    # ── 2. force compact (native history-rendering fixture) ──
+    enqueue_compact_history_fixture(agent_id)
 
     # ── 3. compact ran: clean wipe + compact_request envelope ──
     items = _wait_kinds(e2e_env.gateway_url, agent_id, ["inbound_compact_request"])

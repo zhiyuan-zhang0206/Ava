@@ -8,6 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { newOperationKey } from "./operation-key";
+import type { NativeWorkTarget, CompactTarget } from "../contracts/types";
+
 import { ApiError, api, MessageDeliveryUnknownError } from "./api";
 import { track } from "../telemetry/telemetry";
 
@@ -19,6 +22,15 @@ interface FetchCall {
 }
 
 const GATEWAY_TELEMETRY_KEY_PATTERN = /^[a-z0-9._-]{1,128}$/;
+
+const workTarget: NativeWorkTarget = {
+  agent_id: 8, work_id: "work", machine: "local", generation: "generation", owner: "owner", protocol: 1,
+};
+const compactTarget: CompactTarget = {
+  protocol: 1, observation_id: "observed", source: { ...workTarget, agent_id: 5 },
+  checkpoint_id: "source", checkpoint_ns: "", messages_version: "1",
+  compact_channel_version: null, segment_version: 0, model: "gpt-5.6-sol",
+};
 
 let calls: FetchCall[];
 
@@ -223,7 +235,7 @@ describe("lifecycle endpoints", () => {
       detail: "created but launch failed",
       agent_id: 123,
       state: { status: "idling", availability: { reason: "launch_unreachable" } },
-      retry_launch_path: "/api/agents/123/retry-launch",
+      retry_launch_path: "/api/keyed/v1/agents/123/retry-launch",
     }), { status: 502, headers: { "content-type": "application/problem+json" } })));
     try {
       await api.spawnAgent();
@@ -233,13 +245,14 @@ describe("lifecycle endpoints", () => {
       const failure = error as ApiError;
       expect(failure.agentId).toBe(123);
       expect(failure.launchState?.availability?.reason).toBe("launch_unreachable");
-      expect(failure.retryLaunchPath).toBe("/api/agents/123/retry-launch");
+      expect(failure.retryLaunchPath).toBe("/api/keyed/v1/agents/123/retry-launch");
     }
   });
 
   it("retryAgentLaunch POSTs to the existing id", async () => {
-    await api.retryAgentLaunch(123);
-    expect(calls[0].url).toMatch(/\/api\/agents\/123\/retry-launch$/);
+    await api.retryAgentLaunch(123, "original-attempt", "launch-retry");
+    expect(calls[0].url).toMatch(/\/api\/keyed\/v1\/agents\/123\/retry-launch$/);
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual({ expected_prior_attempt_id: "original-attempt" });
     expect(calls[0].init?.method).toBe("POST");
   });
 
@@ -426,18 +439,20 @@ describe("agent label / messages / cancel", () => {
     ]);
   });
 
-  it("cancel POSTs JSON {agent_id} to /api/cancel (global endpoint)", async () => {
-    await api.cancel(8, "cancel-operation");
-    expect(calls[0].init?.headers).toMatchObject({ "Idempotency-Key": "cancel-operation" });
-    expect(calls[0].url).toMatch(/\/api\/cancel$/);
+  it("cancel submits the original observed work", async () => {
+    await api.cancel(workTarget, "cancel-operation");
+    expect(new Headers(calls[0].init?.headers).get("Idempotency-Key")).toBe("cancel-operation");
+    expect(new Headers(calls[0].init?.headers).get("Idempotency-Scope")).toBe("principal-v1");
+    expect(calls[0].url).toMatch(/\/api\/keyed\/v1\/agents\/8\/cancel-work$/);
     expect(calls[0].init?.method).toBe("POST");
-    expect(JSON.parse(calls[0].init?.body as string)).toEqual({ agent_id: 8 });
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual(workTarget);
   });
 
-  it("compact POSTs /api/agents/{id}/compact", async () => {
-    await api.compact(5, "compact-operation");
-    expect(calls[0].init?.headers).toMatchObject({ "Idempotency-Key": "compact-operation" });
-    expect(calls[0].url).toMatch(/\/api\/agents\/5\/compact$/);
+  it("compact submits the original closed source", async () => {
+    await api.compact(compactTarget, "compact-operation");
+    expect(new Headers(calls[0].init?.headers).get("Idempotency-Key")).toBe("compact-operation");
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual(compactTarget);
+    expect(calls[0].url).toMatch(/\/api\/keyed\/v1\/agents\/5\/compact-history$/);
     expect(calls[0].init?.method).toBe("POST");
   });
 });
@@ -863,8 +878,8 @@ it("submits distinct business operations on private HTTP without randomUUID", as
   const getRandomValues = crypto.getRandomValues.bind(crypto);
   vi.stubGlobal("crypto", { getRandomValues });
   await api.spawnAgent();
-  await api.cancel(8);
-  await api.compact(8);
+  await api.cancel(workTarget, newOperationKey());
+  await api.compact(compactTarget, newOperationKey());
   await api.createSchedule({ name: "daily", script: "pass", command: "python schedule.py", enabled: true });
   await api.updateSchedule(17, { enabled: false });
   await api.startSchedule(17);

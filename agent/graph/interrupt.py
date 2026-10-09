@@ -8,7 +8,7 @@ the event the moment one is queued. The node races its work vs `event.wait()`
 and aborts when the event fires.
 
 Durability is the whole point. The signal is a real `inbound_messages` row
-(INSERTed by /api/cancel for a pause, or the terminate path), detected via a
+(retained native cancel inbounds or the terminate path), detected via a
 short DB poll. A signal that lands while no node is interruptible is NOT lost:
 it stays a pending row and the next claim pass dispatches it. This node only
 *aborts* the current action; the semantic dispatch (cancel -> halt to idle,
