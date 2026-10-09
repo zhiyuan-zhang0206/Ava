@@ -69,7 +69,7 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     from agent.impersonation_handoff import start_marker
     from base.agents.history.timeline import build_timeline_items
     from base.agents.impersonation.timeline import hydrate
-    from base.agents.uploads import upload_url
+    from base.agents.upload_delivery.paths import upload_url
 
     lease = start(owner)
     db_conn.execute(
