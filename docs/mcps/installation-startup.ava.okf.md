@@ -15,4 +15,4 @@ For own server layers, `.mcp.json` uses a **relative** interpreter path `.venv/b
 ## Installation Mechanism (native vs installed, mirroring skills)
 - **native**: `<repo>/ava_builtins/mcps/*/.mcp.json`, directory-scan discovered, unregistered.
 - **installed**: `ava mcp install <source>` (git URL or local path, `--path` selects a subdirectory) places a self-contained package into `$AVA_HOME/mcps/<name>/`, runs `uv sync` once to create an isolated `.venv`, registers `type="mcp"`. The daemon spawns with `cwd=installed_mcp_dir(name)` so the relative `.venv/bin/python -m <module>` resolves to the package's own venv → dependencies isolated from core. Managed via `ava mcp uninstall/upgrade/ls`.
-Parent: [[okf/mcps/mcps.ava.okf.md|MCP integration]].
+Parent: [[docs/mcps/mcps.ava.okf.md|MCP integration]].
