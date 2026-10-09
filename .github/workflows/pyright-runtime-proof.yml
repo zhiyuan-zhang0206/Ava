@@ -1,0 +1,70 @@
+name: Pyright runtime proof
+on:
+  push:
+    branches: [codex/pyright-runtime-proof-1009]
+permissions:
+  contents: read
+env:
+  UV_FROZEN: '1'
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.10.2
+          enable-cache: true
+      - uses: ./.github/actions/uv-sync
+      - name: Compare full diagnostics in both execution orders
+        run: |
+          mkdir -p tmp/pyright-proof
+          uv run python - <<'PY'
+          import json
+          import os
+          import platform
+          import subprocess
+          import time
+          from pathlib import Path
+
+          root = Path("tmp/pyright-proof")
+          rows = []
+          expected = None
+          for index, threads in enumerate((None, 2, 2, None), 1):
+              label = f"{index}-{'single' if threads is None else 'threads2'}"
+              command = ["uv", "run", "pyright", "--outputjson"]
+              if threads is not None:
+                  command.extend(["--threads", str(threads)])
+              started = time.perf_counter()
+              with (root / f"{label}.json").open("w") as output, (root / f"{label}.stderr").open("w") as error:
+                  result = subprocess.run(
+                      ["/usr/bin/time", "-v", "-o", str(root / f"{label}.resources"), *command],
+                      stdout=output, stderr=error, timeout=240, check=False,
+                  )
+              elapsed = time.perf_counter() - started
+              report = json.loads((root / f"{label}.json").read_text())
+              diagnostics = sorted(json.dumps(item, sort_keys=True) for item in report["generalDiagnostics"])
+              summary = {key: value for key, value in report["summary"].items() if key != "timeInSec"}
+              identity = (report["version"], summary, diagnostics)
+              rows.append({"label": label, "seconds": elapsed, "summary": summary, "exitcode": result.returncode})
+              (root / "progress.json").write_text(json.dumps(rows, indent=2) + "\n")
+              assert result.returncode == 0 and summary["errorCount"] == 0, rows[-1]
+              if expected is None:
+                  expected = identity
+              else:
+                  assert identity == expected, f"Complete diagnostics changed: {label}"
+              print(json.dumps(rows[-1]), flush=True)
+          evidence = {
+              "matched": True, "source_sha": os.environ["GITHUB_SHA"],
+              "platform": platform.platform(), "cpu_count": os.cpu_count(),
+              "rows": rows,
+          }
+          (root / "comparison.json").write_text(json.dumps(evidence, indent=2) + "\n")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: pyright-runtime-proof
+          path: tmp/pyright-proof/
+          if-no-files-found: error
