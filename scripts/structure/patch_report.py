@@ -12,7 +12,7 @@ from __future__ import annotations
 import collections
 from collections.abc import Mapping
 
-from scripts.structure.patch_targets import FileResult, Site
+from scripts.structure.patch_targets import Authorization, FileResult, Site
 
 _CLASSES = (
     ("A", "environment boundary (stdlib, third-party, runtime, non-AVA env vars)"),
@@ -142,6 +142,36 @@ def _ambient(sites: list[tuple[str, FileResult, Site]], limit: int) -> list[str]
     return [f"## Class E by module (top {limit})", "", *_table(headers, rows), ""]
 
 
+def _evidence(results: Mapping[str, FileResult]) -> list[str]:
+    gaps = [
+        gap
+        for result in results.values()
+        if result.evidence is not None
+        for gap in result.evidence.unresolved
+    ]
+    policies = sorted({result.authorization.value for result in results.values()})
+    lines = [
+        "## Execution evidence and authority",
+        "",
+        f"Authority analysis: {', '.join(policies) or 'no patch points'}. "
+        f"{len(gaps)} unresolved execution inputs.",
+        "",
+    ]
+    if any(result.authorization is Authorization.LEGACY_INFERENCE for result in results.values()):
+        lines.extend(
+            [
+                "Legacy inferred homes preserve the current patch check during cleanup. "
+                "They do not certify dependency LCA or source-owner private authorization.",
+                "",
+            ]
+        )
+    if gaps:
+        rows = [[f"`{gap.path}:{gap.line}`", gap.reason.replace("|", "\\|")] for gap in gaps]
+        lines.extend(_table(["execution site", "incomplete evidence"], rows))
+        lines.append("")
+    return lines
+
+
 def render(results: Mapping[str, FileResult]) -> str:
     """The Markdown census of `results` (repo-relative path -> analysed file)."""
     sites = _sites(results)
@@ -149,8 +179,9 @@ def render(results: Mapping[str, FileResult]) -> str:
     lines = [
         "# Patch-target census",
         "",
-        f"{len(results)} test files with patch points scanned.",
+        f"{sum(bool(result.sites) for result in results.values())} test files with patch points scanned.",
         "",
+        *_evidence(results),
         *_distribution(sites),
         *_violations(sites),
         *_violations_by_home(results, 15),
