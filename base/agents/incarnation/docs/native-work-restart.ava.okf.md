@@ -10,7 +10,10 @@ tags: []
 The new keyed restart surface accepts only an observed eligible ACTIVE managed
 `NativeWorkTarget`. It does not add idle, held or legacy NULL-resource targets.
 The existing work protocol is target qualification; it cannot prove a restart
-executor understands the new operation. No SDK/UI caller is enabled here.
+executor understands the new operation. The SDK provides explicit observed
+restart and original command progress via [[ava/agents/docs/work-control.ava.okf.md]];
+legacy defaults and UI/CLI/MCP callers remain separate. The operator
+compatibility prerequisite below still applies.
 
 ## Acceptance owner
 
