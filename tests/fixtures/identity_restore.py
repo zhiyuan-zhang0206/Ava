@@ -17,24 +17,15 @@ attribute for good (PR #3791).
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Iterator
 
 import pytest
 
 import ava
 
-# Native metadata ContextVars, read through `.get()` in the main thread's context.
-# SDK context restoration uses the ordinary module slot below.
-IDENTITY_CONTEXTVARS: tuple[tuple[str, str], ...] = (
-    ("base.native_process.turn_identity", "_TURN_AGENT_ID"),
-)
-
 
 @pytest.fixture(autouse=True)
 def _restore_agent_identity() -> Iterator[None]:
-    variables = [getattr(sys.modules[module], name) for module, name in IDENTITY_CONTEXTVARS]
-    held_variables = [variable.get() for variable in variables]
     held = getattr(ava, "context", None)
     yield
     # Clients a test's own context built end with the test; the ones that were bound before it
@@ -46,5 +37,3 @@ def _restore_agent_identity() -> Iterator[None]:
         del ava.context
     else:
         ava.context = held
-    for variable, value in zip(variables, held_variables, strict=True):
-        variable.set(value)

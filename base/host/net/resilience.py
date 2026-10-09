@@ -50,8 +50,6 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Protocol, TypeVar
 
-from base.native_process.turn_identity import effective_agent_id
-
 __all__ = [
     "ExponentialBackoff",
     "Policy",
@@ -103,21 +101,12 @@ class ExponentialBackoff:
 
 
 def _agent_phase(span: float) -> float:
-    """Deterministic per-process phase offset in [0, span).
+    """Deterministic phase for this native process, independent of agent identity.
 
-    Derived from AVA_AGENT_ID when carried by a launched child so an agent
-    keeps its own phase across restarts; falls back to the pid for
-    non-agent processes (gateway daemons, CLI); 0 when neither is available
-    (tests). Same de-phasing idea as agent/graph/_build.py's
-    ``_retry_phase_jitter`` and services/wake/heartbeat/daemon.py's due-time
-    jitter: correlated failures hit the whole fleet at once, and an
-    identical retry schedule would make every process retry at the same
-    instants.
+    Agent-specific schedules pass their identity explicitly at their own owner
+    (the graph LLM retry policy does so). Generic transport calls spread by pid.
     """
-    ident = effective_agent_id()
-    if ident is None:
-        ident = os.getpid()
-    return span * (ident % 1000) / 1000.0
+    return span * (os.getpid() % 1000) / 1000.0
 
 
 def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:

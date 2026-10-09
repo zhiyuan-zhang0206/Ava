@@ -76,7 +76,6 @@ from base.agents.messages.delivery_outbox_types import (
 from base.daemon.schedules import completion_notices
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
-from base.native_process.turn_identity import effective_agent_id
 from base.paths import ava_home
 
 _ENTRY_SCHEMA = 1
@@ -451,6 +450,7 @@ def note_send_succeeded(
 def record_failed_send(
     *,
     agent_id: int,
+    origin_agent_id: int | None,
     source: str,
     content: Content,
     client_message_id: str,
@@ -459,6 +459,7 @@ def record_failed_send(
 ) -> Path | None:
     """Durably record one failed delivery; returns the record path or None.
 
+    `origin_agent_id` is the explicit sender identity, independent of the target.
     Same-fingerprint failures within the dedup window of the entry's last
     attempt merge into the existing pending record (attempts counter folded,
     key advanced to this attempt's), so a retry chain leaves one record, not
@@ -500,7 +501,6 @@ def record_failed_send(
                 agent_id,
             )
             return None
-        origin = effective_agent_id()
         entry = OutboxEntry(
             schema_version=_ENTRY_SCHEMA,
             agent_id=agent_id,
@@ -510,7 +510,7 @@ def record_failed_send(
             created_at=_iso(moment),
             last_attempt_at=_iso(moment),
             attempts=1,
-            origin_agent_id=origin,
+            origin_agent_id=origin_agent_id,
             origin_pid=os.getpid(),
             flush_attempts=0,
             last_flush_at=None,

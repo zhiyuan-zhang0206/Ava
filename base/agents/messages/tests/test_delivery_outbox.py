@@ -86,6 +86,7 @@ def _record(
 ) -> Path | None:
     return outbox.record_failed_send(
         agent_id=agent_id,
+        origin_agent_id=None,
         source=source,
         content=content,
         client_message_id=key,
@@ -286,6 +287,7 @@ def test_flush_replays_hourly_completion_through_the_policy_boundary(
     db_conn.commit()
     path = outbox.record_failed_send(
         agent_id=agent_id,
+        origin_agent_id=None,
         source="shell:77",
         content="Background command 'build' finished. Full output at build.log.",
         client_message_id="hourly-key",
@@ -754,6 +756,7 @@ def test_legacy_completion_marker_is_isolated_from_other_replays(
     agent_id = _agent(db_conn)
     bad_path = outbox.record_failed_send(
         agent_id=agent_id,
+        origin_agent_id=None,
         source="watcher:bad",
         content="damaged",
         client_message_id="bad-completion",
