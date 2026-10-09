@@ -14,7 +14,7 @@ import { cardConfigFor, TimelineRow } from "@/components/timeline/row";
 import { buttonVariants } from "@/components/ui/button";
 import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 import { api } from "@/lib/transport/api";
-import { formatTokensCompact } from "@/lib/format/format-number";
+import { approx, formatTokensCompact } from "@/lib/format/format-number";
 import { FLEX } from "@/lib/layout/layout";
 import type { BackendTimelineItem, RunTimelineMessage, RunTimelineMessagePart, RunTimelineUnit } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
@@ -90,8 +90,7 @@ function MessageCard({
         <span>{message.source ?? ""}</span>
         {tokens !== null ? (
           <span className="ml-auto shrink-0 tabular-nums" data-testid="run-timeline-message-tokens">
-            {t("tokensValue", { tokens: formatTokensCompact(tokens.tokens) })}
-            {tokens.estimated ? ` ${t("estimatedSuffix")}` : ""}
+            {t("tokensValue", { tokens: `${approx(tokens.estimated)}${formatTokensCompact(tokens.tokens)}` })}
           </span>
         ) : null}
       </header>

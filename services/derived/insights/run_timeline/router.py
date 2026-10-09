@@ -31,7 +31,6 @@ from services.derived.insights.run_timeline.messages import router as messages_r
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineEvent,
     RunTimelineGeneration,
-    RunTimelineMessageBar,
     RunTimelineNode,
     RunTimelineResponse,
     RunTimelineUnit,
@@ -39,9 +38,8 @@ from services.derived.insights.run_timeline.schemas import (
     RunTimelineWindow,
 )
 from services.derived.insights.run_timeline.tokens import (
-    MessageBar,
+    BlockContexts,
     block_tokens,
-    message_bars,
     span_tokens,
 )
 
@@ -76,11 +74,13 @@ def _units(
     """The view's blocks intersecting the window, each naming the level-1 node that covers it."""
     leaves = [node for node in served if node.level == 1]
     firsts = [leaf.span_start for leaf in leaves]
+    contexts = BlockContexts(view)
     out: list[RunTimelineUnit] = []
     for unit in view.units:
         if unit.start > end or unit.end < start:
             continue
         tokens = block_tokens(view, unit)
+        context = contexts.of(unit)
         out.append(
             RunTimelineUnit(
                 kind=unit.kind,
@@ -94,6 +94,11 @@ def _units(
                 context_tokens=tokens.context_tokens,
                 generation_tokens=tokens.generation_tokens,
                 estimated=tokens.estimated,
+                session=context.session,
+                context_total=context.context_total,
+                request=RunTimelineUsage(**vars(context.request))
+                if context.request is not None
+                else None,
             )
         )
     return out
@@ -114,19 +119,6 @@ def _node(view: HistoryView, node: ServedNode) -> RunTimelineNode:
         generation=RunTimelineGeneration(**vars(node.generation)) if node.generation else None,
         context_tokens=tokens.context_tokens,
         estimated=tokens.estimated,
-    )
-
-
-def _message(bar: MessageBar) -> RunTimelineMessageBar:
-    return RunTimelineMessageBar(
-        idx=bar.idx,
-        start=bar.start,
-        end=bar.end,
-        session=bar.session,
-        context_tokens=bar.context_tokens,
-        estimated=bar.estimated,
-        context_total=bar.context_total,
-        request=RunTimelineUsage(**vars(bar.request)) if bar.request is not None else None,
     )
 
 
@@ -184,7 +176,4 @@ def get_run_timeline(
         nodes=[_node(view, node) for node in nodes],
         units=_units(view, served, start, end),
         events=_events(db, agent_id, start, end),
-        messages=[
-            _message(bar) for bar in message_bars(view) if bar.start <= end and bar.end >= start
-        ],
     )
