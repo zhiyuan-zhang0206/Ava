@@ -25,6 +25,7 @@ from agent.hooks import Hook
 from agent.messages import exec_output_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
+from base.agents.messages.kwargs import ExecStatus
 from base.packages.plugins.extensions import PluginContributions
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
@@ -238,7 +239,8 @@ async def _handle_compile_failure(
     )
     # Unfixable -- surface the error to the agent so it retries, skipping the
     # subprocess. Format mimics Python's native traceback.
-    error_text = "Code execution output:\n\n" + rendered_error + "\n"
+    error_header = "Code execution output:\n\n"
+    error_text = error_header + rendered_error + "\n"
 
     if len(last_msg.tool_calls) > 1:
         # Let the ordinary child return this call's syntax error. Skipping the
@@ -248,6 +250,8 @@ async def _handle_compile_failure(
     tool_msg = exec_output_message(
         content=error_text,
         tool_call_id=tool_call_id,
+        status=ExecStatus.FAILED,
+        body_start=len(error_header),
     )
     return {
         "goto": "after_exec",

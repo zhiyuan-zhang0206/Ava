@@ -21,7 +21,7 @@ optional wrapper. Existing client handles are reused and the prior context is
 restored at detach; an attachment that creates its own clients closes them.
 
 The impersonator skill owns its context-recovery procedure and bundled
-[read-instructions script](../../../.agents/skills/impersonator-guide/scripts/read_instructions.py).
+[read-instructions script](../../../ava_builtins/skills/platform/impersonator-guide/scripts/read_instructions.py).
 It uses the existing attachment and native snapshot reader; no instruction-export
 method is added to the SDK.
 

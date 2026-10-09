@@ -37,7 +37,8 @@ def test_default_crop_keeps_25_lines_at_each_end_and_recoverable_body(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
 
     assert "line 024 " in wrapped
     assert "line 025 " not in wrapped
@@ -62,7 +63,8 @@ def test_context_reference_survives_legacy_ring_churn(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     archive = next(archive_dir.glob("crop_*.txt"))
     for _ in range(25):
         output.wrap_code_output(
@@ -72,6 +74,7 @@ def test_context_reference_survives_legacy_ring_churn(
             clock=output_clock,
             timeout_seconds=60,
             max_chars=30_000,
+            elapsed_seconds=1.0,
         )
     assert len(list(archive_dir.glob("exec_*.txt"))) == 20
     assert archive.read_text() == body
@@ -93,7 +96,8 @@ def test_referenced_archive_is_kept_when_budget_is_full(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     archive = next(archive_dir.glob("crop_*.txt"))
     second_body = body.replace("content", "another")
     second = output.wrap_code_output(
@@ -104,7 +108,8 @@ def test_referenced_archive_is_kept_when_budget_is_full(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert second_body in second
     assert archive.read_text() == body
     assert list(archive_dir.glob("crop_*.txt")) == [archive]
@@ -125,6 +130,7 @@ def test_unreferenced_archive_is_evicted_under_byte_budget(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
+        elapsed_seconds=1.0,
     )
     old = next(archive_dir.glob("crop_*.txt"))
     second_body = body.replace("content", "changed")
@@ -135,7 +141,8 @@ def test_unreferenced_archive_is_evicted_under_byte_budget(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert not old.exists()
     files = list(archive_dir.glob("crop_*.txt"))
     assert len(files) == 1
@@ -158,6 +165,7 @@ def test_execute_code_argument_reference_protects_archive(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
+        elapsed_seconds=1.0,
     )
     archive = next(archive_dir.glob("crop_*.txt"))
     call = AIMessage(
@@ -178,7 +186,8 @@ def test_execute_code_argument_reference_protects_archive(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert archive.exists()
     assert body in wrapped
 
@@ -200,6 +209,7 @@ def test_reasoning_reference_protects_archive(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
+        elapsed_seconds=1.0,
     )
     archive = next(archive_dir.glob("crop_*.txt"))
     if kind == "provider_reasoning":
@@ -220,7 +230,8 @@ def test_reasoning_reference_protects_archive(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert archive.exists()
     assert body in wrapped
 
@@ -229,13 +240,17 @@ def test_reasoning_reference_protects_archive(
 def test_threshold_short_lines_and_single_line_do_not_create_archive(
     body: str, archive_dir: Path, crop_config: CropConfig, output_clock: Clock
 ):
-    assert body in output.wrap_code_output(
-        body,
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+    assert (
+        body
+        in output.wrap_code_output(
+            body,
+            agent_id=7,
+            crop_config=crop_config,
+            clock=output_clock,
+            timeout_seconds=60,
+            max_chars=30_000,
+            elapsed_seconds=1.0,
+        ).text
     )
     assert not archive_dir.exists()
 
@@ -250,7 +265,8 @@ def test_line_trigger_crops_at_one_over_the_limit(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "line 024 " in wrapped
     assert "line 025 " not in wrapped
     assert "line 275 " not in wrapped
@@ -271,7 +287,8 @@ def test_char_trigger_crops_below_the_line_count(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "line 024 " in wrapped
     assert "line 025 " not in wrapped
     assert "line 174 " not in wrapped
@@ -294,7 +311,8 @@ def test_byte_trigger_crops_multibyte_text_below_char_and_line_triggers(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "line 024 " in wrapped
     assert "line 025 " not in wrapped
     assert "line 224 " not in wrapped
@@ -311,13 +329,17 @@ def test_zero_threshold_disables_soft_crop_only(
     output_clock: Clock,
 ):
     monkeypatch.setattr(crop_config, "exec_output_crop_after_lines", 0)
-    assert _output() in output.wrap_code_output(
-        _output(),
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+    assert (
+        _output()
+        in output.wrap_code_output(
+            _output(),
+            agent_id=7,
+            crop_config=crop_config,
+            clock=output_clock,
+            timeout_seconds=60,
+            max_chars=30_000,
+            elapsed_seconds=1.0,
+        ).text
     )
     wrapped = output.wrap_code_output(
         "x" * 31_000,
@@ -326,7 +348,8 @@ def test_zero_threshold_disables_soft_crop_only(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "output truncated" in wrapped
     assert list(archive_dir.glob("exec_*.txt"))
     assert not list(archive_dir.glob("crop_*.txt"))
@@ -343,7 +366,8 @@ def test_newline_spelling_and_unterminated_tail_survive(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert body.splitlines(keepends=True)[0] in wrapped
     assert body.splitlines(keepends=True)[-1] in wrapped
     assert next(archive_dir.glob("crop_*.txt")).read_bytes() == body.encode()
@@ -357,13 +381,17 @@ def test_budget_counts_utf8_bytes(
 ):
     body = _output().replace("content", "\u6d4b\u8bd5\u8f93\u51fa\u7ed3\u679c")
     monkeypatch.setattr(crop_config, "exec_output_crop_archive_max_bytes", len(body))
-    assert body in output.wrap_code_output(
-        body,
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+    assert (
+        body
+        in output.wrap_code_output(
+            body,
+            agent_id=7,
+            crop_config=crop_config,
+            clock=output_clock,
+            timeout_seconds=60,
+            max_chars=30_000,
+            elapsed_seconds=1.0,
+        ).text
     )
     assert not archive_dir.exists()
 
@@ -383,13 +411,17 @@ def test_archive_write_failure_keeps_body_without_false_recovery_path(
 
     monkeypatch.setattr(Path, "open", fail_archive_write)
     body = _output()
-    assert body in output.wrap_code_output(
-        body,
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+    assert (
+        body
+        in output.wrap_code_output(
+            body,
+            agent_id=7,
+            crop_config=crop_config,
+            clock=output_clock,
+            timeout_seconds=60,
+            max_chars=30_000,
+            elapsed_seconds=1.0,
+        ).text
     )
     assert not list(archive_dir.glob("crop_*.txt"))
 
@@ -410,7 +442,8 @@ def test_head_tail_counts_are_independent_of_trigger(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "line 002 " in wrapped and "line 003 " not in wrapped
     assert "line 337 " not in wrapped and "line 338 " in wrapped
     assert "first 3 + last 2 lines" in wrapped
@@ -438,7 +471,8 @@ def test_failed_archive_cleanup_cannot_drop_original_tool_output(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert body in wrapped
     assert "full output at" not in wrapped
     assert next(archive_dir.glob("crop_*.txt")).read_bytes() == b""

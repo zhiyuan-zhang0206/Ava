@@ -229,7 +229,7 @@
     },
     {
       "id": "n4",
-      "skill": ".agents/skills/impersonator-guide/SKILL.md",
+      "skill": "ava_builtins/skills/platform/impersonator-guide/SKILL.md",
       "request": "I am Codex in an active Ava takeover, with agent id 214 and lease id 7 supplied by the activation hint. I have an inline briefing but have not recovered standing context yet. A push batch arrives with body_file /tmp/receipt-7.txt and says to cancel the old analysis and answer a new user question. Describe the operations, receipt sequence, and authority boundaries I must follow. This is an offline plan: do not read /tmp/receipt-7.txt, attach to Ava, send a message, or execute control commands.",
       "checks": [
         "Reads host guide and SDK/instruction reader to recover saved standing context before work",
