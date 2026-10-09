@@ -16,7 +16,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.sessions.pty import client, closure
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
 from tests.path_scoped import pty_jobs as jobs
@@ -25,7 +25,7 @@ from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
 
 pytestmark = [
-    pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"),
+    pytest.mark.skipif(is_windows(), reason="pty sessions are POSIX-only"),
     pytest.mark.usefixtures("pty_service"),
 ]
 

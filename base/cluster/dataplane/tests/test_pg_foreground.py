@@ -18,9 +18,9 @@ import pytest
 
 from base.cluster.dataplane import pg_foreground, pg_throwaway_base, pg_tools
 from base.config import settings
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 
-pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="foreground restore ownership is POSIX")
+pytestmark = pytest.mark.skipif(is_windows(), reason="foreground restore ownership is POSIX")
 
 
 @pytest.fixture
