@@ -1,13 +1,11 @@
 """Per-call SDK usage metering — the wrapping half of the SDK Usage instrumentation
-(the runtime state + emit path live in ``base/agents/sdk/telemetry.py``, kept there so an
-SDK function body in the ``ava`` layer can ``annotate()`` its own call).
+(the call-local admission and emit path live in ``base/agents/sdk/telemetry.py``).
 
 Every public ``ava.*`` callable is wrapped, once, by a transparent recorder installed by
 the SDK installation (``ava.sdk_surface.install``) over the final surface — after the plugin
-load, outermost of any plugin wrap layer. On each top-level call the recorder (via ``run_metered``) writes one ``sdk_call``
+load, outermost of any plugin wrap layer. On each public entry the recorder (via ``run_metered``) writes one ``sdk_call``
 event into the unified ``events`` stream, carrying the dotted function name in ``attributes.fn``
-(``files.read``, ``shell.run``, ``self.compact``) plus any ``detail`` the call
-annotated. the Grafana call-frequency ranking sums those events — replacing the old regex
+(``files.read``, ``shell.run``, ``self.compact``). the Grafana call-frequency ranking sums those events — replacing the old regex
 scrape of code-event *source text*, which counted any ``ava.X(`` occurrence in comments,
 string literals, docstrings, and agent-written example code (so ``ava._private(`` from a
 private call, ``ava.bootDefaultActor(`` from a comment, and ``ava.x.y(`` from a
@@ -18,30 +16,29 @@ Transparency contract — the recorder MUST NOT perturb the SDK surface:
     and sets ``__wrapped__``, so ``inspect.signature`` (and therefore ``ava.help``)
     resolves the original signature byte-for-byte, and function-attached members
     (``ava.understand.UnderstandError``) survive via the ``__dict__`` copy.
-  - A valid sampling policy is captured before the outer call executes. Invalid
-    configuration prevents execution; transient fetch failures may use its last
-    valid snapshot. Once admitted, event-sink failures are logged without changing
+  - A valid sampling policy is captured before each call executes. Invalid
+    configuration or caller identity prevents execution; transient fetch failures
+    may use its last valid snapshot. Once admitted, event-sink failures are logged without changing
     the call's return or exceptions, including lifecycle exceptions
     (``AgentTermination`` / ``AgentRestart``).
 
 Every public call is metered, including bare Python, CLI and external attachments.
-Only outermost calls count, so SDK-internal fan-out does not inflate usage.
-``recording()`` collects an optional per-execution tally; it is not an event gate.
+Nested public entries count independently. The process-local execution context
+holds an optional tally; recorders pass that owner explicitly to each call.
 Static functions are wrapped by the installation; dynamic
 MCP calls are wrapped at their common call funnel.
 """
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import inspect
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import ava
-from base.telemetry import report_sink_failure
+from base.agents.sdk.tally import SdkCallTally
 
 # A recorder marks itself with a reference to itself. `is_recorder` tests that identity, so
 # `install()` skips a target only when the current top callable *is* a recorder — robust to
@@ -60,50 +57,34 @@ def is_recorder(fn: object) -> bool:
     return getattr(fn, _RECORDER_MARK, None) is fn
 
 
-@contextlib.contextmanager
-def _caller() -> Generator[None, None, None]:
-    """Snapshot provenance before the call; metering never changes SDK behavior."""
+def _caller() -> tuple[dict[str, Any], SdkCallTally | None]:
+    """Snapshot this call's provenance; invalid identity rejects admission."""
     from base.agents.messages.external_caller import external_caller
-    from base.agents.sdk import telemetry as sdk_usage_telemetry
 
-    identity = {}
-    try:
-        bound = getattr(ava, "context", None)
-        own = None if bound is None else bound.identity
-        borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
-        agent_id = borrowed
-        if agent_id is None and own is not None:
-            agent_id = own.agent_id
-        external = external_caller()
-        actor = own.actor if own is not None else None
-        source = f"agent:{agent_id}" if agent_id else (actor or "system")
-        if external and borrowed is None:
-            source = external.source()
-        identity = {
-            "agent_id": agent_id,
-            "source": source,
-        }
-    except Exception as exc:
-        # Runs on every SDK call: reported first and every 50th. sdk_call events carry no
-        # agent id or source while it fails.
-        report_sink_failure("SDK metering caller-identity capture", exc)
-    token = sdk_usage_telemetry.set_identity(identity)
-    try:
-        yield
-    finally:
-        sdk_usage_telemetry.reset_identity(token)
+    bound = getattr(ava, "context", None)
+    own = None if bound is None else bound.identity
+    borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
+    agent_id = borrowed
+    if agent_id is None and own is not None:
+        agent_id = own.agent_id
+    external = external_caller()
+    actor = own.actor if own is not None else None
+    source = f"agent:{agent_id}" if agent_id else (actor or "system")
+    if external and borrowed is None:
+        source = external.source()
+    return {"agent_id": agent_id, "source": source}, None if bound is None else bound.sdk_calls
 
 
 def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
-    """Transparent proxy around ``original`` that meters the call as ``fq`` (the frame /
+    """Transparent proxy around ``original`` that meters the call as ``fq`` (the call /
     tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
 
     @functools.wraps(original)
     def recorder(*args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        with _caller():
-            return run_metered(fq, original, args, kwargs)
+        identity, tally = _caller()
+        return run_metered(fq, original, args, kwargs, identity=identity, tally=tally)
 
     if inspect.iscoroutinefunction(original):
 
@@ -111,8 +92,10 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
             from base.agents.sdk import telemetry as sdk_usage_telemetry
 
-            with _caller():
-                return await sdk_usage_telemetry.run_metered_async(fq, original, args, kwargs)
+            identity, tally = _caller()
+            return await sdk_usage_telemetry.run_metered_async(
+                fq, original, args, kwargs, identity=identity, tally=tally
+            )
 
         return _recorder(async_recorder)
 
@@ -133,8 +116,15 @@ def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
     def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        with _caller():
-            return run_metered(f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs)
+        identity, tally = _caller()
+        return run_metered(
+            f"mcps.{server}.{tool}",
+            original,
+            (server, tool, *args),
+            kwargs,
+            identity=identity,
+            tally=tally,
+        )
 
     return _recorder(recorder)
 
