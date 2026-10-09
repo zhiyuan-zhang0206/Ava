@@ -49,6 +49,7 @@ from agent.state import (
     PluginStateHandle,
     build_agent_state,
 )
+from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.db import Database
@@ -447,6 +448,7 @@ def _make_runtime_and_config(
         agent=AgentSlices.resolve(pins),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        clients=process_clients(),
         identity=AgentIdentity(agent_id=42, owns_loop=True),
     )
     runtime = Runtime(context=ctx)
