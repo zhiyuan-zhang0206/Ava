@@ -15,14 +15,15 @@ from typing import Any
 
 import pytest
 
-import services.desktop.computer.mcp_daemon as daemon_mod
-import services.desktop.computer.ocr_text as ocr_text_mod
-import services.desktop.computer.screen as screen_mod
 from base.db import Database
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.protocol import Request, Response
-from services.desktop.computer.tests.slices import computer_use_config
+
+from .. import mcp_daemon as daemon_mod
+from .. import ocr_text as ocr_text_mod
+from .. import screen as screen_mod
+from ..errors import ComputerUseError
+from ..mcp_daemon import ComputerMcpDaemon
+from ..protocol import Request, Response
+from .slices import computer_use_config
 
 
 def _daemon(**config: Any) -> ComputerMcpDaemon:
@@ -56,10 +57,15 @@ class FakeHelper:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.frontmost = "Finder"
+        self.cursor = {"x": 321.0, "y": 123.0}
         self.screen = {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
         # PNG the fake screencapture produces (IHDR) — Retina 2x by default;
         # a stale-helper regression sets it to the 1x 1920x1080 shape.
         self.png_size: tuple[int, int] = (3024, 1964)
+
+    def cursor_position(self, **kw: Any) -> dict[str, float]:
+        self.calls.append(("cursor_position", {}))
+        return self.cursor
 
     def screen_size(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("screen_size", {}))
@@ -123,6 +129,7 @@ def fake_helper(monkeypatch: pytest.MonkeyPatch) -> FakeHelper:
     monkeypatch.setattr(daemon_mod.helper, "type_text", fh.type_text)
     monkeypatch.setattr(daemon_mod.helper, "key", fh.key)
     monkeypatch.setattr(daemon_mod.helper, "scroll", fh.scroll)
+    monkeypatch.setattr(daemon_mod.helper, "cursor_position", fh.cursor_position)
     monkeypatch.setattr(daemon_mod.helper, "ax_window_info", fh.ax_window_info)
     monkeypatch.setattr(daemon_mod.helper, "window_info", fh.window_info)
     monkeypatch.setattr(daemon_mod.helper, "session_info", fh.session_info)
@@ -187,6 +194,12 @@ async def test_list_tools_and_ping() -> None:
         "snapshot",
         "find_text",
         "click",
+        "drag",
+        "move",
+        "cursor_position",
+        "list_apps",
+        "list_windows",
+        "focus_app",
         "click_text",
         "type_text",
         "key",
