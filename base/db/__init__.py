@@ -120,7 +120,7 @@ def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: st
     instead of waiting out the full recheck budget.
 
     Also runs the best-effort impersonation relay liveness alert before
-    publishing. Never raises: a wake lost here is recovered by `wait_for_inbound`'s
+    publishing. Known Redis/network failures are recovered by `wait_for_inbound`'s
     SELECT within `timeout_s`, so the caller's INSERT+commit is never held hostage to
     Redis. Returns True when the wake reached Redis, False when the publish
     was rejected or skipped — callers that meter delivery (the delivery
@@ -130,11 +130,13 @@ def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: st
     (a `ResponseError`) means the publisher's redis ACL user is not granted this
     cluster's `<prefix>:inbound:*` channel (a channel-prefix or ACL misconfig),
     which would silently disable instant wake fleet-wide, so it is logged at
-    WARNING. Transient failures (redis down) log at DEBUG; any other exception logs at
-    WARNING with its traceback. Channel is derived via
+    WARNING. Transient failures (redis down) log at DEBUG; any other exception
+    propagates to its caller. Channel is derived via
     `inbound_channel` so publish and `RedisInboundListener` subscribe stay in
     sync and stay inside the ACL grant."""
-    from redis.exceptions import RedisError, ResponseError
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import ResponseError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
 
     # A wake for an impersonated agent whose relay heartbeat is stale must not
     # be silent: the inbound can sit unread in the inbox forever. Best-effort,
@@ -168,20 +170,12 @@ def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: st
             exc=exc,
         )
         return False
-    except (RedisError, OSError) as exc:
+    except (RedisConnectionError, RedisTimeoutError, OSError) as exc:
         logger.debug(
             "inbound wake publish to {ch!r} skipped ({exc!r}) — best-effort; the "
             "agent's SELECT recheck delivers within timeout_s.",
             ch=channel,
             exc=exc,
-        )
-        return False
-    except Exception:
-        # Never raises into the caller's committed INSERT, but a non-transport failure is a bug.
-        logger.opt(exception=True).warning(
-            "inbound wake publish to {ch!r} failed unexpectedly; instant wake lost, the "
-            "agent's SELECT recheck delivers within timeout_s.",
-            ch=channel,
         )
         return False
 
