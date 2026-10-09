@@ -33,7 +33,7 @@ import psutil
 import base.host.private_storage
 import base.host.proc
 import base.paths
-from base.native_process.os_platform import IS_MACOS
+from base.native_process.os_platform import is_macos
 from base.native_process.ownership import stable_create_time
 
 _log = logging.getLogger("services.desktop.browser.macos_readiness")
@@ -123,7 +123,7 @@ def probe_startup_readiness() -> StartupReadiness:
     Keychain operation that proves the login Keychain can be queried. A failure
     is deliberately a wait condition, never an unlock attempt.
     """
-    if not IS_MACOS:
+    if not is_macos():
         return StartupReadiness(ready=True)
 
     account, home = _current_account()
@@ -271,7 +271,7 @@ def degraded_wait_state() -> StartupReadiness | None:
         readiness = probe_startup_readiness()
     except Exception:  # Healthchecks must not turn an unknown readiness state into a crash loop.
         _log.exception("ava-browser: startup readiness fallback probe failed")
-        if IS_MACOS:
+        if is_macos():
             return StartupReadiness(
                 ready=False, reason="macOS startup readiness could not be probed"
             )
