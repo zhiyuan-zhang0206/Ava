@@ -9,9 +9,11 @@ from uuid import uuid4
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
+from base.agents.incarnation.resources import ResourceProcess
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -75,6 +77,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
+    exited_host: ResourceProcess,
 ) -> None:
     """Issue #2052: an accepted (not yet active) lease whose accepting
     incarnation died restarts at 'requested' under the successor admission —
@@ -103,9 +106,10 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     )
     leases.accept(database, event_bus, lease["id"], agent_id, first, "Handoff brief")
     db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second' "
+        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second', "
+        "incarnation_resources=jsonb_set(incarnation_resources,'{host_process}',%s) "
         "WHERE id=%s",
-        (agent_id,),
+        (Jsonb(exited_host.model_dump(mode="json")), agent_id),
     )
     db_conn.commit()
     successor = await admit_hosted_runtime(
