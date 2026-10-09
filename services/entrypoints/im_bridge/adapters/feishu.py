@@ -216,7 +216,8 @@ class FeishuAdapter(IMAdapter):
         """Close the ws connection (the SDK has no public stop; its private
         ``_disconnect`` is scheduled on the SDK's own loop). Cancelling the
         service task does not interrupt its worker; daemon main exits without
-        joining the executor after its existing cleanup."""
+        joining the executor after its existing cleanup. This best-effort
+        request does not wait for the SDK loop to execute or finish it."""
         self.begin_shutdown()
         poll_task = self._poll_task
         self._poll_task = None
