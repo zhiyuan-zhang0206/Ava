@@ -313,9 +313,10 @@ def _imported_modules(tree: ast.AST, index: ModuleIndex, rel_path: str) -> Itera
         elif isinstance(node, ast.ImportFrom):
             module = locality._import_base(node, rel_path)
             if module:
-                for alias in node.names:
-                    candidate = f"{module}.{alias.name}"
-                    yield candidate if index.kind(candidate) else module
+                yield from {
+                    candidate if index.kind(candidate := f"{module}.{alias.name}") else module
+                    for alias in node.names
+                }
 
 
 def _matching_units(name: str, units: list[str]) -> list[str]:
