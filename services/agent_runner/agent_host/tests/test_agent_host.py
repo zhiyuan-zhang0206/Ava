@@ -26,7 +26,7 @@ now share one process:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -44,7 +44,6 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
-from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 from .. import settlement
@@ -65,17 +64,9 @@ class _HostPluginConfig(BaseModel):
 
 
 @pytest.fixture
-def host_plugin() -> Iterator[None]:
-    """One registered plugin, so plugin-scope overlay routing has an owner."""
-    snap_classes = dict(_PLUGIN_CONFIG_CLASSES)
-    snap_configs = dict(_PLUGIN_CONFIGS)
-    _PLUGIN_CONFIG_CLASSES["hostplug"] = _HostPluginConfig
-    _PLUGIN_CONFIGS["hostplug"] = _HostPluginConfig()
-    yield
-    _PLUGIN_CONFIG_CLASSES.clear()
-    _PLUGIN_CONFIG_CLASSES.update(snap_classes)
-    _PLUGIN_CONFIGS.clear()
-    _PLUGIN_CONFIGS.update(snap_configs)
+def host_plugin() -> dict[str, BaseModel]:
+    """One host's plugin config image, passed into its composition root."""
+    return {"hostplug": _HostPluginConfig()}
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────
@@ -384,7 +375,7 @@ def _stub_host_transitions(
 
 
 @pytest.fixture
-def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
+def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel]) -> _Build:
     """An `AgentHost` over fakes, with the per-agent build stubbed.
 
     The per-agent build is stubbed because it needs a live key.
@@ -453,7 +444,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     ) -> tuple[AgentHost, _FakeGraph, _FakePool]:
         graph = _FakeGraph(results or {})
         pool = _FakePool(rows)
-        host = _host(pool=pool, checkpointer=object(), graph=graph)
+        host = _host(pool=pool, checkpointer=object(), graph=graph, plugin_configs=host_plugin)
         return host, graph, pool
 
     return _build
@@ -586,6 +577,7 @@ class TestPoolIsolation:
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
             checkpointer=original._checkpointer,
             graph=graph,
+            plugin_configs=original._plugin_configs,
         )
 
         await host.run_turn(11)
