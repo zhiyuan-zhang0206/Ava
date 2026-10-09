@@ -79,7 +79,13 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
     )
 
     def generate(
-        _models: object, model: str, _o: object, _level: int, nodes: list[OpenNode], calls: list
+        _models: object,
+        model: str,
+        _o: object,
+        _level: int,
+        nodes: list[OpenNode],
+        calls: list,
+        _agent_id: int,
     ) -> list[Group]:
         seen["asked"].append([n.id for n in nodes])
         calls.append(GroupCall(0, model, "prompt", AIMessage(content="r"), 5.0, None, None))
@@ -259,7 +265,7 @@ def test_standalone_groupings_hand_the_reasoning_setting_to_the_model(
     none = ModelOverrides.from_pins(None)
     for value in ("", "off", "high"):
         monkeypatch.setattr(settings.agent, "understanding_group_reasoning", value)
-        gc._generate(models, "m", none, 1, [], [])
+        gc._generate(models, "m", none, 1, [], [], 7)
         assert models.get.call_args.args == ("m", none, value)
 
 
@@ -268,7 +274,13 @@ def test_standalone_groupings_hand_the_reasoning_setting_to_the_model(
 
 def _slow_generate(seen: dict, pause: float = 0.3):
     def generate(
-        _models: object, model: str, _o: object, _level: int, nodes: list[OpenNode], calls: list
+        _models: object,
+        model: str,
+        _o: object,
+        _level: int,
+        nodes: list[OpenNode],
+        calls: list,
+        _agent_id: int,
     ) -> list[Group]:
         seen["asked"].append((nodes[0].id, nodes[-1].id))
         time.sleep(pause)
@@ -298,7 +310,13 @@ async def test_different_agents_are_checked_at_the_same_time(
     both = threading.Barrier(2, timeout=10)  # passes only if the two calls overlap
 
     def generate(
-        _models: object, model: str, _o: object, _level: int, nodes: list[OpenNode], calls: list
+        _models: object,
+        model: str,
+        _o: object,
+        _level: int,
+        nodes: list[OpenNode],
+        calls: list,
+        _agent_id: int,
     ) -> list[Group]:
         both.wait()
         return []
@@ -335,13 +353,13 @@ def test_an_open_set_past_three_checks_must_close_a_group(monkeypatch: pytest.Mo
         for i in range(15)
     ]
     monkeypatch.setattr(settings.agent, "understanding_group_check_open", 5)
-    gc._generate(MagicMock(), "m", none, 1, nodes[:14], [])
-    gc._generate(MagicMock(), "m", none, 1, nodes, [])
+    gc._generate(MagicMock(), "m", none, 1, nodes[:14], [], 7)
+    gc._generate(MagicMock(), "m", none, 1, nodes, [], 7)
     monkeypatch.setattr(gc, "MIN_CHECK_OPEN", 6)
     monkeypatch.setattr(settings.agent, "understanding_group_check_open", 60)
     monkeypatch.setattr(settings.agent, "understanding_group_check_decay", 3)
-    gc._generate(MagicMock(), "m", none, 2, nodes[:59], [])  # level 2: 3 x 20 = 60
-    gc._generate(MagicMock(), "m", none, 2, nodes * 4, [])
+    gc._generate(MagicMock(), "m", none, 2, nodes[:59], [], 7)  # level 2: 3 x 20 = 60
+    gc._generate(MagicMock(), "m", none, 2, nodes * 4, [], 7)
     assert seen == [False, True, False, True]  # 14 < 3 x 5, 15 = 3 x 5; per level: 59 < 60 = 3 x 20
 
 
@@ -368,7 +386,13 @@ async def test_single_groups_in_the_middle_close_and_no_level_ever_overlaps(
     state = {"n": 0}
 
     def generate(
-        _models: object, model: str, _o: object, _level: int, nodes: list[OpenNode], calls: list
+        _models: object,
+        model: str,
+        _o: object,
+        _level: int,
+        nodes: list[OpenNode],
+        calls: list,
+        _agent_id: int,
     ) -> list[Group]:
         plan = [(a, b) for a, b in plans[state["n"] % len(plans)] if b < len(nodes) - 1]
         state["n"] += 1

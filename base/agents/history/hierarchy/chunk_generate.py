@@ -110,6 +110,7 @@ def generate_chunk(
     start_offset: int,
     *,
     model: str,
+    agent_id: int,
     tools: Sequence[Any],
     corrections: int = 0,
     params: GenParams | None = None,
@@ -118,6 +119,7 @@ def generate_chunk(
 ) -> ChunkResult:
     """Group and describe `prefix[start_offset:]`; blocking (run it in a worker thread).
 
+    `agent_id` is the agent whose history it is; the calls' usage is attributed to it.
     `corrections` is the budget of `<groups>` re-asks in the same conversation. `on_call`
     receives the raw record of every provider call, the failed one included; a call whose
     groups were refused carries the reason in `problem`.
@@ -167,6 +169,7 @@ def generate_chunk(
             model=model,
             retry_attempts=retry_attempts,
             params=params or GenParams(),
+            agent_id=agent_id,
             on_call=record,
         )
         row = final_rows[-1] if final_rows else -1
