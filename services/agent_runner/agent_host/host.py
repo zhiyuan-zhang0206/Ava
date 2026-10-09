@@ -168,12 +168,13 @@ class AgentHost:
         machine: str | None = None,
         bus: EventBus,
         db: Database,
+        clients: ClientSet | None = None,
         extensions: ExtensionRegistry = EMPTY,
     ) -> None:
         self._bus = bus
         self._db = db
         # Shared clients are passed through each turn's explicit `AvaContext`.
-        self._clients = ClientSet(database=lambda: db)
+        self._clients = clients if clients is not None else ClientSet(database=lambda: db)
         self._extensions = extensions
         self._pool = pool
         self._control_pool = control_pool if control_pool is not None else pool
