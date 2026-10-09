@@ -33,6 +33,12 @@ directory. The manifest is the single expression of the built-in policy
   exist so they are discoverable, and start only when the operator enables
   them.
 
+The adversarial weekly batch owns its counted loopback HTTP server in a lexical
+scope. One batch-local executor serves requests while the batch updates the
+partner document and collects counts. Leaving the batch, including by an error,
+shuts down the server, joins the worker and closes the socket. Server-loop
+failures propagate to the schedule's existing batch-error reporting.
+
 ### How built-ins get created
 
 `provision_builtin_schedules()` (`base/daemon/schedules/builtin_schedules.py`) creates every
