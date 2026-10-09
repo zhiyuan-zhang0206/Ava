@@ -6,9 +6,9 @@ idempotently (keyed by run id — `scripts/ci/pull_requests/accounting.py`), and
 `ci_usage_daily` telemetry event carrying the day's totals. The per-agent
 breakdown stays in the ledger; `ci_utils.py --ci-usage` reads it on demand.
 
-The reconciliation window is the CLAIMED slot itself (exposed via
-`schedules.catchup.claimed_slot()`), so a catch-up boot that fires several
-missed slots reconciles each slot's own day — windows stay gapless and each
+The reconciliation window is the CLAIMED slot passed to the callback, so a
+catch-up boot that fires several missed slots reconciles each slot's own day —
+windows stay gapless and each
 day emits exactly one event. Idempotency: the slot claim
 (`schedules.catchup.fire_slot_once`) is at-most-once, and the ledger append
 is run-id-keyed, so a re-run of the same window is a no-op for
@@ -28,7 +28,7 @@ import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.db import Database
-from schedules.catchup import claimed_slot, cluster_timezone
+from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
 from base.log import init_gateway_process
 
@@ -117,13 +117,7 @@ def summarize(
     }
 
 
-def _fire(_payload: None) -> None:
-    slot_end = claimed_slot()
-    if slot_end is None:
-        # Impossible through fire_slot_once (the claim sets the slot
-        # around the callback) — fail loud on a wiring mistake instead
-        # of reconciling the wrong window.
-        raise RuntimeError("c9-daily-report fired outside a claimed slot")
+def _fire(slot_end: datetime, _payload: None) -> None:
     try:
         accounting = _load_accounting()
         since, until, day = window_bounds(slot_end)
