@@ -595,8 +595,8 @@ async def run() -> None:
             machine=local_machine,
             bus=bus,
             db=db,
-            clients=process_clients(database=lambda: db),
             catalog=installation.require_catalog(),
+            clients=process_clients(database=lambda: db),
             extensions=installation.registry,
             plugin_configs=installation.configs,
         )

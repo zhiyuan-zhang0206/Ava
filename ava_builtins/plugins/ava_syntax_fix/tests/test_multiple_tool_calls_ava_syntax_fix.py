@@ -20,6 +20,7 @@ from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
@@ -63,6 +64,7 @@ def _runtime() -> Runtime[AvaContext]:
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             clients=process_clients(),
+            catalog=build_model_catalog(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )

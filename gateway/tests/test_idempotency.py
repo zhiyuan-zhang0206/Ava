@@ -29,6 +29,7 @@ from starlette.requests import Request
 from base.agents import AgentStatus
 from base.api_contracts.contracts import Idempotency
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.http.middleware import idempotency
 
@@ -228,7 +229,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     image = upload_dir / "gone.png"
     image.write_bytes(b"test image")
 
-    def supports_vision(_model: str) -> bool:
+    def supports_vision(_model: str, *, catalog: ModelCatalog) -> bool:
         return True
 
     monkeypatch.setattr(factory, "model_supports_vision", supports_vision)
