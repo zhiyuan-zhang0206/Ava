@@ -95,4 +95,4 @@ unavailable-model fallback. Callers must also suppress their own cache/retry
 loops; this construction contract cannot prove exactly-once external vendor
 execution or recover a response that was lost before durable storage.
 The manual compact consumer and its proof boundary are documented in
-[[base/agents/compaction/docs/manual-compact.ava.okf.md]].
+[[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md]].
