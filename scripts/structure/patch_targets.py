@@ -38,7 +38,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.structure import locality
+from scripts.structure import imports, locality
 from scripts.structure.patch_points import Point, extract_points
 from scripts.structure.placement import (
     PATCH_TOPS,
@@ -207,7 +207,9 @@ class Classifier:
             base = self.index.repo_root.joinpath(*module.split("."))
             path = base.with_suffix(".py")
             path = path if path.is_file() else base / "__init__.py"
-            self._origins[module] = _origins_of(path)
+            self._origins[module] = _origins_of(
+                path, path.relative_to(self.index.repo_root).as_posix()
+            )
         return self._origins[module]
 
     def classify(self, point: Point, home: str | None) -> Site:
@@ -292,7 +294,7 @@ class Classifier:
         return None
 
 
-def _origins_of(path: Path) -> dict[str, str]:
+def _origins_of(path: Path, rel_path: str) -> dict[str, str]:
     out: dict[str, str] = {}
     if not path.is_file():
         return out
@@ -301,13 +303,8 @@ def _origins_of(path: Path) -> dict[str, str]:
     except (SyntaxError, UnicodeDecodeError):
         return out
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                top = alias.name.split(".")[0]
-                out[alias.asname or top] = alias.name if alias.asname else top
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            for alias in node.names:
-                out[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            out.update(imports.normalize(node, rel_path).origins)
     return out
 
 
@@ -324,7 +321,7 @@ def analyze(rel_path: str, text: str, classifier: Classifier) -> FileResult:
     """Classify the patch points of one test file (`rel_path` is repo-relative, POSIX)."""
     tree = ast.parse(text, filename=rel_path)
     nodes = list(ast.walk(tree))
-    points = extract_points(nodes)
+    points = extract_points(nodes, rel_path)
     if not points:
         return FileResult(None, fallback=False, sites=())
     placement: Placement = place(rel_path, tree, classifier.index, nodes)
