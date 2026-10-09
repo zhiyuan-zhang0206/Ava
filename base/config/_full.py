@@ -45,6 +45,7 @@ from base.config.profiles import (
     profile_unknown_error,
 )
 from base.host.env.config_registry import DOMAIN_ATTRS, DOMAIN_MODELS, schema_extra
+from base.host.env.dotenv_boot import EnvBootResult
 
 
 class Settings(BaseModel):
@@ -64,6 +65,9 @@ class Settings(BaseModel):
     # fail-fast in __getattr__ reads it as a normal attribute, and
     # model_dump()/validation never sees it (exclude=True).
     profile: str | None = Field(default=None, exclude=True)
+    # Runtime delivery facts belong to this config build, not to an env alias
+    # or the public config packet. DB handles copy them with their URL slice.
+    env_boot: EnvBootResult = Field(default_factory=EnvBootResult, exclude=True, repr=False)
 
     lm: LmSettings = Field(default_factory=LmSettings)
     alerts: AlertsSettings = Field(default_factory=AlertsSettings)
@@ -152,13 +156,13 @@ class FullBundle:
     exports: dict[str, Any]
 
 
-def build() -> FullBundle:
+def build(*, env_boot: EnvBootResult) -> FullBundle:
     """Construct the eager chain from the prepared environment.
 
     The environment work — the `.env` load, the config-source decision, the
     cluster clock — already ran in `_lite.prepare()`, in the same order the
     eager boot used; construction is the only step left here."""
-    return FullBundle(settings=Settings(), exports=_facade_exports())
+    return FullBundle(settings=Settings(env_boot=env_boot), exports=_facade_exports())
 
 
 def _facade_exports() -> dict[str, Any]:
@@ -261,5 +265,7 @@ def refresh_data_plane_settings() -> None:
     from base.config import settings
     from base.host.env.dotenv_boot import load_ava_env
 
-    load_ava_env()
-    settings.data_plane = DataPlaneSettings()  # pyright: ignore[reportCallIssue]
+    result = load_ava_env()
+    data_plane = DataPlaneSettings()  # pyright: ignore[reportCallIssue]
+    settings.data_plane = data_plane
+    settings.env_boot = result
