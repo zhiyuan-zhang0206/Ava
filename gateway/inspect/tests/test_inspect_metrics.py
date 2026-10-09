@@ -1,6 +1,7 @@
 """Persisted metric reads: evidence, source seams, exact arithmetic, and windows."""
 
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
@@ -19,9 +20,18 @@ from gateway.inspect.router import build_query_cache, router
 @pytest.fixture
 def app(database: Database) -> Iterator[FastAPI]:
     """Exercise the owning inspector router with a real isolated database."""
-    application = FastAPI()
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
+        queries = build_query_cache()
+        application.state.inspect_query_cache = queries
+        try:
+            yield
+        finally:
+            await queries.aclose()
+
+    application = FastAPI(lifespan=lifespan)
     application.include_router(router)
-    application.state.inspect_query_cache = build_query_cache()
     with database.pool(max_size=2) as pool:
         application.state.db_pool = pool
         yield application
