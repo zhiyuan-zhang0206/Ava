@@ -156,3 +156,53 @@ ava schedules start <name>
 
 The running copy on each host lives in `~/.ava/schedules/<id>/`; this directory
 is the version-controlled source of truth — never edit only the running copy.
+
+## Script repair during maintenance
+
+Normal schedule edits use `ava schedules update`. Business HTTP admission is
+closed during the stop/start window, so that command returns `cluster_updating`
+while the gateway is held. A stopped cluster can instead use the reviewed
+operator tool `scripts/host_ops/update_schedule_script.py`. It accepts only a
+schedule ID and script text, requires a failure-free `stopped` maintenance hold,
+and holds the same home lifecycle mutex as start/stop. A retained live root does
+not invalidate a certified stop. The tool does not advance or release the hold.
+
+For first-generation recovery, copy this one file from a fixed reviewed tool
+commit to a private operator directory outside the installed checkout. Run it
+with the **existing installed source's own interpreter**, explicit home/source
+paths, and the old stored script's SHA-256:
+
+```bash
+AVA_HOME="$H" "$S/.venv/bin/python" "$TOOL" "$ID" \
+  --home "$H" --source "$S" --script-file "$PREPARED_SCRIPT" \
+  --expected-sha256 "$OLD_SCRIPT_SHA256"
+```
+
+`H` is the existing gateway home; `S` is its admitted source checkout recorded
+in `start-intent.json`. The tool verifies both the interpreter and the loaded
+source, and uses that runtime's normal operator database authority. It neither
+copies credentials nor imports application code from the tool's development
+checkout. It deliberately reuses the already installed schedule writer's
+versioned transaction. This narrow bootstrap dependency on
+`gateway.schedules.router._fetch_full_blocking` / `_update_blocking` is tested on
+`44d7faaa6dc97e237c7c6780cee26f6b1f13703c` and current source; first deploying a
+new public writer would recreate the upgrade gate that this entry resolves.
+Ordinary edits continue to use the public CLI after maintenance ends.
+
+An edit preserves ID, name, description, command, enabled state, status, error
+and creation time. The existing writer updates script/revision/backoff metadata,
+adds a `schedule_versions` snapshot, and queues enabled schedules for later
+convergence. The tool does not wait for that queue or start/restart sessions.
+Prepared text already present is a no-op; any text matching neither the expected
+old hash nor the prepared hash is refused. Each invocation commits one row;
+a failed batch is partial, and a retry skips completed rows without adding
+versions. The old-hash read/write interval is protected by the lifecycle mutex
+and stopped admission, not an independent concurrent-writer protocol.
+
+Archive the original rows and versions, validate all prepared scripts against
+the fixed application target, and compare the complete stored table after the
+edits. Verification includes disabled schedules and the callbacks' argument
+contracts; the current static verifier does not prove callback arity by checking
+only the outer call. Do not release the hold or launch old schedule code after
+installing scripts that require the new callback contract. Finish the normal
+whole-cluster update to the approved target before admission resumes.
