@@ -529,7 +529,7 @@ async def test_awaited_calls_retain_their_entry_identity(
     pin_agent(41)
     first = asyncio.create_task(metering._make_recorder(held, "probe.held")())
     try:
-        await entered.wait()
+        await asyncio.wait_for(entered.wait(), timeout=5)
         pin_agent(42)
         metering._make_recorder(lambda: None, "probe.next")()
         release.set()
