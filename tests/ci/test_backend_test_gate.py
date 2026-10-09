@@ -36,6 +36,34 @@ _SHAPES = {
 }
 
 
+@pytest.mark.parametrize("job", ["backend-shard", "backend", "test-selection-shadow-report", "e2e"])
+def test_fanout_and_summaries_respect_workflow_cancellation(job: str) -> None:
+    condition = _JOBS[job]["if"]
+    assert condition.startswith("${{ !cancelled() && ")
+    assert "always()" not in condition
+
+
+@pytest.mark.parametrize("dependency", ["e2e-shard", "e2e-hosted", "e2e-env-guard"])
+@pytest.mark.parametrize("outcome", ["success", "failure", "skipped", "cancelled"])
+def test_e2e_summary_requires_every_dependency_to_succeed(dependency: str, outcome: str) -> None:
+    job = _JOBS["e2e"]
+    assert job["needs"] == ["classify", "e2e-shard", "e2e-hosted", "e2e-env-guard"]
+    script = next(
+        step["run"] for step in job["steps"] if step.get("name") == "Verify shard results"
+    )
+    for name in job["needs"][1:]:
+        result = outcome if name == dependency else "success"
+        script = script.replace("${{ needs." + name + ".result }}", result)
+    assert "${{" not in script
+    actual = subprocess.run(  # noqa: S603 - checked-in verifier over test-owned dependency results
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert actual.returncode == (0 if outcome == "success" else 1), actual.stdout
+
+
 @pytest.mark.parametrize("job", _SHAPES)
 def test_native_tests_and_evidence_have_no_secret_or_quarantine_bypass(job: str) -> None:
     steps = _JOBS[job]["steps"]
