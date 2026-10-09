@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 from langchain_core.messages import BaseMessage
 
@@ -52,6 +53,29 @@ _OVERFLOW_KEEP = 20
 
 def _overflow_dir(agent_id: int) -> Path:
     return workspace_dir(agent_id) / _OVERFLOW_DIRNAME
+
+
+class ExecEnvelope(NamedTuple):
+    """The text fed to the LLM and where its body begins (`ava_exec_body_start`)."""
+
+    text: str
+    body_start: int
+
+
+def format_elapsed(seconds: float) -> str:
+    """Wall-clock duration as the agent reads it: `850ms`, `4.2s`, `53s`, `1min 53s`, `2h 3min 4s`."""
+    if seconds < 1:
+        return f"{round(seconds * 1000)}ms"
+    if seconds < 10:
+        return f"{seconds:.1f}s"
+    whole = round(seconds)
+    hours, rest = divmod(whole, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h {minutes}min {secs}s"
+    if minutes:
+        return f"{minutes}min {secs}s"
+    return f"{secs}s"
 
 
 def _marker(
@@ -118,13 +142,14 @@ def wrap_code_output(
     clock: Clock,
     timeout_seconds: float,
     max_chars: int,
+    elapsed_seconds: float,
     timestamp: str | None = None,
     cancelled: bool = False,
     cancel_reason: InterruptReason = InterruptReason.USER,
     timed_out: bool = False,
     stream_cap: StreamCap | None = None,
     referenced_messages: Sequence[BaseMessage] = (),
-) -> str:
+) -> ExecEnvelope:
     """Generate the code execution output envelope fed to the LLM.
 
     `output` is the exec's stdout + stderr merged stream (both
@@ -138,6 +163,10 @@ def wrap_code_output(
     The caller supplies the cluster sandbox limits, crop view, archive clock and
     optional rendered timestamp. This layer never discovers configuration.
 
+    `elapsed_seconds` is the run's wall-clock time (also for cancelled and timed-out
+    runs: the time before the stop); the header always carries it, with or without
+    a timestamp.
+
     `stream_cap` is set when the accumulation cap already dropped the middle of
     `output` mid-run: it carries the true produced length for the
     instrumentation log line, and tells the overflow archive to stop claiming
@@ -150,7 +179,7 @@ def wrap_code_output(
     Format (double \n after header, same contract as wrap_inbound; the
     frontend splitEnvelope uses this to split header / body):
 
-        Code execution output:
+        Code execution output after running for 1min 53s [timestamp]:
 
         <output>
         (no output)          # only when output is empty — explicitly tells the agent code ran but produced no output
@@ -162,7 +191,9 @@ def wrap_code_output(
         timeout_seconds=timeout_seconds,
     )
     ts = f" {timestamp}" if timestamp is not None else ""
-    header = f"Code execution output{marker}{ts}:"
+    header = (
+        f"Code execution output after running for {format_elapsed(elapsed_seconds)}{marker}{ts}:"
+    )
     if not output:
         body = "(no output)"
     else:
@@ -178,7 +209,8 @@ def wrap_code_output(
             "long Python code as ava.watcher.launch; drive interactive programs "
             "in ava.shell.sessions.]\n"
         )
-    return header + "\n\n" + body
+    head = header + "\n\n"
+    return ExecEnvelope(head + body, len(head))
 
 
 def crashed_no_output_body(exc: BaseException, *, code_reached: bool | None) -> str:

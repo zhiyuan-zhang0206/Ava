@@ -10,7 +10,7 @@ tags:
 
 # Exec output previews
 
-`wrap_code_output` preserves the output envelope and timeout/cancel markers.
+`wrap_code_output` preserves the output envelope and timeout/cancel markers. It returns the text plus the offset where the body begins. The header is `Code execution output after running for <elapsed> [<stop marker>] [<timestamp>]:` — elapsed wall-clock (`1min 53s`) is always present, also for cancelled and timed-out runs (the time before the stop) and with `message_timestamps` off; the stop marker is `[cancelled by <reason>]` or `[timeout after Ns]`. The run is also recorded on the message as `ava_exec_status`, `ava_exec_started_at`, `ava_exec_ms` and `ava_exec_body_start`; no code parses the header.
 Before its hard character limit, `_crop.py` can replace long multiline
 output with its first and last lines plus a real recovery path. It does not
 change tool execution, automatically rerun code, or call a model.
