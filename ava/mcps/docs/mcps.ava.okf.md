@@ -36,6 +36,11 @@ at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one da
 
 **Local fallback and the context**: the SDK side holds its MCP clients on the bound `AvaContext` (`ava/mcps/_clients.py:McpClients`, built on first use through `context.clients.get(McpClients)`): the daemon socket client, and for the fallback a loop on a daemon thread (anyio's blocking portal) with one cached session per server. They end with the context: the exec child releases them as it exits, a launched script at interpreter exit. Cached local sessions are not awaited shut (closing stdio children while the parent dies can deadlock); a server sees EOF and exits.
 
+The SDK supplies `mcp_connect_timeout_seconds` to the daemon client on each
+request. The cached client owns its socket, not a settings snapshot: dial and
+response waiting use that request's explicit timeout budget, and a later request
+reads the current configuration again.
+
 ## See Also
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — skills vs MCP servers
 
