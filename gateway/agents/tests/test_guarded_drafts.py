@@ -10,8 +10,8 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from gateway.agents import router as agent_router
-from gateway.agents.tests.test_guarded_creation import HEADERS
-from gateway.agents.tests.test_guarded_creation import client as client
+from gateway.agents.tests.creation.test_guarded_creation import HEADERS
+from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.extensions import packages
 from gateway.routers import guide
 from gateway.schedules import router as schedules
