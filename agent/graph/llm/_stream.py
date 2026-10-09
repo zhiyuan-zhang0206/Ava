@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
+from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
+from langchain_core.runnables import Runnable
 
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm_errors import (
@@ -38,6 +40,26 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.call import ProviderCallBinding, recover_invocation
 from base.lm.errors import normalize_provider_transport_error
 from base.log import logger
+
+
+class _ModelWaitTimeoutError(TimeoutError):
+    """The model await exceeded its owned deadline; unrelated timeouts do not."""
+
+
+async def _await_model_message(operation: Awaitable[AIMessage], timeout: float) -> AIMessage:
+    deadline = asyncio.timeout(timeout)
+    try:
+        async with deadline:
+            return await operation
+    except TimeoutError as exc:
+        if deadline.expired():
+            raise _ModelWaitTimeoutError(f"Model wait exceeded {timeout:g}s") from exc
+        raise
+    except Exception as exc:
+        normalized = normalize_provider_transport_error(exc)
+        if normalized is exc:
+            raise
+        raise normalized from exc
 
 
 async def _consume_llm(
@@ -76,7 +98,7 @@ async def _consume_llm(
     the provider.
 
     A stall whose fallback ALSO times out is a *stall pair* — the fallback's
-    ``TimeoutError`` is re-raised as ``LLMStreamStallPairError`` here, so the
+    owned deadline expiry is re-raised as ``LLMStreamStallPairError`` here, so the
     retry policy's delayed stall schedule (not the generic transient fast
     retry) owns the next attempt, and a bare transport TimeoutError never
     reads as one more blip to re-burn.
@@ -144,7 +166,7 @@ async def _consume_llm(
                 handler=handler,
                 timeout=stall_segment_timeout,
             )
-        except TimeoutError as fallback_timeout:
+        except _ModelWaitTimeoutError as fallback_timeout:
             # Second adjacent stall: the non-streaming retry was not served
             # either, inside the same bound. Terminate the call here as a
             # first-class LLMStreamError so the delayed stall schedule (not the
@@ -216,16 +238,8 @@ async def _ainvoke_single_chunk(
     Extracted to module level to reduce `_llm_node_impl`'s statement count
     (PLR0915 50-line cap).
     """
-    try:
-        msg: AIMessage = await asyncio.wait_for(
-            bound_llm.ainvoke(messages),  # type: ignore[attr-defined]
-            timeout=timeout,
-        )
-    except Exception as exc:
-        normalized = normalize_provider_transport_error(exc)
-        if normalized is exc:
-            raise
-        raise normalized from exc
+    runnable = cast(Runnable[list[AnyMessage], AIMessage], bound_llm)
+    msg = await _await_model_message(runnable.ainvoke(messages), timeout)
     assert isinstance(msg, AIMessage)  # noqa: S101 — bind_tools returns Runnable but ChatModel still returns AIMessage
     chunk = AIMessageChunk(
         content=msg.content,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -240,16 +254,6 @@ async def _ainvoke_single_chunk(
     return (None, None)
 
 
-async def _next_model_chunk(stream_iter: AsyncIterator[AIMessage], timeout: float) -> AIMessage:
-    try:
-        return await asyncio.wait_for(stream_iter.__anext__(), timeout=timeout)
-    except Exception as exc:
-        normalized = normalize_provider_transport_error(exc)
-        if normalized is exc:
-            raise
-        raise normalized from exc
-
-
 async def _consume_stream_with_stall_timeout(
     stream_iter: AsyncIterator[AIMessage],
     *,
@@ -259,8 +263,9 @@ async def _consume_stream_with_stall_timeout(
     inter_chunk_timeout: float,
     total_timeout: float | None = None,
 ) -> tuple[float | None, float | None]:
-    """`asyncio.wait_for` wraps `__anext__` — raises
-    `LLMStreamStallTimeoutError` if no chunk arrives within the timeout.
+    """An owned `asyncio.timeout` deadline wraps only the model's `__anext__`.
+    Expiry raises `LLMStreamStallTimeoutError`; ordinary model/callback
+    `TimeoutError` retains its identity without claiming that timer expired.
 
     Two separate timeouts:
     - `ttft_timeout`: applied to the first chunk (TTFT) — slower models
@@ -298,12 +303,12 @@ async def _consume_stream_with_stall_timeout(
             stage_timeout, total_timeout, started_at, chunk_idx
         )
         try:
-            chunk = await _next_model_chunk(stream_iter, timeout)
+            chunk = await _await_model_message(stream_iter.__anext__(), timeout)
         except StopAsyncIteration:
             if total_timeout is not None and time.monotonic() - started_at >= total_timeout:
                 raise _total_stall(total_timeout, chunk_idx) from None
             return (first_ts, last_ts)
-        except TimeoutError as e:
+        except _ModelWaitTimeoutError as e:
             if total_is_next_deadline:
                 assert total_timeout is not None  # noqa: S101
                 raise _total_stall(total_timeout, chunk_idx) from e

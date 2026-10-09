@@ -6,7 +6,7 @@ returned another chunk; the default anthropic SDK 600s overall timeout was the o
 safety net, leaving the agent silently stuck for 4-10 minutes; turn_end ok=False never
 even fired, so the frontend saw neither a stream nor an error.
 
-Fix: wrap `__anext__` on `_stream` with `asyncio.wait_for`,
+Fix: bound the model's `__anext__` with an owned `asyncio.timeout`,
 `settings.lm.llm_stream_ttft_timeout_seconds` and `settings.lm.llm_stream_inter_chunk_timeout_seconds`
 raise `LLMStreamStallTimeoutError`. Together with PR #60's finally `logger.opt(exception=
 True).warning`, events.payload automatically carries traceback / exception_type.

@@ -30,6 +30,10 @@ Raw HTTPX network and timeout errors are normalized only around the direct model
 invoke or iterator await. A transport error from an output callback or another
 service is unknown to the node's retry policy. Explicit stream stalls and the
 single configured overload/cache recoveries keep their existing contracts.
+Only an expired owned model deadline grants a stall or stall-pair retry; a
+plain `TimeoutError` raised by model code, metadata or output delivery does not.
+Google's stale-cache recovery requires a trusted permanent 403 rejection with
+the expected cached-content message before invalidating and retrying once.
 Malformed terminal frames, unknown stop reasons and truncation fail once.
 Compaction retries typed transient failures and its empty/short-summary checks;
 an unknown programming error cannot trigger emergency trimming of history.
