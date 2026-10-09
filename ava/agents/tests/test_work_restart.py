@@ -16,6 +16,7 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartOutcome,
     NativeRestartProgress,
 )
+from tests.fixtures.pin_agent import pin_agent
 
 ACCEPTED = NativeRestartAcceptance(
     command_id=123, target=TARGET, config_overlay={"completion_notice_policy": "hourly"}
@@ -29,8 +30,8 @@ PROGRESS = NativeRestartProgress(
 )
 
 
-def test_restart_and_status_use_exact_guarded_command(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(agent_identity, "default_actor", lambda: "agent:7")
+def test_restart_and_status_use_exact_guarded_command() -> None:
+    pin_agent(7)
     calls: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -158,3 +159,40 @@ def test_expired_external_identity_cannot_send(
             work.restart(TARGET, idempotency_key="intent")
         else:
             work.restart_status(ACCEPTED)
+
+
+def test_restart_without_identity_fails_before_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    pin_agent(None)
+    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("AVA_CALLER_IDENTITY", raising=False)
+    calls: list[httpx.Request] = []
+
+    def unexpected(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        pytest.fail("restart without identity reached HTTP")
+
+    with (
+        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(unexpected)) as http,
+        transport.use_client(http),
+        pytest.raises(RuntimeError, match="no established actor or agent identity"),
+    ):
+        work.restart(TARGET, idempotency_key="intent")
+    assert calls == []
+
+
+def test_restart_stamps_system_actor(monkeypatch: pytest.MonkeyPatch) -> None:
+    pin_agent(None, actor="system:test-restart")
+    monkeypatch.delenv("AVA_CALLER_IDENTITY", raising=False)
+    calls: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json=ACCEPTED.model_dump(mode="json"))
+
+    with (
+        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
+        transport.use_client(http),
+    ):
+        assert work.restart(TARGET, idempotency_key="intent") == ACCEPTED
+    assert len(calls) == 1
+    assert json.loads(calls[0].content)["source"] == "system:test-restart"
