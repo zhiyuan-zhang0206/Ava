@@ -93,9 +93,19 @@ def render_item(it: dict[str, Any], agent_id: int | None = None) -> str:
 
 
 async def sync_selection(core: Any, state: ChatState) -> int | None:
-    """Account-bound adapters cannot import a peer-only legacy selection."""
+    """Refresh a live selection only while business acceptance is open."""
     if maintenance.quiesced():
         raise RuntimeError("IM selection is held during maintenance")
+    return await restore_selection(core, state)
+
+
+async def restore_selection(core: Any, state: ChatState) -> int | None:
+    """Rebuild account-bound runtime selection before startup releases its hold.
+
+    This restores subscriptions, not business admission: timeline acceptance and
+    dispatch retain their maintenance gates.
+    Account-bound adapters cannot import a peer-only legacy selection.
+    """
     adapter = core.adapters[state.channel]
     account = await adapter.outbound_account_id()
     if adapter.selection_requires_account_proof:

@@ -12,10 +12,7 @@ from typing import Any, Literal
 from base.deploy.maintenance import admission
 from services.entrypoints.im_bridge import copy, notice_bridge, push_watchdog
 from services.entrypoints.im_bridge.config import ImBridgeConfig
-from services.entrypoints.im_bridge.cursor_store import (
-    CursorStore,
-    PushWatermark,
-)
+from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
 from services.entrypoints.im_bridge.cursor_store import (
     item_key as _item_key,
 )
@@ -38,6 +35,7 @@ from services.entrypoints.im_bridge.timeline_acceptance import (
     hold_selection,
     register_adapter,
     render_item,
+    restore_selection,
     selection_account,
     sync_selection,
 )
@@ -650,6 +648,7 @@ class IMBridgeCore(SpawnMenuMixin):
 
     async def restore_subscriptions(self) -> None:
         """Restore canonical selection and bootstrap the legacy JSON cache once."""
+        admission.snapshot()  # A valid startup hold permits recovery, an invalid journal does not.
         self._last_pushed.update(await asyncio.to_thread(self.cursor_store.load_push))
         legacy = {
             (channel, chat): agent
@@ -665,7 +664,7 @@ class IMBridgeCore(SpawnMenuMixin):
             state.current_agent_id = agent_id
             try:
                 async with self._selection_lock(state):
-                    await self._sync_selection(state)
+                    await restore_selection(self, state)
             except NETWORK_ERRORS as exc:
                 _log.warning(
                     "selection restore held channel=%s class=%s", channel, type(exc).__name__
