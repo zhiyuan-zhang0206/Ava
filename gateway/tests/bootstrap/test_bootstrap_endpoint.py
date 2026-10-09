@@ -14,10 +14,9 @@ from urllib.parse import urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-from base import config
+from base import config, paths
 from base.cluster.auth import bearer_header
 from base.config.domains.storage.data_plane import self_machine_host
-from base.host.env import runtime_config as rt
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from gateway.app import app
@@ -122,7 +121,7 @@ def test_bootstrap_without_a_database_endpoint_refused(
 ) -> None:
     """A gateway config snapshot without AVA_DB_URL is a 400, never a guess."""
     (tmp_path / ".env").write_text("AVA_REDIS_URL=redis://127.0.0.1:1/0\n")
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
@@ -141,7 +140,7 @@ def test_bootstrap_strips_a_remote_managed_planes_provider_password(
         f"AVA_DB_URL=postgresql://ava_owner:{provider_password}@db.example.com:5432/ava\n"
         "AVA_REDIS_URL=redis://ava:runtime@redis.example.com:6379/0\n"
     )
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     monkeypatch.setattr(type(config.settings.data_plane), "is_remote", property(lambda _s: True))
     with TestClient(app) as client:

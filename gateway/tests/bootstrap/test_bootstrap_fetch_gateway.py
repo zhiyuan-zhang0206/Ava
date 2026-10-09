@@ -22,10 +22,7 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 ) -> None:
     # An authenticated gateway: the runner presents its delivered machine API
     # token (the active generation's runner token), never the human secret.
-    from base.host.env import runtime_config as rt
-
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "live-secret")
-    monkeypatch.setattr("base.paths.ava_home", rt._ava_home)
     monkeypatch.setitem(os.environ, "AVA_API_TOKEN", served_gateway_home.api.runner)
     monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET")
 

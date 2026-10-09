@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.agents.upload_delivery.paths import image_mime_for, parse_upload_url
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.routers.upload import batches as upload_batches
 from gateway.routers.upload.batches import UploadItem
@@ -145,7 +146,8 @@ def test_immutable_url_passes_native_image_message_validation(
 
     client, agent = uploaded_agent
 
-    def supports_vision(model: str) -> bool:
+    def supports_vision(model: str, *, catalog: ModelCatalog) -> bool:
+        assert catalog is app.state.catalog
         return True
 
     monkeypatch.setattr(factory, "model_supports_vision", supports_vision)

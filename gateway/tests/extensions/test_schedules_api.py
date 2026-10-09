@@ -12,6 +12,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 
 
@@ -355,8 +357,17 @@ class TestLogsRunsDraft:
         calls: dict[str, object] = {}
 
         async def _fake_create_launch(
-            body: SpawnAgentRequest, target: str, pool: object, db: object, bus: object
+            body: SpawnAgentRequest,
+            target: str,
+            pool: object,
+            db: object,
+            bus: object,
+            *,
+            catalog: ModelCatalog,
+            authority: ConfigAuthority,
         ) -> SpawnedAgent:
+            assert catalog is app.state.catalog
+            assert authority is app.state.config_authority
             calls["label"] = body.label
             calls["prompt"] = body.prompt
             calls["target"] = target
