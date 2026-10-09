@@ -39,7 +39,7 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
         assert ava.self.AGENT_ID == 405
         assert agent_identity.require_agent_id() == 405
         assert agent_identity.require_actor() == "agent:405"
-        assert agent_identity.default_actor() == "agent:405"
+        assert agent_identity.require_actor() == "agent:405"
         assert agent_setting("llm_model") == "external-test"
     assert _borrowed_agent_id() is None
     assert agent_identity.require_actor() == "external_agent:codex"

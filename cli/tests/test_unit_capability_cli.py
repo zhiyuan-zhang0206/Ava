@@ -36,7 +36,9 @@ def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> None:
     from base.host.env import runtime_config
 
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: born.home)
-    monkeypatch.setattr(config, "_self_machine_host", lambda: "localhost")
+    monkeypatch.setattr(
+        "base.config.domains.storage.data_plane.self_machine_host", lambda: "localhost"
+    )
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
 
 
