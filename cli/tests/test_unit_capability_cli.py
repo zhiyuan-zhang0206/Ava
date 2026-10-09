@@ -18,7 +18,9 @@ from base.cluster import authority
 from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import _HUMAN, _MACHINE
 from base.config import settings
+from base.config.service_read import ConfigAuthority, plugin_bootstrap_config
 from base.host.env import bootstrap
+from base.lm.plugin_providers import build_model_catalog
 from cli import start_intent, unit_join
 from cli.commands.data_plane import bringup
 from cli.commands.tests import test_single_box as _single_box
@@ -29,17 +31,17 @@ configured = _single_box.configured
 born = _single_box.born
 
 
-def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> None:
+def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAuthority:
     """Serve bootstrap from `born`'s `.env`. The single-box gateway binds
     loopback (empty bearer), so its served endpoint must stay on loopback for
     the co-located runner under test."""
     from base.host.env import runtime_config
 
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: born.home)
-    monkeypatch.setattr(
-        "base.config.domains.storage.data_plane.self_machine_host", lambda: "localhost"
-    )
+    monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
+    complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
+    return ConfigAuthority(config.settings, complete, born.home / ".env")
 
 
 def _runner_args(bundle: Path) -> Any:
@@ -87,7 +89,7 @@ def _install_on_initialized_unit(bundle: Path, key: str) -> None:
 def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     born: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _serve_on_loopback(monkeypatch, born)
+    bootstrap_authority = _serve_on_loopback(monkeypatch, born)
     # The gateway's API is authenticated: the bundle carries the unit's API admission.
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     runner = (tmp_path / "runner").resolve()
@@ -101,7 +103,11 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     assert "`.venv/bin/ava init --db-capability <bundle>`" in printed, printed
     assert "`ava cluster db-authority install-unit <bundle>`" in printed, printed
     assert bundle.stat().st_mode & 0o777 == 0o600
-    served = config.bootstrap_config_values()
+    served = config.bootstrap_config_values(
+        bootstrap_authority,
+        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
+        plugin_cluster_config=plugin_bootstrap_config(),
+    )
     assert urlsplit(served["AVA_DB_URL"]).password is None
 
     checkout = tmp_path / "checkout"

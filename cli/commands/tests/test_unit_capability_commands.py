@@ -13,7 +13,8 @@ from base import config
 from base.cluster import authority
 from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import _MACHINE, _issue, _open
-from base.config.service_read import served_db_endpoint
+from base.config.service_read import ConfigAuthority, plugin_bootstrap_config, served_db_endpoint
+from base.lm.plugin_providers import build_model_catalog
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.tests import test_single_box as _single_box
@@ -23,17 +24,17 @@ configured = _single_box.configured
 born = _single_box.born
 
 
-def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> None:
+def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAuthority:
     """Serve bootstrap from `born`'s `.env`. The single-box gateway binds
     loopback (empty bearer), so its served endpoint must stay on loopback for
     the co-located runner under test."""
     from base.host.env import runtime_config
 
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: born.home)
-    monkeypatch.setattr(
-        "base.config.domains.storage.data_plane.self_machine_host", lambda: "localhost"
-    )
+    monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
+    complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
+    return ConfigAuthority(config.settings, complete, born.home / ".env")
 
 
 def test_a_bearer_only_runner_receives_no_database_login(
@@ -42,8 +43,12 @@ def test_a_bearer_only_runner_receives_no_database_login(
     """The retired exchange: a stale runner holding the bearer fetches
     bootstrap. The payload carries no generation login, and its endpoint alone
     opens no door."""
-    _serve_on_loopback(monkeypatch, born)
-    served = config.bootstrap_config_values()
+    bootstrap_authority = _serve_on_loopback(monkeypatch, born)
+    served = config.bootstrap_config_values(
+        bootstrap_authority,
+        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
+        plugin_cluster_config=plugin_bootstrap_config(),
+    )
     payload = "".join(served.values())
     for cls in ("gateway", "runner"):
         name, password = born.login(cls)
@@ -56,8 +61,8 @@ def test_a_bearer_only_runner_receives_no_database_login(
 def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     born: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _serve_on_loopback(monkeypatch, born)
-    endpoint = served_db_endpoint()
+    bootstrap_authority = _serve_on_loopback(monkeypatch, born)
+    endpoint = served_db_endpoint(bootstrap_authority)
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
     bundle = _issue(born.home, runner, endpoint=endpoint)

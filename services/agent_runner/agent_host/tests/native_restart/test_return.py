@@ -15,6 +15,8 @@ from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
 from base.native_process.turn_identity import HostedTurnResources
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
@@ -30,6 +32,8 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
     monkeypatch: pytest.MonkeyPatch,
     first: str,
     fault_site: str,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     incarnation, initial = await managed_work(db_conn, aops_pool)
     _insert(db_conn, initial.agent_id)
@@ -43,7 +47,7 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
         await release.wait()
         return Command(update={"halted": True, "turn_idle": True}, goto="__end__")
 
-    graph, _saver, host, ctx = await _blocked_host(aops_pool, model)
+    graph, _saver, host, ctx = await _blocked_host(aops_pool, model, model_catalog=model_catalog)
     ctx = replace(ctx, original_incarnation=incarnation, hosted_resources=HostedTurnResources())
     faults = _install_faults(monkeypatch, initial.agent_id, fault_site)
     running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
@@ -66,6 +70,9 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
                     initial.agent_id,
                     NativeRestartRequest(target=target),
                     lambda _request: None,
+                    catalog=model_catalog,
+                    llm_override=config_authority.all_domains.lm.llm_override,
+                    default_model=config_authority.all_domains.lm.llm_model,
                 )
 
             if first == "cancel":
@@ -104,6 +111,8 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     site: str,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     from agent.ownership.hosted import apply_hosted_lifecycle
     from agent.tests.claim.test_inbound_ownership import _admit
@@ -122,7 +131,7 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
         await release.wait()
         return Command(update={"halted": True, "turn_idle": True}, goto="__end__")
 
-    _graph, _saver, host, ctx = await _blocked_host(aops_pool, model)
+    _graph, _saver, host, ctx = await _blocked_host(aops_pool, model, model_catalog=model_catalog)
     ctx = replace(ctx, original_incarnation=incarnation, hosted_resources=HostedTurnResources())
 
     async def interrupted_apply(pool: AsyncConnectionPool, token: Any, **kwargs: Any) -> Any:
@@ -155,6 +164,9 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
                 initial.agent_id,
                 NativeRestartRequest(target=target),
                 lambda _request: None,
+                catalog=model_catalog,
+                llm_override=config_authority.all_domains.lm.llm_override,
+                default_model=config_authority.all_domains.lm.llm_model,
             )
             queued = _insert(db_conn, initial.agent_id)
             release.set()
