@@ -411,6 +411,45 @@ def test_shallow_checkout_needs_the_deepen_before_resolving_head_parent(
     assert git("rev-parse", "HEAD^1", cwd=checkout) == base
 
 
+def test_manual_structure_guard_resolves_shallow_source_ancestry(tmp_path: Path) -> None:
+    """Dispatch checks a branch head, whose common base can predate current main."""
+    step = STEPS["Fetch comparison ancestry for manual structure guard"]
+    assert step["if"] == "github.event_name == 'workflow_dispatch'"
+    names = list(STEPS)
+    assert names.index(step["name"]) < names.index(LINT["name"])
+    source = tmp_path / "source"
+    source.mkdir()
+
+    def git(*args: str, cwd: Path = source) -> str:
+        return subprocess.run(  # noqa: S603 — fixed git argv over the test's own fixture
+            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "structure-guard@example.invalid")
+    git("config", "user.name", "structure-guard")
+    git("commit", "--allow-empty", "-qm", "measured source")
+    common = git("rev-parse", "HEAD")
+    git("checkout", "-qb", "snapshot")
+    git("commit", "--allow-empty", "-qm", "refreshed timings")
+    git("checkout", "-q", "main")
+    git("commit", "--allow-empty", "-qm", "main moved")
+    checkout = tmp_path / "checkout"
+    git("clone", "-q", "--depth=1", "--branch", "snapshot", source.as_uri(), str(checkout))
+    assert git("rev-parse", "--is-shallow-repository", cwd=checkout) == "true"
+    output = tmp_path / "env"
+    subprocess.run(  # noqa: S603 — execute the repository workflow over the test's fixture
+        ["bash", "-e", "-c", step["run"]],
+        cwd=checkout,
+        env={**os.environ, "GITHUB_ENV": str(output)},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert output.read_text().strip() == f"LINT_STRUCTURE_BASELINE_BASE={common}"
+    assert git("rev-parse", "--is-shallow-repository", cwd=checkout) == "false"
+
+
 def test_every_codegen_input_family_selects_freshness() -> None:
     paths = (
         "gateway/schemas/tasks.py",
