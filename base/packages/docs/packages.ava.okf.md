@@ -37,3 +37,4 @@ possible; the image and `.env` are not one transaction.
 - [[base/packages/extensions/docs/install_registry.ava.okf.md]] — Install Registry (`installed.json`).
 - [[base/packages/extensions/docs/write-path.ava.okf.md]] — Install Registry Write Path.
 - [[base/packages/plugins/docs/enable_config.ava.okf.md]] — Plugin Enable Config.
+- [[base/packages/plugins/docs/plugin-config.ava.okf.md]] — Plugin Config Images and Agent Views.

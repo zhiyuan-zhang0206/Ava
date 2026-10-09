@@ -126,10 +126,7 @@ class Attachment:
             ava.ensure_plugins_loaded(surface=False)
             state, overlay, birth = load_snapshot(self.agent_id)
             self._state_cls = type(state)
-            self.config = (
-                resolve_agent_config_pins(overlay, birth),
-                PluginConfigView(resolve_agent_plugin_pins(overlay)),
-            )
+            self._resolve_config(overlay, birth)
             # Native applies journal entries only after the controller releases
             # the lease. Already applied entries belong to the checkpoint.
             receipt = state.impersonation_applied
@@ -143,6 +140,21 @@ class Attachment:
         except BaseException:
             self._detach()
             raise
+
+    def _resolve_config(
+        self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
+    ) -> None:
+        from ava.sdk_surface.install import installed
+
+        installation = installed()
+        if installation is None:
+            raise RuntimeError("the SDK surface was not installed for the attachment")
+        self.config = (
+            resolve_agent_config_pins(overlay, birth),
+            PluginConfigView(
+                installation.configs, resolve_agent_plugin_pins(overlay, installation.configs)
+            ),
+        )
 
     def _bind_borrowed_context(self) -> None:
         """Bind the borrowed identity for the attachment's lifetime (`_detach` puts the process's

@@ -65,6 +65,29 @@ def _registry(*plugins: tuple[str, PluginContributions]) -> ExtensionRegistry:
     return ExtensionRegistry(plugins)
 
 
+def test_plugin_overlay_publishes_a_new_owned_image(unit_home: Path) -> None:
+    from pydantic import BaseModel, ConfigDict, Field
+
+    from ava.sdk_surface import settings as sdk_settings
+
+    class Config(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        marker: str = Field(default="disk", json_schema_extra={"per_agent": True})
+
+    install.install(_registry(("owned", PluginContributions(config=Config))))
+    before = install.installed()
+    assert before is not None
+    assert sdk_settings.plugins.owned is before.configs["owned"]
+
+    install.apply_config_overlay({"marker": "agent"})
+    after = install.installed()
+    assert after is not None and after is not before
+    assert before.configs["owned"].model_dump()["marker"] == "disk"
+    assert after.configs["owned"].model_dump()["marker"] == "agent"
+    assert sdk_settings.plugins.owned is after.configs["owned"]
+    assert after.registry is before.registry
+
+
 def _namespace(**members: Callable[..., Any]) -> SimpleNamespace:
     return SimpleNamespace(__doc__="An installed test namespace.", **members)
 
@@ -473,7 +496,9 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
 
     from base.packages.plugins import config_registration
 
-    def fail_binding(plugin: str, cls: type[BaseModel]) -> Callable[[], None]:
+    def fail_binding(
+        plugin: str, cls: type[BaseModel], configs: dict[str, BaseModel]
+    ) -> Callable[[], None]:
         raise error
 
     monkeypatch.setattr(config_registration, "bind_plugin_config", fail_binding)
@@ -538,7 +563,9 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
 
         return undo_namespace
 
-    def fail_binding(plugin: str, cls: type[BaseModel]) -> Callable[[], None]:
+    def fail_binding(
+        plugin: str, cls: type[BaseModel], configs: dict[str, BaseModel]
+    ) -> Callable[[], None]:
         raise primary
 
     monkeypatch.setattr(sdk_plugins, "install_member", member)
