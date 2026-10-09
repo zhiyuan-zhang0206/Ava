@@ -24,6 +24,7 @@ import ava
 import ava.sdk_surface.agent_identity
 from ava import shell
 from base.native_process.os_platform import is_windows
+from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
 
 pytestmark = [
     pytest.mark.skipif(is_windows(), reason="PTY sessions are POSIX-only"),
@@ -473,10 +474,7 @@ def test_new_session_bare_python_resolves_into_venv(
 
 
 def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
-    """kill() removes the session, and a FOREGROUND child is reaped with it —
-    the PTY kill signals the shell's group AND the tty's foreground group (a
-    job backgrounded into its own pgrp outlives the tty, exactly like a shell session
-    kill-session)."""
+    """kill() removes the session and reaps the shell and its ready foreground job."""
     import psutil
 
     from ava.shell import sessions as _sessions
@@ -492,15 +490,9 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
         # a foreground child blocks the shell; it gets its own pgrp (job
         # control), which the kill must signal alongside the shell's group.
         shell.sessions.send(sid, "sleep 300")
-        kids: list[psutil.Process] = []
-        deadline = time.time() + 10.0
-        while time.time() < deadline:
-            kids = [c for c in psutil.Process(shell_pid).children() if "sleep" in (c.name() or "")]
-            if kids:
-                break
-            time.sleep(0.1)
-        assert kids, "the foreground sleep never started"
-        child_pid = kids[0].pid
+        child = wait_for_job(psutil.Process(shell_pid), ["sleep", "300"])
+        wait_for_foreground(child)
+        child_pid = child.pid
         shell.sessions.kill(sid)
         assert _wait_for(lambda: not psutil.pid_exists(child_pid), timeout=30.0), (
             "the foreground sleep survived the session kill"
