@@ -10,6 +10,7 @@ from pathlib import Path
 
 from base.paths import logs_dir
 from services.desktop.computer.errors import ComputerUseError
+from services.desktop.computer.targets import CaptureRegion
 from services.desktop.permissions_helper import client as helper
 
 
@@ -77,3 +78,28 @@ def _capture_screen(agent_id: int) -> tuple[Path, helper.ScreenSize, float, tupl
     helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
     pw, ph = _png_size(path)
     return path, size, _pixel_scale(pw, size["w"]), (pw, ph)
+
+
+def capture_region(agent_id: int, region: CaptureRegion) -> tuple[Path, float, tuple[int, int]]:
+    """Capture a main-display rectangle without changing whole-screen state.
+
+    The helper's region capture can clip out-of-display rectangles silently.
+    Reject those before capture so the requested origin and measured scale
+    describe the pixels that actually came back. Coordinates are global
+    logical points; the resulting PNG's coordinates start at the region origin.
+    """
+    screen = helper.screen_size()
+    if not (
+        screen["x"] <= region.x
+        and screen["y"] <= region.y
+        and region.x + region.w <= screen["x"] + screen["w"]
+        and region.y + region.h <= screen["y"] + screen["h"]
+    ):
+        raise ComputerUseError("region must be wholly inside the main display")
+    path = _snapshot_path(agent_id)
+    helper.screencapture_region(region.x, region.y, region.w, region.h, str(path))
+    pw, ph = _png_size(path)
+    scale = _pixel_scale(pw, region.w)
+    if abs(ph - region.h * scale) > 1:
+        raise ComputerUseError("captured region dimensions do not match the requested rectangle")
+    return path, scale, (pw, ph)

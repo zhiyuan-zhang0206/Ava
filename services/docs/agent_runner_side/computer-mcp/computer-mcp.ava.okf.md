@@ -33,12 +33,9 @@ per-machine daemon (the `services/desktop/computer` module family: `mcp_daemon.p
   en) with physical-pixel boxes — soft-failing to `ocr: []` + `ocr_error`
   rather than breaking the snapshot.
 
-There is deliberately **no code-enforced governance** (whitelist / quota /
-denied-app gates were removed 2026-08-10): all agents in a cluster are peers
-with identical OS-level permissions, so any per-agent restriction is bypassable
-theater; permission division is a prompt-level convention between peers, and
-the cluster's security boundary is its entry point (gateway / user), not this
-daemon.
+**No code-enforced governance**: whitelist, quota and denied-app gates were
+removed 2026-08-10. Agents have identical OS permissions; permission division
+is a peer convention. The gateway/user entry point owns the security boundary.
 
 The only gate left is **platform capability** (`ops/spec.py`
 `_computer_mcp_gate_reason`): the service joins the agent-runner roster only
@@ -82,6 +79,9 @@ PNG under `$AVA_HOME/logs/computer/snapshots/` and returns its path;
 `include_ocr` adds recognized text boxes (Vision framework, built on demand
 from `services/desktop/computer/ocr.swift` into `$AVA_HOME/logs/computer/ocr-bin/`),
 `include_ax` adds the focused window geometry.
+
+Explicit observation selectors, cropped captures and coordinate frames are owned
+by `targets.py` and `screen.py`: [[observation-frames.ava.okf.md]].
 
 ## Accessibility tools (`ax_tree`, `ax_act`)
 Element-level alternative to screenshot + OCR; the helper walks the window and
