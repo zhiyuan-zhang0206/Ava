@@ -263,6 +263,8 @@ def _key_tool(args: dict[str, Any]) -> dict[str, Any]:
         raise ComputerUseError("unknown key name; use a supported name or integer keycode")
     options = request.model_dump(exclude_unset=True, exclude={"key", "keycode"})
     options.setdefault("cmd", False)
+    if request.key in {"shift", "ctrl", "alt", "cmd"}:
+        options.setdefault("modifiers", [])
     echoed = helper.key(code, **options)
     return {"pressed": echoed["key"], "cmd": echoed["cmd"]}
 
