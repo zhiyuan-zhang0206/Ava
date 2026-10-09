@@ -11,11 +11,11 @@ from collections.abc import Iterable, Iterator
 import psutil
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure, process_groups
 
-pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="POSIX process groups")
+pytestmark = pytest.mark.skipif(is_windows(), reason="POSIX process groups")
 
 
 @pytest.fixture

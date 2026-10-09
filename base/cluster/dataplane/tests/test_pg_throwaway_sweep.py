@@ -38,11 +38,11 @@ import pytest
 
 from base.cluster.dataplane import pg_throwaway_base, pg_tools
 from base.config import settings
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.paths import repo_root
 
 pytestmark = pytest.mark.skipif(
-    IS_WINDOWS, reason="the registry lock is POSIX flock; the sweep is a no-op on Windows"
+    is_windows(), reason="the registry lock is POSIX flock; the sweep is a no-op on Windows"
 )
 
 _READY_TIMEOUT_S = 120.0

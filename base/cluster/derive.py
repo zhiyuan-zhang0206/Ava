@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from base import cluster
 from base.host.env.registry import REDIS_PASSWORD_ENV, health_port_env_aliases
 from base.host.net.url_secret import redacted_url, url_with_port, url_with_userinfo
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 
 # The db / Postgres-role / redis-ACL identifier a newly-born cluster uses. Fixed:
 # every cluster owns its instance (exactly one tenant), so the identifier carries
@@ -162,7 +162,7 @@ def fe_build_env() -> str:
         return gateway_env
     # The normal build and watchdog rebuild must carry the same browser entry.
     # Keep this host setting separate from the runner/control-plane gateway URL.
-    if IS_WINDOWS:
+    if is_windows():
         return f'{gateway_env}" && set "NEXT_PUBLIC_BROWSER_ORIGIN={origin}'
     return f"{gateway_env} NEXT_PUBLIC_BROWSER_ORIGIN={shlex.quote(origin)}"
 
@@ -197,7 +197,7 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
     """
     frontend_dir = Path(frontend_dir).as_posix()
     build_env = fe_build_env()
-    if IS_WINDOWS:
+    if is_windows():
         return (
             f'cd {frontend_dir} && set "{build_env}" && npm run build && npm run start -- -p {port}'
         )
