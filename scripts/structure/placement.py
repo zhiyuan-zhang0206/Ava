@@ -62,7 +62,7 @@ an interpreter (`sys.executable`). Both gates: `scripts/structure/placement_evid
 
 A result depends on the file's own text, `pyproject.toml` and the non-test source's direct
 imports (`ModuleIndex.importers`, read from the working tree on every run and cached per file
-by `import_cache.py`; no dependency graph is committed). Moving the file into `<pkg>/tests/`
+by `imports/cache.py`; no dependency graph is committed). Moving the file into `<pkg>/tests/`
 does not change its home, but a production import change can: adding an import may lower the
 home of a test that references both ends, deleting one may raise it, and a
 dependency cycle keeps it at the bound. Because of that the lint that enforces a home (the
@@ -84,7 +84,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import import_cache, lint_common, locality, placement_evidence, service_units
+from scripts.structure import imports, lint_common, placement_evidence, service_units
+from scripts.structure.imports import cache
 
 # First-party Python code participates in placement, including runnable templates.
 CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts", "schedules", "commands", "demos")
@@ -224,7 +225,7 @@ class ModuleIndex:
         edges only, function-level imports included; resolved against this checkout.
         """
         found: dict[str, set[str]] = collections.defaultdict(set)
-        for rel, statements in import_cache.production_imports(self.repo_root, CODE_TOPS).items():
+        for rel, statements in cache.production_imports(self.repo_root, CODE_TOPS).items():
             parts = rel.split("/")[:-1]
             directories = {"/".join(parts[:depth]) for depth in range(1, len(parts) + 1)}
             for ref in collect_references(ast.parse(statements), self):
@@ -307,15 +308,9 @@ class UnitGraph:
 
 def _imported_modules(tree: ast.AST, index: ModuleIndex, rel_path: str) -> Iterable[str]:
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            yield from (alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            module = locality._import_base(node, rel_path)
-            if module:
-                yield from {
-                    candidate if index.kind(candidate := f"{module}.{alias.name}") else module
-                    for alias in node.names
-                }
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            clause = imports.normalize(node, rel_path)
+            yield from (ref.module for ref in imports.dependencies(clause, index, CODE_TOPS))
 
 
 def _matching_units(name: str, units: list[str]) -> list[str]:
@@ -466,22 +461,15 @@ class _Collector(ast.NodeVisitor):
             self._add(line, kind, module, via, names)
 
     def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            top = alias.name.split(".")[0]
-            if top in CODE_TOPS:
-                self._add_dotted(node.lineno, "import", alias.name, names=(alias.asname or top,))
+        self._import(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        module = locality._import_base(node, self._rel_path)
-        if not module or module.split(".")[0] not in CODE_TOPS:
-            return
-        for alias in node.names:
-            candidate = f"{module}.{alias.name}"
-            names = (alias.asname or alias.name,)
-            if self.index.kind(candidate):
-                self._add(node.lineno, "import", candidate, names=names)
-            else:
-                self._add_dotted(node.lineno, "import", module, names=names)
+        self._import(node)
+
+    def _import(self, node: ast.Import | ast.ImportFrom) -> None:
+        clause = imports.normalize(node, self._rel_path)
+        for ref in imports.dependencies(clause, self.index, CODE_TOPS):
+            self._add(node.lineno, "import", ref.module, names=ref.names)
 
     def visit_Call(self, node: ast.Call) -> None:
         callee = _callee(node.func)
