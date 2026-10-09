@@ -15,6 +15,7 @@ import io
 import sys
 from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -43,6 +44,7 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, obje
         detail: Mapping[str, object] | None = None,
         duration: float | None = None,
         *,
+        identity: Mapping[str, Any],
         sampling_policy: call_policy.SamplingPolicy | None = None,
     ) -> None:
         assert sampling_policy is not None
@@ -386,7 +388,6 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
 def test_borrowed_identity_is_stamped_on_external_sdk_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from typing import Any
 
     from base import telemetry
     from base.agents.sdk import call_policy
@@ -472,26 +473,71 @@ def test_install_does_not_evaluate_dynamic_namespace_directory(
     metering.uninstall(ledger)
 
 
-def test_a_failing_identity_snapshot_is_reported_and_the_call_goes_on(
+@pytest.mark.parametrize("wrapper", ["sync", "async", "mcp"])
+async def test_invalid_identity_snapshot_prevents_sdk_body(
     monkeypatch: pytest.MonkeyPatch,
+    wrapper: str,
 ) -> None:
-    """The snapshot runs on every SDK call: a failure is reported, never silent, and never
-    changes the call."""
-    reports: list[tuple[str, BaseException]] = []
-
-    def record(sink: str, exc: BaseException) -> None:
-        reports.append((sink, exc))
-
-    def _boom() -> None:
-        raise RuntimeError("identity unreadable")
-
-    monkeypatch.setattr(metering, "report_sink_failure", record)
+    """Unknown provenance errors fail at admission instead of performing an unattributed action."""
     from base.agents.messages import external_caller
 
-    monkeypatch.setattr(external_caller, "external_caller", _boom)
-    with metering._caller():
-        pass
+    failure = RuntimeError("identity unreadable")
+    executed: list[str] = []
 
-    assert len(reports) == 1
-    assert "caller-identity" in reports[0][0]
-    assert isinstance(reports[0][1], RuntimeError)
+    def _boom() -> None:
+        raise failure
+
+    monkeypatch.setattr(external_caller, "external_caller", _boom)
+
+    async def body() -> None:
+        executed.append("async")
+
+    with pytest.raises(RuntimeError) as caught:
+        if wrapper == "async":
+            await metering._make_recorder(body, "probe.async")()
+        elif wrapper == "mcp":
+            metering._make_mcp_recorder(lambda *_: executed.append("mcp"))("probe", "tool")
+        else:
+            metering._make_recorder(lambda: executed.append("sync"), "probe.sync")()
+    assert caught.value is failure
+    assert executed == []
+
+
+async def test_awaited_calls_retain_their_entry_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later attachment cannot relabel an already-admitted async SDK call."""
+    import asyncio
+
+    from base import telemetry
+    from base.agents.sdk import call_policy
+
+    rows: list[dict[str, Any]] = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+
+    def capture(*_args: Any, **kwargs: Any) -> None:
+        rows.append(kwargs)
+
+    monkeypatch.setattr(telemetry, "emit", capture)
+
+    async def held() -> None:
+        entered.set()
+        await release.wait()
+
+    pin_agent(41)
+    first = asyncio.create_task(metering._make_recorder(held, "probe.held")())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        pin_agent(42)
+        metering._make_recorder(lambda: None, "probe.next")()
+        release.set()
+        await first
+    finally:
+        release.set()
+        await first
+    assert [(row["attributes"]["fn"], row["agent_id"], row["source"]) for row in rows] == [
+        ("probe.next", 42, "agent:42"),
+        ("probe.held", 41, "agent:41"),
+    ]
