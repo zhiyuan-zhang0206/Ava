@@ -1,6 +1,6 @@
-"""Event contract registry — the single source of truth for event names (R2-C).
+"""Event contract registry — the single source of truth for event names.
 
-Design: design-r2/design-concept.md §4.3 + okf/design/r2-single-source-of-truth (C).
+Current structure: base/events/docs/events.ava.okf.md.
 
 ``EVENTS`` is one ``EventSpec`` per event name (the stream's
 ``event_name`` field, OTel LogRecord semantics): writers add one entry;
