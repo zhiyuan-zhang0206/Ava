@@ -225,7 +225,7 @@ os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 #
 # The native LGTM installer renders Tempo targets from the host-scope
 # telemetry settings (`settings.observability.telemetry_tempo_query_url` /
-# `telemetry_tempo_endpoint`), and `_self_machine_host()` prefers the
+# `telemetry_tempo_endpoint`), and `self_machine_host()` prefers the
 # AVA_MACHINE_HOST env var. The login
 # shell exports the operator's real ~/.ava/.env into every child process (the
 # 2026-08-04 shell-env leak class), and host-scope keys survive the
@@ -448,7 +448,7 @@ from base.host.env.port_table import FIXED_PORTS
 
 # The host-scope isolation pins (env block above) must have taken effect before
 # Settings construction: the native LGTM render reads the Tempo URLs at use
-# time, `_self_machine_host()` prefers the env var, and the render writes the
+# time, `self_machine_host()` prefers the env var, and the render writes the
 # Grafana credential into its output — the login-shell .env leak class would
 # otherwise put the operator's real host address and credentials into the
 # suite. Assert both the environment and the constructed settings, so a later

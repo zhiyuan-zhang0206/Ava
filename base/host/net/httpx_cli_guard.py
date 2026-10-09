@@ -42,10 +42,13 @@ How it can stop working, and how each case surfaces:
   manual approval and must re-check this guard).
 
 It acts only if it runs before the first `import httpx` of the process: the
-dict entry never replaces a module that is already loaded. Its single call is
-in `base/host/net/__init__.py`, which every service entry imports (through the
-Settings load) before anything reaches httpx, including the third-party
-libraries that import it (langsmith, langgraph_sdk); the entry-import test in
+dict entry never replaces a module that is already loaded. The package initializer
+in `base/host/net/__init__.py` calls it before network clients are imported.
+Service entries must establish that dependency before anything reaches httpx,
+including third-party imports (langsmith, langgraph_sdk). Memory search imports
+the public guard before its embedding provider and calls it explicitly at its
+entry point; it does not rely on config facade aliases to initialize networking.
+The entry-import test in
 `services/tests/test_service_entries_skip_httpx_cli.py` is what proves that
 order for each service, and fails when a new early `import httpx` breaks it.
 """

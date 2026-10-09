@@ -8,8 +8,11 @@ from urllib.parse import urlsplit
 import pytest
 
 from base import config
+from base.config.domains.storage.data_plane import self_machine_host
 from base.host.env import runtime_config as rt
 from base.host.env.dotenv_file import upsert_env
+from base.host.net.predicates import is_loopback_host
+from base.host.net.url_secret import url_with_host
 
 
 @pytest.fixture
@@ -32,9 +35,9 @@ def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
     # The served DB URL is the credential-free endpoint; only the host may be
     # rewritten for a remote runner.
     expected = str(config.settings.data_plane.db_url)
-    reachable = config._self_machine_host()
-    if not config.is_loopback_host(reachable):
-        expected = config.url_with_host(expected, reachable)
+    reachable = self_machine_host()
+    if not is_loopback_host(reachable):
+        expected = url_with_host(expected, reachable)
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(expected)
     assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname
@@ -152,7 +155,9 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)  # no .env overrides
     serve_generation(tmp_path)
-    monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
+    monkeypatch.setattr(
+        "base.config.domains.storage.data_plane.self_machine_host", lambda: "10.0.0.3"
+    )
 
     db = str(config.settings.data_plane.db_url)
     redis = str(config.settings.data_plane.redis_url)
@@ -175,7 +180,9 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
     `localhost` would be a no-op."""
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     serve_generation(tmp_path)
-    monkeypatch.setattr(config, "_self_machine_host", lambda: "localhost")
+    monkeypatch.setattr(
+        "base.config.domains.storage.data_plane.self_machine_host", lambda: "localhost"
+    )
 
     vals = config.bootstrap_config_values()
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(config.settings.data_plane.db_url)
@@ -192,7 +199,9 @@ def test_bootstrap_keeps_existing_reachable_url_host(
     hand-set URLs) passes through verbatim — no rewrite of a non-loopback host."""
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     serve_generation(tmp_path)
-    monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
+    monkeypatch.setattr(
+        "base.config.domains.storage.data_plane.self_machine_host", lambda: "10.0.0.3"
+    )
     dp = config.settings.data_plane
     # parts-built, scanner-safe (same convention as cli/commands/converge/tests/test_converge.py)
     host_url = f"postgresql://ava_main:{'sek'}@10.0.0.2:5433/ava_main"

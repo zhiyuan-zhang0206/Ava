@@ -16,7 +16,10 @@ from fastapi.testclient import TestClient
 
 from base import config
 from base.cluster.auth import bearer_header
+from base.config.domains.storage.data_plane import self_machine_host
 from base.host.env import runtime_config as rt
+from base.host.net.predicates import is_loopback_host
+from base.host.net.url_secret import url_with_host
 from gateway.app import app
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture, not a real secret
@@ -36,9 +39,9 @@ def test_bootstrap_returns_config_with_secret(db_conn, monkeypatch: pytest.Monke
     # The DB URL is the credential-free endpoint; only the host may be
     # rewritten for a remote runner.
     expected = str(config.settings.data_plane.db_url)
-    reachable = config._self_machine_host()
-    if not config.is_loopback_host(reachable):
-        expected = config.url_with_host(expected, reachable)
+    reachable = self_machine_host()
+    if not is_loopback_host(reachable):
+        expected = url_with_host(expected, reachable)
     served, owner = urlsplit(body["AVA_DB_URL"]), urlsplit(expected)
     assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname

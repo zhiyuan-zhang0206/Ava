@@ -626,12 +626,8 @@ def test_facade_settings_rebinds_to_the_singleton_after_upgrade() -> None:
     assert proc.stdout.startswith("REBIND _SettingsView Settings False True"), proc.stdout
 
 
-def test_legacy_names_resolve_after_upgrade() -> None:
-    """Settings-free facade helpers resolve while lite; other exports upgrade once.
-
-    The upgraded Settings class retains its module and pickle identity.
-    Removed implementation details are outside the exported facade contract.
-    """
+def test_current_facade_resolves_after_upgrade() -> None:
+    """The lite and eager config surfaces preserve Settings identity."""
     proc = _spawn(
         "import pickle\n"
         "import base.config as c\n"
@@ -641,13 +637,12 @@ def test_legacy_names_resolve_after_upgrade() -> None:
         "served_ok = all(hasattr(c, n) for n in lite_served) and c._boot_state()['mode'] == 'lite'\n"
         "from base.config import _full\n"
         "missing = [n for n in _full._facade_exports() if not hasattr(c, n)]\n"
-        "legacy_ok = hasattr(c, '_plant_lite_placeholders')\n"
         "pinned = c.Settings.__module__\n"
         "same = pickle.loads(pickle.dumps(c.Settings)) is c.Settings\n"
-        "print('LEGACY', served_ok, missing, legacy_ok, pinned, same, c._boot_state()['mode'])\n"
+        "print('FACADE', served_ok, missing, pinned, same, c._boot_state()['mode'])\n"
     )
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.startswith("LEGACY True [] True base.config True full"), proc.stdout
+    assert proc.stdout.startswith("FACADE True [] base.config True full"), proc.stdout
 
 
 def test_forked_child_keeps_full_state() -> None:

@@ -28,6 +28,12 @@ verbs keep deferring everything until first attribute access (`skip` wins over
 `eager`), so metadata-only repair code can load model declarations without
 reading a broken local `.env` or fetching runner configuration.
 
+Configuration readers use their owning helpers directly: bootstrap host projection
+uses `base.config.domains.storage.data_plane.self_machine_host`, and URL operations
+use `base.host.net.predicates` and `base.host.net.url_secret`. The config facade
+exports configuration surfaces, without the retired private helper aliases or
+test-only network utility re-exports.
+
 The boot-path index is generated: `base/host/env/config_lite_table.json` (read by the
 hand-written `base/host/env/config_lite_table.py`, outside this package because
 `base/host/env/registry.py` consumes its surfaces before Settings exists) is
