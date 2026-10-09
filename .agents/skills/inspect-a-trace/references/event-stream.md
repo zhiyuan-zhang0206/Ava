@@ -21,6 +21,11 @@ Since the 2026-08-23 index-label cutover (`INDEX_LABEL_CUTOVER_AT` in
 indexed era narrows the stream itself instead of scanning the whole
 `unknown_service` family — the fast per-agent form is:
 
+Agent selectors cover explicitly attributed events and agent-owned exec process
+logs. Ordinary unannotated shared-host logs use process/system attribution and
+are absent from that selector; inspect them by machine, process, time or trace.
+Critical audit, cancellation and lifecycle events require their explicit owner.
+
 ```logql
 {service_name="unknown_service", agent_id="3048"} | json
 ```
