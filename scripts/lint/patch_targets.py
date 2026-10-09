@@ -49,12 +49,10 @@ The message names the package that owns the private name and the relation of the
 - give the owning package a public entry point or injection seam (a parameter, a settings
   field, a public setter) and patch that.
 
-There is no per-site opt-out. Today's sites are frozen in the `patch_targets` section of the
-structure baseline shards (`scripts/structure/baseline/`) as `path::target -> site count`:
-growth is a violation, a fixed site fails until its entry is lowered or removed, and against
-the base revision the section is shrink-only (a moved owner may carry a key, `git -M`
-renames carry keys), all enforced by `scripts/lint/code_structure.py`. Changing the placement rule or introducing a new lint does not allow freezing new
-sites. The guard remains shrink-only by key and count across rule versions.
+Every foreign-private patch fails directly. There is no per-site opt-out or
+baseline allowance; moving a file or changing a measurement rule cannot permit
+one. Current structure shards reject the retired `patch_targets` field, even
+when it is empty.
 
 ## Scope and cost
 
@@ -68,8 +66,7 @@ of a test nobody touched. The checks split accordingly:
 - pre-push (`lint-patch-targets-full`) and the CI structure job scan everything, so a
   production import change is caught before it merges.
 
-A frozen entry whose file was deleted is stale wherever the run started. The production
-imports are read from the working tree on every run (about 0.4 s warm, 1.5-2.5 s cold) and
+Production imports are read from the working tree on every run (about 0.4 s warm, 1.5-2.5 s cold) and
 cached per file in `.cache/structure/`; no dependency graph is committed.
 """
 
@@ -124,15 +121,15 @@ def _explicit_targets(argv: list[str], repo_root: Path) -> tuple[list[Path], boo
     return sorted(files), full
 
 
-def _hint(baseline: dict[str, int], new: dict[str, int]) -> str:
+def _hint(measured: dict[str, int]) -> str:
     modules: dict[str, int] = {}
-    for key, count in {**baseline, **new}.items():
+    for key, count in measured.items():
         module = key.partition("::")[2].rsplit(".", 1)[0]
         modules[module] = modules.get(module, 0) + count
     top = sorted(modules.items(), key=lambda item: (-item[1], item[0]))[:_HINT_MODULES]
     listed = ", ".join(f"{module} ({count})" for module, count in top)
     return (
-        f"Most patched private targets so far: {listed}. A shared public injection seam for one "
+        f"Most patched private targets: {listed}. A shared public injection seam for one "
         "of these is cheaper than a private patch per test; `scripts/lint/patch_targets.py "
         "--report` lists the full ranking."
     )
@@ -154,7 +151,7 @@ def _select_files(argv: list[str], repo_root: Path) -> list[Path] | None:
 
 
 def _scan(
-    files: list[Path], baseline: dict[str, int], repo_root: Path
+    files: list[Path], repo_root: Path
 ) -> tuple[dict[str, patch_targets.FileResult], patch_targets.Sites, list[str]]:
     """(analysed files with patch points, measured class D sites, per-site errors)."""
     locality.reset_caches()
@@ -174,7 +171,7 @@ def _scan(
         if result.sites:
             results[rel] = result
         measured.update(patch_targets.violations(rel, result))
-        errors.extend(patch_targets.new_site_errors(rel, result, baseline))
+        errors.extend(patch_targets.site_errors(rel, result))
     return results, measured, errors
 
 
@@ -186,23 +183,15 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
     files = _select_files([] if report else argv, repo_root)
     if files is None:
         return 1
-    try:
-        baseline = patch_targets.read_baseline(repo_root)
-    except (OSError, ValueError) as exc:
-        print(f"scripts/structure/baseline: invalid patch_targets baseline: {exc}", file=sys.stderr)
-        return 1
-    results, measured, errors = _scan(files, baseline, repo_root)
+    results, measured, errors = _scan(files, repo_root)
     if report:
-        sites = sum(baseline.values())
-        print(patch_report.render(results, baseline_keys=len(baseline), baseline_points=sites))
+        print(patch_report.render(results))
         return 0
-    scanned = {path.relative_to(repo_root).as_posix() for path in files}
-    errors.extend(patch_targets.stale_errors(measured, baseline, scanned, repo_root))
     for error in errors:
         print(error)
     if errors:
-        new = {k: len(v) for k, v in measured.items() if len(v) > baseline.get(k, 0)}
-        print(f"\n{len(errors)} patch-target violations. {_hint(baseline, new)}", file=sys.stderr)
+        counts = {key: len(lines) for key, lines in measured.items()}
+        print(f"\n{len(errors)} patch-target violations. {_hint(counts)}", file=sys.stderr)
         print("Rule and fixes: see scripts/lint/patch_targets.py.", file=sys.stderr)
         return 1
     return 0
