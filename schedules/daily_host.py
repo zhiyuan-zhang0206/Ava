@@ -37,7 +37,9 @@ def report_agent(env_name: str, label: str) -> int:
         before_id = page.next_cursor
 
 
-def run_daily_loop(db: Database, cron: str, tz: str, fire: Callable[[None], None]) -> None:
+def run_daily_loop(
+    db: Database, cron: str, tz: str, fire: Callable[[datetime, None], None]
+) -> None:
     """Catch up bounded missed slots, then claim each due slot at most once."""
     catch_up(db, [(cron, None)], timezone=tz, fire=fire)
     last_run_at = datetime.now(UTC)
