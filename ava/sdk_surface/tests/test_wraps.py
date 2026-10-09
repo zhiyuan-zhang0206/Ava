@@ -390,3 +390,25 @@ def test_wrap_noncallable_target_raises(probe: tuple[Any, Any]):
     ns.value = 3
     with pytest.raises(wraps.WrapTargetError, match="not callable"):
         wraps.apply_wrap("probe.value", _bare, "myplugin", layers={})
+
+
+def test_wrap_missing_target_is_a_typed_refusal(probe: tuple[Any, Any]) -> None:
+    with pytest.raises(wraps.WrapTargetError, match="does not resolve"):
+        wraps.apply_wrap("probe.missing", _bare, "myplugin", layers={})
+
+
+def test_wrap_descriptor_attribute_error_is_not_a_refusal(
+    probe: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    error = AttributeError("descriptor implementation failed")
+
+    class BrokenTarget:
+        @property
+        def broken(self) -> Any:
+            raise error
+
+    namespace, _fn = probe
+    monkeypatch.setattr(namespace, "target", BrokenTarget(), raising=False)
+    with pytest.raises(AttributeError) as caught:
+        wraps.apply_wrap("probe.target.broken", _bare, "myplugin", layers={})
+    assert caught.value is error
