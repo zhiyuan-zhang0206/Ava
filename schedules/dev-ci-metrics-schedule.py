@@ -14,7 +14,7 @@ import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.db import Database
-from schedules.catchup import claimed_slot, cluster_timezone
+from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
 
 
@@ -69,10 +69,7 @@ def _run_exporter(exporter: Any, repo: str) -> None:
         raise RuntimeError("ci-runs-export exited non-zero")
 
 
-def _fire(_payload: None) -> None:
-    slot_end = claimed_slot()
-    if slot_end is None:
-        raise RuntimeError("dev-ci-metrics fired outside a claimed slot")
+def _fire(slot_end: datetime, _payload: None) -> None:
     try:
         exporter = _load_exporter()
         repo = exporter.DEFAULT_REPO
