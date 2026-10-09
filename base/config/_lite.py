@@ -77,7 +77,7 @@ from base.host.env.config_lite_table import (
     REQUIRED_FIELDS,
 )
 from base.host.env.config_registry import DOMAIN_ATTRS
-from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL, load_ava_env
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL, EnvBootResult, load_ava_env
 
 # `AVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
 BOOT_MODE_ENV = "AVA_CONFIG_BOOT"
@@ -104,6 +104,7 @@ class _BootState:
     globals) so the upgrade path reads as field updates, not `global` juggling."""
 
     __slots__ = (
+        "env_boot",
         "mode",
         "pending",
         "prepared",
@@ -116,6 +117,7 @@ class _BootState:
     )
 
     def __init__(self) -> None:
+        self.env_boot: EnvBootResult | None = None
         self.mode = _LITE
         self.reason: str | None = None
         self.upgrades = 0
@@ -486,7 +488,7 @@ def prepare() -> None:
         # Latched first: a re-entrant read during step 4 (cluster_tz_name reads
         # through the view) must not prepare again.
         _state.prepared = True
-        load_ava_env()
+        _state.env_boot = load_ava_env()
         profile = os.environ.get(AVA_PROCESS_PROFILE_ENV)
         if profile is not None and profile not in PROCESS_PROFILES:
             raise profile_unknown_error(profile)
@@ -512,7 +514,7 @@ def _apply_source_decision() -> None:
     elif should_fetch_from_gateway():
         from base.host.env.bootstrap import inject_config_from_gateway
 
-        inject_config_from_gateway()
+        _state.env_boot = inject_config_from_gateway()
     else:
         _plant_placeholders()
 
@@ -576,7 +578,10 @@ def upgrade(reason: str) -> Any:
         try:
             from base.config._full import build
 
-            bundle = build()
+            env_boot = _state.env_boot
+            if env_boot is None:
+                raise RuntimeError("config boot did not produce an environment delivery result")
+            bundle = build(env_boot=env_boot)
             _install(bundle, reason)
             for name, value in tuple(_state.pending.items()):
                 setattr(getattr(_state.settings, FIELD_DOMAINS[name]), name, value)

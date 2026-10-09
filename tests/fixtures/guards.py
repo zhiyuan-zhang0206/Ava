@@ -357,16 +357,6 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(base.host.env.bootstrap, "dial_get", _boom)
 
 
-@pytest.fixture(autouse=True)
-def _restore_db_authority_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A test that drives a boot pass (`load_ava_env`, a runner's bootstrap
-    injection) may record a per-process database-authority refusal; restore the
-    suite's value afterwards so the refusal never leaks into later tests' dials."""
-    from base.host.env import dotenv_boot
-
-    monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", dotenv_boot._db_authority_refusal)
-
-
 # Loggers `base.log._install_stdlib_intercept()` gives a level of its own besides the
 # first-party names and the root: the psycopg pool gate and the uvicorn trio.
 _INTERCEPT_LEVELED_THIRD_PARTY = ("psycopg.pool", "uvicorn", "uvicorn.error", "uvicorn.access")
