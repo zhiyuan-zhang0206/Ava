@@ -3,8 +3,10 @@
 A test may replace a name in its own package, a public name anywhere, the process
 environment, or a third-party / runtime boundary. It may not reach into a private name of a
 package it does not belong to. This module classifies every patch point of a test file
-(`scripts/structure/patch_points.py`) against the file's home package
-(`scripts/structure/placement.py`). Every foreign-private patch is rejected directly; no baseline can permit it.
+(`scripts/structure/patch_points.py`) against an explicit authority package.
+The active consumer retains legacy dependency-derived home inference and
+explicitly carries incomplete execution evidence. Complete execution diagnostics
+use the same private policy; they do not replace authority with dependency LCA. Every foreign-private patch is rejected directly; no baseline can permit it.
 New violations must be fixed; introducing the lint cannot freeze new exemptions.
 
 Classes (each patch point lands in exactly one):
@@ -36,6 +38,7 @@ from __future__ import annotations
 import ast
 import sys
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from scripts.structure import imports, locality
@@ -43,8 +46,9 @@ from scripts.structure.patch_points import Point, extract_points
 from scripts.structure.placement import (
     PATCH_TOPS,
     ModuleIndex,
-    Placement,
-    place,
+    ReferenceEvidence,
+    collect_reference_evidence,
+    legacy_patch_placement,
     unit_of,
 )
 
@@ -308,28 +312,52 @@ def _origins_of(path: Path, rel_path: str) -> dict[str, str]:
     return out
 
 
+class Authorization(StrEnum):
+    """The package authority supplied to patch classification."""
+
+    LEGACY_INFERENCE = "legacy-inference"
+
+
 @dataclass(frozen=True)
 class FileResult:
-    """One test file: where it lives (its home) and every classified patch point."""
+    """Patch classifications, their authority policy and retained execution evidence.
+
+    Legacy inference is not a placement-compliance or source-owner verdict.
+    None evidence means no patch points required analysis; it is not complete
+    dependency evidence. Completeness diagnostics collect facts even without points.
+    """
 
     home: str | None
     fallback: bool
     sites: tuple[Site, ...]
+    authorization: Authorization = Authorization.LEGACY_INFERENCE
+    evidence: ReferenceEvidence | None = None
 
 
-def analyze(rel_path: str, text: str, classifier: Classifier) -> FileResult:
-    """Classify the patch points of one test file (`rel_path` is repo-relative, POSIX)."""
+def analyze(
+    rel_path: str, text: str, classifier: Classifier, *, include_unpatched: bool = False
+) -> FileResult:
+    """Current patch-gate contract, explicitly retaining its evidence gaps."""
     tree = ast.parse(text, filename=rel_path)
     nodes = list(ast.walk(tree))
     points = extract_points(nodes, rel_path)
     if not points:
-        return FileResult(None, fallback=False, sites=())
-    placement: Placement = place(rel_path, tree, classifier.index, nodes)
+        evidence = (
+            collect_reference_evidence(tree, classifier.index, rel_path)
+            if include_unpatched
+            else None
+        )
+        return FileResult(None, fallback=False, sites=(), evidence=evidence)
     support_home = _support_home(rel_path)
     if support_home is not None:
-        placement = Placement(support_home, placement.unit)
-    sites = tuple(classifier.classify(point, placement.home) for point in points)
-    return FileResult(placement.home, placement.fallback, sites)
+        evidence = collect_reference_evidence(tree, classifier.index, rel_path)
+        home, fallback = support_home, False
+    else:
+        legacy = legacy_patch_placement(rel_path, tree, classifier.index, nodes)
+        evidence = legacy.evidence
+        home, fallback = legacy.placement.home, legacy.placement.fallback
+    sites = tuple(classifier.classify(point, home) for point in points)
+    return FileResult(home, fallback, sites, evidence=evidence)
 
 
 def _support_home(rel_path: str) -> str | None:

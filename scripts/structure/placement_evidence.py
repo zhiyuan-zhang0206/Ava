@@ -1,15 +1,13 @@
-"""What counts as the repository root, and which files can run the source they hold.
-
-Two gates of the placement rule (`scripts/structure/placement.py`, "Data is not evidence"):
-a path is evidence only when it starts at the repository root, and source in a string is
-evidence only when the file runs it. Both are decided from the file's own syntax.
-"""
+"""First-party reference facts and syntax-derived repository-root path evidence."""
 
 from __future__ import annotations
 
 import ast
 import collections
+from dataclasses import dataclass
 from pathlib import PurePosixPath
+
+from scripts.structure.imports import executed
 
 
 def _last_name(node: ast.expr) -> str:
@@ -107,13 +105,53 @@ class RepoRoots:
         return self._depth > 0 and file_ascents(node) == self._depth
 
 
-def spawns_interpreter(tree: ast.AST) -> bool:
-    """Does the file start a Python interpreter (`sys.executable`)? Source in a string is only run by
-    such a file; in any other it is a sample handed to a linter, a placement call or a writer."""
-    return any(
-        isinstance(node, ast.Attribute)
-        and node.attr == "executable"
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "sys"
-        for node in ast.walk(tree)
-    )
+@dataclass
+class Ref:
+    """One first-party module a file references."""
+
+    line: int
+    kind: str  # import | string-target | string-loose | embedded-import | path-file | path-dir
+    module: str
+    unit: str
+    via: str = ""  # callee of a string target
+    names: tuple[str, ...] = ()  # local names an import binds (patch-evidence pruning)
+
+
+@dataclass
+class ReferenceEvidence:
+    """Known references with execution inputs whose dependencies remain unresolved."""
+
+    refs: list[Ref]
+    unresolved: list[executed.Unresolved]
+
+
+class IncompleteReferenceEvidenceError(ValueError):
+    """The legacy list API cannot represent incomplete execution evidence."""
+
+    def __init__(self, evidence: ReferenceEvidence) -> None:
+        self.evidence = evidence
+        details = "; ".join(f"{u.path}:{u.line}: {u.reason}" for u in evidence.unresolved)
+        super().__init__(details)
+
+
+@dataclass(frozen=True)
+class Placement:
+    """The package a test file belongs to: `home` is a code directory such as `base/host`."""
+
+    home: str | None
+    unit: str | None = None
+    fallback: bool = False  # the patch-evidence fallback applied
+    ambiguous: bool = False  # no unit could legally import all the others
+
+
+@dataclass(frozen=True)
+class LegacyPlacement:
+    """Existing patch-gate inference paired with its complete or incomplete facts.
+
+    This adapter is only for the existing private-patch consumer during cleanup.
+    New locality checks must consume ReferenceEvidence directly; an inferred home
+    from incomplete facts does not certify placement or grant new private access.
+    """
+
+    placement: Placement
+    evidence: ReferenceEvidence

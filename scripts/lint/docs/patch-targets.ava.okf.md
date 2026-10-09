@@ -44,6 +44,30 @@ permitting current sites. Fix the ownership or use an existing public boundary.
 
 Checks: pre-commit passes only the changed test files (a changed lint, placement module or shard scans everything); the pre-push hook `lint-patch-targets-full` and the CI structure job scan everything, because a production import change can move the home of a test that did not change.
 
+## Execution evidence and staged diagnostics
+
+The shared collector parses actual Python `-c` inputs through imported launcher
+bindings, literal source, one plain binding or a transparent local helper.
+Unrelated multiline samples do not become dependencies. Unsupported execution
+inputs retain their path, launch line and reason.
+
+The refs-only API raises `IncompleteReferenceEvidenceError` on gaps. The existing
+patch consumer explicitly uses `legacy_patch_placement()`: one shared collector,
+all gaps retained, results labeled `legacy-inference`. The CLI and report show
+those gaps. A default pass gives only the existing private-policy verdict; it
+certifies neither complete evidence nor raw LCA. New placement consumers must
+use structured evidence, never the legacy adapter.
+
+`--strict-evidence` retains that private policy and exits 1 on unresolved inputs,
+unreadable members or existing-policy violations, including with `--report`.
+The independent LCA check may prove root from known subjects while retaining
+unknown; completeness failure does not invalidate that proof.
+
+No replacement private-authority rule is selected. The root integration owner
+coordinates that design; verified consumer/seam closure under the final design
+must precede adapter removal. The placement owner independently closes LCA and
+fixture/lane migration. No baseline, exception marker or whitelist bridges them.
+
 ## Report
 
 `scripts/lint/patch_targets.py --report` prints the census as Markdown and exits 0: the class distribution, D by relation, D by test home, D by production module (the injection-seam work list), the most-patched ambient modules and the fallback files. The numbers and the follow-up list live in [test patch audit](../../../future/infra/engineering/test-patch-audit.md).

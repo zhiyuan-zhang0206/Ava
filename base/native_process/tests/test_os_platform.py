@@ -89,15 +89,15 @@ class TestEnsureLineBufferedStdio:
         is still alive."""
         repo_root = str(Path(__file__).resolve().parents[3])
         script = (
-            f"import sys, time\n"
-            f"sys.path.insert(0, {repo_root!r})\n"
-            f"from base.native_process.os_platform import ensure_line_buffered_stdio\n"
-            f"ensure_line_buffered_stdio()\n"
-            f"print('[update] header')\n"
-            f"time.sleep(30)\n"
+            "import sys, time\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "from base.native_process.os_platform import ensure_line_buffered_stdio\n"
+            "ensure_line_buffered_stdio()\n"
+            "print('[update] header')\n"
+            "time.sleep(30)\n"
         )
         proc = subprocess.Popen(  # noqa: S603 — this interpreter, a literal script
-            [sys.executable, "-c", script],
+            [sys.executable, "-c", script, repo_root],
             stdout=subprocess.PIPE,
             text=True,
         )
