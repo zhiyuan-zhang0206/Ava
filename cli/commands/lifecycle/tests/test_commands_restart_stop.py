@@ -200,10 +200,15 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """An outer operation's still-running journal is never closed by the nested
     restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
     from base.deploy.lifecycle import status_journal
+
+    # Real phases create an implicit journal while begin/finish are stubbed.
+    # Keep that unfinished record out of later tests' journal ownership.
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
 
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(

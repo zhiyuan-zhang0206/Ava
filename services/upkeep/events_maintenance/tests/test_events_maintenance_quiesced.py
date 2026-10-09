@@ -48,16 +48,29 @@ async def test_a_quiesced_unit_runs_no_pass(
 
     monkeypatch.setattr(daemon, pass_name, record_pass)
 
-    async def short_sleep(_progress: LoopProgress, _total_s: float) -> None:
-        await asyncio.sleep(0.01)
+    entered = asyncio.Event()
+    suspended = asyncio.Event()
 
+    async def held_pass(pool: Any, _progress: LoopProgress, run: Any) -> None:
+        run(pool)
+        entered.set()
+        await suspended.wait()
+
+    async def short_sleep(_progress: LoopProgress, _total_s: float) -> None:
+        entered.set()
+        await suspended.wait()
+
+    # Cancel inside an admitted pass or the first quiesced sleep, rather than
+    # racing a fixed delay against worker-thread completion.
+    monkeypatch.setattr(daemon, "_maintenance_with_liveness", held_pass)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", short_sleep)
     task = asyncio.create_task(
         loop(object(), LoopProgress("t", timeout_s=5.0), events_maintenance_config())
     )
     try:
-        await asyncio.sleep(0.2)
+        await asyncio.wait_for(entered.wait(), timeout=2.0)
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+    assert task.cancelled(), "the loop must propagate cancellation"
     assert bool(passes) is (not quiesced)
