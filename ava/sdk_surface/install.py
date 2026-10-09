@@ -254,8 +254,8 @@ def _apply(
     for provider in contributions.skill_sources:
         build.providers.append(provider)
         build.undo.append(_provider_remover(build.providers, provider))
-    if contributions.flags:
-        build.undo.append(flags.declare_flags(plugin, contributions.flags))
+    for key in contributions.flags:
+        flags.validate_flag_key(key)
     if contributions.config is not None:
         build.undo.append(config_registration.bind_plugin_config(plugin, contributions.config))
     return promoted
