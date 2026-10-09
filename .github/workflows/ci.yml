@@ -260,7 +260,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -295,7 +295,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -380,21 +380,13 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
-          # No project cache here. setup-uv keys the cache on pyproject.toml +
-          # uv.lock only, every job shares that key, and an entry is immutable:
-          # the first job to finish writes it. This job installs nothing from the
-          # lockfile (only `uvx uv==0.11.16`) and finishes in ~20s, so it always
-          # won that race and left a ~46 MB entry without the project wheels,
-          # which every other job then restored as a "hit" and re-downloaded
-          # all 265 packages from PyPI anyway.
+          version: 0.12.23
+          # This job installs no project dependencies. Do not let it publish
+          # an incomplete cache under the lockfile key used by install jobs.
           enable-cache: false
 
       - name: Audit locked Python dependencies
-        # The canonical CI uv (0.10.2) predates `uv audit`; pin the
-        # audit-capable tool locally so this informational job performs a real
-        # vulnerability query without expanding the repository toolchain pin.
-        run: uvx --from 'uv==0.11.16' uv audit --frozen
+        run: uv audit --frozen
         continue-on-error: true
 
       - name: Install Node
@@ -424,7 +416,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -596,7 +588,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -787,7 +779,7 @@ jobs:
         if: ${{ env.STATUS == 'merged' }}
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -875,7 +867,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1085,7 +1077,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1165,7 +1157,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1298,7 +1290,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -1322,7 +1314,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -1548,7 +1540,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -1916,7 +1908,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Node
@@ -2046,7 +2038,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Node
@@ -2158,7 +2150,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Node
