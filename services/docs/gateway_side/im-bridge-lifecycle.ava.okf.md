@@ -16,11 +16,15 @@ The daemon's entered `asyncio.TaskGroup` owns subscription, typing, inbound
 outbox replay and all three adapter pollers. Unexpected child errors fail the
 daemon; supervision may restart it. The group drains children before adapters,
 health and the shared database pool close. Feishu websocket callbacks create handlers in that same group; unexpected
-thread exit or faults reach its owner through an instance-local Future.
+worker exit or faults reach its owner through an instance-local Future.
 `begin_shutdown()` rejects queued callbacks and ends the owner wait before group
 exit; this does not prove the thread stopped. Its existing disconnect budget and
 best-effort thread shutdown contract remain. Late thread outcomes after the
-owner stops receiving are outside its completed lifecycle wait.
+owner stops receiving are outside its completed lifecycle wait. The same group
+owns the await task for the blocking SDK call via `asyncio.to_thread`; startup
+waits for worker entry, which does not prove a websocket connection. Shutdown
+cancels that wait without claiming the SDK worker physically stopped. Daemon
+main retains its existing bounded cleanup and hard exit without executor join.
 
 Teardown attempts every adapter, health server, database pool and pidfile even
 after a stop fault. Unknown cleanup faults are reported with the original body
