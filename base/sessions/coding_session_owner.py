@@ -99,27 +99,21 @@ def launch_is_stale(
     return timestamp - owner.created_at >= _UNPUBLISHED_CLAIM_WINDOW
 
 
-# A unix socket path must fit ``sockaddr_un.sun_path`` with its terminating NUL:
-# 104 bytes on macOS, 108 on Linux.
-_SUN_PATH_BYTES = 104 if is_macos() else 108
-# Short real directories to hold the per-user socket directory. On macOS
-# ``/tmp`` is a symlink, and codex refuses a socket directory reached through
-# one, so the real ``/private/tmp`` is used.
-_SOCKET_BASE = Path("/private/tmp" if is_macos() else "/tmp")  # noqa: S108 — the per-user dir below is checked: real, ours, 0700
-
-
 class CodingSessionSocketError(RuntimeError):
     """No private, short-enough directory is available for an app-server socket."""
 
 
-def _private_socket_dir() -> Path:
+def _private_socket_dir(*, base: Path | None = None) -> Path:
     """``<short tmp>/ava-<uid>``: a real directory this user owns, mode 0700.
 
     A world-writable parent lets anyone pre-create the name, so a directory
     that is a symlink or belongs to another user is refused rather than used.
     """
+    # macOS /tmp is a symlink; codex requires a real directory path.
+    if base is None:
+        base = Path("/private/tmp" if is_macos() else "/tmp")  # noqa: S108 — the per-user dir below is checked: real, ours, 0700
     uid = os.getuid()
-    directory = _SOCKET_BASE / f"ava-{uid}"
+    directory = base / f"ava-{uid}"
     with contextlib.suppress(FileExistsError):
         directory.mkdir(mode=0o700)
     info = directory.lstat()
@@ -149,10 +143,12 @@ def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
     name = f"codex-app-server.{key_digest(key)[:12]}-{generation.replace('-', '')[:8]}.sock"
     path = _private_socket_dir() / name
     size = len(os.fsencode(path))
-    if size >= _SUN_PATH_BYTES:
+    # sockaddr_un.sun_path includes its terminating NUL: 104 bytes on macOS, 108 on Linux.
+    sun_path_bytes = 104 if is_macos() else 108
+    if size >= sun_path_bytes:
         raise CodingSessionSocketError(
             f"Codex app-server socket path {path} is {size} bytes; unix sockets on this "
-            f"host take at most {_SUN_PATH_BYTES - 1}"
+            f"host take at most {sun_path_bytes - 1}"
         )
     return path
 

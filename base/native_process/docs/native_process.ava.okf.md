@@ -15,6 +15,8 @@ Its component nodes describe the current contracts and implementation.
 `os_platform.is_linux()` and `os_platform.is_macos()` read Python's `sys.platform`
 directly without retaining process-level copies. The Windows compatibility flag
 remains available.
+Platform-dependent socket directory and length choices are made when the socket
+is requested, rather than cached when its owner module imports.
 Disk sampling uses the macOS data volume on macOS and `/` on other POSIX hosts,
 including WSL; no WSL detection or `uname` probe runs when the module imports.
 Loaded commit and code version are separate boot facts and retain their frozen
