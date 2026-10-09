@@ -15,7 +15,7 @@ frozen declaration.
 - `system_prompt_sections` — `(slices: AgentSlices) -> str`; an empty string contributes nothing.
 - `context_notes` — `ContextNote(build, on_fork, rank)`; `build(ctx: AvaContext)` returns a `HumanMessage` or `None` when it has
   nothing to say. Lower `rank` sits closer to the SystemMessage; `on_fork` also grafts the note onto a fork.
-- `after_init` / `before_llm` / `before_exec` / `after_exec` — `Hook` instances ([[okf/plugins/graph-edge-hooks.ava.okf.md]]).
+- `after_init` / `before_llm` / `before_exec` / `after_exec` — `Hook` instances ([[docs/plugins/graph-edge-hooks.ava.okf.md]]).
 - `state` — `BaseModel` classes whose fields become channels `<plugin>__<field>`; the plugin keeps its own
   `PluginStateHandle(cls, plugin)`.
 - `metrics` / `inspect_widgets` — `MetricSpec` / `InspectWidgetSpec`, declared by the plugin's `metrics.py` /

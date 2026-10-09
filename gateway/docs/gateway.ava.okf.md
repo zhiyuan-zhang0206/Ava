@@ -62,7 +62,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
 ## Key Dependencies
 
 Feature packages (routes + helpers + wire models):
-[[agents-router.ava.okf.md|agents]],
+[[gateway/agents/docs/agents.ava.okf.md|agents]],
 [[ops-surfaces.ava.okf.md|cluster]],
 [[gateway/events/docs/sse.ava.okf.md|events]],
 [[gateway/alerts/docs/alerts.ava.okf.md|alerts]],

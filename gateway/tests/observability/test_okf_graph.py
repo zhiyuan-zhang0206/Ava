@@ -90,8 +90,8 @@ def test_parse_frontmatter_returns_original_text_for_unknown_or_bad_fences(text:
         ("base/packages/docs/docs/x.ava.okf.md", "base/packages/docs/x.ava.okf.md"),
         ("a/docs/b/docs/c.ava.okf.md", "a/docs/b/c.ava.okf.md"),
         ("docs/x.ava.okf.md", "x.ava.okf.md"),
+        ("docs/index.ava.okf.md", "index.ava.okf.md"),
         # No `docs` directory segment: the path is its own logical path.
-        ("okf/index.ava.okf.md", "okf/index.ava.okf.md"),
         ("agent/agent.ava.okf.md", "agent/agent.ava.okf.md"),
         # A file name is never a directory segment.
         ("agent/docs.ava.okf.md", "agent/docs.ava.okf.md"),
@@ -103,7 +103,7 @@ def test_logical_path_drops_the_last_docs_directory_segment(physical: str, logic
     assert logical_path(physical) == logical
 
 
-_ROOT = "okf/index.ava.okf.md"
+_ROOT = "docs/index.ava.okf.md"
 
 
 def _parents(paths: set[str]) -> dict[str, str | None]:
@@ -158,7 +158,7 @@ def test_layered_and_unlayered_documents_share_one_tree() -> None:
     even one directory's overview and children may sit on different sides."""
     paths = {
         _ROOT,
-        "okf/plugins.ava.okf.md",
+        "docs/plugins/plugins.ava.okf.md",
         "agent/agent.ava.okf.md",
         "agent/kernel.ava.okf.md",
         "base/docs/base.ava.okf.md",
@@ -170,7 +170,7 @@ def test_layered_and_unlayered_documents_share_one_tree() -> None:
     parents = _parents(paths)
     assert parents == {
         _ROOT: None,
-        "okf/plugins.ava.okf.md": _ROOT,
+        "docs/plugins/plugins.ava.okf.md": _ROOT,
         "agent/agent.ava.okf.md": _ROOT,
         "agent/kernel.ava.okf.md": "agent/agent.ava.okf.md",
         "base/docs/base.ava.okf.md": _ROOT,
@@ -182,10 +182,23 @@ def test_layered_and_unlayered_documents_share_one_tree() -> None:
     assert all(p is None or p in paths for p in parents.values())
 
 
-def test_okf_index_layer_is_unchanged() -> None:
-    """`okf/` is not a `docs` layer: its nodes have no filesystem parent."""
-    paths = {_ROOT, "okf/plugins.ava.okf.md", "okf/skills.ava.okf.md"}
-    assert _parents(paths) == {_ROOT: None, **dict.fromkeys(paths - {_ROOT}, _ROOT)}
+def test_repository_docs_keep_cross_domain_overviews_and_nested_children() -> None:
+    paths = {
+        _ROOT,
+        "docs/plugins/plugins.ava.okf.md",
+        "docs/plugins/module-loading/module-loading.ava.okf.md",
+        "docs/plugins/module-loading/two-faces.ava.okf.md",
+        "docs/skills/skills.ava.okf.md",
+    }
+    assert _parents(paths) == {
+        _ROOT: None,
+        "docs/plugins/plugins.ava.okf.md": _ROOT,
+        "docs/plugins/module-loading/module-loading.ava.okf.md": "docs/plugins/plugins.ava.okf.md",
+        "docs/plugins/module-loading/two-faces.ava.okf.md": (
+            "docs/plugins/module-loading/module-loading.ava.okf.md"
+        ),
+        "docs/skills/skills.ava.okf.md": _ROOT,
+    }
 
 
 def test_python_package_named_docs_keeps_its_layer_under_the_package() -> None:
@@ -222,7 +235,7 @@ def test_graph_of_layered_bundle_has_one_root_and_physical_edges(tmp_path: Path)
             f"---\ntype: doc\ntitle: {rel}\ndescription: d\n---\n\n{body}\n", encoding="utf-8"
         )
 
-    write("okf/index.ava.okf.md")
+    write("docs/index.ava.okf.md")
     write("pkg/docs/pkg.ava.okf.md")
     write("pkg/docs/child.ava.okf.md", "See [[other/docs/leaf.ava.okf.md]].")
     write("pkg/nested/docs/nested.ava.okf.md")
@@ -234,15 +247,15 @@ def test_graph_of_layered_bundle_has_one_root_and_physical_edges(tmp_path: Path)
     data = build_graph_data(tmp_path)
     ids = {n["id"] for n in data["nodes"]}
     roots = [n["id"] for n in data["nodes"] if n["parent"] is None]
-    assert roots == ["okf/index.ava.okf.md"]
+    assert roots == ["docs/index.ava.okf.md"]
     tree = {(e["source"], e["target"]) for e in data["treeEdges"]}
     assert tree == {
-        ("okf/index.ava.okf.md", "pkg/docs/pkg.ava.okf.md"),
+        ("docs/index.ava.okf.md", "pkg/docs/pkg.ava.okf.md"),
         ("pkg/docs/pkg.ava.okf.md", "pkg/docs/child.ava.okf.md"),
         ("pkg/docs/pkg.ava.okf.md", "pkg/nested/docs/nested.ava.okf.md"),
         ("pkg/nested/docs/nested.ava.okf.md", "pkg/nested/deep/docs/leaf.ava.okf.md"),
-        ("okf/index.ava.okf.md", "other/docs/leaf.ava.okf.md"),
-        ("okf/index.ava.okf.md", "legacy/legacy.ava.okf.md"),
+        ("docs/index.ava.okf.md", "other/docs/leaf.ava.okf.md"),
+        ("docs/index.ava.okf.md", "legacy/legacy.ava.okf.md"),
         ("legacy/legacy.ava.okf.md", "legacy/child.ava.okf.md"),
     }
     assert all(a in ids and b in ids for a, b in tree)
