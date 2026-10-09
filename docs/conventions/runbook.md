@@ -875,7 +875,7 @@ hand, as updates did before; the gate protects from the following update on.
 ## Code flow & Events
 
 Event publication and payloads belong to
-[the live event bus](../../base/events/live/docs/live.ava.okf.md);
+[the live event bus](../../base/events/live/docs/live/live.ava.okf.md);
 interrupt and control belong to [the agent graph](../../agent/graph/docs/graph.ava.okf.md).
 
 **Lifecycle command residue:** never hand-clean a stuck lifecycle command (a row
