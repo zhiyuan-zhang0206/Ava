@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -30,6 +31,8 @@ from base.events.live.projection import Error
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.redis_client import open_async_redis
 from base.host.env.agent_slices import AgentSlices
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 
 from ...host import AgentHost
 from ...runtime import TurnOutcome
@@ -115,8 +118,20 @@ def _build_host_driving_invoke_until_done(
         "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
     )
 
-    async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
-        return await host._invoke_until_done(target, ctx)
+    async def drive(
+        target: int,
+        _runtime: object,
+        _slices: object,
+        *,
+        incarnation: RuntimeIncarnation,
+        resources: HostedTurnResources | None,
+    ) -> TurnOutcome:
+        assert incarnation.agent_id == target and incarnation.owner == host._owner
+        assert resources is not None
+        bound = replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
+        assert bound.require_original_incarnation(target) is incarnation
+        assert bound.hosted_resources is resources
+        return await host._invoke_until_done(target, bound)
 
     monkeypatch.setattr(host, "_drive_turns", drive)
     return host

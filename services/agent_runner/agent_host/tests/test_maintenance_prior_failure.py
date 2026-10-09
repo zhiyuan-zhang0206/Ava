@@ -1,5 +1,6 @@
 """A prior ordinary crash cannot poison a later durable maintenance generation."""
 
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -22,6 +23,8 @@ from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.runtime import TurnOutcome
@@ -76,8 +79,20 @@ async def _failed_turn(
         bus=EventBus.from_settings(),
     )
 
-    async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
-        return await host._invoke_until_done(target, ctx)
+    async def drive(
+        target: int,
+        _runtime: object,
+        _slices: object,
+        *,
+        incarnation: RuntimeIncarnation,
+        resources: HostedTurnResources | None,
+    ) -> TurnOutcome:
+        assert incarnation.agent_id == target and incarnation.owner == host._owner
+        assert resources is not None
+        bound = replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
+        assert bound.require_original_incarnation(target) is incarnation
+        assert bound.hosted_resources is resources
+        return await host._invoke_until_done(target, bound)
 
     monkeypatch.setattr(host, "_drive_turns", drive)
     with pytest.raises(RuntimeError, match="ordinary node failure"):
