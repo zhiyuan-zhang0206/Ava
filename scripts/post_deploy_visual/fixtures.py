@@ -150,6 +150,13 @@ RUN_TIMELINE = {
             "end": "2026-09-01T00:10:04Z",
             "source": None,
             "preview": "visual fixture step",
+            "parent": None,
+            "context_tokens": None,
+            "generation_tokens": None,
+            "estimated": None,
+            "session": 0,
+            "context_total": None,
+            "request": None,
         }
     ],
     "events": [],
