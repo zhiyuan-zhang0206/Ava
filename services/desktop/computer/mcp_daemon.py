@@ -103,7 +103,7 @@ _LINE_LIMIT = 64 * 1024 * 1024
 
 def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None) -> str | None:
     """The compact "where / what" string of a computer_action audit row."""
-    if tool == "click" and "x" in args:
+    if tool in {"click", "move"} and "x" in args:
         return f"{args['x']},{args['y']}"
     if tool == "drag":
         return (
@@ -115,7 +115,7 @@ def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None
         return f"{result.get('x')},{result.get('y')}"
     if tool == "ax_act" and result is not None:
         # The element's center and the action — never the value written.
-        return f"{result.get('x')},{result.get('y')},{result.get('action')}"
+        return f"{result.get('x')},{result.get('y')},{result.get('native_action', result.get('action'))}"
     if tool == "scroll":
         return f"{args.get('x')},{args.get('y')},{args.get('dy')}"
     if tool == "key":
@@ -305,8 +305,8 @@ class ComputerMcpDaemon:
     def __init__(self, config: ComputerUseConfig, db: Database, sock: str | None = None) -> None:
         self._db = db
         self._sock = sock or str(computer_mcp_socket())
-        # Last pointer position in PHYSICAL pixels (set by click / explicit
-        # scroll); the scroll fallback when the caller gives no x/y.
+        # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
+        # Scroll without x/y reads the actual native cursor.
         self._pointer: tuple[float, float] | None = None
         # Last measured physical->logical scale (snapshot PNG vs logical size).
         # None until the first snapshot; click/scroll use it via _current_scale.
@@ -378,7 +378,7 @@ class ComputerMcpDaemon:
 
     def _track_tool_effects(self, tool: str, args: dict[str, Any], result: dict[str, Any]) -> None:
         """Remember the scale and pointer the tool's result established, for later conversions."""
-        if tool == "snapshot":
+        if tool == "snapshot" and "frame" not in result:
             # click/scroll convert with the scale the caller saw.
             self._scale = float(result["screen"]["scale"])
         elif tool == "click_text":
@@ -387,7 +387,9 @@ class ComputerMcpDaemon:
             # click/scroll convert like this call did.
             self._scale = float(result["scale"])
             self._pointer = (float(result["x"]), float(result["y"]))
-        if tool == "click" or (tool == "scroll" and "x" in args and "y" in args):
+        if "frame" in args:
+            return
+        if tool in {"click", "move"} or (tool == "scroll" and "x" in args and "y" in args):
             self._pointer = (float(args["x"]), float(args["y"]))
         elif tool == "drag":
             self._pointer = (float(args["end_x"]), float(args["end_y"]))
