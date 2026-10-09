@@ -158,7 +158,7 @@ def test_stateful_modes_are_retired(arguments: list[str]) -> None:
 
 
 def test_docstring_lookalike_is_not_scanned() -> None:
-    path = Path(__file__).parents[3] / "agent/hooks/tests/hook_typing_contract.py"
+    path = Path(__file__).parents[4] / "agent/hooks/tests/hook_typing_contract.py"
     ignores = gate.scan_file(path, "agent/hooks/tests/hook_typing_contract.py")
     assert not any(ignore.line == 13 for ignore in ignores)
 

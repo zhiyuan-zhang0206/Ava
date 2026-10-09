@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # (field, env alias, raw value) — one exercise per kind and per failure mode.
 _CASES: list[tuple[str, str, str]] = [
@@ -90,9 +90,11 @@ print("PARITY " + json.dumps(results))
 """
 
 
-def _run_child() -> list[dict[str, Any]]:
+def _run_child(home: Path) -> list[dict[str, Any]]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.pop("VIRTUAL_ENV", None)
+    env["AVA_HOME"] = str(home)
+    env["AVA_CONFIG_FETCH"] = "skip"
     env["PARITY_CASES"] = json.dumps(_CASES)
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
         [sys.executable, "-B", "-c", _CHILD],
@@ -108,8 +110,8 @@ def _run_child() -> list[dict[str, Any]]:
     return json.loads(line.removeprefix("PARITY "))
 
 
-def test_lite_parity_matrix() -> None:
-    results = _run_child()
+def test_lite_parity_matrix(tmp_path: Path) -> None:
+    results = _run_child(tmp_path)
     assert len(results) == len(_CASES)
     for case in results:
         label = f"{case['name']}={case['raw']!r}"

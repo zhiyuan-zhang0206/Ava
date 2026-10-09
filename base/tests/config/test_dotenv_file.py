@@ -161,7 +161,7 @@ def test_snapshot_filename_stamps_the_host_clock(
     finally:
         # monkeypatch's own TZ-env undo does not re-run tzset(), so the C
         # library's cached zone would otherwise leak into later tests (the
-        # same gotcha base/config/tests/test_cluster_tz.py's _restore_process_tz
+        # same gotcha base/tests/config/test_cluster_tz.py's _restore_process_tz
         # documents).
         if original_tz is None:
             os.environ.pop("TZ", None)

@@ -1,6 +1,5 @@
 "tests.path_scoped.ava_tests" = [
     "test_lazy_boot_import.py",
-    "test_lazy_connection.py",
     "test_lazy_lm_import.py",
     "test_machine_surface.py",
     "test_mcp_config.py",
