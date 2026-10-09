@@ -39,7 +39,7 @@ copied from an old doc or an old spawn; list the current roster first:
                                #         reasoning_effort_options, ...}
   ```
 
-- **Source of truth (repo-side)** — `base/lm/catalog.py`'s `ModelCatalog.models` and
+- **Source of truth (repo-side)** — `base/lm/catalog/__init__.py`'s `ModelCatalog.models` and
   the derived `supported_models` (provider → spawnable ids). A model is
   selectable iff `spawnable=True`. Chat prices live in the provider plugin's
   `PriceRates` and are mirrored in `base/lm/pricing/pricing_catalog_archive.json` —
