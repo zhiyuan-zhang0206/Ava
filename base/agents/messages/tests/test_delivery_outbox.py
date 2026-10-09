@@ -189,21 +189,21 @@ def test_logical_key_reuses_until_delivery_then_rotates(
     _patch_limits(monkeypatch)
     first = outbox.logical_key(agent_id=7, source="watcher:7", content="check")
     assert outbox.logical_key(agent_id=7, source="watcher:7", content="check") == first
-    outbox.note_send_succeeded(agent_id=7, source="watcher:7", content="check", key=first)
+    outbox.retire_send(agent_id=7, source="watcher:7", content="check", key=first)
     assert outbox.logical_key(agent_id=7, source="watcher:7", content="check") != first
     assert outbox.logical_key(agent_id=7, source="watcher:7", content="other") != first
 
 
-def test_note_send_succeeded_retires_only_the_matching_record(
+def test_retire_send_retires_only_the_matching_record(
     journal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_limits(monkeypatch)
     path = _record(agent_id=7, content="check", key="key-1")
     assert path is not None
     # A different attempt's key must not retire this record.
-    outbox.note_send_succeeded(agent_id=7, source="watcher:7", content="check", key="key-other")
+    outbox.retire_send(agent_id=7, source="watcher:7", content="check", key="key-other")
     assert path.exists()
-    outbox.note_send_succeeded(agent_id=7, source="watcher:7", content="check", key="key-1")
+    outbox.retire_send(agent_id=7, source="watcher:7", content="check", key="key-1")
     assert not path.exists()
 
 
@@ -367,7 +367,7 @@ def test_flush_failed_attempt_backs_off(
 
     def _boom(_pool: object, _wake: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
         attempts.append(_NOW)
-        raise RuntimeError("data plane down")
+        raise psycopg.OperationalError("data plane down")
 
     monkeypatch.setattr(outbox, "_deliver", _boom)
     first = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
@@ -395,7 +395,7 @@ def test_flush_abandons_at_budget_after_the_failed_attempt(
     assert path is not None
 
     def _boom(_pool: object, _wake: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
-        raise RuntimeError("data plane down")
+        raise psycopg.OperationalError("data plane down")
 
     monkeypatch.setattr(outbox, "_deliver", _boom)
     report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=43201))
@@ -441,7 +441,7 @@ def test_flush_past_budget_not_due_defers_until_the_attempt(
     _patch_limits(monkeypatch, budget_seconds=100.0)
 
     def _boom(_pool: object, _wake: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
-        raise RuntimeError("data plane down")
+        raise psycopg.OperationalError("data plane down")
 
     monkeypatch.setattr(outbox, "_deliver", _boom)
     # Attempt 1 at +31 (next due +91), attempt 2 at +95 (next due +395).

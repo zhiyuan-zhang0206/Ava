@@ -69,7 +69,6 @@ from ava.gateway_client.launch_retry import get_launch_attempt as get_launch_att
 from ava.gateway_client.launch_retry import retry_launch as retry_launch
 from ava.gateway_client.transport import (
     _MEMORY_SEARCH_MAX_RETRIES,
-    _TRANSIENT_HTTP_STATUSES,
     _delete,
     _memory_search_timeout,
     get,
@@ -215,10 +214,8 @@ def send_message(
     `content` is either a plain string or a list of OpenAI-shaped content blocks
     (`{"type": "text", ...}` / `{"type": "image_url", "image_url": {"url": ...}}`)
     for a multimodal message; an image url must reference an upload of the
-    target agent. Pure INSERT + return. Auto-resurrect on the gateway side (in
-    `deliver_chat_inbound`) ensures the message always reaches a live
-    agent. The caller does not inspect status — a message to any agent
-    is always deliverable.
+    target agent. The gateway commits the inbound before publishing live
+    arrival and waking/resurrecting its owner in the current request.
 
     Uses a per-call 120 s timeout (overriding the global 20 s client
     default) so a large message body or a gateway-side auto-resurrect
@@ -234,15 +231,16 @@ def send_message(
     of the same (target, source, content) within the dedup window — share one
     key while the message is undelivered, and a final failure is recorded
     durably on this machine for bounded redelivery once the gateway returns.
-    A raised `GatewayUnavailable` still means "not delivered now"; it no longer
-    means the message evaporated. Callers keep their own retry semantics
-    unchanged — a re-send is deduplicated by the shared key, and a caller that
-    gives up leaves the durable record behind.
+    `GatewayUnavailable` can leave the commit outcome uncertain. HTTP 500 and
+    responses carrying `committed=true` or `retryable=false` are exposed once,
+    without enrolling automatic outbox recovery. The original HTTP response
+    retains its durable receipt and logical key for the caller to inspect.
     """
     import httpx
 
     from ava.sdk_surface import agent_identity
     from base.agents.messages import delivery_outbox
+    from base.agents.messages.delivery_retry import retryable_response
 
     origin_agent_id = agent_identity.agent_id()
 
@@ -251,21 +249,12 @@ def send_message(
         "source": source,
         **({"completion_notice": completion_notice} if completion_notice else {}),
     }
-    key: str | None = None
-    try:
-        key = delivery_outbox.logical_key(
-            agent_id=agent_id,
-            source=source,
-            content=content,
-            completion_notice=completion_notice,
-        )
-    except Exception:
-        # The outbox is a safety net for a failing send, never a reason for one:
-        # an unusable outbox degrades to the pre-outbox behavior (no shared key,
-        # no record) with a loud log, instead of changing the call's outcome.
-        logger.opt(exception=True).warning(
-            "delivery outbox unavailable; sending agent {} an unkeyed message", agent_id
-        )
+    key = delivery_outbox.logical_key(
+        agent_id=agent_id,
+        source=source,
+        content=content,
+        completion_notice=completion_notice,
+    )
     try:
         resp = post(
             f"/api/agents/{agent_id}/messages",
@@ -274,34 +263,41 @@ def send_message(
             idempotency_key=key,
         )
     except GatewayUnavailable:
-        if key is not None:
-            delivery_outbox.record_failed_send(
-                agent_id=agent_id,
-                origin_agent_id=origin_agent_id,
-                source=source,
-                content=content,
-                client_message_id=key,
-                completion_notice=completion_notice,
-            )
+        delivery_outbox.record_failed_send(
+            agent_id=agent_id,
+            origin_agent_id=origin_agent_id,
+            source=source,
+            content=content,
+            client_message_id=key,
+            completion_notice=completion_notice,
+        )
         raise
-    if key is not None:
-        if resp.status_code in _TRANSIENT_HTTP_STATUSES:
-            delivery_outbox.record_failed_send(
-                agent_id=agent_id,
-                origin_agent_id=origin_agent_id,
-                source=source,
-                content=content,
-                client_message_id=key,
-                completion_notice=completion_notice,
-            )
-        elif resp.is_success:
-            delivery_outbox.note_send_succeeded(
-                agent_id=agent_id,
-                source=source,
-                content=content,
-                key=key,
-                completion_notice=completion_notice,
-            )
+    if retryable_response(resp):
+        delivery_outbox.record_failed_send(
+            agent_id=agent_id,
+            origin_agent_id=origin_agent_id,
+            source=source,
+            content=content,
+            client_message_id=key,
+            completion_notice=completion_notice,
+        )
+    elif resp.is_success:
+        delivery_outbox.retire_send(
+            agent_id=agent_id,
+            source=source,
+            content=content,
+            key=key,
+            completion_notice=completion_notice,
+        )
+    else:
+        delivery_outbox.retire_send(
+            agent_id=agent_id,
+            source=source,
+            content=content,
+            key=key,
+            completion_notice=completion_notice,
+            completed=False,
+        )
     raise_from_response(resp)
 
 

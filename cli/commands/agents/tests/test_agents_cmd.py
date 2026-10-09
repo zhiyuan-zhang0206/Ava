@@ -496,7 +496,7 @@ def test_agents_send_success_retires_the_pending_record(monkeypatch: pytest.Monk
         retired.append(kw)
 
     monkeypatch.setattr("base.agents.messages.delivery_outbox.logical_key", fake_logical_key)
-    monkeypatch.setattr("base.agents.messages.delivery_outbox.note_send_succeeded", fake_retire)
+    monkeypatch.setattr("base.agents.messages.delivery_outbox.retire_send", fake_retire)
     seen = _patch_post(monkeypatch, {"status": "delivered"})
     assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
     assert retired == [
@@ -531,29 +531,99 @@ def test_agents_send_client_error_records_nothing(
 
     monkeypatch.setattr("base.agents.messages.delivery_outbox.logical_key", fake_logical_key)
     monkeypatch.setattr("base.agents.messages.delivery_outbox.record_failed_send", fake_call)
-    monkeypatch.setattr("base.agents.messages.delivery_outbox.note_send_succeeded", fake_call)
+    monkeypatch.setattr("base.agents.messages.delivery_outbox.retire_send", fake_call)
     monkeypatch.setattr(httpx, "post", fake_post)
     with pytest.raises(httpx.HTTPStatusError):
         _agents.cmd_agents_send(5, "msg", "external_agent:codex")
-    assert calls == []
+    assert calls == [
+        {
+            "agent_id": 5,
+            "source": "external_agent:codex",
+            "content": "msg",
+            "key": "key-cli-1",
+            "completion_notice": False,
+            "completed": False,
+        }
+    ]
 
 
-def test_agents_send_degrades_to_unkeyed_when_outbox_fails(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """An unusable outbox must not change the send's outcome: the notice goes
-    out without a key and the degradation is named on stderr."""
+def test_agents_send_unknown_key_failure_stops_before_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A broken logical key must not cause an unkeyed body side effect."""
 
     def boom(**_kw: object) -> str:
         raise RuntimeError("outbox broken")
 
     monkeypatch.setattr("base.agents.messages.delivery_outbox.logical_key", boom)
     seen = _patch_post(monkeypatch, {"status": "delivered"})
-    assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
-    assert "unkeyed" in capsys.readouterr().err
-    headers = seen["headers"]
-    assert isinstance(headers, dict)
-    assert "Idempotency-Key" not in headers
+    with pytest.raises(RuntimeError, match="outbox broken"):
+        _agents.cmd_agents_send(5, "build done", "shell:3")
+    assert seen == {}
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [(500, {"committed": True, "inbound_id": 73}), (503, {"retryable": False})],
+)
+def test_agents_send_refused_retry_preserves_error_without_journaling(
+    monkeypatch: pytest.MonkeyPatch, status: int, body: dict[str, object]
+) -> None:
+    from base.agents.messages import delivery_outbox
+
+    requests: list[dict[str, object]] = []
+    response = httpx.Response(
+        status,
+        json={**body, "idempotency_key": "cli-key"},
+        request=httpx.Request("POST", "http://gateway/messages"),
+    )
+
+    def fail_post(*_args: object, **kwargs: object) -> httpx.Response:
+        requests.append(kwargs)
+        return response
+
+    def key(**_kwargs: object) -> str:
+        return "cli-key"
+
+    monkeypatch.setattr(delivery_outbox, "logical_key", key)
+    monkeypatch.setattr(httpx, "post", fail_post)
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        _agents.cmd_agents_send(5, "notice", "shell:3")
+    assert raised.value.response is response
+    assert len(requests) == 1
+    assert list(delivery_outbox.journal_dir().glob("*.json")) == []
+
+
+def test_agents_send_terminal_response_retires_old_recovery_and_keeps_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.agents.messages import delivery_outbox
+
+    keys: list[str] = []
+    stage = "network"
+
+    def post(_url: str, **kwargs: object) -> httpx.Response:
+        headers = kwargs["headers"]
+        assert isinstance(headers, dict)
+        key = headers["Idempotency-Key"]
+        assert isinstance(key, str)
+        keys.append(key)
+        if stage == "network":
+            raise httpx.ConnectError("refused")
+        request = httpx.Request("POST", "http://gateway/messages")
+        if stage == "committed":
+            return httpx.Response(500, json={"committed": True, "inbound_id": 73}, request=request)
+        return httpx.Response(201, json={"status": "delivered"}, request=request)
+
+    monkeypatch.setattr(httpx, "post", post)
+    with pytest.raises(httpx.ConnectError):
+        _agents.cmd_agents_send(5, "notice", "shell:3")
+    assert len(list(delivery_outbox.journal_dir().glob("*.json"))) == 1
+    stage = "committed"
+    with pytest.raises(httpx.HTTPStatusError):
+        _agents.cmd_agents_send(5, "notice", "shell:3")
+    assert list(delivery_outbox.journal_dir().glob("*.json")) == []
+    stage = "explicit_retry"
+    assert _agents.cmd_agents_send(5, "notice", "shell:3") == 0
+    assert len(keys) == 3 and len(set(keys)) == 1
 
 
 def test_agents_terminate_renders_the_shell_session_kill(

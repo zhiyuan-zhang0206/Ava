@@ -3,8 +3,8 @@
 The recorder wraps every public `ava.*` callable to emit one `sdk_call` event per
 public entry (summed by the Grafana call-frequency ranking). These tests pin the two
 things that make it safe to bolt onto the whole SDK surface: it is byte-for-byte
-transparent to `ava.help` / signatures, and it is a pure side channel over the call
-(records each entry independently, and never perturbs args / return / exceptions).
+transparent to `ava.help` / signatures, and records each entry independently.
+Emitter failures preserve an already-raised body exception as the primary outcome.
 """
 
 from __future__ import annotations

@@ -15,8 +15,10 @@ not the database: a failed send is usually a failure to reach the data plane, so
 journal must be readable without it. A restart therefore resumes every cooldown.
 
 A round that raises ends the loop, and through the `TaskGroup` the ops server: the
-supervisor restarts it. An unreadable record or a failed delivery is not such an
-error — the flush pass keeps the record and counts the attempt.
+supervisor restarts it. An unreadable record or a known database connection
+failure is handled by the flush pass. Unknown delivery errors propagate through
+this service boundary with the journal unchanged; they are not counted as a
+transient attempt or converted into budget abandonment.
 """
 
 from __future__ import annotations
