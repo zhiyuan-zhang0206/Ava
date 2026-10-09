@@ -31,6 +31,7 @@ from ._task_update import (
     _collect_update_fields,
     _nothing_to_update,
     _owner_actually_changed,
+    _Unset,
     _validate_status,
     _write_task_update,
 )
