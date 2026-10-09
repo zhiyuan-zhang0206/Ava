@@ -37,14 +37,21 @@ def _inbound(text: str, at: str | None = "2026-10-05T03:04:05+00:00") -> HumanMe
     return HumanMessage(content=text, additional_kwargs=kwargs)
 
 
+_HEADER = "Code execution output after running for 1min 53s [2026-10-05 Mon 11:04:05]:\n\n"
+
+
 def _turn(code: str, n: int, result: str = "ok", **result_kwargs: Any) -> list[BaseMessage]:
     call = {"name": "execute_code", "args": {"code": code}, "id": f"tc{n}"}
     return [
         AIMessage(content="", tool_calls=[call]),
         ToolMessage(
-            content=f"Code execution output [2026-10-05 Mon 11:04:05]:\n\n{result}",
+            content=f"{_HEADER}{result}",
             tool_call_id=f"tc{n}",
-            additional_kwargs={"ava_msg_type": "exec_output", **result_kwargs},
+            additional_kwargs={
+                "ava_msg_type": "exec_output",
+                "ava_exec_body_start": len(_HEADER),
+                **result_kwargs,
+            },
         ),
     ]
 
@@ -63,9 +70,13 @@ def _think_turn(think: str, code: str, n: int, result: str = "ok", **kw: Any) ->
     return [
         AIMessage(content=[{"type": "thinking", "thinking": think}], tool_calls=[call]),
         ToolMessage(
-            content=f"Code execution output [x]:\n\n{result}",
+            content=f"{_HEADER}{result}",
             tool_call_id=f"tc{n}",
-            additional_kwargs={"ava_msg_type": "exec_output", **kw},
+            additional_kwargs={
+                "ava_msg_type": "exec_output",
+                "ava_exec_body_start": len(_HEADER),
+                **kw,
+            },
         ),
     ]
 
@@ -137,9 +148,9 @@ def test_the_turns_text_is_its_own_line_before_its_work_line() -> None:
         tool_calls=[call],
     )
     result = ToolMessage(
-        content="Code execution output [x]:\n\nfiles",
+        content=f"{_HEADER}files",
         tool_call_id="t",
-        additional_kwargs={"ava_msg_type": "exec_output"},
+        additional_kwargs={"ava_msg_type": "exec_output", "ava_exec_body_start": len(_HEADER)},
     )
     chunk: list[BaseMessage] = [turn, result]
     assert build_catalog(chunk, divide_units(chunk)).splitlines() == [
