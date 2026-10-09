@@ -47,5 +47,5 @@ the creator, such as `SSH_AUTH_SOCK`, are not carried over.
 
 - [[lifecycle.ava.okf.md]] — agent control
 - [[env-vars.ava.okf.md]] — environment surface
-- [[base/sessions/pty/docs/pty_sessions.ava.okf.md]] — PTY resource owner
+- [[base/sessions/pty/docs/pty_sessions/pty_sessions.ava.okf.md]] — PTY resource owner
 - [[base/deploy/maintenance/docs/maintenance.ava.okf.md]] — cluster resource scopes

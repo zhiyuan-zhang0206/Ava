@@ -97,7 +97,7 @@ Anything derivable from the code — modules, endpoints, schemas, wiring, data
 flow — lives in the OKF graph, never in `docs/conventions/`. Each package keeps its
 `.ava.okf.md` files in its own `docs/` directory, beside its code and `tests/`
 (`agent/`, `ava/`, `ava_builtins/`, `cli/`, `ui/web/`, `gateway/`, `services/`,
-`base/`); the rest are index-layer nodes in `okf/`.
+`base/`); the cross-domain index nodes live in the repository's `docs/`.
 
 Hierarchy is filesystem-derived (`base/packages/docs/okf_graph.py:compute_parent`)
 and runs on **logical paths**: the `docs/` layer is transparent, so the last
@@ -122,11 +122,14 @@ directory holds only documents when the code it describes lives elsewhere
 layer would attach to the nearest ancestor overview (or ultimately the root),
 not to the node it was split from.
 
-The one exception is the **index layer**: the apex and the cross-domain concept
-systems — plugins, skills, MCP integration, and the design-phase R1–R4 models —
-have no code directory to sit inside, so they live in `okf/`. `compute_parent`
-uses the root only when no ancestor overview exists — so the tree has exactly
-one root and no dangling edges.
+The **index layer** uses the same documentation placement: the apex is
+`docs/index.ava.okf.md`, and the cross-domain plugin, skill and MCP concept
+systems live beneath `docs/`. They have no single code directory to own them.
+Chosen alternatives and their rationale belong in `docs/decisions/`;
+unimplemented proposals and plans belong in `future/`. Both use ordinary
+Markdown, so they do not appear as current-system graph nodes.
+`compute_parent` uses the root only when no ancestor overview exists — so the
+tree has exactly one root and no dangling edges.
 
 A `[[wikilink]]` is the **edge syntax of the node graph**, so its universe is the
 `.ava.okf.md` files and nothing else. A link to any other axis — a decision
@@ -147,7 +150,7 @@ in its resolution, while it is still only a wrong path.
 Format is enforced by `scripts/content_lint/lint_ava_okf.py`: YAML frontmatter with
 `type` / `title` / `description`, a line + character size ceiling (which forces
 hierarchy instead of long files), and `[[wikilink]]` targets that must resolve.
-Every node sits in a `docs/` layer (`E014`; `okf/` and `.github/` are exempt), and
+Every node sits in a `docs/` layer (`E014`; `.github/` is exempt), and
 the overview-position rule (`E009`) is judged on logical paths, so a directory
 whose nodes all sit in `docs/<sub>/` still has its overview there and no sibling
 `docs/<sub>.ava.okf.md`. The three thresholds are `MAX_LINES` / `MAX_CHARS` / `WARN_MARGIN` in that
@@ -203,9 +206,9 @@ paths, `docs/` layer included:
 | Base library / LM providers / config / migrations | `base/docs/base.ava.okf.md` |
 | Background services | `services/docs/services.ava.okf.md` |
 | GitHub Actions / CI workflows | `.github/.github.ava.okf.md` |
-| Plugins / extension points | `okf/plugins/plugins.ava.okf.md` |
-| Skills | `okf/skills/skills.ava.okf.md` |
-| MCP integrations | `okf/mcps/mcps.ava.okf.md` |
+| Plugins / extension points | `docs/plugins/plugins.ava.okf.md` |
+| Skills | `docs/skills/skills.ava.okf.md` |
+| MCP integrations | `docs/mcps/mcps.ava.okf.md` |
 | Test suite | `tests/docs/tests.ava.okf.md` |
 | Ops scripts | `scripts/docs/scripts.ava.okf.md` |
 Process, rule, and observed-behaviour changes → the doc that owns them:
