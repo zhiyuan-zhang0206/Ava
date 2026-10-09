@@ -170,7 +170,7 @@ what turns search into research.
 4. **Run the audit** until clean:
 
 ```bash
-python3 .agents/skills/ava-deep-research/scripts/audit_research.py \
+python3 ava_builtins/skills/practice/ava-deep-research/scripts/audit_research.py \
   --state research_state.json --report report.md
 ```
 

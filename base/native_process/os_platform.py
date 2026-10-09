@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import platform as _osplat
 import re
 import signal
 import subprocess
@@ -18,8 +17,16 @@ from collections.abc import Generator
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
-IS_MACOS = sys.platform == "darwin"
-IS_LINUX = sys.platform.startswith("linux")
+
+
+def is_macos() -> bool:
+    """Whether this process runs on macOS, queried directly from Python."""
+    return sys.platform == "darwin"
+
+
+def is_linux() -> bool:
+    """Whether this process runs on Linux, queried directly from Python."""
+    return sys.platform.startswith("linux")
 
 
 def launchd_job_label() -> str | None:
@@ -42,7 +49,7 @@ def _launchd_print(label: str) -> subprocess.CompletedProcess[str] | None:
     Shared by :func:`launchd_job_loaded` (verdict) and
     :func:`descends_from_launchd_job` (live pid): the dump on success is the
     caller's to parse; off macOS there is nothing to ask."""
-    if not IS_MACOS:
+    if not is_macos():
         return None
     return subprocess.run(  # noqa: S603
         ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
@@ -116,20 +123,6 @@ def _parent_pid(pid: int) -> int | None:
         return None
 
 
-# WSL is a Linux kernel whose uname release string carries "microsoft" / "WSL".
-# Some host probes (e.g. disk usage) want the Windows host's view, so detect it
-# once here rather than re-deriving it from uname at each call site.
-def _detect_wsl(uname_release: str) -> bool:
-    """True if a Linux uname release string is a WSL kernel (the 'microsoft' /
-    'WSL' marker). Factored out so the marker logic is unit-testable without
-    monkeypatching uname."""
-    release = uname_release.lower()
-    return "microsoft" in release or "wsl" in release
-
-
-IS_WSL = _detect_wsl(_osplat.uname().release)
-
-
 # --- Kill signals -----------------------------------------------------------
 # Windows' `signal` module defines neither SIGKILL nor SIGHUP. Code that names
 # them for `os.kill` / handler registration would AttributeError at import or
@@ -181,7 +174,7 @@ def pty_max() -> int | None:
     it is not a binding constraint here) and on any read failure — callers treat
     None as "no known PTY ceiling to check against".
     """
-    if not IS_MACOS:
+    if not is_macos():
         return None
     import ctypes
 
@@ -328,6 +321,6 @@ def primary_disk_path() -> str:
     space this Linux machine is actually using. Windows: the system drive. Any
     other POSIX host: the root filesystem.
     """
-    if IS_MACOS:
+    if is_macos():
         return "/System/Volumes/Data"
     return "/"

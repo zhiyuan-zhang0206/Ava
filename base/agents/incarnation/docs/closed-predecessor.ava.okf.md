@@ -19,7 +19,11 @@ The closed-predecessor form is the incarnation a retired value named, with no
 host identity, no freeze and an empty set; rows converted from the retired
 shape carry it. It is backed by that incarnation's existing predecessor
 receipt (the old drain's applied restart still held as the lifecycle pointer,
-or an applied and observed terminate). The ordinary predecessor rule admits
+or an applied and observed terminate). An applied restart superseded by a
+later force retains its closure evidence: the receipt must still name the
+resource set's exact incarnation and carry the original `lifecycle_release`
+plus the force supersession result. An unapplied or failed restart cannot
+satisfy this rule. The ordinary predecessor rule admits
 the form once: admission rewrites the set for its own incarnation and
 observes a restart receipt. Without its receipt the form is not admissible,
 and a same-owner continuation refuses it because no host identity is
@@ -34,8 +38,9 @@ A terminated row that was never admitted resurrects as a fresh hosted birth
 only when that is proven: no runtime identity and the fresh-INSERT birth
 marker unconsumed, rechecked in the final CAS. NULL resources are unknown and
 refuse there. A row the current runtime force-terminated while it was
-unowned resurrects the same way. It carries no resource evidence; the force
-recorded an `unowned_termination` receipt because the runtime's own birth
+unowned resurrects the same way. Force preserves its resource evidence; a
+managed successor still needs the original incarnation's closure receipt.
+The force recorded an `unowned_termination` receipt because the runtime's own birth
 epoch or `lifecycle_release` had left the row unowned
 (`docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md`). A legacy row
 never qualifies.

@@ -9,8 +9,8 @@ title: Guarded manual compaction
 This domain protects one explicit manual history replacement. Legacy `/compact`,
 automatic compaction and SDK self-compaction retain their existing semantics.
 The SDK offers explicit source observation, submission and retained status via
-[[ava/agents/docs/compaction.ava.okf.md]]; default controls and UI/CLI/MCP
-consumers remain separate. This does not authorize runtime rollout.
+[[ava/agents/docs/compaction.ava.okf.md]]; UI and CLI consumers use this observed contract. MCP
+activation remains separate. This does not authorize runtime rollout.
 
 ## Observation and acceptance
 

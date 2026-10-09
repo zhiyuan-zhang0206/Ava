@@ -48,7 +48,8 @@ def _park(
         if status == "terminated":
             cur.execute(
                 "UPDATE agents_meta SET runtime_kind='hosted', "
-                "runtime_generation=gen_random_uuid(), runtime_owner=gen_random_uuid() "
+                "runtime_generation=gen_random_uuid(), runtime_owner=gen_random_uuid(), "
+                "incarnation_resources=NULL "
                 "WHERE id=%s",
                 (aid,),
             )
@@ -427,7 +428,7 @@ def test_historical_runtime_cannot_be_resurrected(
 
     aid = _park(db_conn, status="terminated")
     db_conn.execute(
-        "UPDATE agents_meta SET runtime_kind=%s, "
+        "UPDATE agents_meta SET runtime_kind=%s, incarnation_resources=NULL, "
         "runtime_generation=CASE WHEN %s THEN runtime_generation ELSE NULL END, "
         "runtime_owner=CASE WHEN %s THEN runtime_owner ELSE NULL END WHERE id=%s",
         (runtime_kind, has_identity, has_identity, aid),

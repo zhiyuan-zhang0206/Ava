@@ -69,7 +69,7 @@ _RUNNING_JOB = """gui/501/com.ava.test.f5-lwcr-stub = {
 
 @pytest.fixture(autouse=True)
 def _macos_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "IS_MACOS", True)
+    monkeypatch.setattr(hc, "is_macos", lambda: True)
 
 
 class _Recorder:
@@ -228,10 +228,10 @@ def test_probe_alive_and_classified_down(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_probe_is_total_and_non_macos_is_up(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "IS_MACOS", False)
+    monkeypatch.setattr(hc, "is_macos", lambda: False)
     assert hc.probe().alive
 
-    monkeypatch.setattr(hc, "IS_MACOS", True)
+    monkeypatch.setattr(hc, "is_macos", lambda: True)
     monkeypatch.setattr(hc, "_ping", _unhealthy_ping)
 
     def broken_read() -> str | None:

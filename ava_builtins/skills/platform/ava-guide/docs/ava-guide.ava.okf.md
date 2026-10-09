@@ -49,8 +49,9 @@ sub-skills carry executable procedures and their bundled resources.
 
 `ava-workflow` owns work organization and general work evaluation.
 `skill-creator` owns skill authoring and the evaluation contract used by Preset
-Maker. `ava-self-development` and `impersonator-guide`
-remain project-local contributor/executor manuals. Guide membership changes
+Maker. `ava-self-development` remains a project-local contributor manual.
+`impersonator-guide` is a separate built-in executor manual under
+`ava_builtins/skills/platform/impersonator-guide/`. Guide membership changes
 neither kernel contribution requirements nor operator authorization.
 
 The shared skill/preset evaluation contract lives once at

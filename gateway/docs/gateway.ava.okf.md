@@ -33,7 +33,7 @@ database posture is a status projection, not this gate's authority.
 - **Agent lifecycle management**: unified handling of spawn, send_message, terminate, resurrect, restart via `/api/agents/*`
 - **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results
 - **SSE event push**: Redis pub/sub → SSE bridge, pushing agent events to the browser in real time
-- **Runtime observability**: process CPU/RSS/file descriptors, event-loop lag/slow ticks, and SSE connection depth/open/close rates flow through the unified OTLP emitter
+- **Runtime observability**: CPU/RSS/FD, loop lag/slow ticks and SSE metrics use OTLP. Lifespan joins its telemetry flushers before pool closure; emit failures stay best effort.
 - **Alert truth reconciliation**: the events-maintenance service's startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
 - **Failure feedback delivery**: authenticated CI, QA, and merge failure events are deduplicated durably, then delivered to the author through chat auto-resurrection, the nearest live birth ancestor, or a task-registry alert
 - **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)

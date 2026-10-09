@@ -59,7 +59,6 @@ from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import (
     PG_BIN_LINUX,
     brew_prefix,
-    is_macos,
     pg_shm_args,
     pg_start_env,
     pg_tool,
@@ -73,6 +72,7 @@ from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
 from base.host.system.backend import get_backend
 from base.native_process.child_env import daemon_process_env, inherited_process_env
+from base.native_process.os_platform import is_macos
 from base.paths import ava_home
 from cli.commands.data_plane.walg import warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args

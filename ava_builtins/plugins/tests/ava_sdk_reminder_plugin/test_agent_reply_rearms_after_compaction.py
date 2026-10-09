@@ -26,6 +26,7 @@ from ava_builtins.plugins.tests.test_ava_sdk_reminder_plugin import (
 from ava_builtins.plugins.tests.test_ava_sdk_reminder_plugin import (
     _loaded as _loaded,
 )
+from base.agents.messages.kwargs import ExecStatus
 
 
 async def test_agent_reply_rearms_after_compaction(_loaded: Any):
@@ -316,6 +317,8 @@ async def test_after_exec_leaves_exec_output_untouched(_loaded: Any):
         content="original stdout",
         tool_call_id="c1",
         exec_ms=1300,
+        status=ExecStatus.COMPLETED,
+        body_start=0,
     )
     out.id = "out-1"
     out_kwargs_before = dict(out.additional_kwargs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

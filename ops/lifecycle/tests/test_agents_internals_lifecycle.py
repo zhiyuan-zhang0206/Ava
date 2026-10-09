@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, cast
+from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 import base.db
 from base.agents import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
+from base.agents.incarnation.resources import IncarnationResources
 from base.agents.messages.envelope import wrap_inbound
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
@@ -87,10 +90,12 @@ def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str,
 def _hosted_agent(db: psycopg.Connection) -> int:
     """Seed the retained authority of a hosted incarnation for guard tests."""
     agent_id = _spawn_agent()
+    generation, owner = uuid4(), uuid4()
+    resources = IncarnationResources(generation=generation, owner=owner, requests={})
     db.execute(
-        "UPDATE agents_meta SET runtime_kind='hosted', runtime_generation=gen_random_uuid(), "
-        "runtime_owner=gen_random_uuid() WHERE id=%s",
-        (agent_id,),
+        "UPDATE agents_meta SET runtime_kind='hosted', runtime_generation=%s, "
+        "runtime_owner=%s, incarnation_resources=%s WHERE id=%s",
+        (generation, owner, Jsonb(resources.model_dump(mode="json")), agent_id),
     )
     db.commit()
     return agent_id
