@@ -110,6 +110,8 @@ template into a running cluster without a restart of the manager, run
   execute the same slot twice. On first use, the schedule's `created_at` is the
   lower bound; later starts use its newest claim. Startup executes at most the
   two most recent missed slots and warns when older slots were truncated.
+  Callbacks receive `(slot_fire_at, payload)`, with the claimed slot normalized
+  to UTC, so window-based reports use their own slot even during catch-up.
   Claims commit before the fire callback: a crash after claiming can lose that
   slot, which is the intentional at-most-once trade-off.
 - **A template change reaches a running cluster at the next `schedule-manager`

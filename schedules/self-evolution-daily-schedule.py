@@ -131,7 +131,7 @@ def run_scan() -> None:
             print(f"daily report to {report_agent} failed: {e}")
 
 
-def _fire_scan(_trigger: None) -> None:
+def _fire_scan(_slot: datetime, _trigger: None) -> None:
     run_scan()
 
 
