@@ -8,6 +8,8 @@ from typing import Any, cast
 
 import yaml
 
+from base.host import brew_pin
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
 _PRE_COMMIT = _REPO_ROOT / ".pre-commit-config.yaml"
@@ -33,7 +35,8 @@ def _assert_dependency_audit_job_runs_both_audits(workflow: dict[object, Any]) -
     dependency_audit = workflow["jobs"]["dependency-audit"]
     assert dependency_audit.get("continue-on-error") is not True
     audit_steps = dependency_audit["steps"]
-    assert audit_steps[2]["run"] == "uvx --from 'uv==0.11.16' uv audit --frozen"
+    assert audit_steps[1]["with"]["version"] == brew_pin.UV_VERSION
+    assert audit_steps[2]["run"] == "uv audit --frozen"
     assert audit_steps[2]["continue-on-error"] is True
     assert audit_steps[4]["working-directory"] == "ui/web"
     assert audit_steps[4]["run"] == "npm audit"

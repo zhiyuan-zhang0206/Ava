@@ -136,10 +136,15 @@ def test_the_fast_shutdown_leaves_room_for_the_legs_after_it(
 ) -> None:
     monkeypatch.setattr(plane, "PROCESS_CLEANUP_WAIT_S", 10.0)
     monkeypatch.setattr(plane, "PROCESS_KILL_WAIT_S", 3.0)
+    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
 
-    assert plane._postgres_fast_budget(time.monotonic() + 300) == pytest.approx(277, abs=1)
+    assert plane._postgres_fast_budget(1300.0) == 277.0
     # a stop with less time than the reserve gives the fast shutdown all of it
-    assert plane._postgres_fast_budget(time.monotonic() + 20) == pytest.approx(20, abs=1)
+    assert plane._postgres_fast_budget(1020.0) == 20.0
+    # Exhaustion refuses admission instead of relying on a busy host to spend the budget.
+    for deadline in (1000.0, 999.0):
+        with pytest.raises(TimeoutError, match="stop deadline expired"):
+            plane._postgres_fast_budget(deadline)
 
 
 @pytest.fixture

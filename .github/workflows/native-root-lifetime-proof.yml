@@ -39,7 +39,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
         with:
-          version: 0.10.2
+          version: 0.12.23
       - uses: ./.github/actions/uv-sync
       - name: Require native manager (absence is not a passing skip)
         run: |

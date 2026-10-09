@@ -34,9 +34,9 @@ from pathlib import Path
 import ava
 from base.sessions import coding_session_owner
 
+from . import impersonator_guide
 from ._common import cancel as _cancel_generation
 from ._common import (
-    impersonator_guide,
     init_file,
     kill_session_after_failed_launch,
     new_generation,
