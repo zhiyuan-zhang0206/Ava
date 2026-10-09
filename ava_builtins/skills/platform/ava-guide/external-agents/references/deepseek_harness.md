@@ -41,7 +41,7 @@ prompts in a PTY. Inspect or stop the generation like the other launchers:
 `--status`, or `--cancel-generation <generation>`.
 
 The executor's own manual is the `impersonator-guide` skill and its
-`.agents/skills/impersonator-guide/reference/deepseek_harness.md` in the Ava source checkout.
+`ava_builtins/skills/platform/impersonator-guide/reference/deepseek_harness.md` in the Ava source checkout.
 
 `spawn_dsh.py` has no `--resume`: its relay plugin opens a new dsh session on
 every launch. After an interruption, launch a fresh takeover whose brief is

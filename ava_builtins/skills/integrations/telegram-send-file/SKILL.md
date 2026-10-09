@@ -25,13 +25,13 @@ never `uv run`):
 
 ```bash
 # From a dev checkout:
-.venv/bin/python .agents/skills/telegram-send-file/scripts/send_file.py /path/to/file.pdf
+.venv/bin/python ava_builtins/skills/integrations/telegram-send-file/scripts/send_file.py /path/to/file.pdf
 
 # From the prod install:
 $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/telegram-send-file/scripts/send_file.py /path/to/file.pdf
 
 # With an optional caption (plain text, up to 1024 chars):
-.venv/bin/python .agents/skills/telegram-send-file/scripts/send_file.py /path/to/file.zip --caption "Weekly report"
+.venv/bin/python ava_builtins/skills/integrations/telegram-send-file/scripts/send_file.py /path/to/file.zip --caption "Weekly report"
 ```
 
 The script resolves the source root itself (the checkout it runs from, or

@@ -378,6 +378,9 @@ def test_product_guide_has_one_builtin_source_and_nested_operator_entries() -> N
     canonical = repo / "ava_builtins" / "skills" / "platform" / "ava-guide"
     assert (repo / ".agents" / "skills" / "ava-guide").resolve() == canonical
     assert any(source.name == "ava-guide" and source.src == canonical for source in sources)
+    executor = canonical.parent / "impersonator-guide"
+    assert any(source.name == "impersonator-guide" and source.src == executor for source in sources)
+    assert not (repo / ".agents" / "skills" / "impersonator-guide").exists()
     assert not any(source.name in _DISTRIBUTED_SKILLS for source in sources)
     guide = (canonical / "SKILL.md").read_text()
     assert "deploy/SKILL.md" in guide
@@ -396,13 +399,14 @@ def test_builtin_guide_installs_with_the_core_update_channel(
     product_repo = Path(__file__).resolve().parents[4]
     repo = tmp_path / "repo"
     sources = repo / "ava_builtins" / "skills" / "platform"
-    for name in ("ava-guide",):
+    for name in ("ava-guide", "impersonator-guide"):
         shutil.copytree(
             product_repo / "ava_builtins" / "skills" / "platform" / name, sources / name
         )
     converge_skills(repo, unit_home)
-    assert any(skill["name"] == "ava-guide" for skill in ava.skills.names())
-    for name in ("ava-guide",):
+    installed_names = {skill["name"] for skill in ava.skills.names()}
+    for name in ("ava-guide", "impersonator-guide"):
+        assert name in installed_names
         entry = install_registry.get(name)
         assert entry is not None and entry.enabled and entry.origin == "repo"
         installed = unit_home / "skills" / name / "SKILL.md"

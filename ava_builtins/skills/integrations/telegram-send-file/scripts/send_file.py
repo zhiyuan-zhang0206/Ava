@@ -8,7 +8,7 @@ delivery goes through IM Bridge.
 
 Run from the Ava source root with the venv Python:
 
-    .venv/bin/python .agents/skills/telegram-send-file/scripts/send_file.py <path> [--caption TEXT]
+    .venv/bin/python ava_builtins/skills/integrations/telegram-send-file/scripts/send_file.py <path> [--caption TEXT]
 
 Credentials come from the shared cluster config (``settings.telegram.*``,
 env ``AVA_TELEGRAM_BOT_TOKEN`` / ``AVA_TELEGRAM_OWNER_ID``) — the same source
