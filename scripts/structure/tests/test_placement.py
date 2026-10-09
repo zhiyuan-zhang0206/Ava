@@ -23,6 +23,50 @@ def _place(root: pathlib.Path, rel: str, text: str) -> placement.Placement:
     return placement.place(rel, tree, placement.ModuleIndex(root))
 
 
+@pytest.mark.parametrize(
+    ("rel", "text", "module", "name"),
+    [
+        (
+            "base/net/tests/test_relative.py",
+            "from ..retry import backoff as call",
+            "base.net.retry",
+            "call",
+        ),
+        (
+            "base/net/tests/test_relative.py",
+            "from .. import retry as subject",
+            "base.net.retry",
+            "subject",
+        ),
+        (
+            "base/net/tests/nested/test_relative.py",
+            "from ...retry import backoff",
+            "base.net.retry",
+            "backoff",
+        ),
+        ("base/net/__init__.py", "from .retry import backoff as call", "base.net.retry", "call"),
+        (
+            "base/net/tests/test_relative.py",
+            "from ...db import pool as database",
+            "base.db.pool",
+            "database",
+        ),
+        ("base/net/tests/test_relative.py", "from .. import *", "base.net", "*"),
+        (
+            "base/net/tests/test_relative.py",
+            "def run():\n    from ..retry import backoff as call",
+            "base.net.retry",
+            "call",
+        ),
+    ],
+)
+def test_relative_imports_resolve_module_members_and_local_aliases(
+    root: pathlib.Path, rel: str, text: str, module: str, name: str
+) -> None:
+    refs = placement.collect_references(ast.parse(text), placement.ModuleIndex(root), rel)
+    assert [(ref.module, ref.names) for ref in refs] == [(module, (name,))]
+
+
 def test_home_is_the_nearest_common_ancestor_of_the_referenced_modules(
     root: pathlib.Path,
 ) -> None:
