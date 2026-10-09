@@ -163,7 +163,7 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/commands/observability/trace.py": "which recovery ingress does this host serve: gateway-local Tempo or a pure-runner relay target (what do I serve)",
     "services/agent_runner/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
     "ops/inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
-    "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
+    "gateway/routers/configuration/runtime.py": "for the gateway itself, local role is authoritative (what do I serve)",
 }
 
 

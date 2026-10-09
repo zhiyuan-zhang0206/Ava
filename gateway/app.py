@@ -127,12 +127,6 @@ from gateway.mcp_server import router as mcp_server_router
 from gateway.routers import (
     commands as commands_router,
 )
-from gateway.routers import (
-    config as config_router,
-)
-from gateway.routers import (
-    default_model as default_model_router,
-)
 from gateway.routers import fleet_graph as fleet_graph_router
 from gateway.routers import (
     frontend_telemetry as frontend_telemetry_router,
@@ -164,6 +158,8 @@ from gateway.routers import (
 from gateway.routers import (
     tasks as tasks_router,
 )
+from gateway.routers.configuration import default_model as default_model_router
+from gateway.routers.configuration import runtime as config_router
 from gateway.routers.upload import router as uploads_router
 from gateway.schedules import router as schedules_router
 from gateway.upload_delivery import router as upload_delivery_router
