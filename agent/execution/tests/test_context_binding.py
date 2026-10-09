@@ -18,6 +18,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally
@@ -126,7 +127,9 @@ def test_failure_preserves_legal_delta_and_original_traceback(tmp_path: Path, fa
 
 def test_execution_tally_stays_with_its_context_and_out_of_description() -> None:
     tally = SdkCallTally()
-    context = AvaContext(identity=AgentIdentity(41, True), sdk_calls=tally)
+    context = AvaContext(
+        identity=AgentIdentity(41, True), clients=process_clients(), sdk_calls=tally
+    )
     tally.add("files.read")
     assert set(context.describe()) == {"identity", "gateway_url"}
     assert AvaContext().sdk_calls is None
