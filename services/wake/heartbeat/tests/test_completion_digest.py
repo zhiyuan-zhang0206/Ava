@@ -117,10 +117,10 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         assert cur.fetchone() == (0,)
 
 
-def test_flush_once_continues_after_one_digest_delivery_failure(
+def test_unknown_digest_failure_propagates_to_service(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """One unavailable digest does not prevent another agent's completed hour."""
+    """An unknown failure ends this round rather than deferring poison work."""
     import base.db
 
     blocked_agent = _agent(db_conn)
@@ -153,21 +153,82 @@ def test_flush_once_continues_after_one_digest_delivery_failure(
     monkeypatch.setattr(completion_digest, "deliver_chat_inbound", fail_one)
     pool = base.db.pool(max_size=2)
     try:
-        delivered = asyncio.run(
-            completion_digest.flush_once(
-                pool,
-                Database.from_settings(),
-                EventBus.from_settings(),
-                now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+        with pytest.raises(RuntimeError, match="poison digest"):
+            asyncio.run(
+                completion_digest.flush_once(
+                    pool,
+                    Database.from_settings(),
+                    EventBus.from_settings(),
+                    now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+                )
             )
-        )
     finally:
         pool.close()
 
-    assert delivered == 1
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT agent_id, digest_inbound_id IS NOT NULL FROM completion_notice_events "
             "ORDER BY agent_id"
         )
-        assert cur.fetchall() == [(blocked_agent, False), (delivered_agent, True)]
+        assert cur.fetchall() == [(blocked_agent, False), (delivered_agent, False)]
+
+
+def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbound(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import base.db
+    from base.agents.messages.chat_delivery import ChatInboundCommittedError
+    from ops import lifecycle
+
+    agent_id = _agent(db_conn)
+    record_hourly_notice(
+        db_conn,
+        agent_id,
+        CompletionNotice(source="shell:receipt", content="Background command finished."),
+    )
+    db_conn.execute(
+        "UPDATE completion_notice_events SET created_at=%s",
+        (datetime(2026, 9, 22, 10, tzinfo=UTC),),
+    )
+    db_conn.commit()
+    bug = AttributeError("digest live bug")
+
+    async def fail_publish(*_args: object, **_kwargs: object) -> None:
+        raise bug
+
+    with base.db.pool(max_size=2) as pool:
+        with monkeypatch.context() as patch:
+            patch.setattr(lifecycle, "publish_inbound_arrived", fail_publish)
+            with pytest.raises(ChatInboundCommittedError) as failed:
+                asyncio.run(
+                    completion_digest.flush_once(
+                        pool,
+                        Database.from_settings(),
+                        EventBus.from_settings(),
+                        now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+                    )
+                )
+            assert failed.value.__cause__ is bug
+            assert db_conn.execute(
+                "SELECT digest_inbound_id FROM completion_notice_events WHERE agent_id=%s",
+                (agent_id,),
+            ).fetchone() == (None,)
+        assert (
+            asyncio.run(
+                completion_digest.flush_once(
+                    pool,
+                    Database.from_settings(),
+                    EventBus.from_settings(),
+                    now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+                )
+            )
+            == 1
+        )
+    assert db_conn.execute(
+        "SELECT digest_inbound_id FROM completion_notice_events WHERE agent_id=%s",
+        (agent_id,),
+    ).fetchone() == (failed.value.receipt.inbound_id,)
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s",
+        (agent_id,),
+    ).fetchone() == (1,)

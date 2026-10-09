@@ -20,7 +20,8 @@ class _BoomSyncClient:
     def __init__(self, exc: BaseException) -> None:
         self._exc = exc
 
-    def publish(self, _channel: str, _payload: str) -> int:
+    def publish(self, _channel: str, _payload: str, *, auth_retry: bool) -> int:
+        assert auth_retry is False
         raise self._exc
 
     def close(self) -> None:
