@@ -24,10 +24,11 @@ it first for the same reason.
 
 Per plugin the order is: namespaces, members (a member may hang on the plugin's own namespace),
 expansions, wraps (a wrap target may be a namespace or member just added, or another plugin's),
-skill sources, flags, config. A plugin whose declaration cannot be applied (a conflicting or
-disabled namespace name, a wrap target that does not resolve, a flag or config that does not
-validate or bind) is **rolled back whole** — its already-applied pieces undone, in reverse — reported
-as a plugin load failure, and left out of the registry `install` returns.
+skill sources, flags, config. Explicit declaration refusals (`RegisterNamespaceError`,
+`WrapTargetError`, `PluginFlagError`, `SchemaDriftError`, `InvalidConfigData`) are rolled back whole,
+reported, and left out of the returned registry only if rollback succeeds. Other errors abort the
+entire installation and propagate unchanged after every undo is attempted. Cleanup failures are
+fatal themselves when there is no primary error; otherwise they are notes on the primary error.
 
 `install` refuses to run twice: the one installation must be `uninstall`ed before the next, which is
 what a reload is (a new registry, a new install). Nothing here triggers a reload at runtime; the host
@@ -72,14 +73,17 @@ class Installation:
 
 
 # The installation is recorded on the `ava` module object itself — the one process-wide thing it
-# describes — rather than in a module global of its own. Between values the slot carries `_LOADING`:
-# set while a load is in flight (the re-entrancy guard), left behind when a load was attempted and
-# failed so the process does not retry it (the old `_plugins_loaded` latch's second job).
+# describes — rather than in a module global of its own. A loading value also retains an
+# existing surface during a faces upgrade; a failed value retains the original error.
 _SLOT = "__plugin_installation__"
 
 
+@dataclass(frozen=True)
 class _Loading:
-    """Slot marker: a load is in progress, or one was attempted and failed in this process."""
+    """An in-flight load, or its failure; neither is a successful installation."""
+
+    installation: Installation | None = None
+    failure: BaseException | None = None
 
 
 _LOADING = _Loading()
@@ -92,24 +96,39 @@ def _slot() -> Any:
 def installed() -> Installation | None:
     """The current installation, or None before `install` / after `uninstall`."""
     value = _slot()
+    if isinstance(value, _Loading):
+        return value.installation
     return value if isinstance(value, Installation) else None
 
 
 def load_attempted() -> bool:
     """Whether a load is in flight or was attempted and failed in this process (no retry)."""
-    return _slot() is _LOADING
+    return isinstance(_slot(), _Loading)
 
 
 def mark_load_attempt() -> None:
-    """Occupy the slot while `ensure_plugins_loaded` loads (a no-op when already occupied)."""
-    if _slot() is None:
-        setattr(ava_module(), _SLOT, _LOADING)
+    """Guard a load or faces upgrade without discarding the already-installed surface."""
+    if not load_attempted():
+        setattr(ava_module(), _SLOT, _Loading(installed()))
+
+
+def mark_load_failed(exc: BaseException) -> None:
+    """Keep the original failed load in the same slot; later accesses must not retry it."""
+    setattr(ava_module(), _SLOT, _Loading(installed(), exc))
+
+
+def raise_load_failure() -> None:
+    """Propagate a prior load failure instead of answering as if the surface were ready."""
+    value = _slot()
+    if isinstance(value, _Loading) and value.failure is not None:
+        raise value.failure
 
 
 def clear_load_attempt() -> None:
     """Release the slot after a deferred load (the loader module was still importing)."""
-    if _slot() is _LOADING:
-        setattr(ava_module(), _SLOT, None)
+    value = _slot()
+    if isinstance(value, _Loading):
+        setattr(ava_module(), _SLOT, value.installation)
 
 
 def mark_faces_loaded() -> None:
@@ -253,14 +272,20 @@ class _Build:
     undo: list[Callable[[], None]] = field(default_factory=list)
 
 
-def _run(undo: list[Callable[[], None]], report: load_report.Reporter | None = None) -> None:
-    """Run undos newest first; one failing does not stop the rest."""
+def _run(undo: list[Callable[[], None]], primary: BaseException | None = None) -> None:
+    """Attempt every undo; preserve a primary failure or raise the first cleanup failure."""
+    failure = primary
     while undo:
         step = undo.pop()
         try:
             step()
-        except Exception as exc:
-            load_report.reporter(report)("<sdk-surface>", exc)
+        except BaseException as exc:
+            if failure is None:
+                failure = exc
+            else:
+                failure.add_note(f"SDK rollback also failed: {type(exc).__name__}: {exc}")
+    if primary is None and failure is not None:
+        raise failure
 
 
 def install(
@@ -270,11 +295,15 @@ def install(
 
     Raises:
         RuntimeError: a previous installation is still in place (`uninstall()` first).
+        BaseException: an unexpected application or cleanup failure; already-applied
+            pieces are undone before the original error propagates.
     """
     if installed() is not None:
         raise RuntimeError(
             "the SDK surface is already installed; uninstall() it before installing another registry"
         )
+    from base.packages.plugins import config_registration, flags
+
     from . import metering, sdk_disable
 
     prior = _slot()
@@ -292,17 +321,24 @@ def install(
             claimed = dict(build.namespaces)
             try:
                 paths = _apply(plugin, contributions, build, claimed)
-            except Exception as exc:
-                _run(build.undo[mark:], report)
+            except (
+                _plugins.RegisterNamespaceError,
+                wraps.WrapTargetError,
+                flags.PluginFlagError,
+                config_registration.SchemaDriftError,
+                config_registration.InvalidConfigData,
+            ) as exc:
+                partial = build.undo[mark:]
                 del build.undo[mark:]
+                _run(partial)
                 load_report.reporter(report)(plugin, exc)
                 continue
             build.namespaces = claimed
             build.expansions.extend(paths)
             admitted.append((plugin, contributions))
         metered = metering.install()
-    except BaseException:
-        _run(build.undo, report)
+    except BaseException as exc:
+        _run(build.undo, exc)
         setattr(ava_module(), _SLOT, prior)
         raise
     installation = Installation(
