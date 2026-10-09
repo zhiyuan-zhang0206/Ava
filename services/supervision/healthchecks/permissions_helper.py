@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import psutil
 
 from base.daemon.health import DaemonProbe
-from base.native_process.os_platform import IS_MACOS
+from base.native_process.os_platform import is_macos
 from base.native_process.ownership import OwnedProcess
 from base.paths import permissions_helper_socket
 from services.desktop.permissions_helper import client
@@ -207,7 +207,7 @@ def _emit_unhealthy(observation: _Observation) -> None:
 
 def probe() -> DaemonProbe:
     """Detect and classify; inspection failures remain unavailable evidence."""
-    if not IS_MACOS:
+    if not is_macos():
         return DaemonProbe.up("not macOS: no launchd-owned permissions helper")
     try:
         observation = _observe()
