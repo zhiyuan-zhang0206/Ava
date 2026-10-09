@@ -15,7 +15,7 @@ from base.agents.messages.kwargs import AvaMsgType, ExecStatus, NoteTag, read_av
 def test_stored_discriminator_is_plain_str() -> None:
     """Constructors store `ava_msg_type` / `ava_note_tag` as plain `str`, never
     the StrEnum member — the serialization-safety invariant."""
-    inbound = inbound_message(content="hi", source="user", inbound_id=1)
+    inbound = inbound_message(content="hi", source="user", inbound_id=1, body_start=0)
     note = system_note_message(content="n", tag=NoteTag.MEMORY)
     exec_out = exec_output_message(
         content="ok", tool_call_id="t1", status=ExecStatus.COMPLETED, body_start=0
@@ -92,3 +92,11 @@ def test_exec_output_records_status_start_and_body_offset() -> None:
     assert kwargs.get("ava_exec_started_at") == started.isoformat()
     assert kwargs.get("ava_exec_ms") == 113_000
     assert msg.text[kwargs.get("ava_exec_body_start", -1) :] == "hi\n"
+
+
+def test_inbound_records_where_its_content_begins() -> None:
+    msg = inbound_message(
+        content="Agent 5 [t]:\n\nhi", source="agent:5", inbound_id=1, body_start=14
+    )
+    kwargs = read_ava_kwargs(msg)
+    assert msg.text[kwargs.get("ava_inbound_body_start", -1) :] == "hi"
