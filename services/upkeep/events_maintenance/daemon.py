@@ -25,6 +25,9 @@ ruling. Its implementation remains in `checkpoint_reaper.py` but is not schedule
 Each loop reports independent progress, success, and errors in `/healthz`.
 Only completed bounded work or sleeps beat; exceeding a hard deadline fails
 healthz until the watchdog replaces the process and its orphaned worker thread.
+The service's TaskGroup retains every pass proxy, including expired passes; a
+late worker failure is reported with its original traceback without restoring
+health. Stop cancels those proxies and the existing hard exit skips thread joins.
 The same trackers are projected as unified envelope components, so the legacy
 per-loop snapshots and the component degradation reasons describe one state.
 
@@ -136,6 +139,33 @@ _ALERT_RECONCILIATION_LIVENESS_TIMEOUT_S = 180.0
 
 class WedgedPassError(RuntimeError):
     """A blocking pass exceeded its deadline and left a worker thread orphaned."""
+
+
+class _MaintenancePass:
+    """One service-owned worker's terminal result, including a late failure."""
+
+    def __init__(
+        self, pool: ConnectionPool, name: str, work: Callable[[ConnectionPool], None]
+    ) -> None:
+        self.pool = pool
+        self.name = name
+        self.work = work
+        self.expired = False
+
+    async def run(self) -> Exception | None:
+        """Return the original failure to the caller, or report an expired pass."""
+        try:
+            await asyncio.to_thread(self.work, self.pool)
+        except Exception as exc:
+            # A completed pass's caller owns retry/schema-drift policy. Once its
+            # deadline expires that caller parks, so this terminal boundary owns
+            # the late traceback. The loop remains permanently unhealthy.
+            if self.expired:
+                _log.exception(
+                    "[events-maintenance] %s pass failed after its hard deadline", self.name
+                )
+            return exc
+        return None
 
 
 def _run_maintenance(
@@ -281,23 +311,34 @@ async def _maintenance_with_liveness(
     pool: ConnectionPool,
     progress: LoopProgress,
     run: Callable[[ConnectionPool], None],
+    *,
+    tasks: asyncio.TaskGroup,
 ) -> None:
     """Run one pass (`run`, handed the pool) within its deadline; unresolved work is
     not progress. Completion beats before propagating its result; timeout
     permanently fails the loop.
     """
-    fut = asyncio.ensure_future(asyncio.to_thread(run, pool))
+    worker = _MaintenancePass(pool, progress.name, run)
+    fut = tasks.create_task(worker.run())
     done, _pending = await asyncio.wait({fut}, timeout=progress.timeout_s)
     if fut not in done:
+        worker.expired = True
         message = f"{progress.name} pass exceeded hard deadline of {progress.timeout_s:.1f}s"
         progress.fail(message)
         raise WedgedPassError(message)
     progress.beat()
-    await fut  # propagate the completed maintenance pass's exception, if any
+    failure = fut.result()
+    if failure is not None:
+        raise failure
 
 
 async def _dispatch_loop(
-    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig, db: Database
+    pool: ConnectionPool,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
+    db: Database,
+    *,
+    tasks: asyncio.TaskGroup,
 ) -> None:
     """Main loop: roll immediately on start (fresh after a restart), then every
     interval. The rollup DB work is synchronous psycopg run in a thread so it does
@@ -318,6 +359,7 @@ async def _dispatch_loop(
                     pool,
                     progress,
                     lambda target_pool: _run_maintenance(target_pool, progress, config, db),
+                    tasks=tasks,
                 )
         except asyncio.CancelledError:
             raise
@@ -341,7 +383,11 @@ async def _dispatch_loop(
 
 
 async def _resolution_loop(
-    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+    pool: ConnectionPool,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
+    *,
+    tasks: asyncio.TaskGroup,
 ) -> None:
     """Refresh immutable-event class-resolution gauges on their own cadence.
 
@@ -364,6 +410,7 @@ async def _resolution_loop(
                     pool,
                     progress,
                     lambda target_pool: _run_resolution(target_pool, progress, config, cadence),
+                    tasks=tasks,
                 )
         except asyncio.CancelledError:
             raise
@@ -426,11 +473,13 @@ async def run() -> None:
     db = events_maintenance_db()
     pool = db.pool()
     try:
-        # One TaskGroup owns the three loops: one that raises cancels its siblings
-        # and ends the process, and the supervisor restarts it.
+        # The service TaskGroup owns resident loops and their in-flight passes.
+        # An expired pass remains owned while healthz asks the watchdog to replace
+        # the process. Stop cancels its async proxy; main's hard exit never joins
+        # the blocking executor thread.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_dispatch_loop(pool, dispatch_progress, config, db))
-            loops.create_task(_resolution_loop(pool, resolution_progress, config))
+            loops.create_task(_dispatch_loop(pool, dispatch_progress, config, db, tasks=loops))
+            loops.create_task(_resolution_loop(pool, resolution_progress, config, tasks=loops))
             loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
             if alert_progress is not None:
                 bus = EventBus.from_settings()

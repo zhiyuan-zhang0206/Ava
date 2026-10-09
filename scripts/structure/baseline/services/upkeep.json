@@ -1,5 +1,3 @@
 {
-  "ambient_state": {
-    "services/upkeep/events_maintenance/daemon.py::asyncio-task:_maintenance_with_liveness": 1
-  }
+  "ambient_state": {}
 }
