@@ -14,6 +14,7 @@ and let the other workers end unwatched.
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import ava
 from base.paths import workspace_dir
@@ -64,6 +65,7 @@ for task in SUB_TASKS:
 
     wid = ava.agents.spawn(
         prompt=task["prompt"].format(handoff_file=task["handoff_path"]),
+        idempotency_key=str(uuid4()),
     )
     worker_ids[task["id"]] = wid
     print(f"  spawned {task['label']}: #{wid}")

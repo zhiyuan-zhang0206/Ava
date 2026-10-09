@@ -141,16 +141,18 @@ cluster/gateway view.
 Passed at spawn time — not edited on a running agent:
 
 ```python
+from uuid import uuid4
+
 # Via preset (base layer)
-ava.agents.spawn(prompt="...", config_overlay={"preset": "coder"})
+ava.agents.spawn(prompt="...", config_overlay={"preset": "coder"}, idempotency_key=str(uuid4()))
 
 # Via explicit fields (precise override)
 # model id from the registry roster — see the models sub-skill
-ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"})
+ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4()))
 
 # Both (explicit fields win per-key)
 ava.agents.spawn(prompt="...",
-                 config_overlay={"preset": "coder", "llm_model": "claude-opus-5"})
+                 config_overlay={"preset": "coder", "llm_model": "claude-opus-5"}, idempotency_key=str(uuid4()))
 ```
 
 Per-agent config is snapshotted into the agent row at spawn; changing a preset

@@ -9,6 +9,16 @@ Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 
 What is (and is not) covered, feature by feature, lives in [FEATURES.md](FEATURES.md).
 
+
+SDK creation and budget-handoff scenarios explicitly request the
+`authenticated_gateway` fixture. It gives their test HTTP clients and exec SDK
+children a fresh private bearer; the throwaway gateway verifies it through
+production authentication middleware. Runner/ops retain the direct-process
+harness's open posture because no root launcher or machine-token ledger exists.
+Other scenarios retain their existing gateway posture. Fixture credentials are
+function scoped and restored at teardown; no product admission bypass is added.
+
+
 ## Running
 
 ```bash

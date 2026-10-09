@@ -7,6 +7,8 @@ a Thursday mid-week follow-up trigger.
 Resumable: recomputes on every iteration, acts only when the window is open.
 """
 
+from uuid import uuid4
+
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -100,7 +102,7 @@ def ensure_agent(label: str, prompt: str) -> int:
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return ava.agents.spawn(prompt=prompt, label=label)  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
+    return ava.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 
 def fire(prompt: str) -> None:
