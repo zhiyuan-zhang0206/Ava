@@ -5,7 +5,7 @@ The gateway exposes the cluster control plane as a standard MCP server over
 [`gateway/mcp_server/endpoint.py`](../../../gateway/mcp_server/docs/mcp-endpoint.ava.okf.md)). Any MCP
 client — Claude Code, Codex, anything speaking the protocol — drives the fleet
 through it with seven control tools
-(list_agents / get_agent / spawn_agent / send_message / get_messages /
+(list_agents / get_agent / spawn_agent_guarded_v1 / send_message / get_messages /
 terminate_agent / cluster_status).
 
 [Streamable HTTP]: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http
@@ -80,3 +80,9 @@ revoked client token gets 401.
   `mcp_tool_call` audit event with the client id/name and outcome. Argument
   values are never recorded — only each argument's JSON type, character size,
   and SHA-256. `agent_id` is NULL because the client identity is service-level.
+
+Agent creation uses `spawn_agent_guarded_v1` with a required 1–128 character
+`idempotency_key`. Retain the same key and arguments to recover the original
+birth after response loss. The former `spawn_agent` tool has been removed
+without a compatibility alias; do not substitute another creation entry for
+the same intent. See the endpoint owner for retained acceptance semantics.
