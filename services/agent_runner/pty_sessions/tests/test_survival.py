@@ -48,12 +48,17 @@ while True:
     time.sleep(1)
 """
 
+# Publish complete snapshots so concurrent readers never observe a truncated count.
 _COUNTER_JOB = (
-    "import sys, time\n"
+    "import os, sys, time\n"
+    "counter = sys.argv[1]\n"
+    "pending = counter + '.next'\n"
     "n = 0\n"
     "while True:\n"
     "    n += 1\n"
-    "    open(sys.argv[1], 'w').write(str(n))\n"
+    "    with open(pending, 'w') as output:\n"
+    "        output.write(str(n))\n"
+    "    os.replace(pending, counter)\n"
     "    time.sleep(0.1)\n"
 )
 
