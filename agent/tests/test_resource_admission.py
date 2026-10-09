@@ -61,6 +61,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
         asyncio.Event(),
         30,
         exec_dir=tmp_path,
+        accumulation_max_chars=1_000_000,
     )
     thread.join(10)
     assert not thread.is_alive() and failures == [] and len(commands) == 1

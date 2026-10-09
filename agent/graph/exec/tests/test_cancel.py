@@ -459,7 +459,7 @@ def test_streaming_textio_concurrent_writes() -> None:
 
     from agent.graph.exec._stream import StreamingTextIO
 
-    stream = StreamingTextIO()
+    stream = StreamingTextIO(max_chars=1_000_000)
     n_writers = 4
     writes_per = 200
     payload = "x" * 100  # single write 100 chars
@@ -488,7 +488,7 @@ async def test_streaming_textio_take_pending_increments() -> None:
     content (no duplicates)."""
     from agent.graph.exec._stream import StreamingTextIO
 
-    stream = StreamingTextIO()
+    stream = StreamingTextIO(max_chars=1_000_000)
     stream.write("aaa")
     assert stream.take_pending() == "aaa"
     assert stream.take_pending() == ""  # all published
