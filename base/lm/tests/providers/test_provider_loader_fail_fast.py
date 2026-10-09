@@ -45,7 +45,7 @@ def test_unknown_provider_error_preserves_identity_and_traceback_then_recovers(
     def fail_build(_builder: CatalogBuilder) -> NoReturn:
         fail()
 
-    original_install = CatalogBuilder._install
+    original_install = CatalogBuilder.install
 
     def fail_install(
         builder: CatalogBuilder, plugin: str, contribution: ProviderContribution
@@ -66,7 +66,7 @@ def test_unknown_provider_error_preserves_identity_and_traceback_then_recovers(
                 "from provider_loader_failure_marker import fail\ndef contribute():\n    fail()\n"
             )
         elif phase == "install":
-            failing.setattr(CatalogBuilder, "_install", fail_install)
+            failing.setattr(CatalogBuilder, "install", fail_install)
         else:
             failing.setattr(CatalogBuilder, "build", fail_build)
 
