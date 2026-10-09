@@ -101,9 +101,9 @@ def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
 def test_systemd_running_requires_linux_systemctl_and_the_runtime_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(boot_unit, "IS_LINUX", False)
+    monkeypatch.setattr(boot_unit, "is_linux", lambda: False)
     assert systemd_running() is False
-    monkeypatch.setattr(boot_unit, "IS_LINUX", True)
+    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
     monkeypatch.setattr(boot_unit.shutil, "which", _no_binary)
     assert systemd_running() is False
     monkeypatch.setattr(boot_unit.shutil, "which", _systemctl_binary)
@@ -187,7 +187,7 @@ def test_uninstall_removes_only_the_boot_units_paths(
     units = tmp_path / "etc-systemd"
     units.mkdir()
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", units)
-    monkeypatch.setattr(boot_unit, "IS_LINUX", True)
+    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
     recorded: list[list[str]] = []
 
     def fake_privileged(
@@ -222,7 +222,7 @@ def test_uninstall_removes_only_the_boot_units_paths(
     assert recorded == before
     # A non-Linux host never touches /etc, whatever is on disk.
     unit.write_text(render_unit(ctx))
-    monkeypatch.setattr(boot_unit, "IS_LINUX", False)
+    monkeypatch.setattr(boot_unit, "is_linux", lambda: False)
     assert uninstall() == []
     assert unit.exists()
 
@@ -234,7 +234,7 @@ def _manager_reports(
     units = tmp_path / "etc-systemd"
     units.mkdir(exist_ok=True)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", units)
-    monkeypatch.setattr(boot_unit, "IS_LINUX", True)
+    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
     monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
     recorded: list[list[str]] = []
 
@@ -309,7 +309,7 @@ def test_interactive_start_never_publishes(
 ) -> None:
     from base.native_process.ownership import OwnedProcess
 
-    monkeypatch.setattr(boot_unit, "IS_LINUX", True)
+    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
 
     def interactive(_pid: int) -> str:
         return "/user.slice/interactive.scope"
@@ -370,7 +370,7 @@ def test_root_publication_binds_native_custody(
 def test_uninstall_failed_stop_preserves_unit(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(boot_unit, "IS_LINUX", True)
+    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", tmp_path)
     target = boot_unit.unit_path()
     target.write_text(render_unit(ctx))
