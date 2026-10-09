@@ -80,7 +80,6 @@ async def test_deliver_survives_publish_failure(
             prepare=lambda _c: "hello there",
             refresh_badge=True,
         )
-        await asyncio.sleep(0.05)  # let the fire-and-forget InboundArrived task settle
 
     # The user's inbound is durably committed.
     with db_conn.cursor() as cur:
@@ -89,36 +88,47 @@ async def test_deliver_survives_publish_failure(
     assert rows == [("hello there",)]
 
 
-async def test_deliver_degrades_when_badge_step_raises(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+async def test_unknown_badge_error_exposes_committed_delivery(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The whole post-commit badge step is off the delivery's critical path: even
-    if the hint helper raises unexpectedly, the delivery must not 500 — the inbound stays committed and the
-    InboundArrived + resurrect tail still runs (proven by the returned status)."""
     tid = _seed_idling_agent(db_conn)
 
     def _boom_badge(_bus: object, _agent_id: int) -> None:
         raise RuntimeError("lifecycle hint failed")
 
     monkeypatch.setattr("gateway.agents.delivery.publish_agent_updated_sync", _boom_badge)
-
-    with _sync_pool() as pool:
-        delivery = await deliver_chat_inbound(
+    with _sync_pool() as pool, pytest.raises(RuntimeError, match="lifecycle hint failed"):
+        await deliver_chat_inbound(
             pool,
             Database.from_settings(),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "hi",
             refresh_badge=True,
+            client_message_id="badge-committed",
         )
-        await asyncio.sleep(0.05)
-
-    # Delivery-time status returned (resurrect tail ran) — not a 500.
-    assert delivery.status == AgentStatus.IDLING
     with db_conn.cursor() as cur:
         cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (tid,))
         assert cur.fetchall() == [("hi",)]
+
+
+async def test_unknown_live_publish_error_is_awaited_after_commit(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tid = _seed_idling_agent(db_conn)
+    patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(AttributeError("live bug")))
+    with _sync_pool() as pool, pytest.raises(RuntimeError, match="live bug"):
+        await deliver_chat_inbound(
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            prepare=lambda _c: "live committed",
+            client_message_id="live-committed",
+        )
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (tid,))
+        assert cur.fetchall() == [("live committed",)]
 
 
 async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
@@ -439,3 +449,60 @@ async def test_badge_publish_happens_after_commit(
         cur.execute("SELECT label FROM agents WHERE id = %s", (tid,))
         row = cur.fetchone()
     assert row is not None and row[0] == "ordering-marker"
+
+
+async def test_cancelled_caller_stops_live_publish_and_reconciles_same_receipt(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gateway.agents import delivery
+
+    tid = _seed_idling_agent(db_conn)
+    entered = asyncio.Event()
+    exited = asyncio.Event()
+
+    async def hold_publish(*_args: object, **_kwargs: object) -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            exited.set()
+
+    with _sync_pool() as pool:
+        with monkeypatch.context() as patch:
+            patch.setattr(delivery._ops, "publish_inbound_arrived", hold_publish)
+            caller = asyncio.create_task(
+                deliver_chat_inbound(
+                    pool,
+                    Database.from_settings(),
+                    EventBus.from_settings(),
+                    tid,
+                    prepare=lambda _c: "cancel after commit",
+                    client_message_id="cancel-committed",
+                )
+            )
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM inbound_messages WHERE agent_id=%s AND content=%s",
+                    (tid, "cancel after commit"),
+                )
+                row = cur.fetchone()
+                assert row is not None
+            caller.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await caller
+            assert exited.is_set()
+        recovered = await delivery.reconcile_chat_delivery(
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            client_message_id="cancel-committed",
+            content="cancel after commit",
+            source="user",
+            payload=None,
+        )
+    assert recovered is not None and recovered.inbound_id == row[0]
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (tid,))
+        assert cur.fetchone() == (1,)
