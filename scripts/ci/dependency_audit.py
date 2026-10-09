@@ -35,7 +35,7 @@ from typing import Any, cast
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MARKER = "<!-- weekly-dependency-audit -->"
 _TITLE = "Weekly dependency audit: findings need attention"
-_UV_AUDIT_VERSION = "0.11.16"  # first uv with `audit`; the CI uv (0.10.2) predates it
+_UV_PIN = ("uv", "base/host/brew_pin.py", r'^UV_VERSION = "([^"]+)"')
 _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2, "low": 1, "unknown": 0}
 _ACTIONABLE_SEVERITIES = frozenset({"critical", "high", "unknown"})
 
@@ -186,7 +186,7 @@ _PINS: tuple[tuple[str, str, str], ...] = (
         "base/deploy/release/collector_artifact.py",
         r'^OTELCOL_CONTRIB_VERSION = "([^"]+)"',
     ),
-    ("uv", "base/host/brew_pin.py", r'^UV_VERSION = "([^"]+)"'),
+    _UV_PIN,
     ("Grafana", "deploy/lgtm/docker-compose.yml", r"^\s*image: grafana/grafana:(\S+)$"),
 )
 
@@ -384,7 +384,7 @@ def main(argv: list[str]) -> int:
         [
             "uvx",
             "--from",
-            f"uv=={_UV_AUDIT_VERSION}",
+            f"uv=={pinned_version(*_UV_PIN[1:])}",
             "uv",
             "audit",
             "--frozen",
