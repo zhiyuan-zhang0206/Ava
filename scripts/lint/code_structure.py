@@ -92,14 +92,13 @@ background work fail, except what the closed lists in `allowlist.py` allow. Froz
 
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
-Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.
-Direct entries are .py/.pyi files and subdirectories with content; hidden entries,
-symlinks, __pycache__, migrations subtrees, and a subdirectory holding nothing
-else (a local leftover CI never checks out) are excluded. Each directory is
-independent. A `docs/` or `tests/` layer without `__init__.py` takes no slot in its
-parent's budget, and a `tests/` layer has no entry cap of its own (see
-`scripts/structure/budgets/directory_budget.py`); its files keep the 800-line ceiling.
-AST rules retain their governed-package scope.
+Every non-root directory has at most 20 direct Git-tracked entries. Files of every
+suffix, hidden entries, docs, tests, migrations, symlinks and gitlinks each count
+one slot. A directory counts once in its parent and is independently checked at
+any depth. Symlink targets and untracked local artifacts are not traversed.
+The repository root alone has no entry cap. File and function budgets retain the
+existing Python scope: `_SCAN_DIRS`, tests/ and scripts/. AST rules retain their
+governed-package scope.
 
 File, directory, complexity and nesting budgets have no exemptions. Every
 selected violation fails, including after a file or function rename.
@@ -327,23 +326,15 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
-def _ancestors_within(path: Path, scope: Path) -> set[Path]:
-    """Every directory from `path`'s own up to `scope`: a new subpackage adds an entry to each
-    ancestor's budget, not just to its parent's."""
-    return {a for a in path.parents if a == scope or scope in a.parents}
-
-
-def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
-    """Collect files and independently checked directories without following links."""
+def _budget_files(targets: list[Path]) -> set[Path]:
+    """Collect the existing Python file-budget scope without following links."""
     files: set[Path] = set()
-    directories: set[Path] = set()
     visited: set[Path] = set()
 
     def visit(directory: Path) -> None:
         if directory in visited:
             return
         visited.add(directory)
-        directories.add(directory)
         for entry in directory_budget.entries(directory):
             if entry.is_dir():
                 visit(entry)
@@ -357,11 +348,9 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
                 continue
             if selected.is_dir():
                 visit(selected)
-            elif selected.is_file():
-                directories.update(_ancestors_within(selected, scope))
-                if selected.suffix == ".py":
-                    files.add(selected)
-    return files, directories
+            elif selected.is_file() and selected.suffix == ".py":
+                files.add(selected)
+    return files
 
 
 def _parse_baseline(
@@ -542,8 +531,8 @@ def _baseline_guard(
     return errors
 
 
-def _check_budgets(targets: list[Path]) -> list[str]:
-    files, directories = _budget_targets(targets)
+def _check_budgets(targets: list[Path], directory_targets: list[Path]) -> list[str]:
+    files = _budget_files(targets)
     errors: list[str] = []
     for path in sorted(files):
         try:
@@ -555,13 +544,13 @@ def _check_budgets(targets: list[Path]) -> list[str]:
             errors.append(
                 f"{name}:{count}: file is {count} lines, over the {_HARD_CEILING}-line hard ceiling — split it"
             )
-    for path in sorted(directories):
-        if directory_budget.is_tests_layer(path):
-            continue  # no entry cap of its own (module docstring)
-        count = sum(
-            directory_budget.counts_toward_budget(entry) for entry in directory_budget.entries(path)
-        )
-        name = path.relative_to(_REPO_ROOT).as_posix()
+    listing = _git("ls-files", "-z")
+    listing.check_returncode()
+    children = directory_budget.tracked_children(listing.stdout)
+    for name in sorted(
+        directory_budget.selected_directories(children, directory_targets, _REPO_ROOT)
+    ):
+        count = len(children[name])
         if count > _DIRECTORY_CEILING:
             errors.append(
                 f"{name}: directory has {count} direct entries, over the {_DIRECTORY_CEILING}-entry cap — split it"
@@ -598,7 +587,7 @@ def _check_ast_and_quality(
     full: bool,
     renames: dict[str, str] | None = None,
 ) -> list[str]:
-    files, _ = _budget_targets(targets)
+    files = _budget_files(targets)
     ast_files = _ast_rule_files(argv)
     locality.reset_caches()
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
@@ -654,20 +643,24 @@ def _parse_args(argv: list[str]) -> tuple[list[str], bool, bool]:
     return targets, full, only == [] and not targets
 
 
+def _budget_scopes(argv: list[str]) -> tuple[list[Path], list[Path]]:
+    """Explicit paths share one scope; a full run counts directories across the repo."""
+    if argv:
+        # Keep tracked symlinks lexical: count their names without following targets.
+        selected = [Path(os.path.abspath(a)) for a in argv]  # noqa: PTH100 — normalize without following symlinks
+        return selected, selected
+    return [_REPO_ROOT / directory for directory in _STRUCTURE_DIRS], [_REPO_ROOT]
+
+
 def main(argv: list[str] | None = None) -> int:
     argv, full, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:])
     if nothing_changed:
         return 0
-    missing = [arg for arg in argv if not Path(arg).exists()]
+    missing = [arg for arg in argv if not os.path.lexists(arg)]
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return 1
-    # Keep symlinks visible to the budget collector so it can exclude them.
-    targets = (
-        [Path(os.path.abspath(a)) for a in argv]  # noqa: PTH100 — normalize without following symlinks
-        if argv
-        else [_REPO_ROOT / d for d in _STRUCTURE_DIRS]
-    )
+    targets, directory_targets = _budget_scopes(argv)
     try:
         baseline = _parse_baseline(baseline_shards.read_worktree(_REPO_ROOT))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
@@ -680,7 +673,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{baseline_shards.SHARD_DIR}: cannot establish baseline comparison: {exc}")
         return 1
     errors = _baseline_guard(baseline, base=base, renames=renames)
-    errors.extend(_check_budgets(targets))
+    try:
+        errors.extend(_check_budgets(targets, directory_targets))
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        print(f"cannot read tracked directory structure: {exc}", file=sys.stderr)
+        return 1
     errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full, renames=renames))
     for error in errors:
         print(error)

@@ -15,8 +15,8 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from base.agents.context import AvaContext
 from base.events.live.publisher import AgentEventPublisher
 
-from ..invocation import driver
-from ..runtime import TurnOutcome
+from ...invocation import driver
+from ...runtime import TurnOutcome
 
 
 class _Redis:
