@@ -292,7 +292,7 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
     assert pending == ("pending",)
 
 
-async def test_other_auto_resurrect_failures_stay_informational(
+async def test_unknown_auto_resurrect_failure_propagates(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
@@ -309,16 +309,18 @@ async def test_other_auto_resurrect_failures_stay_informational(
         raise ClusterOpFailed({"error": "launch failed on the home machine"})
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
-    await lifecycle.resurrect_if_terminated(
-        Database.from_settings(),
-        event_bus,
-        aid,
-        trigger_inbound_id=trigger,
-        trigger_inbound_kind=InboundKind.CHAT,
-    )
-    events = [r["extra"].get("event") for r in loguru_records if r["level"].name == "WARNING"]
-    assert "auto_resurrect_refused" not in events
-    assert any(r["extra"].get("event") == "auto_resurrect_failed" for r in loguru_records)
+    with pytest.raises(ClusterOpFailed):
+        await lifecycle.resurrect_if_terminated(
+            Database.from_settings(),
+            event_bus,
+            aid,
+            trigger_inbound_id=trigger,
+            trigger_inbound_kind=InboundKind.CHAT,
+        )
+    assert not any(r["extra"].get("event") == "auto_resurrect_failed" for r in loguru_records)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (trigger,)
+    ).fetchone() == ("pending",)
 
 
 # ── Unowned termination ──────────────────────────────────────────────────────
