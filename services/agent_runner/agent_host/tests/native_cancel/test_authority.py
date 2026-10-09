@@ -13,8 +13,8 @@ from base.agents.incarnation.native_work_models import NativeWorkUncertainError
 from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import HostedTurnResources
 from base.lm.catalog import ModelCatalog
+from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction

@@ -16,7 +16,6 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import (
     _admit,
@@ -78,10 +77,7 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
         raise error
 
     monkeypatch.setattr(db_recovery, "repair_dangling_tool_use_at_startup", failed_repair)
-    with (
-        bind_turn_identity(incarnation.agent_id, incarnation=incarnation),
-        pytest.raises(db_recovery.DatabaseRecoveryBudgetExceededError, match="after 2 attempts"),
-    ):
+    with pytest.raises(db_recovery.DatabaseRecoveryBudgetExceededError, match="after 2 attempts"):
         await db_recovery.recover_database(
             pool=aops_pool,
             graph=graph,
@@ -89,6 +85,7 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
             incarnation=incarnation,
             database_waits=waits,
             peek_lock=asyncio.Lock(),
+            work=None,
         )
     assert attempts == backoff.await_count == 2
     assert waits.snapshot(incarnation.agent_id) is None
@@ -147,15 +144,15 @@ async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
         await flush(checkpointer, agent)
 
     monkeypatch.setattr(db_recovery, "flush_checkpoint", flaky_flush)
-    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
-        await db_recovery.recover_database(
-            pool=aops_pool,
-            graph=graph,
-            checkpointer=saver,
-            incarnation=incarnation,
-            database_waits=DatabaseWaits(),
-            peek_lock=asyncio.Lock(),
-        )
+    await db_recovery.recover_database(
+        pool=aops_pool,
+        graph=graph,
+        checkpointer=saver,
+        incarnation=incarnation,
+        database_waits=DatabaseWaits(),
+        peek_lock=asyncio.Lock(),
+        work=None,
+    )
     warnings = [
         c for c in log.warning.call_args_list if c.args[0] == "host checkpoint recovery prolonged"
     ]
@@ -201,15 +198,15 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
         await refresh(pool, original)
 
     monkeypatch.setattr(db_recovery, "_refresh_owner", flaky_probe)
-    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
-        await db_recovery.recover_database(
-            pool=aops_pool,
-            graph=graph,
-            checkpointer=saver,
-            incarnation=incarnation,
-            database_waits=waits,
-            peek_lock=asyncio.Lock(),
-        )
+    await db_recovery.recover_database(
+        pool=aops_pool,
+        graph=graph,
+        checkpointer=saver,
+        incarnation=incarnation,
+        database_waits=waits,
+        peek_lock=asyncio.Lock(),
+        work=None,
+    )
     assert backoff.await_count == failures
     assert waits.snapshot(incarnation.agent_id) is not None
     recovered = [

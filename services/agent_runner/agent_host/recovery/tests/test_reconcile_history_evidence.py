@@ -11,7 +11,6 @@ from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_sn
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
 from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort import (
     _build_graph,
@@ -42,8 +41,7 @@ async def test_checkpoint_clock_skew_scans_settled_history(
     )
     db_conn.commit()
 
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -73,8 +71,7 @@ async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
         {"configurable": {"thread_id": str(agent)}}, {"halted": True}, as_node="work"
     )
 
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -101,10 +98,9 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
         raise RuntimeError("history unavailable")
 
     monkeypatch.setattr(sideload_mod, "committed_ids_for_reconcile", _failed_scan)
-    with (
-        bind_turn_identity(agent, incarnation=incarnation),
-        pytest.raises(RuntimeError, match="history unavailable"),
-    ):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    with pytest.raises(RuntimeError, match="history unavailable"):
+        await reconcile_claimed_inbounds_at_startup(
+            aops_pool, saver, agent, incarnation=incarnation
+        )
 
     assert _statuses(db_conn, [claimed]) == {claimed: "claimed"}

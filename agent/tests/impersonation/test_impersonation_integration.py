@@ -159,6 +159,7 @@ async def _prepare_graph(
         clients=process_clients(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         original_incarnation=owner,
+        catalog=build_model_catalog(),
     )
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {

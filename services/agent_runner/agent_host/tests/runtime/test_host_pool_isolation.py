@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.config import settings
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.tests.test_agent_host import (
     _Build,
@@ -51,6 +52,7 @@ class TestPoolIsolation:
         monkeypatch: pytest.MonkeyPatch,
         *,
         database: Database,
+        model_catalog: ModelCatalog,
     ) -> None:
         """A busy turn may use the work pool without consuming control capacity."""
         import services.agent_runner.agent_host.host as host_mod
@@ -103,6 +105,7 @@ class TestPoolIsolation:
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
         monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", force)
         host = _host(
+            catalog=model_catalog,
             pool=cast(AsyncConnectionPool[Any], turn_pool),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
             checkpointer=original._checkpointer,

@@ -23,8 +23,8 @@ from base.agents.messages.native_cancel import accept_native_cancel, observe_nat
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import HostedTurnResources
 from base.lm.catalog import ModelCatalog
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_owner
 from services.agent_runner.agent_host.invocation import native_work as work_owner
 from services.agent_runner.agent_host.settlement import close_hosted_turn
