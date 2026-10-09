@@ -13,7 +13,7 @@ import pytest
 
 from base.native_process import ownership as proc_tree
 from base.native_process import pid_starttime_ticks
-from base.native_process.os_platform import IS_LINUX
+from base.native_process.os_platform import is_linux
 from base.native_process.ownership import OwnedProcess, create_time_matches, stable_create_time
 
 
@@ -25,7 +25,7 @@ def _identity_with_drift(offset: float) -> OwnedProcess:
 @pytest.mark.parametrize("offset", [-1.0, 1.0, -0.0001, 0.0001])
 def test_live_rejects_a_different_native_birth(offset: float) -> None:
     """A nearby birth is another process, never an ownership tolerance."""
-    if IS_LINUX:
+    if is_linux():
         with pytest.raises(RuntimeError, match="missing Linux start ticks"):
             _identity_with_drift(offset).live()
     else:
@@ -49,7 +49,7 @@ def test_birth_matches_exposes_the_same_rule() -> None:
     assert not changed.birth_matches(process)
 
 
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_live_converges_when_the_proc_entry_vanishes_mid_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -83,7 +83,7 @@ def test_live_converges_when_the_proc_entry_vanishes_mid_check(
             child.wait()
 
 
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_live_keeps_the_error_when_a_present_process_cannot_be_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,8 +1,7 @@
 """Unit tests for base.native_process.os_platform — host detection + the disk-path probe.
 
-The WSL-marker and primary-disk-path logic used to live in the retired
-base.resource_monitor (as `_is_wsl` / `_disk_usage_path`); it now lives here as the canonical
-`_detect_wsl` / `primary_disk_path`, so these tests followed it.
+The primary-disk-path probe samples the macOS data volume or the POSIX root,
+including a WSL process's own root filesystem.
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ import pytest
 
 import base.native_process.os_platform as plat
 from base.native_process.os_platform import (
-    _detect_wsl,
     descends_from_launchd_job,
     ensure_line_buffered_stdio,
     launchd_job_loaded,
@@ -26,38 +24,43 @@ from base.native_process.os_platform import (
 )
 
 
-class TestDetectWsl:
-    @pytest.mark.parametrize(
-        "release",
+def test_cold_import_does_not_probe_uname() -> None:
+    result = subprocess.run(
         [
-            "6.18.33.1-microsoft-standard-WSL2",  # WSL2
-            "4.4.0-19041-Microsoft",  # WSL1
-            "5.15.0-custom-WSL",
-        ],
-    )
-    def test_wsl_kernels_detected(self, release: str) -> None:
-        assert _detect_wsl(release) is True
+            ".venv/bin/python",
+            "-I",
+            "-c",
+            """
+import platform
+import sys
+import uuid
 
-    @pytest.mark.parametrize("release", ["5.15.0-91-generic", "23.2.0", "6.1.0-amd64"])
-    def test_non_wsl_not_detected(self, release: str) -> None:
-        assert _detect_wsl(release) is False
+# Linux's stdlib UUID initialization probes the OS independently of Ava.
+assert "base.native_process" not in sys.modules
+assert "base.native_process.os_platform" not in sys.modules
+
+def refuse_probe():
+    raise AssertionError("platform import must not probe uname")
+
+platform.uname = refuse_probe
+import base.native_process.os_platform
+""",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 class TestPrimaryDiskPath:
     def test_macos_data_volume(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "IS_MACOS", True)
+        monkeypatch.setattr(plat, "is_macos", lambda: True)
         assert primary_disk_path() == "/System/Volumes/Data"
 
-    def test_wsl_uses_ext4_rootfs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # WSL samples its own ext4 rootfs, not the auto-mounted Windows /mnt/c
-        # (whose near-full C: drive has nothing to do with this Linux machine).
-        monkeypatch.setattr(plat, "IS_MACOS", False)
-        monkeypatch.setattr(plat, "IS_WSL", True)
-        assert primary_disk_path() == "/"
-
     def test_plain_posix_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "IS_MACOS", False)
-        monkeypatch.setattr(plat, "IS_WSL", False)
+        monkeypatch.setattr(plat, "is_macos", lambda: False)
         assert primary_disk_path() == "/"
 
 
@@ -65,10 +68,10 @@ class TestPtyMax:
     def test_non_macos_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Off macOS the PTY ceiling does not bind (Linux `kernel.pty.max` is far
         higher), so callers get None and skip the check."""
-        monkeypatch.setattr(plat, "IS_MACOS", False)
+        monkeypatch.setattr(plat, "is_macos", lambda: False)
         assert pty_max() is None
 
-    @pytest.mark.skipif(not plat.IS_MACOS, reason="reads kern.tty.ptmx_max, macOS-only")
+    @pytest.mark.skipif(not plat.is_macos(), reason="reads kern.tty.ptmx_max, macOS-only")
     def test_macos_reads_positive_ceiling(self) -> None:
         """On macOS it returns the live `kern.tty.ptmx_max` — a positive int
         (511 by default)."""
@@ -148,11 +151,11 @@ class TestLaunchdOwnership:
             return subprocess.CompletedProcess(cmd, 0 if value else 1, value, "")
 
         monkeypatch.setattr(plat.subprocess, "run", run)
-        monkeypatch.setattr(plat, "IS_MACOS", True)
+        monkeypatch.setattr(plat, "is_macos", lambda: True)
         monkeypatch.setattr(plat.os, "getpid", lambda: 500)
 
     def test_off_macos_is_never_owned(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "IS_MACOS", False)
+        monkeypatch.setattr(plat, "is_macos", lambda: False)
         assert descends_from_launchd_job("com.x") is False
         assert launchd_job_loaded("com.x") is False
 

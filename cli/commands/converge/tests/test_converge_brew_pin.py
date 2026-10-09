@@ -73,7 +73,7 @@ def test_all_formulae_pinned_is_silent(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(cbp, "IS_MACOS", True)
+    monkeypatch.setattr(cbp, "is_macos", lambda: True)
     _brew_output(monkeypatch, set(EXPECTED_PINNED_FORMULAE))
 
     cbp.ensure_brew_pin(_ctx(tmp_path))
@@ -86,7 +86,7 @@ def test_missing_formula_warns_with_manual_repin_command(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(cbp, "IS_MACOS", True)
+    monkeypatch.setattr(cbp, "is_macos", lambda: True)
     _brew_output(monkeypatch, set(EXPECTED_PINNED_FORMULAE - {"redis@8.2"}))
 
     cbp.ensure_brew_pin(_ctx(tmp_path))
@@ -102,7 +102,7 @@ def test_uninstalled_manifest_formula_is_not_flagged(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(cbp, "IS_MACOS", True)
+    monkeypatch.setattr(cbp, "is_macos", lambda: True)
     installed = set(EXPECTED_PINNED_FORMULAE - {"grafana"})
     _brew_output(monkeypatch, installed, installed=installed)
 
@@ -116,7 +116,7 @@ def test_installed_but_unpinned_formula_still_warns(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(cbp, "IS_MACOS", True)
+    monkeypatch.setattr(cbp, "is_macos", lambda: True)
     pinned = set(EXPECTED_PINNED_FORMULAE - {"grafana"})
     _brew_output(monkeypatch, pinned, installed=set(EXPECTED_PINNED_FORMULAE))
 
@@ -132,7 +132,7 @@ def test_brew_absent_is_silent(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(cbp, "IS_MACOS", True)
+    monkeypatch.setattr(cbp, "is_macos", lambda: True)
 
     def absent(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise FileNotFoundError("brew")
@@ -149,7 +149,7 @@ def test_non_macos_is_silent_without_calling_brew(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(cbp, "IS_MACOS", False)
+    monkeypatch.setattr(cbp, "is_macos", lambda: False)
     monkeypatch.setattr(
         cbp,
         "unpinned_formulae",
