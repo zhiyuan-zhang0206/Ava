@@ -102,12 +102,14 @@ def _generate(
     level: int,
     nodes: list[OpenNode],
     calls: list[GroupCall],
+    agent_id: int,
 ) -> list[Group]:
     """Blocking: one grouping conversation; every provider call is appended to `calls`."""
     return generate_groups(
         models.get(model, overrides, settings.agent.understanding_group_reasoning),
         nodes,
         model=model,
+        agent_id=agent_id,
         corrections=settings.agent.understanding_group_corrections,
         clock=Clock.from_settings(),
         # The brake on an open set that keeps growing: past three checks' worth of this level, close one.
@@ -145,7 +147,7 @@ async def _check_level(
         model, overrides = await asyncio.to_thread(_group_model, db, agent_id)
         try:
             groups = await run_blocking(
-                executor, _generate, models, model, overrides, level, nodes, calls
+                executor, _generate, models, model, overrides, level, nodes, calls, agent_id
             )
         except GenerateError as exc:
             telemetry.emit(
