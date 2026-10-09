@@ -11,11 +11,11 @@ from __future__ import annotations
 def stop_permissions_helper(*, force: bool = False, timeout_s: float = 30.0) -> None:
     """Stop this home's macOS helper; the Windows helper is user-wide."""
     from base.config import settings
-    from base.native_process.os_platform import IS_MACOS
+    from base.native_process.os_platform import is_macos
     from base.paths import ava_home
     from services.desktop.permissions_helper.launchd_job import unregister_helper
 
-    if IS_MACOS:
+    if is_macos():
         unregister_helper(
             ava_home(),
             helper_port=settings.services.permissions_helper_port,
