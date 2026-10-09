@@ -101,7 +101,7 @@ def _leaves(error: BaseException) -> list[BaseException]:
 
 
 @pytest.mark.parametrize("fault", ["pipeline", "result", "mixed_result", "disconnect"])
-@pytest.mark.parametrize("error_type", [ValueError, DataError])
+@pytest.mark.parametrize("error_type", [ValueError, DataError, ResponseError])
 async def test_unknown_worker_error_reaches_invocation_owner(
     monkeypatch: pytest.MonkeyPatch,
     fault: str,

@@ -5,8 +5,9 @@ The publisher is the best-effort SSE fan-out for one agent process: callers
 background worker serially publishes to the central Redis. Serial = the SSE
 ordering contract (Start before Delta, chunk concatenation) is preserved.
 A slow/unreachable central Redis must degrade the live view, never stall the
-agent's control flow — so a publish that times out or errors drops that event
-and the worker keeps going; a full queue drops rather than blocking emit.
+agent's control flow — so a publish with a known transport/auth failure drops that event
+and the worker keeps going; unknown command/programming defects fail the owning
+invocation. A full queue drops rather than blocking emit.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any, cast
 
 import pytest
 import redis.asyncio as aredis
+from redis.exceptions import AuthenticationError, NoPermissionError, ResponseError
 
 from .. import redis_client
 from ..publisher import AgentEventPublisher
@@ -24,7 +26,7 @@ from ..publisher import AgentEventPublisher
 class _FakePipeline:
     """Minimal pipeline: collects publish commands, executes them in order on
     execute() — one round-trip, mirroring the real Redis pipeline contract.
-    `fail` payloads are command-level errors (like an ACL NOPERM): under
+    `fail` payloads are unexpected command-level rejections: under
     `raise_on_error=False` they come back as Exception results and the rest of
     the batch still goes out, matching redis-py's real semantics."""
 
@@ -37,19 +39,17 @@ class _FakePipeline:
         return self
 
     async def execute(self, raise_on_error: bool = True) -> list[object]:
-        from redis.exceptions import AuthenticationError, ResponseError
-
         self._redis.pipeline_attempts += 1
         if self._redis.auth_failures_remaining > 0:
             self._redis.auth_failures_remaining -= 1
-            return [AuthenticationError("ACL is being re-affirmed") for _ in self._cmds]
+            return [self._redis.auth_error_type("ACL is being re-affirmed") for _ in self._cmds]
 
         results: list[object] = []
         for channel, payload in self._cmds:
             if payload in self._redis.hang:
                 await asyncio.Event().wait()  # block forever — connection-level stall
             if payload in self._redis.fail:
-                err = ResponseError("redis down")
+                err = ResponseError("invalid publish command")
                 if raise_on_error:
                     raise err
                 results.append(err)
@@ -69,6 +69,7 @@ class _FakeRedis:
         self.fail: set[str] = set()
         self.hang: set[str] = set()
         self.auth_failures_remaining = 0
+        self.auth_error_type: type[AuthenticationError | NoPermissionError] = AuthenticationError
         self.pipeline_attempts = 0
         self.connection_pool: object = self  # async disconnect, like a real client pool
 
@@ -104,11 +105,14 @@ async def test_emits_in_fifo_order() -> None:
         assert [p for _, p in redis.published] == ["e0", "e1", "e2", "e3", "e4"]
 
 
+@pytest.mark.parametrize("error_type", [AuthenticationError, NoPermissionError])
 async def test_batch_retries_acl_transition_without_real_waiting(
     monkeypatch: pytest.MonkeyPatch,
+    error_type: type[AuthenticationError | NoPermissionError],
 ) -> None:
     redis = _FakeRedis()
     redis.auth_failures_remaining = 2
+    redis.auth_error_type = error_type
     delays: list[float] = []
 
     async def _record_sleep(delay: float) -> None:
@@ -180,19 +184,21 @@ async def test_drains_in_batches_preserving_order() -> None:
         assert [p for _, p in redis.published] == [f"e{i}" for i in range(150)]
 
 
-async def test_batch_publish_failure_sheds_batch_and_keeps_worker_alive() -> None:
-    # A pipeline failure drops the whole batch; the worker survives and the
-    # next batch publishes normally.
-    async with asyncio.TaskGroup() as tasks:
-        redis = _FakeRedis()
-        redis.fail.add("bad")
-        pub = _pub(redis)
-        await pub.start(tasks)
-        pub.emit("bad")
-        pub.emit("good")
-        await pub.aclose()
-        assert ("ch", "good") in redis.published
-        assert ("ch", "bad") not in redis.published
+async def test_unexpected_command_rejection_reaches_the_owning_group() -> None:
+    redis = _FakeRedis()
+    redis.fail.add("bad")
+    pub = _pub(redis)
+    with pytest.raises(ExceptionGroup) as caught:
+        async with asyncio.TaskGroup() as tasks:
+            await pub.start(tasks)
+            pub.emit("bad")
+            pub.emit("good")
+            await pub.aclose()
+    errors = caught.value.exceptions
+    assert len(errors) == 1
+    assert isinstance(errors[0], ResponseError)
+    assert ("ch", "bad") not in redis.published
+    assert pub._task is None
 
 
 async def test_batch_publish_timeout_sheds_batch_and_continues() -> None:

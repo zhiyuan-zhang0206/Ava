@@ -110,9 +110,10 @@ fails. This does not change the separate `EventBus.publish_best_effort` contract
 up to 64 from a queue of 2048; overflow sheds the oldest buffered event and keeps
 queue completion accounting. The publisher gives each command attempt two
 seconds and close drains for up to two seconds before cancelling the worker.
-Authentication and ACL transitions retain the shared bounded retry. Redis
-connection failures, timeouts, OS transport errors and explicit Redis command
-rejections shed live events with the existing structured `sse_drop` report;
+Typed `AuthenticationError` and `NoPermissionError` transitions retain the
+shared bounded retry. These exhausted auth failures, Redis connection failures,
+timeouts and OS transport errors shed live events with the existing structured
+`sse_drop` report; other `ResponseError` and `DataError` failures reach the owner;
 only transport failures tear down the shared client's pool for reconnect. The
 publisher never closes the `EventBus`'s shared Redis client or retries ordinary
 invocation work. Durable DB state and gateway postcommit notification policy

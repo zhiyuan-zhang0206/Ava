@@ -38,7 +38,7 @@ import time
 from contextlib import suppress
 
 import redis.asyncio as aredis
-from redis.exceptions import AuthenticationError, NoPermissionError, ResponseError
+from redis.exceptions import AuthenticationError, NoPermissionError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -46,7 +46,7 @@ from ...log import logger
 from .redis_client import retry_auth_failures_async
 
 _TRANSPORT_ERRORS = (RedisConnectionError, RedisTimeoutError, OSError, TimeoutError)
-_PUBLISH_ERRORS = (*_TRANSPORT_ERRORS, ResponseError)
+_PUBLISH_ERRORS = (*_TRANSPORT_ERRORS, NoPermissionError)
 
 _DEFAULT_MAXSIZE = 2048
 _DEFAULT_PUBLISH_TIMEOUT_S = 2.0
@@ -139,9 +139,11 @@ class AgentEventPublisher:
                 # The owning TaskGroup observes worker exceptions. Waiting here
                 # joins teardown without replacing an invocation's primary error
                 # or adding the same worker exception to the group a second time.
-                await asyncio.wait({task})
-                self._task = None
-                self._flush_warn()
+                try:
+                    await asyncio.wait({task})
+                finally:
+                    self._task = None
+                    self._flush_warn()
         else:
             self._flush_warn()
 
@@ -178,8 +180,8 @@ class AgentEventPublisher:
         Authentication and ACL-denial results retry the whole batch with the
         shared bounded backoff. Every command targets this one events channel,
         so an ACL transition rejects the complete batch before any publish can
-        land. Known Redis command rejections shed only their failing event; unknown
-        command errors propagate to the invocation owner; a
+        land. Only typed transport or exhausted authentication/ACL failures shed
+        live events. Other command errors propagate to the invocation owner; a
         connection-level failure or a per-attempt timeout sheds the batch as
         before, so transport-failure behavior stays best-effort."""
 
