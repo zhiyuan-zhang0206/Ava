@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import psycopg
+import pytest
 
 from base.cluster import wake_key
 from base.config import settings
@@ -26,3 +27,24 @@ async def test_publish_sets_wake_key_too(database: Database, event_bus: EventBus
         r.delete(wake_key(agent_id))
     finally:
         r.close()
+
+
+def test_unknown_wake_error_propagates(
+    database: Database, event_bus: EventBus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from base.db import publish_inbound_wake
+    from base.events.live.tests.fakes import patch_sync_redis
+
+    bug = AttributeError("wake bug")
+
+    class BrokenRedis:
+        def publish(self, *_args: object, **_kwargs: object) -> int:
+            raise bug
+
+        def close(self) -> None:
+            pass
+
+    patch_sync_redis(monkeypatch, BrokenRedis)
+    with pytest.raises(AttributeError) as raised:
+        publish_inbound_wake(database, event_bus, 123, "456")
+    assert raised.value is bug
