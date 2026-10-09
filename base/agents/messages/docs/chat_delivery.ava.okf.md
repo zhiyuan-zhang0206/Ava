@@ -21,9 +21,37 @@ creation is insufficient for the caller-owned contract.
 `insert_chat_inbound_once` remains the standalone compatibility owner. It opens
 its existing transaction context, invokes the native writer, explicitly commits,
 emits the recorded event and wakes only a newly inserted inbound, in that order.
-Its signature, `ChatInboundReceipt` return, source semantics, conflict detection
-and duplicate handling are unchanged. Gateway delivery/reconciliation and SDK
-outbox consumers retain their existing post-commit and resurrection policies.
+`ChatInboundReceipt` return, source semantics, conflict detection and duplicate
+handling remain unchanged. If post-commit telemetry or wake raises, it propagates
+as `ChatInboundCommittedError` with that receipt, the original logical key and
+chained cause. This error carries an observed commit, not a fabricated success
+or retry decision.
+
+Gateway `deliver_chat_inbound` and reconciliation await pending-row wake, live
+`InboundArrived` publication and exact-row resurrection in their calling task.
+Badge refresh, wake, live UI and resurrection remain separate effects. Known
+Redis/network errors use the existing bounded best-effort policy; programming
+errors propagate with the committed receipt. Automatic resurrection retains
+known local refusals, machine pauses, verified remote refusals and unreachable
+homes; an unknown RPC failure or malformed result propagates instead of being
+logged as a successful request. Claimed/done rows only return the
+receipt and observed status; they never revive stale work.
+
+An HTTP post-commit error returns the existing 500 error envelope with
+`retryable=false`, `committed=true`, `inbound_id` and the request's original
+`idempotency_key`. A same-key retry or `/messages/reconcile` returns that same
+row and repairs its pending tail without another chat/audit/resurrection effect.
+A caller cancellation can lose its response after commit; it must reconcile
+with the original key. Without a key, the receipt still proves commit but a new
+request has no same-operation identity. No notification registry, UI outbox or
+new durable custody mechanism is introduced. Publication adds its bounded
+transport latency to the current request.
+
+The completion digest uses this same awaited path as a heartbeat-service caller,
+not an HTTP request. Unknown errors reach that service's existing `TaskGroup`;
+the stable digest key reconciles a later service restart before event rows are
+marked. The accepted boundary is recorded in
+[Explicit runtime ownership boundaries](https://github.com/zhiyuan-zhang0206/Ava/blob/14a32f8a362ac6cc55b277c49e48e86f39d06347/docs/decisions/engineering/design/simplification/2026-10-09-explicit-runtime-ownership-boundaries.md).
 
 `client_message_id` still lives on the inbound row: identical body/source/target
 replays recover the original id, changed immutable identity raises

@@ -211,7 +211,7 @@ class TestResurrectIfTerminatedPlacement:
         assert "home machine unreachable" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_remote_op_failure_swallowed(
+    async def test_unknown_remote_op_failure_propagates(
         self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         from base.agents import AgentStatus
@@ -226,10 +226,34 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
 
-        status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
+        with pytest.raises(ClusterOpFailed):
+            await lifecycle.resurrect_if_terminated(
+                _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("remote", [False, True])
+    async def test_known_resurrection_refusal_keeps_inbound_queued(
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, remote: bool
+    ) -> None:
+        from base.agents import AgentStatus, ResurrectRefused
+        from ops.cluster.rpc import ClusterOpFailed
+
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "wsl")
+
+        async def refuse(*_args: object, **_kwargs: object) -> dict:
+            if remote:
+                raise ClusterOpFailed({"error": "ResurrectRefused: runtime_cutover_required"})
+            raise ResurrectRefused("runtime_cutover_required")
+
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", refuse)
+        assert (
+            await lifecycle.resurrect_if_terminated(
+                _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
+            )
+            is AgentStatus.TERMINATED
         )
-        assert status is AgentStatus.TERMINATED
 
     @pytest.mark.asyncio
     async def test_not_terminated_short_circuits(
