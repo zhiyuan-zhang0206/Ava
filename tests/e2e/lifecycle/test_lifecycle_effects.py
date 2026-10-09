@@ -108,6 +108,7 @@ def test_sdk_message_reaches_the_other_agents_model(spawned_agent: int, clean_re
 # -- SDK spawn -----------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("authenticated_gateway")
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_spawn")
 def test_sdk_spawn_starts_a_child_that_runs_the_prompt(
     spawned_agent: int, clean_record: None

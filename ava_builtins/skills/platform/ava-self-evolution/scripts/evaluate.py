@@ -37,6 +37,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import ava
 from base.db import Database
@@ -135,7 +136,9 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
         overlay: dict[str, object] = {"eval_isolation": True}
         if model:
             overlay["llm_model"] = model
-        eval_id = ava.agents.spawn(prompt=task["task_prompt"], config_overlay=overlay)
+        eval_id = ava.agents.spawn(
+            prompt=task["task_prompt"], config_overlay=overlay, idempotency_key=str(uuid4())
+        )
         runs.append(
             {
                 "eval_agent_id": eval_id,

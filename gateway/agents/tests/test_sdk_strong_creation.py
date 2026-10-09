@@ -36,7 +36,6 @@ def _sdk(**kwargs: Any) -> int:
         "fork_from": None,
         "prompt_source": "user",
         "machine": "local-test",
-        "require_idempotency": True,
         "idempotency_key": "sdk-intent",
     }
     return spawn(**(args | kwargs))
@@ -173,14 +172,10 @@ def test_changed_sdk_context_same_principal_key_conflicts(
     http.post.side_effect = submit
     monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "user")
     monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "local-test")
-    original = ava.agents.spawn(
-        prompt="same raw inputs", idempotency_key="context", require_idempotency=True
-    )
+    original = ava.agents.spawn(prompt="same raw inputs", idempotency_key="context")
     monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "another-machine")
     with pytest.raises(httpx.HTTPStatusError) as changed:
-        ava.agents.spawn(
-            prompt="same raw inputs", idempotency_key="context", require_idempotency=True
-        )
+        ava.agents.spawn(prompt="same raw inputs", idempotency_key="context")
     assert changed.value.response.status_code == 409
     assert db_conn.execute("SELECT id FROM agents").fetchall() == [(original,)]
     assert {call.args[0] for call in http.post.call_args_list} == {PATH}
