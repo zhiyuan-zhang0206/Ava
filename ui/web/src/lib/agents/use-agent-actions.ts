@@ -14,7 +14,7 @@ import { errMsg } from "../contracts/errors";
 import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "../fold/agents";
 import { track } from "../telemetry/telemetry";
 import { useStore } from "../state/store";
-import type { AgentRow, AgentRoster } from "../contracts/types";
+import type { AgentRow, AgentRoster, CompactTarget } from "../contracts/types";
 
 export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring";
 
@@ -159,7 +159,8 @@ export function useAgentActions(
   });
 
   const compactMutation = useMutation({
-    mutationFn: (id: number) => api.compact(id),
+    mutationFn: async ({ target, operationKey }: { id: number; target: Promise<CompactTarget>; operationKey: string }) =>
+      api.compact(await target, operationKey),
     onSuccess: () => track("compact"),
     onError: (e: unknown) => showError(`Compact failed: ${errMsg(e)}`),
   });
@@ -180,7 +181,7 @@ export function useAgentActions(
       out[resurrectMutation.variables.id] = "resurrecting";
     }
     if (compactMutation.isPending) {
-      out[compactMutation.variables] = "compacting";
+      out[compactMutation.variables.id] = "compacting";
     }
     if (forceExpireMutation.isPending) {
       out[forceExpireMutation.variables.id] = "expiring";
@@ -393,7 +394,7 @@ export function useAgentActions(
   const compact = useCallback(
     async (id: number) => {
       try {
-        await compactMutation.mutateAsync(id);
+        await compactMutation.mutateAsync({ id, target: api.observeCompact(id), operationKey: newOperationKey() });
       } catch {
         // error already handled in onError callback
       }

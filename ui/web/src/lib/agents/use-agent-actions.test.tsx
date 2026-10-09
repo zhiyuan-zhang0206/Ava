@@ -21,7 +21,7 @@ it("selects the committed agent after launch failure instead of retrying create"
     reason: "agent_launch_failed",
     agent_id: 123,
     state: { status: "idling", availability: { reason: "launch_unreachable" } },
-    retry_launch_path: "/api/agents/123/retry-launch",
+    retry_launch_path: "/api/keyed/v1/agents/123/retry-launch",
   }));
   const showError = vi.fn();
   const wrapper = ({ children }: { children: ReactNode }) =>
@@ -49,5 +49,31 @@ it("holds one creation key across mutation retries and gives concurrent actions 
   expect(spawn.mock.calls[0][1]).toBe(spawn.mock.calls[1][1]);
   await act(async () => { await Promise.all([result.current.spawn(), result.current.spawn()]); });
   expect(spawn.mock.calls[2][1]).not.toBe(spawn.mock.calls[3][1]);
+  client.clear();
+});
+
+it("retries compaction with its original observation and key", async () => {
+  const target = {
+    protocol: 1 as const, observation_id: "observed", source: {
+      agent_id: 8, work_id: "work", machine: "local", generation: "generation", owner: "owner", protocol: 1 as const,
+    },
+    checkpoint_id: "source", checkpoint_ns: "", messages_version: "1",
+    compact_channel_version: null, segment_version: 0, model: "gpt-5.6-sol",
+  };
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: 1, retryDelay: 0 } } });
+  const observe = vi.spyOn(api, "observeCompact").mockResolvedValue(target);
+  const compact = vi.spyOn(api, "compact").mockRejectedValueOnce(new Error("response lost"))
+    .mockResolvedValue({ target, command_id: "command" });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result } = renderHook(() => useAgentActions(vi.fn(), []), { wrapper });
+  await act(async () => { await result.current.compact(8); });
+  expect(observe).toHaveBeenCalledTimes(1);
+  expect(compact.mock.calls).toHaveLength(2);
+  expect(compact.mock.calls[0]).toEqual(compact.mock.calls[1]);
+  expect(compact.mock.calls[0][0]).toBe(target);
+  await act(async () => { await result.current.compact(8); });
+  expect(observe).toHaveBeenCalledTimes(2);
+  expect(compact.mock.calls[2][1]).not.toBe(compact.mock.calls[0][1]);
   client.clear();
 });
