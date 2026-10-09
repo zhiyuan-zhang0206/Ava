@@ -141,5 +141,5 @@ projects.
 
 - [[cli/commands/extensions/packages/docs/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` operator surface
 - [[enable_config.ava.okf.md]] — the sibling per-machine plugin enable config
-- [[okf/skills/skills.ava.okf.md|Skills]] — what a skill is and how the scanner loads one
-- [[okf/mcps/mcps.ava.okf.md|MCP integration]] — MCP server merge layers and launch form
+- [[docs/skills/skills.ava.okf.md|Skills]] — what a skill is and how the scanner loads one
+- [[docs/mcps/mcps.ava.okf.md|MCP integration]] — MCP server merge layers and launch form

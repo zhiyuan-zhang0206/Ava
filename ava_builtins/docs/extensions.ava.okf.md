@@ -30,7 +30,7 @@ The three systems are decoupled — plugins don't need skills, skills don't depe
 - `base/packages/plugins/config_registration.py:bind_plugin_config()` — binds a plugin's declared Config class from its disk image
 - `base/packages/plugins/extensions.py:PluginContributions` — hooks, state, sections and notes a plugin declares
 - `agent/state.py:plugin_state_schema()` — state field validation
-- `agent/extensions/catalog.py:SURFACES` — the enumeration of every plugin injection surface, with each entry point's live signature; `ava plugins inspect` renders it beside what each installed plugin actually registered ([[okf/plugins/plugins.ava.okf.md|Plugin System]])
+- `agent/extensions/catalog.py:SURFACES` — the enumeration of every plugin injection surface, with each entry point's live signature; `ava plugins inspect` renders it beside what each installed plugin actually registered ([[docs/plugins/plugins.ava.okf.md|Plugin System]])
 - `ava/skills/__init__.py` — skill loading and help() rendering
 - `ava/mcps/__init__.py` — MCP client interface
 
