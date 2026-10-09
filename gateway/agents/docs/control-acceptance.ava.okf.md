@@ -19,7 +19,10 @@ One user action owns one key and one observation. Recovery replays that exact
 pair; it never silently observes newer work or history. Changed intent with the
 same key conflicts. A deliberate new action gets a fresh observation and key.
 Acceptance returns the original `command_id + target`, not proof of application.
-Native command status owns the eventual outcome.
+Native command status owns the eventual outcome. Fresh birth transactions stamp
+`ResourceBirth`; actual host admission must consume it and capture its process
+before a work/history observation is eligible. Existing unknown resource rows
+remain ineligible; receipt replay does not reset their resource state.
 
 The browser captures the observation promise and key before its compaction
 mutation can retry. Its stop action observes native work before submitting
