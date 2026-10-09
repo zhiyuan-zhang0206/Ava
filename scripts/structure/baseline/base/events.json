@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "base/events/live/publisher.py::asyncio-task:AgentEventPublisher.start": 1,
     "base/events/live/redis_listener.py::asyncio-task:RedisInboundListener._wait_one_impl": 2
   }
 }
