@@ -44,6 +44,7 @@ behavioral discipline for long-running agents.
 | Skill | Purpose | Detail |
 |------|------|------|
 | ava-guide | Shared guide for humans and internal/external agents: deploy, operate, extend, schedule, and manage agents; root routes to sub-skills | [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md]] |
+| impersonator-guide | Executor manual for an active Ava takeover, including inherited context, receipt, and release | [Skill](../platform/impersonator-guide/SKILL.md) |
 | ava-being-a-long-running-agent | Operating as a long-running process: manage lifecycle, wait for external events, persist before compaction | [[ava_builtins/skills/coordination/ava-being-a-long-running-agent/docs/ava-being-a-long-running-agent.ava.okf.md]] |
 
 ## Orchestration & workflow

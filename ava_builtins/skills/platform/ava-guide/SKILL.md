@@ -68,7 +68,7 @@ for the action you are taking.
 External agents may operate Ava through the CLI without borrowing an agent
 identity. A takeover is a separate mode: its launcher follows
 [external-agents](external-agents/SKILL.md), and its executor follows the
-project-local `impersonator-guide` under `.agents/skills/impersonator-guide/`.
+built-in `impersonator-guide` under `ava_builtins/skills/platform/impersonator-guide/`.
 
 ## Design intent
 
