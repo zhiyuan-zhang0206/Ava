@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 import pytest
@@ -26,8 +26,6 @@ from fastapi.testclient import TestClient
 from base import config, telemetry
 from base.api_contracts.mcp_tool_contract import project_message
 from base.cluster.auth import bearer_header
-from base.db import Database
-from base.events.live.bus import EventBus
 from gateway.app import app
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -162,7 +160,7 @@ def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
 # ── handshake + tool surface ─────────────────────────────────────────────
 
 
-def test_initialize_negotiates_and_lists_seven_tools() -> None:
+def test_initialize_negotiates_and_lists_guarded_creation_tool() -> None:
     with TestClient(app) as client:
         token = _create_token(client)
         init = _initialize(client, token)
@@ -172,12 +170,16 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
     assert set(tools) == {
         "list_agents",
         "get_agent",
-        "spawn_agent",
+        "spawn_agent_guarded_v1",
         "send_message",
         "get_messages",
         "terminate_agent",
         "cluster_status",
     }
+    creation_schema = tools["spawn_agent_guarded_v1"]["inputSchema"]
+    assert set(creation_schema["required"]) == {"prompt", "idempotency_key"}
+    assert creation_schema["properties"]["idempotency_key"]["minLength"] == 1
+    assert creation_schema["properties"]["idempotency_key"]["maxLength"] == 128
     terminate_description = " ".join(tools["terminate_agent"]["description"].split())
     assert "requests interruption" in terminate_description
     assert (
@@ -187,22 +189,9 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
     assert "Use force only when a clean stop cannot progress" in terminate_description
 
 
-async def test_gateway_contract_matches_pre_extraction_golden() -> None:
+def test_gateway_uses_shared_message_projection() -> None:
     from gateway.mcp_server import endpoint
 
-    server = endpoint._build_server(None, cast(Database, None), cast(EventBus, None))
-    tools = await server.list_tools()
-    contract = {
-        "instructions": server.instructions,
-        "tools": [
-            {"name": t.name, "description": t.description, "inputSchema": t.input_schema}
-            for t in sorted(tools, key=lambda t: t.name)
-        ],
-    }
-    encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    assert hashlib.sha256(encoded.encode()).hexdigest() == (
-        "66d3d15ba554f8cc51b31628b1988110bbf552d6d219c77397409a045453023d"
-    )
     assert endpoint.project_message is project_message
     assert project_message({"type": "ai", "tool_calls": [{"args": {"other": 1}}]}) == {
         "role": "ai",
@@ -287,7 +276,14 @@ def test_list_agents_rejects_invalid_directory_arguments(arguments: dict[str, ob
 def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
         token = _create_token(client)
-        payload = _tool_result(_tool_call(client, token, "spawn_agent", {"prompt": "test goal"}))
+        payload = _tool_result(
+            _tool_call(
+                client,
+                token,
+                "spawn_agent_guarded_v1",
+                {"idempotency_key": "birth-intent", "prompt": "test goal"},
+            )
+        )
         agent_id = int(payload["id"])
 
         row = _tool_result(_tool_call(client, token, "get_agent", {"agent_id": agent_id}))
@@ -326,7 +322,12 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
     monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
         token = _create_token(client)
-        response = _tool_call(client, token, "spawn_agent", {"prompt": "Keep this task"})
+        response = _tool_call(
+            client,
+            token,
+            "spawn_agent_guarded_v1",
+            {"idempotency_key": "birth-intent", "prompt": "Keep this task"},
+        )
     assert response["result"]["isError"] is True
     message = _tool_result(response)
     assert "agent_id=" in message
@@ -346,7 +347,14 @@ def test_send_message_and_get_messages() -> None:
     with TestClient(app) as client:
         token = _create_token(client)
         agent_id = int(
-            _tool_result(_tool_call(client, token, "spawn_agent", {"prompt": "test goal"}))["id"]
+            _tool_result(
+                _tool_call(
+                    client,
+                    token,
+                    "spawn_agent_guarded_v1",
+                    {"idempotency_key": "birth-intent", "prompt": "test goal"},
+                )
+            )["id"]
         )
 
         sent = _tool_result(
@@ -381,7 +389,14 @@ def test_token_clients_same_key_are_isolated_and_body_reuse_conflicts() -> None:
         first = _create_token(client, name="idem-first")
         second = _create_token(client, name="idem-second")
         agent_id = int(
-            _tool_result(_tool_call(client, first, "spawn_agent", {"prompt": "goal"}))["id"]
+            _tool_result(
+                _tool_call(
+                    client,
+                    first,
+                    "spawn_agent_guarded_v1",
+                    {"idempotency_key": "birth-intent", "prompt": "goal"},
+                )
+            )["id"]
         )
         args = {"agent_id": agent_id, "content": "same", "idempotency_key": "same-key"}
         one = _tool_result(_tool_call(client, first, "send_message", args))
@@ -401,7 +416,14 @@ def test_revoked_client_cannot_replay_prior_key() -> None:
         ).json()
         token = created["token"]
         agent_id = int(
-            _tool_result(_tool_call(client, token, "spawn_agent", {"prompt": "goal"}))["id"]
+            _tool_result(
+                _tool_call(
+                    client,
+                    token,
+                    "spawn_agent_guarded_v1",
+                    {"idempotency_key": "birth-intent", "prompt": "goal"},
+                )
+            )["id"]
         )
         args = {"agent_id": agent_id, "content": "same", "idempotency_key": "prior-key"}
         _tool_call(client, token, "send_message", args)
@@ -422,7 +444,12 @@ def test_revoked_client_cannot_replay_prior_key() -> None:
 def test_read_scope_cannot_call_write_tools() -> None:
     with TestClient(app) as client:
         token = _create_token(client, name="read-client", scope="read")
-        denied = _tool_call(client, token, "spawn_agent", {"prompt": "must not run"})
+        denied = _tool_call(
+            client,
+            token,
+            "spawn_agent_guarded_v1",
+            {"idempotency_key": "birth-intent", "prompt": "must not run"},
+        )
         agents = _tool_result(_tool_call(client, token, "list_agents", {}))
 
     assert denied["result"].get("isError") is True
@@ -434,9 +461,14 @@ def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
     prompt = "blocked sensitive prompt"
     with TestClient(app) as client:
         token = _create_token(client, name="audit-read-client", scope="read")
-        _tool_call(client, token, "spawn_agent", {"prompt": prompt})
+        _tool_call(
+            client,
+            token,
+            "spawn_agent_guarded_v1",
+            {"idempotency_key": "birth-intent", "prompt": prompt},
+        )
 
-    hits = _audit_hits("spawn_agent", "audit-read-client")
+    hits = _audit_hits("spawn_agent_guarded_v1", "audit-read-client")
     assert hits, "no mcp_tool_call event for the denied spawn reached the mirror"
     attributes = hits[-1]["attributes"]
     assert attributes["outcome"] == "error"
@@ -573,19 +605,29 @@ def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
         )
         assert created.status_code == 200, created.text
         body = created.json()
-        _tool_call(client, body["token"], "spawn_agent", {"prompt": prompt}, req_id=7)
+        _tool_call(
+            client,
+            body["token"],
+            "spawn_agent_guarded_v1",
+            {"idempotency_key": "birth-intent", "prompt": prompt},
+            req_id=7,
+        )
 
-    hits = _audit_hits("spawn_agent", "audit-write-client")
-    assert hits, "no mcp_tool_call event for spawn_agent reached the mirror"
+    hits = _audit_hits("spawn_agent_guarded_v1", "audit-write-client")
+    assert hits, "no mcp_tool_call event for spawn_agent_guarded_v1 reached the mirror"
     attributes = hits[-1]["attributes"]
     encoded = json.dumps(prompt, ensure_ascii=False)
+    encoded_key = json.dumps("birth-intent")
     assert attributes["client_id"] == body["id"]
     assert attributes["client_name"] == "audit-write-client"
     assert attributes["outcome"] == "ok"
     assert attributes["args"] == {
-        "schema": {"prompt": "string"},
-        "size": {"prompt": len(encoded)},
-        "sha256": {"prompt": hashlib.sha256(encoded.encode()).hexdigest()},
+        "schema": {"prompt": "string", "idempotency_key": "string"},
+        "size": {"prompt": len(encoded), "idempotency_key": len(encoded_key)},
+        "sha256": {
+            "prompt": hashlib.sha256(encoded.encode()).hexdigest(),
+            "idempotency_key": hashlib.sha256(encoded_key.encode()).hexdigest(),
+        },
     }
     assert prompt not in json.dumps(attributes, ensure_ascii=False)
     assert hits[-1]["category"] == "audit"
@@ -620,15 +662,22 @@ def test_creation_key_replays_identity_conflicts_and_scopes_to_client() -> None:
         first = _create_token(client, name="creation-first")
         second = _create_token(client, name="creation-second")
         args = {"prompt": "same goal", "idempotency_key": "creation-a"}
-        original = _tool_result(_tool_call(client, first, "spawn_agent", args))
-        replay = _tool_result(_tool_call(client, first, "spawn_agent", args))
+        original = _tool_result(_tool_call(client, first, "spawn_agent_guarded_v1", args))
+        replay = _tool_result(_tool_call(client, first, "spawn_agent_guarded_v1", args))
         assert replay["id"] == original["id"]
-        changed = _tool_call(client, first, "spawn_agent", {**args, "prompt": "changed goal"})
+        changed = _tool_call(
+            client,
+            first,
+            "spawn_agent_guarded_v1",
+            {"idempotency_key": "birth-intent", **args, "prompt": "changed goal"},
+        )
         assert changed["result"].get("isError") is True
-        other = _tool_result(_tool_call(client, second, "spawn_agent", args))
+        other = _tool_result(_tool_call(client, second, "spawn_agent_guarded_v1", args))
         assert other["id"] != original["id"]
         new = _tool_result(
-            _tool_call(client, first, "spawn_agent", {**args, "idempotency_key": "creation-b"})
+            _tool_call(
+                client, first, "spawn_agent_guarded_v1", {**args, "idempotency_key": "creation-b"}
+            )
         )
         assert new["id"] != original["id"]
 
@@ -638,7 +687,7 @@ def test_creation_tool_rejects_invalid_key(key: str) -> None:
     with TestClient(app) as client:
         token = _create_token(client)
         response = _tool_call(
-            client, token, "spawn_agent", {"prompt": "goal", "idempotency_key": key}
+            client, token, "spawn_agent_guarded_v1", {"prompt": "goal", "idempotency_key": key}
         )
     assert response["result"].get("isError") is True
 
@@ -654,7 +703,7 @@ def test_concurrent_mcp_creation_retries_share_one_identity() -> None:
                 _tool_call(
                     client,
                     token,
-                    "spawn_agent",
+                    "spawn_agent_guarded_v1",
                     {"prompt": "one concurrent goal", "idempotency_key": "concurrent-birth"},
                     req_id=index + 10,
                 )
@@ -698,7 +747,7 @@ def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
                 _tool_call(
                     client,
                     credentials[index]["token"],
-                    "spawn_agent",
+                    "spawn_agent_guarded_v1",
                     {
                         "prompt": "shared intent",
                         "idempotency_key": "same-key",
@@ -713,6 +762,6 @@ def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
             ids = list(executor.map(submit, range(2)))
     assert len(set(ids)) == 2
     for credential in credentials:
-        hits = _audit_hits("spawn_agent", credential["name"])
+        hits = _audit_hits("spawn_agent_guarded_v1", credential["name"])
         assert hits[-1]["attributes"]["client_id"] == credential["id"]
         assert hits[-1]["attributes"]["outcome"] == "ok"

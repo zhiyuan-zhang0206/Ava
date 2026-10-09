@@ -132,7 +132,9 @@ def _tool_result_is_error(
 def _validate_mcp_identity_arguments(tool: str, args: dict[str, Any]) -> None:
     from mcp.server.mcpserver.exceptions import ToolError
 
-    if tool == "send_message" and args.get("caller_protocol") == "v1":
+    if tool == "spawn_agent_guarded_v1" or (
+        tool == "send_message" and args.get("caller_protocol") == "v1"
+    ):
         reserved = {"source", "instance", "caller_identity", "auth_principal", "client_id"}
         if reserved.intersection(args):
             raise ToolError("caller identity is server-derived; remove identity arguments")
@@ -342,45 +344,38 @@ async def _mcp_deliver_send_message(
     return {"status": delivery.status, "inbound_id": delivery.inbound_id}
 
 
-def _register_fleet_tools(
-    server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def _register_spawn_tools(
+    server: object,
     pool: Any,
     db: Database,
     bus: EventBus,
 ) -> None:
-    """Fleet-mutating tools: spawn / message / terminate.
-
-    Each tool's description is the contract an external model reads before
-    calling it, so it states what the call *does to the fleet* — including
-    that `terminate_agent` ends a running process.
-    """
+    """Register keyed creation through the immutable native birth owner."""
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
 
     typed_server = cast(MCPServer, server)
 
-    @typed_server.tool(description=tool_description("spawn_agent"))
-    async def spawn_agent(
+    @typed_server.tool(description=tool_description("spawn_agent_guarded_v1"))
+    async def spawn_agent_guarded_v1(
         prompt: str,
+        idempotency_key: Annotated[str, Field(min_length=1, max_length=128)],
         ctx: Context,
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         client = _authenticated_client(ctx.request_context.request)
-        _require_write_scope("spawn_agent", client)
-        creation_key = None
-        if idempotency_key is not None:
-            try:
-                creation_key = principal_key(
-                    AuthPrincipal("mcp_client", str(client["id"])),
-                    "POST",
-                    "/api/agents",
-                    idempotency_key,
-                )
-            except PrincipalScopeError as exc:
-                raise ToolError(str(exc)) from exc
+        _require_write_scope("spawn_agent_guarded_v1", client)
+        try:
+            creation_key = principal_key(
+                AuthPrincipal("mcp_client", str(client["id"])),
+                "POST",
+                "/mcp/tools/spawn_agent_guarded_v1",
+                idempotency_key,
+            )
+        except PrincipalScopeError as exc:
+            raise ToolError(str(exc)) from exc
         body = SpawnAgentRequest(
             prompt=prompt,
             prompt_source=_MESSAGE_SOURCE,
@@ -396,7 +391,7 @@ def _register_fleet_tools(
         # spawn route.
         try:
             spawned = await _agents_router.create_and_launch_agent(
-                body, target, pool, db, bus, creation_key=creation_key
+                body, target, pool, db, bus, creation_key=creation_key, immutable_birth=True
             )
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from exc
@@ -412,6 +407,20 @@ def _register_fleet_tools(
                 ) from exc
             raise ToolError(str(exc)) from exc
         return spawned.model_dump(mode="json")
+
+
+def _register_fleet_tools(
+    server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    pool: Any,
+    db: Database,
+    bus: EventBus,
+) -> None:
+    """Register fleet mutation and transcript tools with their native owners."""
+    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    typed_server = cast(MCPServer, server)
+    _register_spawn_tools(typed_server, pool, db, bus)
 
     @typed_server.tool(description=tool_description("send_message"))
     async def send_message(
