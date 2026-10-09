@@ -356,7 +356,7 @@ select = [
     "ERA",          # commented-out code
     "DTZ",          # datetime timezone
     "S",            # bandit security
-    "TID",          # tidy imports
+    "TID251", "TID253",  # banned imports; package-relative style has a separate owner
     "LOG",          # logging
     "PL",           # pylint
     "TRY",          # tryceratops (try/except best practices)
