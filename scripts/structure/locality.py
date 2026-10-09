@@ -18,11 +18,10 @@ from typing import cast
 
 from scripts.structure import ambient_state, baseline_shards, path_imports
 
-SECTIONS = ("private_imports", "owner_bypasses", "patch_targets")
+SECTIONS = ("private_imports", "owner_bypasses")
 STRICT_SECTIONS = ("private_imports", "owner_bypasses", path_imports.SECTION)
-# section -> the lint that measures it. Frozen and guarded like the others, but measured over
-# the test files by its own script; the structure gate only parses and guards them.
-EXTERNAL_SECTIONS = {"patch_targets": "scripts/lint/patch_targets.py"}
+# No externally measured rule retains baseline allowances.
+EXTERNAL_SECTIONS: dict[str, str] = {}
 # White-box tests reach into privates by design; only test *directories* are
 # exempt, since a governed module may legitimately be named test_*.py.
 _TEST_DIR = re.compile(r"(^|/)tests?/")

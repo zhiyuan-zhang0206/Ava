@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage
 from base.agents.history.timeline import (
     build_timeline_items,
 )
+from base.agents.messages.kwargs import ExecStatus
 from base.db import Database, create_agent, insert_inbound_message
 from base.events.live.bus import EventBus
 from gateway.agents.history.tests.test_timeline import (
@@ -201,7 +202,9 @@ class TestAttachItems:
                 }
             ],
         )
-        output = exec_output_message(content="ok", tool_call_id="tc-1")
+        output = exec_output_message(
+            content="ok", tool_call_id="tc-1", status=ExecStatus.COMPLETED, body_start=0
+        )
         attach = self._attach_message(tmp_path)
         items, count = build_timeline_items([tool_call, output, attach], [])
         assert count == 3

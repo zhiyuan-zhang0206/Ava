@@ -11,6 +11,13 @@ tags:
 
 ## The gate
 
+Structure lint runs for every eligible change class, including documentation and
+frontend-only diffs. Its non-success result reaches the required
+`backend (pytest + pyright)` check even when no backend suite was requested;
+the verifier fails before dependency installation or coverage processing. A
+non-backend diff with successful structure retains the skipped backend check.
+Draft eligibility and the Trunk full-suite policy remain owned by `classify`.
+
 Backend shards, enforced selected subsets, the serial timing-sensitive bucket,
 frontend Vitest and every e2e family propagate their native test command's final
 exit status. No external quarantine service or repository secrets change that

@@ -49,7 +49,7 @@ installed capabilities before choosing it.
 These launch scripts run from an Ava agent's execution context. Humans and
 external operators can arrange that agent through the CLI; they should not
 assume their shell has an Ava agent identity. A takeover executor follows the
-project-local `impersonator-guide`, while its launcher follows Mode B here.
+built-in `impersonator-guide`, while its launcher follows Mode B here.
 
 ## Mode A — file-driven collaboration (the pattern for long tasks)
 

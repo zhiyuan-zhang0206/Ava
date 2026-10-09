@@ -1,56 +1,39 @@
 ---
 type: doc
 title: Cancel and Compact Acceptance
-description: Transactional operation identities preserve original native inbound acceptance without claiming execution recovery.
-tags: []
+description: Observed targets and required principal-scoped keys fence native cancel and manual compaction.
+tags: [gateway, agents, idempotency]
 ---
 
 # Cancel and compact acceptance
 
-`POST /api/cancel` and `POST /api/agents/{agent_id}/compact` accept an optional
-`Idempotency-Key`. `gateway.http.auth.request_principal.optional_request_key` owns
-validation and credential scoping. One key identifies one operation in that
-scope. A principal-v1 key includes the verified credential, method and actual
-path: the same raw key on different compact agent paths or credentials is a
-different scope. On the shared `/api/cancel` path, changing `agent_id` for the
-same scoped key conflicts with 409. Legacy keys retain their raw namespace,
-partitioned by actual path. Unknown/empty keys or scopes fail before writes;
-missing keys preserve one-shot legacy behavior.
+Public callers first observe the exact target through
+`GET /api/keyed/v1/agents/{agent_id}/native-work` or `compact-target`, then submit
+that unchanged target to `POST /api/keyed/v1/agents/{agent_id}/cancel-work` or
+`compact-history`. Both writes require `Idempotency-Key`,
+`Idempotency-Scope: principal-v1` and a verified credential principal. Missing
+identity or unsupported ingress fails before effects. The former `/api/cancel`
+and `/api/agents/{agent_id}/compact` routes are removed.
 
-`base/agents/messages/control_delivery.py` owns acceptance. Its transaction
-serializes the scoped identity, checks an existing receipt before mutable agent
-state, then locks `agents_meta` before checking status and inserting a native
-inbound. Termination and resurrection use the same status row lock. The inbound,
-its audit fact and `agent_control_receipts` snapshot commit together. Cancel on
-a terminated agent records `already_terminated` without an inbound. Replaying
-that no-op after resurrection keeps its original result and cannot pause new
-work. A deliberate new request uses a new key.
+One user action owns one key and one observation. Recovery replays that exact
+pair; it never silently observes newer work or history. Changed intent with the
+same key conflicts. A deliberate new action gets a fresh observation and key.
+Acceptance returns the original `command_id + target`, not proof of application.
+Native command status owns the eventual outcome. Fresh birth transactions stamp
+`ResourceBirth`; actual host admission must consume it and capture its process
+before a work/history observation is eligible. Existing unknown resource rows
+remain ineligible; receipt replay does not reset their resource state.
 
-Responses retain their existing `status` and add `inbound_id` (null for a cancel
-no-op). An acceptance is not an applied or observed command. The receipt stores
-only original agent/kind, result, inbound ID and acceptance time; it has no work
-queue, worker, foreign key or expiry. Positive identity snapshots survive later
-queue or agent deletion. A retry never replaces a missing inbound with new work.
-Future receipt retirement needs explicit expired-key semantics before pruning.
+The browser captures the observation promise and key before its compaction
+mutation can retry. Its stop action observes native work before submitting
+cancel. CLI cancel and compact validate both the observation and acceptance
+against the requested agent, and print only acceptance. There is no fallback to
+retired ingress or implicit resurrection for manual compaction.
 
-Live hints follow commit. Retry may repair a wake only while the exact original
-inbound is pending. Compact auto-resurrection uses that original ID and the
-existing `COMPACT_REQUEST` pending-work guard, including termination/force
-cutoffs. A consumed or deleted inbound replays acceptance without waking,
-resurrecting or re-enqueueing. Recovery hints cannot establish kernel completion.
-
-The browser allocates an operation ID per invocation and accepts an explicit
-ID for same-intent recovery. CLI calls allocate one ID per invocation; SDK POST
-transport follows the route contract. These clients add no outbox or automatic
-ambiguous retry against an unproven older gateway. Keyless callers remain
-supported; new gateways do not make older gateways recognize the header.
-
-## Remaining native execution boundaries
-
-This owner does not add a work-episode fence. Runtime generation spans multiple
-hosted turns; it cannot identify the current episode alone. Existing cancel and
-compact claim semantics mark non-chat rows done before halt/compaction/checkpoint
-application, so `done` is not proof that those effects occurred. Recovery after
-that claim/application crash window and stale commands crossing work episodes
-remain separate lifecycle work under issue #4474. Restart/terminate acceptance,
-incarnation ownership and resurrection authority are unchanged.
+Canonical owners describe native admission, checkpoint recovery and settlement:
+[[base/agents/incarnation/docs/native-work-cancel.ava.okf.md]] and
+[[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md]]. The native
+compact-envelope insertion primitive remains for graph/history producers and
+fixtures; it is not public manual-compaction admission. Historical
+`agent_control_receipts` data has no remaining writer; merged migrations and
+stored evidence are retained.

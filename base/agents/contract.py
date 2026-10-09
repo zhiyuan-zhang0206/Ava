@@ -92,13 +92,6 @@ class TerminationSource(StrEnum):
         return (cls.REAPER, cls.LAUNCH_CONFIRM)
 
 
-class CancelResult(StrEnum):
-    """Acceptance of a durable cancel request; separate from process termination."""
-
-    ENQUEUED = "enqueued"
-    ALREADY_TERMINATED = "already_terminated"
-
-
 class TerminateResult(StrEnum):
     ENQUEUED = "enqueued"
     ALREADY_TERMINATED = "already_terminated"
