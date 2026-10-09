@@ -616,7 +616,7 @@ async def post_guarded_agents(
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
     idempotency_scope: str = Header(alias=SCOPE_HEADER),
 ) -> SpawnedAgent:
-    """Create a plain agent through a versioned, principal-bound keyed entry.
+    """Create or fork an agent through principal-bound keyed admission.
 
     Older routing cannot execute this path. Callers must keep it fixed for an
     intent and never fall back to the legacy path after an uncertain response.
@@ -624,8 +624,6 @@ async def post_guarded_agents(
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
-    if body.fork_from is not None:
-        raise HTTPException(status_code=422, detail="guarded v1 creation does not support forks")
     return await _create_agent_http(body, request, key, immutable_birth=True)
 
 

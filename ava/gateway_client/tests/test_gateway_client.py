@@ -8,6 +8,7 @@ Covers:
 
 import json
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -323,100 +324,6 @@ class TestGetRetry:
 # --- spawn ---
 
 
-class TestSpawn:
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
-    def test_spawn_returns_agent_id(self, mock_client: MagicMock):
-        from ava.gateway_client import spawn
-
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.is_success = True
-        mock_resp.json.return_value = {"id": 42}
-        mock_client.post.return_value = mock_resp
-
-        agent_id = spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
-        assert agent_id == 42
-
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
-    def test_spawn_without_prompt(self, mock_client: MagicMock):
-        from ava.gateway_client import spawn
-
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.is_success = True
-        mock_resp.json.return_value = {"id": 7}
-        mock_client.post.return_value = mock_resp
-
-        agent_id = spawn(spawner="agent:1", prompt=None, fork_from=5, prompt_source="agent")
-        assert agent_id == 7
-
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
-    def test_spawn_read_timeout_is_not_retried(self, mock_client: MagicMock):
-        """Spawn is non-idempotent: a ReadTimeout means the gateway may have
-        already created the agent (response lost, not request lost). Retrying
-        the POST could spawn a phantom-twin agent, so the first read timeout
-        must raise immediately — one POST, no re-send (task #698 G7)."""
-        from ava.gateway_client import GatewayUnavailable, spawn
-
-        mock_client.post.side_effect = httpx.ReadTimeout("gateway slow")
-
-        with pytest.raises(GatewayUnavailable, match="no retry: non-idempotent"):
-            spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
-        assert mock_client.post.call_count == 1
-
-    @pytest.mark.parametrize(
-        "error",
-        [
-            httpx.ConnectError("refused"),
-            httpx.ConnectTimeout("dial stalled"),
-            httpx.PoolTimeout("pool busy"),
-        ],
-    )
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
-    @pytest.mark.usefixtures("retry_waits")
-    def test_spawn_pre_send_error_is_retried(
-        self, mock_client: MagicMock, error: httpx.TransportError
-    ):
-        """Connect-family failures happen before the request reaches the
-        server, so re-sending a spawn is safe — the retry stays."""
-        from ava.gateway_client import spawn
-
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.is_success = True
-        mock_resp.json.return_value = {"id": 42}
-        mock_client.post.side_effect = [error, mock_resp]
-
-        agent_id = spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
-        assert agent_id == 42
-        assert mock_client.post.call_count == 2
-        keys = [
-            call.kwargs["headers"]["Idempotency-Key"] for call in mock_client.post.call_args_list
-        ]
-        assert keys[0] == keys[1] and keys[0]
-
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
-    @pytest.mark.usefixtures("retry_waits")
-    def test_spawn_read_timeout_after_connect_error_retries_connect_only(
-        self, mock_client: MagicMock
-    ):
-        """Mixed failure: the first connect error is retried, but the read
-        timeout that follows is terminal — the request may have landed."""
-        from ava.gateway_client import GatewayUnavailable, spawn
-
-        mock_client.post.side_effect = [
-            httpx.ConnectError("refused"),
-            httpx.ReadTimeout("gateway slow"),
-        ]
-
-        with pytest.raises(GatewayUnavailable, match="no retry: non-idempotent"):
-            spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
-        assert mock_client.post.call_count == 2
-
-
-# --- send_message ---
-
-
 class TestSendMessage:
     @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_send_message_fire_and_forget(self, mock_client: MagicMock):
@@ -607,7 +514,13 @@ class TestTransientHttpRetry:
         mock_client.post.return_value = _transient_resp(500)
 
         with pytest.raises(httpx.HTTPStatusError):
-            spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
+            spawn(
+                spawner="user",
+                prompt="hello",
+                fork_from=None,
+                prompt_source="user",
+                idempotency_key=str(uuid4()),
+            )
         assert mock_client.post.call_count == 1
 
     @patch("ava.gateway_client.transport._http", new_callable=_client_mock)

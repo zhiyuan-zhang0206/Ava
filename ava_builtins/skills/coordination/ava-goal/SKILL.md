@@ -57,8 +57,15 @@ below apply only when you choose this pattern.
    If delegation is useful and no suitable target exists, spawn a peer:
 
    ```python
-   target_id = ava.agents.spawn(prompt="<the goal, stated as a concrete task>")
+   from uuid import uuid4
+
+   creation_key = str(uuid4())
+   target_id = ava.agents.spawn(
+       prompt="<the goal, stated as a concrete task>", idempotency_key=creation_key
+   )
    ```
+
+   Keep `creation_key` if the response is lost and retry the same intent with it.
 
 2. **Launch the watcher as soon as the target ID is known.** Read the reference
    watcher from this skill's directory, substitute the target ID, and launch it.

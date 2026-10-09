@@ -53,6 +53,7 @@ from psycopg import sql
 from base.agents import AgentStatus
 from base.config import settings
 from tests._containers import runner_projection
+from tests.e2e._authenticated_gateway import authenticated_gateway as authenticated_gateway
 from tests.e2e._env import E2EEnv
 from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_SOCKET, GATEWAY_URL
 from tests.e2e._proc import (
@@ -499,7 +500,9 @@ def scenario_env(request: pytest.FixtureRequest) -> Iterator[None]:
 
 
 @pytest.fixture
-def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+def gateway_proc(
+    scenario_env: None, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Iterator[str]:
     """gateway uvicorn (kernel-assigned port, see `_ports.py`)——inherits current os.environ (including AVA_LLM_OVERRIDE).
 
     function-scoped rather than session: each test restarts gateway to pick up new scenario env.
@@ -516,25 +519,28 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
     fixture_gate = _AVA_HOME / "e2e-serving"
     fixture_gate.unlink(missing_ok=True)
     generation = str(fixture_gate)
+    authenticated = "authenticated_gateway" in request.fixturenames
+    if authenticated:
+        request.getfixturevalue("authenticated_gateway")
     cmd = [
         sys.executable,
         "-m",
         "tests.e2e._proc",
         generation,
         "uvicorn",
-        "gateway.app:app",
+        "tests.e2e._authenticated_gateway:create_app" if authenticated else "gateway.app:app",
         "--host",
         "127.0.0.1",
         "--fd",
         str(GATEWAY_SOCKET.fileno()),
     ]
+    if authenticated:
+        cmd.append("--factory")
     log_path = _LOG_DIR / f"gateway-{_E2E_SUFFIX}.log"
     env = os.environ.copy()
-    # Prod-shaped profile construction: production starts the gateway with its
-    # `gateway` profile, so e2e must exercise only the config domains it owns.
+    # Construct the same gateway profile that production starts.
     env["AVA_PROCESS_PROFILE"] = "gateway"
-    # Disable the auth middleware in e2e — the auth layer is tested by its
-    # dedicated suite; e2e tests exercise business logic without auth overhead.
+    # The authenticated factory overrides this inside its gateway process.
     env["AVA_AUTH_MIDDLEWARE_ENABLED"] = "false"
     evidence_path = log_path.with_suffix(".listeners.json")
     evidence_path.write_text(json.dumps(listener_evidence(GATEWAY_PORT, "reserved-before-start")))
@@ -732,11 +738,8 @@ def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> 
 
 @pytest.fixture
 def playwright_context(playwright_browser: Browser) -> Iterator[BrowserContext]:
-    # No session cookie is injected: the frontend page (localhost) and the
-    # gateway (127.0.0.1) are different hosts, so a SameSite=Lax cookie is
-    # dropped on the cross-site /api/auth/check request. Instead the gateway
-    # reports authenticated when auth is disabled, so AuthGuard renders
-    # the app directly.
+    # Browser scenarios use the open test gateway; SDK creation scenarios
+    # explicitly select the authenticated gateway fixture without a browser.
     ctx = playwright_browser.new_context(viewport={"width": 1280, "height": 800})
     try:
         yield ctx

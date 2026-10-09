@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import json
 import shutil
 import threading
@@ -137,6 +139,7 @@ def ensure_agent(label: str, prompt: str) -> int:
         ava.agents.spawn(
             prompt=prompt,
             label=label,  # pyright: ignore[reportCallIssue] — fleet plugin supplies labels
+            idempotency_key=str(uuid4()),
         ),
     )
 
@@ -264,6 +267,7 @@ def _prepare_case(
                 prompt=prompt,
                 label=PROBE_LABEL,  # pyright: ignore[reportCallIssue] — fleet plugin supplies labels
                 config_overlay=overlay,
+                idempotency_key=str(uuid4()),
             ),
         )
         record["probe_id"] = probe_id
@@ -280,6 +284,7 @@ def _prepare_case(
                     prompt=colleague_prompt,
                     label=COLLEAGUE_LABEL,  # pyright: ignore[reportCallIssue] — fleet plugin supplies labels
                     config_overlay={"eval_isolation": True},
+                    idempotency_key=str(uuid4()),
                 ),
             )
             record["colleague_id"] = colleague_id
