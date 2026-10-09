@@ -31,7 +31,7 @@ from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls
 from base.agents.model_overrides import agent_overrides
-from base.agents.uploads import image_mime_for, parse_upload_url, resolve_upload_path
+from base.agents.upload_delivery.paths import image_mime_for, parse_upload_url, resolve_upload_path
 from base.config import settings
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
