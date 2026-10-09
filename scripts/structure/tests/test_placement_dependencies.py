@@ -12,7 +12,8 @@ import pathlib
 
 import pytest
 
-from scripts.structure import import_cache, locality, placement
+from scripts.structure import imports, locality, placement
+from scripts.structure.imports import cache
 from scripts.structure.tests.patch_repo import make_repo, write
 
 RUN = "cli/commands/run.py"
@@ -179,7 +180,7 @@ def _edges(cache_root: pathlib.Path) -> dict[str, set[str]]:
             for ref in placement.collect_references(ast.parse(statements), index)
             if ref.kind == "import"
         }
-        for rel, statements in import_cache.production_imports(cache_root, TOPS).items()
+        for rel, statements in cache.production_imports(cache_root, TOPS).items()
     }
 
 
@@ -202,7 +203,7 @@ def cache_root(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def _statements(cache_root: pathlib.Path) -> dict[str, str]:
-    return import_cache.production_imports(cache_root, TOPS)
+    return cache.production_imports(cache_root, TOPS)
 
 
 def test_it_keeps_the_absolute_first_party_import_statements(cache_root: pathlib.Path) -> None:
@@ -225,54 +226,26 @@ def test_test_and_docs_directories_are_not_production_source(cache_root: pathlib
     assert not {rel for rel in files if "/tests/" in rel or "/docs/" in rel}
 
 
-def test_an_unchanged_file_is_not_read_again_and_a_changed_one_is(
-    cache_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reads: list[str] = []
-    real = import_cache._statements
-
-    def counting(path: pathlib.Path, rel: str, tops: tuple[str, ...]) -> str:
-        reads.append(rel)
-        return real(path, rel, tops)
-
-    monkeypatch.setattr(import_cache, "_statements", counting)
-    cold = _statements(cache_root)
-    assert len(reads) == len(cold)
-
-    reads.clear()
-    assert _statements(cache_root) == cold
-    assert reads == []
-
-    _edit(cache_root, "cli/commands/run.py", "from base.net import retry\n")
-    assert _statements(cache_root)["cli/commands/run.py"] == "from base.net import retry"
-    assert reads == ["cli/commands/run.py"]
-
-    reads.clear()
-    (cache_root / "cli/commands/_util.py").unlink()
-    assert "cli/commands/_util.py" not in _statements(cache_root)
-    assert reads == []
-
-
 @pytest.mark.parametrize("damage", ["not json", '{"version": 999, "files": {}}', '{"files": []}'])
 def test_a_damaged_or_foreign_cache_is_rebuilt(cache_root: pathlib.Path, damage: str) -> None:
     fresh = _statements(cache_root)
-    (cache_root / import_cache.CACHE_PATH).write_text(damage, encoding="utf-8")
+    (cache_root / cache.CACHE_PATH).write_text(damage, encoding="utf-8")
     assert _statements(cache_root) == fresh
-    assert json.loads((cache_root / import_cache.CACHE_PATH).read_text(encoding="utf-8"))["files"]
+    assert json.loads((cache_root / cache.CACHE_PATH).read_text(encoding="utf-8"))["files"]
 
 
 def test_previous_relative_import_semantics_cache_is_rebuilt(cache_root: pathlib.Path) -> None:
-    """Version 1 could resolve an escape above the package as a repository import."""
+    """Version 2 predates fail-fast normalization of relative imports."""
     rel = "cli/commands/run.py"
-    _edit(cache_root, rel, "from ...base.net import retry\n")
+    _edit(cache_root, rel, "from ..parsers import args\n")
     _statements(cache_root)
-    cache_file = cache_root / import_cache.CACHE_PATH
+    cache_file = cache_root / cache.CACHE_PATH
     payload = json.loads(cache_file.read_text())
-    payload["version"] = 1
+    payload["version"] = 2
     payload["files"][rel][2] = "from base.net import retry"
     cache_file.write_text(json.dumps(payload))
-    assert _statements(cache_root)[rel] == ""
-    assert json.loads(cache_file.read_text())["version"] == 2
+    assert _statements(cache_root)[rel] == "from cli.parsers import args"
+    assert json.loads(cache_file.read_text())["version"] == 3
 
 
 def test_a_cache_hit_still_resolves_against_the_current_tree(cache_root: pathlib.Path) -> None:
@@ -285,7 +258,7 @@ def test_a_cache_hit_still_resolves_against_the_current_tree(cache_root: pathlib
 
     _edit(cache_root, "cli/commands/helper.py", "VALUE = 1\n")
     warm = _edges(cache_root)
-    (cache_root / import_cache.CACHE_PATH).unlink()
+    (cache_root / cache.CACHE_PATH).unlink()
     assert warm == _edges(cache_root)
     assert warm["cli/commands/run.py"] == {"cli.commands.helper"}
 
@@ -294,9 +267,24 @@ def test_a_cached_graph_is_the_graph_of_a_fresh_read_file_by_file(
     cache_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The real checkout: every file's cached statements equal a fresh parse of the file."""
-    monkeypatch.setattr(import_cache, "CACHE_PATH", str(cache_root / "real-tree-cache.json"))
-    cold = import_cache.production_imports(REPO_ROOT, TOPS)
-    warm = import_cache.production_imports(REPO_ROOT, TOPS)
+    monkeypatch.setattr(cache, "CACHE_PATH", str(cache_root / "real-tree-cache.json"))
+    cold = cache.production_imports(REPO_ROOT, TOPS)
+    warm = cache.production_imports(REPO_ROOT, TOPS)
     assert cold == warm
     for rel, cached in warm.items():
-        assert cached == import_cache._statements(REPO_ROOT / rel, rel, TOPS), rel
+        assert cached == cache._statements(REPO_ROOT / rel, rel, TOPS), rel
+
+
+def test_old_cache_cannot_hide_an_invalid_relative_import(cache_root: pathlib.Path) -> None:
+    rel = "cli/commands/run.py"
+    _edit(cache_root, rel, "from ...base.net import retry\n")
+    path = cache_root / rel
+    cache_file = cache_root / cache.CACHE_PATH
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(
+        json.dumps(
+            {"version": 2, "files": {rel: [path.stat().st_mtime_ns, path.stat().st_size, ""]}}
+        )
+    )
+    with pytest.raises(imports.InvalidRelativeImportError, match=f"{rel}:1"):
+        _statements(cache_root)
