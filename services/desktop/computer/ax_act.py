@@ -191,6 +191,8 @@ def ax_act_tool(
         "action": action,
         "completed": result["completed"],
     }
+    if action is AxAction.PERFORM_ACTION:
+        out["native_action"] = request.native_action
     if "role" in result:
         out["role"] = result["role"]
     if "label" in result:

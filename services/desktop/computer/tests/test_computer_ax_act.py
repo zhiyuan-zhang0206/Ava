@@ -426,6 +426,7 @@ async def test_perform_action_forwards_a_reported_platform_identifier(
     )
     assert app.calls[-1][1]["native_action"] == "AXCustomApplicationAction"
     assert out["action"] == "perform_action" and out["completed"] is True
+    assert out["native_action"] == "AXCustomApplicationAction"
 
 
 @pytest.mark.parametrize("selection", [None, "text", "cursor_before", "cursor_after"])
