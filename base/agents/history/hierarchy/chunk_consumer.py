@@ -167,6 +167,7 @@ def _describe(
     located: LocatedChunk,
     tools: Sequence[Any],
     calls: list[ChunkCall],
+    agent_id: int,
 ) -> ChunkResult:
     """Blocking: the agent's own model's groups and summaries of a located chunk.
 
@@ -177,6 +178,7 @@ def _describe(
         located.prefix,
         located.start_offset,
         model=model,
+        agent_id=agent_id,
         tools=tools,
         corrections=settings.agent.understanding_group_corrections,
         on_call=calls.append,
@@ -300,6 +302,7 @@ async def _run_job(
             located,
             tools,
             calls,
+            job.agent_id,
         )
     except GenerateError as exc:
         if job.attempts >= GENERATION_MAX_ATTEMPTS:
