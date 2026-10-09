@@ -31,3 +31,5 @@ Cost accepted: the history cache holds one whole-history view per agent
 (about 12 KB per message, measured: 4.6k messages 49 MB, 200 messages 3 MB), so
 its cap went from 6 to 16 entries; a view of more agents than the cap rebuilds
 evicted ones on each read.
+
+Superseded in part: the context rows are per block, see `2026-10-09-agent-view-per-block-context.md`.
