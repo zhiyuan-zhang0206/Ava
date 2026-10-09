@@ -30,7 +30,7 @@ from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
-from base.agents.messages.envelope import wrap_inbound
+from base.agents.messages.envelope import inbound_head
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -114,10 +114,15 @@ async def claim_gate(
             f"To decline, call ava.impersonation.reject({request_id!r}, reason=...). "
             "Acceptance pauses your native loop until release or lease expiry."
         )
+        head = inbound_head(session["source"])
         message = HumanMessage(
             id=f"impersonation-request:{request_receipt}",
-            content=wrap_inbound(content, session["source"]),
-            additional_kwargs={"ava_msg_type": "inbound", "ava_source": session["source"]},
+            content=head + content,
+            additional_kwargs={
+                "ava_msg_type": "inbound",
+                "ava_source": session["source"],
+                "ava_inbound_body_start": len(head),
+            },
         )
         return Command(
             update={
