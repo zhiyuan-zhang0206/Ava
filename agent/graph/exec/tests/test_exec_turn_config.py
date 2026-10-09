@@ -12,6 +12,7 @@ from agent.graph.exec._result import _ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import _run_agent_code
 from agent.state import AgentState
+from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.config import settings
@@ -73,6 +74,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
                 agent=slices or AgentSlices.resolve(),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
+                clients=process_clients(),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             ),
             agent_id,
