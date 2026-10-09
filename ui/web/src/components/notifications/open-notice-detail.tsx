@@ -7,6 +7,7 @@ import { ChatMarkdown } from "@/components/content/markdown";
 import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 import { SendButton } from "@/components/ui/send-button";
 import { api } from "@/lib/transport/api";
+import { newOperationKey } from "@/lib/transport/operation-key";
 import { errMsg } from "@/lib/contracts/errors";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import { formatAbsolute, formatRelative } from "@/lib/format/time";
@@ -54,6 +55,8 @@ export function OpenNoticeDetail({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inFlight = useRef(false);
+  const attempt = useRef<{ intent: string; key: string } | null>(null);
 
   // Focus the reply box on mount when asked. The parent keys this component by
   // notice id, so a new notice replacing a resolved one re-focuses too.
@@ -65,17 +68,26 @@ export function OpenNoticeDetail({
   // so the caller (via onResolved) refetches and this component unmounts — a
   // sticky disabled state avoids a flash of re-enabled controls before it goes.
   const run = async (body: ResolveNoticeIn, alreadyMsg: string, failVerb: string) => {
-    if (pending) return;
+    if (pending || inFlight.current) return;
+    inFlight.current = true;
     setPending(true);
     setError(null);
     try {
-      await api.resolveNotice(agentId, notice.id, body);
+      const intent = JSON.stringify({ agentId, noticeId: notice.id, body });
+      if (attempt.current?.intent !== intent) {
+        attempt.current = { intent, key: newOperationKey() };
+      }
+      // Retain this intent's key after failure so a manual retry recovers its
+      // original reply. A changed action/body/target starts a distinct intent.
+      await api.resolveNotice(agentId, notice.id, body, attempt.current.key);
       setReply("");
       onResolved?.();
     } catch (e: unknown) {
       const msg = errMsg(e);
       setError(msg.includes("409") ? alreadyMsg : t("failed", { verb: failVerb, msg }));
       setPending(false);
+    } finally {
+      inFlight.current = false;
     }
   };
 
