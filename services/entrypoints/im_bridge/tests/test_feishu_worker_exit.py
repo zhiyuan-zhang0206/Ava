@@ -1,13 +1,11 @@
 """The production IM main exits while Feishu's SDK call remains blocked."""
 
 import asyncio
-import importlib
 import os
 import secrets
 import socket
 import subprocess
 import sys
-import threading
 from pathlib import Path
 
 import pytest
@@ -33,9 +31,10 @@ def run_blocked_ws_child(markers_path: Path) -> None:
 
     class BlockedWsClient(FakeWsClient):
         def start(self) -> None:
-            mark("ready")
+            loop = asyncio.get_event_loop()
+            loop.call_soon(mark, "ready")
             try:
-                threading.Event().wait()
+                loop.run_forever()
             finally:
                 mark("worker-exited")
 
@@ -43,7 +42,6 @@ def run_blocked_ws_child(markers_path: Path) -> None:
             mark("disconnect-requested")
 
     async def run_ws() -> None:
-        importlib.import_module("lark_oapi.ws.client")
         adapter = PatchingAdapter(
             FakeCore(),
             feishu_config(
