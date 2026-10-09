@@ -45,7 +45,7 @@ def test_mcp_revalidates_lease_before_transport_fallback(
     lease, attachment = attached_mcp_runtime
 
     class FailedDaemon:
-        def call_tool(self, *_args: Any) -> dict[str, Any]:
+        def call_tool(self, *_args: Any, timeout_seconds: float) -> dict[str, Any]:
             lease["status"] = "expired"
             raise mcps.MCPConnectError("daemon disconnected")
 
