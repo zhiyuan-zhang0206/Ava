@@ -142,15 +142,14 @@ def _ambient(sites: list[tuple[str, FileResult, Site]], limit: int) -> list[str]
     return [f"## Class E by module (top {limit})", "", *_table(headers, rows), ""]
 
 
-def render(results: Mapping[str, FileResult], *, baseline_keys: int, baseline_points: int) -> str:
+def render(results: Mapping[str, FileResult]) -> str:
     """The Markdown census of `results` (repo-relative path -> analysed file)."""
     sites = _sites(results)
     fallback = sorted(rel for rel, result in results.items() if result.fallback)
     lines = [
         "# Patch-target census",
         "",
-        f"{len(results)} test files with patch points scanned; frozen baseline: "
-        f"{baseline_keys} keys, {baseline_points} sites.",
+        f"{len(results)} test files with patch points scanned.",
         "",
         *_distribution(sites),
         *_violations(sites),
