@@ -66,7 +66,7 @@ class _FakePool:
         return self._Conn()
 
 
-def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
     """A worker that exceeds its hard deadline wedges; elapsed time never earns a beat."""
     progress = LoopProgress("dispatch", timeout_s=0.01)
     beats = 0
@@ -79,21 +79,23 @@ def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(progress, "beat", counting_beat)
 
-    with pytest.raises(daemon.WedgedPassError, match=r"dispatch.*hard deadline"):
-        asyncio.run(
-            daemon._maintenance_with_liveness(
+    async with asyncio.TaskGroup() as tasks:
+        with pytest.raises(daemon.WedgedPassError, match=r"dispatch.*hard deadline"):
+            await daemon._maintenance_with_liveness(
                 _FAKE_POOL,
                 progress,
                 lambda _pool: time.sleep(0.05),
+                tasks=tasks,
             )
-        )
 
     assert beats == 0
     assert not progress.is_alive()
     assert progress.snapshot()["wedged"] is True
 
 
-def test_completed_pass_beats_once_after_worker_finishes(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_completed_pass_beats_once_after_worker_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A bounded worker completion advances progress exactly once, after it returns."""
     progress = LoopProgress("dispatch", timeout_s=1.0)
     finished_at = 0.0
@@ -109,13 +111,14 @@ def test_completed_pass_beats_once_after_worker_finishes(monkeypatch: pytest.Mon
         original_beat()
 
     monkeypatch.setattr(progress, "beat", counting_beat)
-    asyncio.run(daemon._maintenance_with_liveness(_FAKE_POOL, progress, run))
+    async with asyncio.TaskGroup() as tasks:
+        await daemon._maintenance_with_liveness(_FAKE_POOL, progress, run, tasks=tasks)
 
     assert len(beat_at) == 1
     assert beat_at[0] >= finished_at
 
 
-def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     """A maintenance pass that raises a transient (non-ProgrammingError) exception
     beats on completion, records the error, then waits before re-running."""
     failed_at = 0.0
@@ -144,10 +147,11 @@ def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(progress, "beat", counting_beat)
     config = events_maintenance_config()
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(
-            daemon._dispatch_loop(_FAKE_POOL, progress, config, events_maintenance_db())
-        )  # pool unused
+    async with asyncio.TaskGroup() as tasks:
+        with pytest.raises(asyncio.CancelledError):
+            await daemon._dispatch_loop(
+                _FAKE_POOL, progress, config, events_maintenance_db(), tasks=tasks
+            )  # pool unused
 
     assert len(beat_at) == 1
     assert beat_at[0] >= failed_at
@@ -155,12 +159,14 @@ def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch)
     assert slept == [config.events_maintenance_interval_seconds]
 
 
-def test_wedged_dispatch_parks_without_entering_retry_sleep(
+async def test_wedged_dispatch_parks_without_entering_retry_sleep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A timed-out worker parks by ending its loop without entering either sleep path."""
 
-    async def wedge(_pool: object, progress: LoopProgress, _run: object) -> None:
+    async def wedge(
+        _pool: object, progress: LoopProgress, _run: object, *, tasks: asyncio.TaskGroup
+    ) -> None:
         progress.fail("dispatch exceeded hard deadline")
         raise daemon.WedgedPassError("dispatch exceeded hard deadline")
 
@@ -175,14 +181,14 @@ def test_wedged_dispatch_parks_without_entering_retry_sleep(
     monkeypatch.setattr(daemon, "_sleep_with_liveness", forbidden_retry_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=1.0)
-    asyncio.run(
-        daemon._dispatch_loop(
+    async with asyncio.TaskGroup() as tasks:
+        await daemon._dispatch_loop(
             _FAKE_POOL,
             progress,
             events_maintenance_config(),
             events_maintenance_db(),
+            tasks=tasks,
         )
-    )
 
     assert not progress.is_alive()
 
@@ -374,11 +380,20 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
 
     configs: list[object] = []
 
-    async def dispatch(_pool: object, progress: LoopProgress, config: object, _db: object) -> None:
+    async def dispatch(
+        _pool: object,
+        progress: LoopProgress,
+        config: object,
+        _db: object,
+        *,
+        tasks: asyncio.TaskGroup,
+    ) -> None:
         received["dispatch"] = progress
         configs.append(config)
 
-    async def resolution(_pool: object, progress: LoopProgress, config: object) -> None:
+    async def resolution(
+        _pool: object, progress: LoopProgress, config: object, *, tasks: asyncio.TaskGroup
+    ) -> None:
         received["resolution"] = progress
         configs.append(config)
 
@@ -439,7 +454,8 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
             closed.append("pool")
 
     def loop(name: str) -> Callable[..., Any]:
-        async def run_loop(*_args: object) -> None:
+        # Dispatch/resolution receive the service group; registry gauge does not.
+        async def run_loop(*_args: object, tasks: asyncio.TaskGroup | None = None) -> None:
             if name == crashing:
                 await asyncio.sleep(0.01)
                 raise RuntimeError(f"{name} crashed")
@@ -486,7 +502,8 @@ def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -
         def close(self) -> None:
             return None
 
-    async def parked(*_args: object) -> None:
+    # This fixture serves both group-injected maintenance and the gauge loop.
+    async def parked(*_args: object, tasks: asyncio.TaskGroup | None = None) -> None:
         return None
 
     async def alert_loop(
