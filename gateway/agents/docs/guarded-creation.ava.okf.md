@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Guarded Agent Creation
-description: Versioned plain-creation admission and receipt compatibility during mixed gateway generations.
+description: Principal-bound creation admission with immutable birth receipts and fixed retry identity.
 tags:
 - gateway
 - agents
@@ -52,13 +52,19 @@ write supports keyed admission.
 The SDK can explicitly opt in with `require_idempotency=True` and a caller key;
 see the SDK owner at `ava/agents/docs/strong-creation.ava.okf.md`. It keeps the
 same guarded path, scope and key for every attempt without capability discovery
-or fallback. The default SDK helper and MCP continue to use `/api/agents`,
-including MCP's canonical principal-scoped keys. Existing HTTP and MCP identities
-remain intact. Automatic ambiguous keyed retries remain disabled on both paths.
+or fallback. The default SDK helper still uses its existing route; removing
+that compatibility branch is tracked in #4473. Gateway MCP creation now has only
+`spawn_agent_guarded_v1`; the former `spawn_agent` tool is removed. Old installed
+consumers are not an adoption gate. Automatic ambiguous retries remain disabled.
 
 A previous gateway that already exposes this versioned path can still use its
 older mutable launch projection. The path proves keyed admission support, not a
 cluster-wide immutable recovery capability. Operators must stop or drain those
 gateway generations before relying on original-attempt recovery; this change
-does not perform that rollout. Legacy HTTP, MCP and task assignment retain
-their established owners and behavior.
+does not perform that rollout. Other HTTP and compound-creation entry cleanup remains tracked in #4473.
+
+Gateway MCP clients use `spawn_agent_guarded_v1` for retained original
+birth recovery. The versioned tool name admits each write on its serving
+gateway before effects and has a distinct authenticated MCP-client namespace;
+unsupported servers reject it without legacy fallback. See the
+[MCP endpoint owner](../../mcp_server/docs/mcp-endpoint.ava.okf.md).

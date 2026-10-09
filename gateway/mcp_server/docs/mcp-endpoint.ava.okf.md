@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Gateway /mcp endpoint — control plane as an MCP server
-description: '`gateway/mcp_server/endpoint.py` — the cluster control plane exposed over Streamable HTTP at `/mcp` on the gateway. Seven tools are thin handlers over the REST routers'' internal functions; stateless transport, revocable read/write client tokens, and client-identified audit events with redacted arguments. Flag-gated off by default (AVA_MCP_ENDPOINT_ENABLED).'
+description: 'Gateway MCP control tools with scoped credentials, retained creation receipts, stateless transport and redacted audit events.'
 tags:
 - gateway
 - mcp
@@ -52,13 +52,13 @@ surface and result shapes are the ones external MCP clients drive.
   Messages written through this boundary record `mcp_client:<id>` as their
   server-verified credential fact without storing the token.
 - **Scope**: `read` clients may list/inspect agents, messages, and cluster
-  status. `spawn_agent`, `send_message`, and `terminate_agent` require `write`.
+  status. `spawn_agent_guarded_v1`, `send_message`, and `terminate_agent` require `write`.
 - **Directory reads**: `list_agents` returns the same bounded scalar-card page
   as REST and stdio MCP. Scope defaults to live; historical search and cursor
   traversal are explicit, with at most 200 rows per call. `get_agent` remains
   the full single-agent diagnostic view.
 - **Advertised contract**: `base/api_contracts/mcp_tool_contract.py` owns the
-  the advertised instructions, the seven tool descriptions (including the
+  advertised instructions, the seven tool descriptions (including the
   `caller_protocol` / `idempotency_key` guidance on `send_message`), and message
   projection; local tool signatures still generate the input schemas.
 - **Audit**: a `_AuditMiddleware` on the MCPServer records every `tools/call`
@@ -66,7 +66,23 @@ surface and result shapes are the ones external MCP clients drive.
   represented only by its JSON type, character size, and SHA-256; raw values
   never enter the event. `agent_id` stays NULL for this service-level identity.
 
-Creation `spawn_agent` accepts an optional 1–128 character `idempotency_key`, scoped to the authenticated MCP client and `POST /api/agents`. Reusing it with the same body recovers the same birth; changed arguments conflict. Another key creates another agent. JSON-RPC request IDs are not operation identities. Without a key, each call remains a separate creation.
+`spawn_agent_guarded_v1` requires a 1–128 character caller key and uses the
+existing immutable birth transaction. Its principal-scoped identity binds
+`POST /mcp/tools/spawn_agent_guarded_v1`; it is distinct from
+guarded HTTP creation. Replay retains the original agent, placement, config,
+birth config and launch attempt before mutable preflight. Only its original
+pending, unadmitted attempt on its original machine may receive a launch wake.
+Rotated, admitted, terminated or deleted births return historical acceptance
+without dispatching successor work or inserting another prompt.
+
+Clients keep this exact tool, key and arguments across retries of one intent.
+An older server has no such tool and rejects it before creation; a cached tool
+list is not admission proof for a later call. The former `spawn_agent` tool is
+removed without a compatibility alias. Do not change namespaces after an
+ambiguous response. Every call checks the current
+verified write credential, including replay. Caller identity arguments are
+rejected; JSON-RPC IDs and asserted metadata supply no authority. No automatic
+retries, client journal, receipt expiry or legacy-key conversion are added.
 
 Guarded credential creation and its one-time-token recovery exception are owned by
 [credential creation receipts](credential-creation.ava.okf.md).
