@@ -10,13 +10,13 @@ import pytest
 
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, _backoff_delay
 from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
-    BlockingThread,
     FakeCore,
     FakeRestClient,
     make_event,
     make_list_item,
     make_list_item_listapi,
     make_list_response,
+    websocket_ready,
 )
 from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
     adapter as adapter,
@@ -130,16 +130,10 @@ async def test_send_registers_chat_for_polling(adapter: FeishuAdapter) -> None:
     """An outbound send resolves the p2p chat id and adds it to the poll set."""
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
-    try:
+    async with websocket_ready(adapter):
         await adapter.send("ou_user_1", "hi")
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     assert adapter._sent_chat_ids == {"ou_user_1": "oc_p2p_1"}
     assert "oc_p2p_1" in adapter._poll_chats
 
@@ -148,17 +142,11 @@ async def test_send_restores_owner_open_id_when_unseeded(adapter: FeishuAdapter)
     """An outbound send restores the owner open id when the seed found no user."""
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
-    try:
+    async with websocket_ready(adapter):
         assert adapter._last_open_id == ""
         await adapter.send("ou_user_1", "hi")
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     assert adapter._last_open_id == "ou_user_1"
 
 
@@ -166,17 +154,11 @@ async def test_send_does_not_override_existing_owner_open_id(adapter: FeishuAdap
     """An outbound send preserves an existing owner open id."""
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
     adapter._last_open_id = "ou_first"
-    try:
+    async with websocket_ready(adapter):
         await adapter.send("ou_other", "hi")
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     assert adapter._last_open_id == "ou_first"
 
 
@@ -523,16 +505,10 @@ async def test_card_send_registers_chat_for_polling(adapter: FeishuAdapter) -> N
     text send, so button-reply conversations also enable polling."""
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
-    try:
+    async with websocket_ready(adapter):
         await adapter.send("ou_user_1", "pick:", buttons=[("a", "/status")])
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     assert adapter._sent_chat_ids == {"ou_user_1": "oc_p2p_1"}
     assert "oc_p2p_1" in adapter._poll_chats
 
