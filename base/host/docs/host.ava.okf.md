@@ -16,3 +16,10 @@ helpers. HTTPX uses its installed import behavior and public entry points.
 ## Documented components
 
 - [[base/host/env/docs/audit.ava.okf.md]] — Base — .env write audit & integrity guard.
+- [[base/host/env/docs/registry.ava.okf.md]] — Environment declarations and boot/child projections.
+
+`base/host/net/resilience.py` owns immutable `Policy` parameters and the shared
+`retry` / `aretry` executors, including backoff, jitter, classification and
+idempotency gates. Bootstrap fetches use this owner. Provider and Redis-listener
+loops still have dedicated contracts; the remaining Redis audit is a
+[future item](../../../future/infra/engineering/retry-consumer-contracts.md).
