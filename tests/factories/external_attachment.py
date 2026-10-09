@@ -14,7 +14,9 @@ import ava
 from agent import state as state_module
 from ava import external
 from ava.sdk_surface.install import Installation
+from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.pin_agent import pin_agent
 
@@ -45,7 +47,10 @@ class ExampleState(state_module.BaseAgentState):
 
 @pytest.fixture
 def attached_runtime(
-    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> tuple[dict[str, Any], Any, list[dict[str, Any]]]:
     lease: dict[str, Any] = {
         "id": "lease",
@@ -74,6 +79,8 @@ def attached_runtime(
         disabled=frozenset(),
         faces=True,
         undo=(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
 

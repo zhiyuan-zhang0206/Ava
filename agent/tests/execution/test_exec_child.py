@@ -27,6 +27,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from ava.sdk_surface.install import Installation
 from tests.fixtures.pin_agent import exec_context
 
 # Fixed test identity — the child never dials a real DB/Redis here.
@@ -529,6 +530,7 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch: pytest.MonkeyPatch,
+    model_installation: Installation,
 ) -> None:
     """A signal arriving during request decoding must become an in-band result,
     so SIGTERM's child handler is installed before the read begins."""
@@ -575,6 +577,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava.ensure_plugins_loaded", fake_ensure_plugins_loaded)
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     try:
         exec_child._run("request.json", "result.json", 0.0)
@@ -638,7 +641,7 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
 
 
 def test_child_overlay_phases_framework_then_plugin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
 ) -> None:
     """`_run` applies the maps in the agent process's own boot order: framework
     scope BEFORE plugins load, plugin scope after. A single framework-only pass
@@ -689,6 +692,7 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava.ensure_plugins_loaded", fake_plugins_loaded)
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     def fake_apply_scope(
         birth: dict[str, object] | None,

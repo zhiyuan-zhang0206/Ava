@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -28,6 +29,8 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The optional Redis announce is downstream of the durable status flip.
 
@@ -59,8 +62,12 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         raising=False,
     )
 
-    def allow_model_config(*, model: str | None = None) -> None:
+    def allow_model_config(
+        *, model: str | None = None, catalog: ModelCatalog, llm_override: str | None
+    ) -> None:
         assert model is not None
+        assert catalog is model_catalog
+        del llm_override
 
     monkeypatch.setattr(
         "services.agent_runner.agent_host.runtime.validate_model_config", allow_model_config
@@ -74,6 +81,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         machine="host-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     # Exercise the owned work task itself. ``run_turn`` deliberately shields
     # this inner task from scheduler cancellation; injecting cancellation at
@@ -108,6 +116,8 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
     status: str,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     from services.agent_runner.agent_host.host import AgentHost
 
@@ -125,6 +135,7 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
         machine="host-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
 
     async def forbidden_runtime(_agent_id: int, _fingerprint: str, _model: str) -> None:

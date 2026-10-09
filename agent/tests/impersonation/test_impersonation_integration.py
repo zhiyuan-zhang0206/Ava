@@ -256,6 +256,8 @@ async def test_consent_exec_inbox_release_and_resume(
     *,
     config_authority: ConfigAuthority,
 ) -> None:
+    # The real exec child boots this installed unit, whose identity is file-owned.
+    config_authority.env_path.write_text(f"AVA_MACHINE_NAME={machine_name()}\n", encoding="utf-8")
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch, config_authority=config_authority
     )

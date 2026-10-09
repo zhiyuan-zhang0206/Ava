@@ -51,7 +51,7 @@ from base.config.domains.agent.compaction import AgentCompactionSettings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import ContextBudget
 from base.lm.plugin_providers import build_model_catalog
@@ -163,10 +163,13 @@ def _patch_compact_config(monkeypatch: pytest.MonkeyPatch) -> None:
         soft_compact_tokens=1,
         hard_compact_tokens=1,
     )
-    monkeypatch.setattr(
-        "agent.hooks.compact.resolve_context_budget",  # pyright: ignore[reportUnknownArgumentType]
-        lambda *_: budget,  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def fixed_budget(
+        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
+    ) -> ContextBudget:
+        return budget
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixed_budget)
 
 
 def _fake_llm(summary_text: str) -> Any:

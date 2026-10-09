@@ -14,6 +14,7 @@ from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.turn_identity import HostedTurnResources
+from base.lm.catalog import ModelCatalog
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -34,6 +35,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
     monkeypatch: pytest.MonkeyPatch,
     *,
     database: Database,
+    model_catalog: ModelCatalog,
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool)
@@ -55,6 +57,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=database,
+        catalog=model_catalog,
     )
     host._owner = incarnation.owner
 

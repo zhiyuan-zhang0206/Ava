@@ -46,7 +46,8 @@ from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import ContextBudget
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
@@ -88,7 +89,13 @@ def _patch_compact_config(
         soft_compact_tokens=compact_reminder_tokens,
         hard_compact_tokens=auto_compact_tokens,
     )
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_: budget)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fixed_budget(
+        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
+    ) -> ContextBudget:
+        return budget
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixed_budget)
 
 
 def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
@@ -214,6 +221,7 @@ async def test_stamp_compact_boundary_writes_the_closing_request(
 
 
 async def test_generate_summary_emits_agent_billing_span(
+    model_catalog: ModelCatalog,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
@@ -250,7 +258,8 @@ async def test_generate_summary_emits_agent_billing_span(
 
     # The summary's billing behavior requires a known provider; a bare test
     # process has no installed provider plugins and must declare that input.
-    def vendor_of_model(_model: str) -> str:
+    def vendor_of_model(_model: str, *, catalog: ModelCatalog) -> str:
+        assert catalog is model_catalog
         return "deepseek"
 
     monkeypatch.setattr("base.lm.pricing.billing.vendor_of_model", vendor_of_model)
@@ -272,7 +281,7 @@ async def test_generate_summary_emits_agent_billing_span(
 
     assert (
         await generate_summary(
-            [HumanMessage(content="conversation")], llm, slices, catalog=build_model_catalog()
+            [HumanMessage(content="conversation")], llm, slices, catalog=model_catalog
         )
         == "a complete summary"
     )
