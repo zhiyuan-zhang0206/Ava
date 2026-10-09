@@ -13,7 +13,11 @@ from base.agents.upload_delivery.models import (
     UploadDeliveryConflictError,
     current_unit,
 )
-from base.agents.uploads import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES, agent_upload_dir
+from base.agents.upload_delivery.paths import (
+    MAX_AGENT_UPLOAD_BYTES,
+    MAX_AGENT_UPLOAD_FILES,
+    agent_upload_dir,
+)
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.db.transaction import write_transaction
 from base.host.net.http_dial import get as http_get
