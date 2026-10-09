@@ -24,7 +24,7 @@ from loguru import logger
 
 from base.host.atomic_io import write_text_atomic
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
-from base.native_process.os_platform import IS_LINUX
+from base.native_process.os_platform import is_linux
 from base.native_process.ownership import OwnedProcess
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
@@ -83,7 +83,9 @@ def _default_context() -> BootUnitContext:
 def systemd_running() -> bool:
     """True when this host runs systemd as its service manager."""
     return (
-        IS_LINUX and shutil.which("systemctl") is not None and Path("/run/systemd/system").is_dir()
+        is_linux()
+        and shutil.which("systemctl") is not None
+        and Path("/run/systemd/system").is_dir()
     )
 
 
@@ -185,7 +187,7 @@ def process_cgroup(pid: int) -> str:
 
 def in_boot_unit() -> bool:
     """Interactive start has no systemd readiness tail, even on Linux."""
-    if not IS_LINUX:
+    if not is_linux():
         return False
     return process_cgroup(os.getpid()) == f"/system.slice/{UNIT_NAME}"
 
@@ -316,7 +318,7 @@ def uninstall() -> list[str]:
     jobs. Removes only the exact unit path of `UNIT_NAME`, then resets the failed
     record systemd keeps listing for a removed unit whose last stop failed.
     """
-    if not IS_LINUX:
+    if not is_linux():
         return []
     steps: list[str] = []
     name = UNIT_NAME

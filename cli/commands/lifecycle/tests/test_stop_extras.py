@@ -18,7 +18,7 @@ def test_helper_macos_stop_failure_propagates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     home = _home(monkeypatch, tmp_path)
-    monkeypatch.setattr("base.native_process.os_platform.IS_MACOS", True)
+    monkeypatch.setattr("base.native_process.os_platform.is_macos", lambda: True)
 
     def failed(target: Path, *, helper_port: int, force: bool, timeout_s: float) -> None:
         assert target == home and helper_port > 0
@@ -31,7 +31,7 @@ def test_helper_macos_stop_failure_propagates(
 
 def test_helper_non_macos_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _home(monkeypatch, tmp_path)
-    monkeypatch.setattr("base.native_process.os_platform.IS_MACOS", False)
+    monkeypatch.setattr("base.native_process.os_platform.is_macos", lambda: False)
 
     def unexpected(target: Path, *, helper_port: int, force: bool, timeout_s: float) -> None:
         pytest.fail("a user-wide Windows helper must not be stopped by one home")

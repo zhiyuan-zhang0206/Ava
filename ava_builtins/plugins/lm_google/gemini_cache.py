@@ -49,10 +49,11 @@ every agent on the API key. Processes adopt each other's caches via
 ``caches.list()`` matched on display_name ``ava-sys-{model}-{key16}``; the
 process-local memo keeps the steady state at zero extra API calls per turn.
 
-Fail-open by design: every cache-layer error (quota, network, unsupported
-model, below-minimum) logs and returns None — the caller falls back to the
-implicit-caching path (SystemMessage in-band + bind_tools), so this feature
-can only ever cost an occasional extra API call, never break a turn.
+Cache requests recover only from trusted transient provider errors, typed
+connection/timeouts, and an expired owned deadline. Unknown errors and permanent
+rejections propagate unchanged. Schema and response processing do not authorize
+recovery. A known stale-cache refresh leaves the reference for the existing
+single plain-call recovery; other refresh failures are not treated as success.
 """
 
 from __future__ import annotations
@@ -60,6 +61,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -85,8 +87,8 @@ _REFRESH_BELOW_SECONDS = 900
 # one is cheaper than adopting + refreshing + racing its expiry.
 _ADOPT_MIN_REMAINING_SECONDS = 300
 
-# After a create/list failure, skip retries for this long (per key) so a
-# broken cache layer costs one API call per window, not one per turn.
+# After a declared transient create failure, skip creation for this long
+# (per key) so an unavailable cache costs one request per window, not per turn.
 _NEGATIVE_RETRY_SECONDS = 600.0
 
 # Skip caching when the prompt estimates below this. The API floor is 1024
@@ -111,6 +113,41 @@ class CacheRef:
 
 _MEMO: dict[str, CacheRef] = {}
 _NEGATIVE: dict[str, float] = {}  # key -> time.monotonic() deadline to skip creation until
+
+
+class _CacheUnavailableError(Exception):
+    """A declared transient SDK request failure permits cache-only recovery."""
+
+
+async def _cache_request[T](operation: Awaitable[T], timeout_s: float) -> T:
+    """Bound actual SDK I/O; application errors retain their original identity."""
+    from aiohttp import ClientConnectionError, ClientSSLError, ServerTimeoutError
+    from google.auth.exceptions import TransportError
+    from google.genai.errors import APIError
+    from httpx import NetworkError, RemoteProtocolError, TimeoutException
+
+    deadline = asyncio.timeout(timeout_s)
+    try:
+        async with deadline:
+            return await operation
+    except TimeoutError as exc:
+        if not deadline.expired() and not isinstance(exc, ServerTimeoutError):
+            raise
+        raise _CacheUnavailableError("cache request timed out") from exc
+    except ClientSSLError:
+        raise
+    except APIError as exc:
+        if classify_error(exc).error_class is not ErrorClass.TRANSIENT:
+            raise
+        raise _CacheUnavailableError("transient cache provider rejection") from exc
+    except (
+        NetworkError,
+        RemoteProtocolError,
+        TimeoutException,
+        ClientConnectionError,
+        TransportError,
+    ) as exc:
+        raise _CacheUnavailableError("cache transport unavailable") from exc
 
 
 def _remaining_seconds(ref: CacheRef, now: datetime) -> float:
@@ -157,40 +194,50 @@ def invalidate(ref: CacheRef) -> None:
 
 
 async def _maybe_refresh(client: Any, ref: CacheRef, now: datetime, timeout_s: float) -> None:
-    """Extend the TTL when the entry is close to expiring. Best-effort: a
-    failed refresh leaves the entry in place — if the cache really died, the
-    next request 403s and the caller's stale-retry recovers."""
+    """Extend the TTL; only declared transient/stale failures leave the reference."""
     if _remaining_seconds(ref, now) >= _REFRESH_BELOW_SECONDS:
         return
     from google.genai import types
+    from google.genai.errors import APIError
 
     try:
-        updated = await asyncio.wait_for(
+        updated = await _cache_request(
             client.aio.caches.update(
                 name=ref.name,
                 config=types.UpdateCachedContentConfig(ttl=f"{_CACHE_TTL_SECONDS}s"),
             ),
-            timeout=timeout_s,
+            timeout_s,
         )
-        ref.expire_time = updated.expire_time or (now + timedelta(seconds=_CACHE_TTL_SECONDS))
-    except Exception:
+    except (_CacheUnavailableError, APIError) as exc:
+        if isinstance(exc, APIError) and not is_stale_cache_error(exc):
+            raise
         logger.opt(exception=True).warning(
             "[gemini-cache] ttl refresh failed for {name}; the entry stays and a stale cache "
             "recovers on the next request",
             name=ref.name,
         )
+        return
+    ref.expire_time = updated.expire_time or (now + timedelta(seconds=_CACHE_TTL_SECONDS))
 
 
 async def _adopt_existing(
     client: Any, model: str, key: str, now: datetime, timeout_s: float
 ) -> CacheRef | None:
     """Adopt a cache created by another process of this build, matched on the
-    display_name convention. Returns None when the list call fails or nothing
-    live matches — the caller then creates a fresh cache."""
+    display_name convention. A declared transient list failure or no live match
+    permits a fresh create; unknown failures stop the call."""
     display = f"ava-sys-{model}-{key[:16]}"
-
-    async def _scan() -> CacheRef | None:
-        async for cached in await client.aio.caches.list():
+    expires_at = time.monotonic() + timeout_s
+    try:
+        pager = await _cache_request(client.aio.caches.list(), timeout_s)
+        iterator = pager.__aiter__()
+        while True:
+            try:
+                cached = await _cache_request(
+                    anext(iterator), max(0.0, expires_at - time.monotonic())
+                )
+            except StopAsyncIteration:
+                return None
             if cached.display_name != display or cached.name is None:
                 continue
             expire = cached.expire_time
@@ -205,11 +252,7 @@ async def _adopt_existing(
                 expire=expire,
             )
             return ref
-        return None
-
-    try:
-        return await asyncio.wait_for(_scan(), timeout=timeout_s)
-    except Exception:
+    except _CacheUnavailableError:
         logger.opt(exception=True).warning(
             "[gemini-cache] listing existing caches failed; creating a fresh one instead"
         )
@@ -243,11 +286,11 @@ def _eligible_gemini(llm: BaseChatModel, system_text: str) -> Any | None:
 async def _create_cache(
     llm: Any, system_text: str, genai_tools: Any, key: str, policy: LlmCallPolicy
 ) -> Any | None:
-    """Create the explicit cache; None (and a negative-cache stamp) when the create fails."""
+    """Create a cache; only declared transient failures stamp the negative memo."""
     from google.genai import types
 
     try:
-        cache = await asyncio.wait_for(
+        cache = await _cache_request(
             llm.client.aio.caches.create(
                 model=llm.model,
                 config=types.CreateCachedContentConfig(
@@ -259,16 +302,17 @@ async def _create_cache(
                     ttl=f"{_CACHE_TTL_SECONDS}s",
                 ),
             ),
-            timeout=policy.gemini_cache_timeout_seconds,
+            policy.gemini_cache_timeout_seconds,
         )
-    except Exception as exc:
+    except _CacheUnavailableError:
         _NEGATIVE[key] = time.monotonic() + _NEGATIVE_RETRY_SECONDS
-        logger.warning(
-            "[gemini-cache] create failed (implicit caching only for {window}s): {exc!r}",
+        logger.opt(exception=True).warning(
+            "[gemini-cache] transient create failure (implicit caching only for {window}s)",
             window=int(_NEGATIVE_RETRY_SECONDS),
-            exc=exc,
         )
         return None
+    if cache is None or not cache.name:
+        raise ValueError("Google explicit cache creation returned no resource name")
     return cache
 
 
@@ -281,8 +325,9 @@ async def get_or_create_cache(
     """Return a live explicit cache for (llm.model, system_text, tools), or None.
 
     None means "use the plain path" — non-Gemini model, feature flag off,
-    prompt below the token floor, or any cache-layer error (logged). Callers
-    treat None as today's behavior: SystemMessage in-band + bind_tools.
+    prompt below the token floor, or a declared transient request failure.
+    Unknown errors propagate. Callers use SystemMessage in-band + bind_tools
+    when caching is unavailable under this explicit contract.
 
     `tools` are LangChain tools (``[execute_code]``); their converted schema
     is baked into the cache, so cache-bound requests must NOT bind tools.
@@ -323,11 +368,6 @@ async def get_or_create_cache(
 
     cache = await _create_cache(gemini, system_text, genai_tools, key, policy)
     if cache is None:
-        return None
-
-    if cache.name is None:
-        _NEGATIVE[key] = time.monotonic() + _NEGATIVE_RETRY_SECONDS
-        logger.warning("[gemini-cache] create returned no name — implicit caching only")
         return None
 
     ref = CacheRef(
