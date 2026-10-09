@@ -17,7 +17,11 @@ from collections.abc import Generator
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
-IS_MACOS = sys.platform == "darwin"
+
+
+def is_macos() -> bool:
+    """Whether this process runs on macOS, queried directly from Python."""
+    return sys.platform == "darwin"
 
 
 def is_linux() -> bool:
@@ -45,7 +49,7 @@ def _launchd_print(label: str) -> subprocess.CompletedProcess[str] | None:
     Shared by :func:`launchd_job_loaded` (verdict) and
     :func:`descends_from_launchd_job` (live pid): the dump on success is the
     caller's to parse; off macOS there is nothing to ask."""
-    if not IS_MACOS:
+    if not is_macos():
         return None
     return subprocess.run(  # noqa: S603
         ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
@@ -170,7 +174,7 @@ def pty_max() -> int | None:
     it is not a binding constraint here) and on any read failure — callers treat
     None as "no known PTY ceiling to check against".
     """
-    if not IS_MACOS:
+    if not is_macos():
         return None
     import ctypes
 
@@ -317,6 +321,6 @@ def primary_disk_path() -> str:
     space this Linux machine is actually using. Windows: the system drive. Any
     other POSIX host: the root filesystem.
     """
-    if IS_MACOS:
+    if is_macos():
         return "/System/Volumes/Data"
     return "/"

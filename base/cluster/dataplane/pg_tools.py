@@ -38,19 +38,13 @@ from base.cluster.dataplane.pg_foreground import (
 from base.cluster.dataplane.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
 from base.log import logger
 from base.native_process.child_env import daemon_process_env
-from base.native_process.os_platform import IS_MACOS, IS_WINDOWS
+from base.native_process.os_platform import IS_WINDOWS, is_macos
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
 
 # Historical private name: tests monkeypatch it to redirect artifact writes.
 _fixture_log_artifact_dir = fixture_log_artifact_dir
-
-
-def is_macos() -> bool:
-    """True on macOS. Thin re-export of base.native_process.os_platform.IS_MACOS, kept because
-    cli/commands/data_plane/cluster_instance.py imports this name."""
-    return IS_MACOS
 
 
 # mmap-backed shared memory for every Postgres this codebase starts (Task #1263).

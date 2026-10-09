@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from base.native_process.os_platform import IS_MACOS, file_lock
+from base.native_process.os_platform import file_lock, is_macos
 from base.sessions.coding_session_owner_record import (
     CodingSessionKey,
     CodingSessionOwner,
@@ -101,11 +101,11 @@ def launch_is_stale(
 
 # A unix socket path must fit ``sockaddr_un.sun_path`` with its terminating NUL:
 # 104 bytes on macOS, 108 on Linux.
-_SUN_PATH_BYTES = 104 if IS_MACOS else 108
+_SUN_PATH_BYTES = 104 if is_macos() else 108
 # Short real directories to hold the per-user socket directory. On macOS
 # ``/tmp`` is a symlink, and codex refuses a socket directory reached through
 # one, so the real ``/private/tmp`` is used.
-_SOCKET_BASE = Path("/private/tmp" if IS_MACOS else "/tmp")  # noqa: S108 — the per-user dir below is checked: real, ours, 0700
+_SOCKET_BASE = Path("/private/tmp" if is_macos() else "/tmp")  # noqa: S108 — the per-user dir below is checked: real, ours, 0700
 
 
 class CodingSessionSocketError(RuntimeError):

@@ -50,11 +50,11 @@ import base.native_process.os_platform
 
 class TestPrimaryDiskPath:
     def test_macos_data_volume(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "IS_MACOS", True)
+        monkeypatch.setattr(plat, "is_macos", lambda: True)
         assert primary_disk_path() == "/System/Volumes/Data"
 
     def test_plain_posix_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "IS_MACOS", False)
+        monkeypatch.setattr(plat, "is_macos", lambda: False)
         assert primary_disk_path() == "/"
 
 
@@ -62,10 +62,10 @@ class TestPtyMax:
     def test_non_macos_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Off macOS the PTY ceiling does not bind (Linux `kernel.pty.max` is far
         higher), so callers get None and skip the check."""
-        monkeypatch.setattr(plat, "IS_MACOS", False)
+        monkeypatch.setattr(plat, "is_macos", lambda: False)
         assert pty_max() is None
 
-    @pytest.mark.skipif(not plat.IS_MACOS, reason="reads kern.tty.ptmx_max, macOS-only")
+    @pytest.mark.skipif(not plat.is_macos(), reason="reads kern.tty.ptmx_max, macOS-only")
     def test_macos_reads_positive_ceiling(self) -> None:
         """On macOS it returns the live `kern.tty.ptmx_max` — a positive int
         (511 by default)."""
@@ -145,11 +145,11 @@ class TestLaunchdOwnership:
             return subprocess.CompletedProcess(cmd, 0 if value else 1, value, "")
 
         monkeypatch.setattr(plat.subprocess, "run", run)
-        monkeypatch.setattr(plat, "IS_MACOS", True)
+        monkeypatch.setattr(plat, "is_macos", lambda: True)
         monkeypatch.setattr(plat.os, "getpid", lambda: 500)
 
     def test_off_macos_is_never_owned(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "IS_MACOS", False)
+        monkeypatch.setattr(plat, "is_macos", lambda: False)
         assert descends_from_launchd_job("com.x") is False
         assert launchd_job_loaded("com.x") is False
 
