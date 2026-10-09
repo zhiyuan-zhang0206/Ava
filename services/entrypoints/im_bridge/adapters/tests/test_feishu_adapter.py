@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -119,18 +121,23 @@ class FakeRestClient:
         return self.list_responses.pop(0)
 
 
-class BlockingThread(threading.Thread):
-    """A live daemon thread (is_alive() True) the adapter's start-state checks need."""
+@asynccontextmanager
+async def websocket_ready(adapter: FeishuAdapter) -> AsyncGenerator[None]:
+    """A started service wait for REST-only tests; no SDK or native worker."""
+    loop = asyncio.get_running_loop()
 
-    def __init__(self) -> None:
-        super().__init__(daemon=True)
-        self._release = threading.Event()
+    async def wait() -> None:
+        await asyncio.Event().wait()
 
-    def run(self) -> None:
-        self._release.wait()
-
-    def release(self) -> None:
-        self._release.set()
+    async with asyncio.TaskGroup() as tasks:
+        adapter._ws_started = loop.create_future()
+        adapter._ws_started.set_result(None)
+        task = tasks.create_task(wait())
+        adapter._ws_task = task
+        try:
+            yield
+        finally:
+            task.cancel()
 
 
 class PatchingAdapter(FeishuAdapter):
@@ -235,7 +242,7 @@ async def test_start_skips_without_credentials() -> None:
     async with owned_tasks() as _owned_tasks:
         adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_app_id="", feishu_app_secret=""))
         await adapter.start(_owned_tasks)
-        assert adapter._ws_thread is None
+        assert adapter._ws_task is None
         assert adapter._ws_client is None
 
 
@@ -255,7 +262,7 @@ async def test_start_connects_with_credentials() -> None:
         adapter = PatchingAdapter(FakeCore(), credentials, ws_client)
         await adapter.start(_owned_tasks)
         assert (adapter._app_id, adapter._app_secret) == ("cli_x", "secret_x")
-        assert adapter._ws_thread is not None
+        assert adapter._ws_task is not None
         assert ws_client.started.wait(timeout=15)
         assert adapter._ws_client is ws_client
         # Point stop() at the live pytest loop so the scheduled disconnect actually
@@ -378,17 +385,11 @@ async def test_build_ws_client_installs_the_env_proxy_kwargs_builder(
 async def test_send_segments_long_text(adapter: FeishuAdapter) -> None:
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
-    try:
+    async with websocket_ready(adapter):
         text = "a" * (MAX_SEGMENT_CHARS * 2 + 123)
         await adapter.send("ou_user_1", text)
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     assert len(rest.created) == 3
     for request, expected in zip(rest.created, _segment(text, MAX_SEGMENT_CHARS), strict=True):
         assert request.receive_id_type == "open_id"
@@ -405,18 +406,12 @@ async def test_send_logs_one_delivery_line_per_segment(
     part of that count."""
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
     recorder = _LogRecorder()
     monkeypatch.setattr(feishu_module, "logger", recorder)
-    try:
+    async with websocket_ready(adapter):
         await adapter.send("ou_user_1", "a" * (MAX_SEGMENT_CHARS * 2 + 123))
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     oks = [message for message in recorder.messages if "send ok" in message]
     assert oks == ["feishu send ok chat_id=ou_user_1 message_id=om_sent_1"] * 3
 
@@ -427,18 +422,12 @@ async def test_card_send_logs_delivery_line(
     """The interactive-card path logs its own 'feishu send ok' line."""
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
     recorder = _LogRecorder()
     monkeypatch.setattr(feishu_module, "logger", recorder)
-    try:
+    async with websocket_ready(adapter):
         await adapter.send("ou_user_1", "hi", buttons=[("List", "/list")])
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     oks = [message for message in recorder.messages if "send ok" in message]
     assert oks == ["feishu send ok chat_id=ou_user_1 message_id=om_sent_1"]
 
@@ -446,34 +435,22 @@ async def test_card_send_logs_delivery_line(
 async def test_send_short_text_single_call(adapter: FeishuAdapter) -> None:
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
-    try:
+    async with websocket_ready(adapter):
         await adapter.send("ou_user_1", "hi")
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     assert len(rest.created) == 1
 
 
 async def test_send_failure_raises_sanitized(adapter: FeishuAdapter) -> None:
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     rest.fail = True
     adapter._rest_client = rest
-    try:
+    async with websocket_ready(adapter):
         with pytest.raises(RuntimeError, match="code=99999"):
             await adapter.send("ou_user_1", "hi")
-    finally:
-        thread.release()
-        thread.join(timeout=2)
 
 
 async def test_send_without_credentials_raises(adapter: FeishuAdapter) -> None:
@@ -506,16 +483,10 @@ async def test_send_to_owner_after_inbound_uses_last_open_id(
     await adapter._handle_event(make_event(open_id="ou_latest"))
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
-    try:
+    async with websocket_ready(adapter):
         await adapter.send_to_owner("hi")
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     assert len(rest.created) == 1
     assert rest.created[0].request_body.receive_id == "ou_latest"
 
@@ -570,12 +541,9 @@ async def test_send_with_buttons_renders_interactive_card(adapter: FeishuAdapter
     command string so core routing handles the tap unchanged."""
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
-    thread = BlockingThread()
-    thread.start()
-    adapter._ws_thread = thread
     rest = FakeRestClient()
     adapter._rest_client = rest
-    try:
+    async with websocket_ready(adapter):
         await adapter.send(
             "ou_user_1",
             "\u5728\u7ebf agent\uff0c\u70b9\u4e00\u4e2a\u5207\u6362\uff1a",
@@ -584,9 +552,6 @@ async def test_send_with_buttons_renders_interactive_card(adapter: FeishuAdapter
                 ("\u961f\u5217", "notice:list"),
             ],
         )
-    finally:
-        thread.release()
-        thread.join(timeout=2)
     assert len(rest.created) == 1
     request = rest.created[0]
     assert request.request_body.msg_type == "interactive"
