@@ -106,15 +106,20 @@ def test_duplicate_baseline_entry_across_shards_is_an_actionable_error(
 ) -> None:
     directory = _clear_baseline_dir(tmp_path)
     (directory / "base.json").write_text(
-        json.dumps({"patch_targets": {"base/q.py::base.db._pool": 2}}), encoding="utf-8"
+        json.dumps({"ambient_state": {"base/q.py::import-time-call:atexit.register": 2}}),
+        encoding="utf-8",
     )
     (directory / "tests.json").write_text(
-        json.dumps({"patch_targets": {"base/q.py::base.db._pool": 2}}), encoding="utf-8"
+        json.dumps({"ambient_state": {"base/q.py::import-time-call:atexit.register": 2}}),
+        encoding="utf-8",
     )
     assert lcs.main([]) == 1
     captured = capsys.readouterr()
     assert f"{baseline_shards.SHARD_DIR}: invalid baseline" in captured.err
-    assert "duplicates patch_targets entry 'base/q.py::base.db._pool'" in captured.err
+    assert (
+        "duplicates ambient_state entry 'base/q.py::import-time-call:atexit.register'"
+        in captured.err
+    )
 
 
 def test_missing_baseline_directory_is_an_actionable_error(
@@ -143,13 +148,20 @@ def test_an_empty_committed_baseline_still_enforces_the_guard(
 
     directory = _clear_baseline_dir(tmp_path)
     (directory / "tests.json").write_text(
-        json.dumps({"patch_targets": {"base/new.py::base.db._pool": 2}}), encoding="utf-8"
+        json.dumps({"ambient_state": {"base/new.py::import-time-call:atexit.register": 2}}),
+        encoding="utf-8",
+    )
+
+    (tmp_path / "base").mkdir()
+    (tmp_path / "base/new.py").write_text(
+        "import atexit\natexit.register(lambda: None)\natexit.register(lambda: None)\n",
+        encoding="utf-8",
     )
 
     assert lcs.main([]) == 1
     captured = capsys.readouterr()
     assert "guard skipped" not in captured.err
-    assert "added patch_targets entry base/new.py::base.db._pool" in captured.out
+    assert "added ambient_state entry base/new.py::import-time-call:atexit.register" in captured.out
 
 
 @pytest.mark.parametrize("command", ["ls-tree", "cat-file", "show", "diff", "merge-base"])
@@ -168,11 +180,21 @@ def test_cli_fails_when_baseline_history_cannot_be_read(
         encoding="utf-8",
     )
     binary.chmod(0o755)
+    history = tmp_path / "history"
+    history.mkdir()
+    directory = _clear_baseline_dir(history)
+    (directory / "rules.json").write_text('{"ambient_state": 1}\n', encoding="utf-8")
+    (directory / "base.json").write_text('{"ambient_state": {}}\n', encoding="utf-8")
+    _git(history, "init", "--quiet")
+    _git(history, "add", baseline_shards.SHARD_DIR)
+    _git(history, "commit", "--quiet", "-m", "Historical rule metadata")
+    revision = _git(history, "rev-parse", "HEAD").stdout.strip()
     repo = pathlib.Path(lcs.__file__).resolve().parents[2]
     env = dict(
         os.environ,
         PATH=f"{binary.parent}{os.pathsep}{os.environ['PATH']}",
-        LINT_STRUCTURE_BASELINE_BASE="HEAD",
+        GIT_ALTERNATE_OBJECT_DIRECTORIES=str(history / ".git/objects"),
+        LINT_STRUCTURE_BASELINE_BASE=revision,
     )
     if command == "merge-base":
         env.pop("LINT_STRUCTURE_BASELINE_BASE")
@@ -188,6 +210,7 @@ def test_cli_fails_when_baseline_history_cannot_be_read(
     )
     assert result.returncode != 0, result.stdout + result.stderr
     assert "guard skipped" not in result.stderr
+    assert "exit status 71" in result.stdout + result.stderr
 
 
 def test_actual_cli_compares_an_explicit_empty_git_tree(tmp_path: pathlib.Path) -> None:

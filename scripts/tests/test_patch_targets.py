@@ -9,7 +9,7 @@ import pathlib
 import pytest
 
 from scripts.lint import patch_targets as lint
-from scripts.structure import baseline_shards, locality, patch_points, patch_targets
+from scripts.structure import locality, patch_points, patch_targets
 from scripts.structure.placement import ModuleIndex
 from scripts.structure.tests.patch_repo import make_repo, write
 
@@ -277,7 +277,8 @@ def test_the_ambient_list_is_an_explicit_constant_with_a_lookup_by_longest_prefi
     assert patch_targets.e_lookup("base.paths") == ("base.paths", "paths")
     assert patch_targets.e_lookup("base.paths.sub") is None  # only the door, not the subtree
     assert patch_targets.e_lookup("base.db.pool") is None
-    assert patch_targets.SECTION in locality.EXTERNAL_SECTIONS
+    assert patch_targets.SECTION not in locality.EXTERNAL_SECTIONS
+    assert patch_targets.SECTION not in locality.SECTIONS
 
 
 # --------------------------------------------------------------------------- points
@@ -335,10 +336,8 @@ def test_a_call_result_or_a_parameter_is_unresolved() -> None:
 # --------------------------------------------------------------------------- the lint
 
 
-def _freeze(root: pathlib.Path, counts: dict[str, int]) -> None:
-    shards = baseline_shards.split({patch_targets.SECTION: counts})
-    for name, shard in shards.items():
-        write(root, f"{baseline_shards.SHARD_DIR}/{name}.json", baseline_shards.render(shard))
+def _write_old_exemption(root: pathlib.Path, counts: dict[str, int]) -> None:
+    write(root, "scripts/structure/baseline/tests.json", json.dumps({"patch_targets": counts}))
 
 
 _VIOLATION = (
@@ -355,7 +354,7 @@ def test_a_new_violation_fails_with_a_message_that_says_what_to_do(
     assert "tests/test_x.py:5:" in captured.out
     assert "private name `base.net.retry._sleep` of package `base.net`" in captured.out
     assert "public entry point" in captured.out
-    assert "Most patched private targets so far: base.net.retry (1)" in captured.err
+    assert "Most patched private targets: base.net.retry (1)" in captured.err
 
 
 def test_the_ancestor_relation_gets_its_own_advice(
@@ -374,33 +373,32 @@ def test_the_ancestor_relation_gets_its_own_advice(
     assert "move the test down into `base.net`" in out
 
 
-def test_a_frozen_site_passes_growth_and_shrinkage_both_fail(
+def test_old_exemptions_cannot_permit_any_foreign_private_patch(
     root: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     write(root, "tests/test_x.py", _VIOLATION)
-    _freeze(root, {"tests/test_x.py::base.net.retry._sleep": 1})
+    _write_old_exemption(root, {"tests/test_x.py::base.net.retry._sleep": 100})
+    assert lint.main([], repo_root=root) == 1
+    assert "tests/test_x.py:5:" in capsys.readouterr().out
+
+    write(
+        root,
+        "tests/test_x.py",
+        _VIOLATION + "    monkeypatch.setattr('base.net.retry._sleep', None)\n",
+    )
+    assert lint.main([], repo_root=root) == 1
+    out = capsys.readouterr().out
+    assert "tests/test_x.py:5:" in out and "tests/test_x.py:6:" in out
+
+    write(root, "tests/test_x.py", _SUBJECT)
     assert lint.main([], repo_root=root) == 0
 
-    two = _VIOLATION + "    monkeypatch.setattr('base.net.retry._sleep', None)\n"
-    write(root, "tests/test_x.py", two)
-    assert lint.main([], repo_root=root) == 1
-    assert "grew above its frozen count 1" in capsys.readouterr().out
 
-    write(root, "tests/test_x.py", _SUBJECT)  # the reach-in was fixed
-    assert lint.main([], repo_root=root) == 1
-    assert (
-        "stale patch_targets entry tests/test_x.py::base.net.retry._sleep"
-        in capsys.readouterr().out
-    )
-
-
-def test_a_deleted_file_leaves_a_stale_entry_even_when_only_other_files_are_checked(
-    root: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    write(root, "tests/test_other.py", _SUBJECT)
-    _freeze(root, {"tests/test_gone.py::base.net.retry._sleep": 1})
-    assert lint.main([str(root / "tests/test_other.py")], repo_root=root) == 1
-    assert "stale patch_targets entry tests/test_gone.py" in capsys.readouterr().out
+def test_clean_scans_do_not_require_a_baseline_directory(root: pathlib.Path) -> None:
+    write(root, "tests/test_clean.py", _SUBJECT)
+    (root / "scripts/structure/baseline/README.md").unlink()
+    (root / "scripts/structure/baseline").rmdir()
+    assert lint.main([], repo_root=root) == 0
 
 
 def test_explicit_targets_check_only_the_named_test_files(root: pathlib.Path) -> None:
@@ -458,13 +456,6 @@ def test_an_unparseable_test_file_is_reported(
     assert "tests/test_broken.py:1: cannot parse" in capsys.readouterr().out
 
 
-def test_the_baseline_section_is_read_from_the_shards_and_validated(root: pathlib.Path) -> None:
-    _freeze(root, {"tests/test_x.py::base.net.retry._sleep": 2, "base/tests/test_y.py::a._b": 1})
-    assert patch_targets.read_baseline(root) == {
-        "tests/test_x.py::base.net.retry._sleep": 2,
-        "base/tests/test_y.py::a._b": 1,
-    }
-    shard = root / baseline_shards.SHARD_DIR / "tests.json"
-    shard.write_text(json.dumps({"patch_targets": {"tests/test_x.py::a._b": 0}}), encoding="utf-8")
-    with pytest.raises(ValueError, match="invalid patch_targets entry"):
-        patch_targets.read_baseline(root)
+def test_patch_scanner_has_no_baseline_reader_or_stale_allowance() -> None:
+    assert not hasattr(patch_targets, "read_baseline")
+    assert not hasattr(patch_targets, "stale_errors")
