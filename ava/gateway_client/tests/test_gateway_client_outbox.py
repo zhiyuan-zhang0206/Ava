@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -35,14 +36,20 @@ def _client_mock() -> MagicMock:
     ],
 )
 @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
-def test_unkeyed_spawn_does_not_retry_uncertain_transport_error(
+def test_keyed_spawn_does_not_retry_uncertain_transport_error(
     mock_client: MagicMock, error: httpx.TransportError
 ) -> None:
     from ava.gateway_client import spawn
 
     mock_client.post.side_effect = error
     with pytest.raises(GatewayUnavailable, match="result unknown"):
-        spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
+        spawn(
+            spawner="user",
+            prompt="hello",
+            fork_from=None,
+            prompt_source="user",
+            idempotency_key=str(uuid4()),
+        )
     assert mock_client.post.call_count == 1
 
 
@@ -194,7 +201,7 @@ def test_creation_explicit_key_survives_lost_response_and_caller_retry(
     from ava.gateway_client import spawn
 
     response = httpx.Response(
-        201, json={"id": 42}, request=httpx.Request("POST", "http://gateway/api/agents")
+        201, json={"id": 42}, request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents")
     )
     mock_client.post.side_effect = [httpx.ReadTimeout("reply lost"), response, response]
     with pytest.raises(GatewayUnavailable):
@@ -228,7 +235,7 @@ def test_creation_explicit_key_survives_lost_response_and_caller_retry(
     )
     assert _keys(mock_client) == ["creation-a", "creation-a", "creation-b"]
     assert all(
-        "Idempotency-Scope" not in call.kwargs["headers"]
+        call.kwargs["headers"]["Idempotency-Scope"] == "principal-v1"
         for call in mock_client.post.call_args_list
     )
 

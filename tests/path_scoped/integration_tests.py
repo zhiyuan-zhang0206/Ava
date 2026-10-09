@@ -6,12 +6,8 @@ import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from psycopg_pool import ConnectionPool
 
 from ava.gateway_client.transport import use_client
-from base.config import settings
-from base.db import Database
-from base.events.live.bus import EventBus
 
 # ava.self.AGENT_ID is set by tests/fixtures/env_bootstrap.py (=1), no override here.
 from gateway.app import app
@@ -56,19 +52,12 @@ class _TestClientTransport(httpx.BaseTransport):
 @pytest.fixture
 def gateway_client(db_conn: psycopg.Connection) -> Iterator[httpx.Client]:
     """Point the SDK's gateway client at the in-process gateway app (a TestClient transport)."""
-    pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
-    app.state.db = Database.from_settings()
-    app.state.bus = EventBus.from_settings()
-    app.state.db_pool = pool
-
-    test_client = TestClient(app)
-    transport = _TestClientTransport(test_client)
-
-    client = httpx.Client(
-        transport=transport, base_url="http://testserver", timeout=httpx.Timeout(10.0)
-    )
-    try:
-        with use_client(client):
+    with TestClient(app) as test_client:
+        transport = _TestClientTransport(test_client)
+        with (
+            httpx.Client(
+                transport=transport, base_url="http://testserver", timeout=httpx.Timeout(10.0)
+            ) as client,
+            use_client(client),
+        ):
             yield client
-    finally:
-        pool.close()

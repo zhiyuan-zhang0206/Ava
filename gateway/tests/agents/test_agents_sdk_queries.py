@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -304,7 +305,7 @@ class TestListAgents:
 
     def test_agent_row_keeps_domain_fields(self, db_conn: psycopg.Connection) -> None:
         pin_agent(_spawn_agent())
-        agent_id = ava.agents.spawn()
+        agent_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
         db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -333,7 +334,7 @@ class TestSpawnConfig:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
-        agents.spawn(config_overlay={"llm_model": "claude-sonnet-5"})
+        agents.spawn(config_overlay={"llm_model": "claude-sonnet-5"}, idempotency_key=str(uuid4()))
         assert seen["config"] == {"llm_model": "claude-sonnet-5"}
 
     def test_spawn_preset_inside_config_passes_through(
@@ -346,7 +347,10 @@ class TestSpawnConfig:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
-        agents.spawn(config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"})
+        agents.spawn(
+            config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"},
+            idempotency_key=str(uuid4()),
+        )
         assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
 
     def test_spawn_preset_key_must_be_nonempty_string(
@@ -356,7 +360,7 @@ class TestSpawnConfig:
 
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         with pytest.raises(ValueError, match="non-empty string"):
-            agents.spawn(config_overlay={"preset": ""})
+            agents.spawn(config_overlay={"preset": ""}, idempotency_key=str(uuid4()))
 
     def test_spawn_config_with_preset_skips_preset_key_in_overlay_validation(
         self, monkeypatch: pytest.MonkeyPatch
@@ -370,10 +374,16 @@ class TestSpawnConfig:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
-        agents.spawn(config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"})
+        agents.spawn(
+            config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"},
+            idempotency_key=str(uuid4()),
+        )
         assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
         with pytest.raises(InvalidConfigOverlay):
-            agents.spawn(config_overlay={"preset": "coder", "db_url": "postgres://nope"})
+            agents.spawn(
+                config_overlay={"preset": "coder", "db_url": "postgres://nope"},
+                idempotency_key=str(uuid4()),
+            )
 
     def test_spawn_rejects_non_per_agent_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """spawn(config_overlay=...) rejects fields not marked per_agent — raises before spawning."""
@@ -382,7 +392,7 @@ class TestSpawnConfig:
 
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         with pytest.raises(InvalidConfigOverlay):
-            agents.spawn(config_overlay={"db_url": "postgres://nope"})
+            agents.spawn(config_overlay={"db_url": "postgres://nope"}, idempotency_key=str(uuid4()))
 
 
 class TestResurrect:
