@@ -56,6 +56,59 @@ def service_plugin_config_packet() -> str | None:
     return os.environ.get(SERVICE_PLUGIN_CONFIG_ENV)
 
 
+def cluster_plugin_config_values(plugin: str) -> dict[str, object] | None:
+    """One plugin's cluster projection from the existing bootstrap payload.
+
+    This carrier never contains host fields or service birth snapshots. Schema
+    admission belongs to the declared plugin class at its composition boundary.
+    """
+    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
+
+    packet = os.environ.get(PLUGIN_CLUSTER_CONFIG_ENV)
+    if packet is None:
+        return None
+    raw: object = json.loads(packet)
+    if not isinstance(raw, dict):
+        raise TypeError("plugin cluster config must be a JSON object")
+    contents = cast("dict[str, object]", raw)
+    if plugin not in contents:
+        return None
+    values = contents[plugin]
+    if not isinstance(values, dict):
+        raise TypeError(f"plugin cluster config {plugin!r} must be a JSON object")
+    return cast("dict[str, object]", values)
+
+
+def legacy_plugin_config_values(aliases: tuple[str, ...]) -> dict[str, str]:
+    """Capture declared legacy inputs for one-time import; never write a home."""
+    if not aliases:
+        return {}
+    from dotenv import dotenv_values
+
+    from base.host.env.dotenv_boot import resolve_ava_home
+
+    disk = dotenv_values(resolve_ava_home() / ".env")
+    values: dict[str, str] = {}
+    for alias in aliases:
+        disk_value = disk.get(alias)
+        delivered = os.environ.get(alias)
+        if disk_value is not None and delivered is not None and disk_value != delivered:
+            raise ValueError(f"legacy plugin input {alias} differs between environment and .env")
+        value = delivered if delivered is not None else disk_value
+        if value is not None:
+            values[alias] = value
+    return values
+
+
+def consume_legacy_plugin_env(values: dict[str, str]) -> None:
+    """Drop only process inputs successfully imported by the image writer."""
+    for alias, captured in values.items():
+        current = os.environ.get(alias)
+        if current is not None and current != captured:
+            raise RuntimeError(f"legacy plugin input {alias} changed during import")
+        os.environ.pop(alias, None)
+
+
 def _fetch_backoff(attempt: int) -> float:
     return 0.5 * (attempt + 1)
 

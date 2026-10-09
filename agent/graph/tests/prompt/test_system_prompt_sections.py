@@ -723,7 +723,6 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
 
 def test_long_running_operation_without_fleet(monkeypatch: pytest.MonkeyPatch):
     """An isolated agent gets cost/lifecycle guidance without loading a skill or fleet."""
-    monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
     prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
     assert prompt.count("# Efficient long-running operation") == 1

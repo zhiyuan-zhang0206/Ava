@@ -531,6 +531,7 @@ export type SystemEvent =
 // the stable `@/lib/types` path without touching the generated layer directly.
 
 export interface ConfigFieldView {
+  readonly owner?: string | null; // None is Core; a plugin name owns its image.
   readonly name: string;
   readonly field_type: "bool" | "string" | "int" | "float" | "enum";
   readonly current_value: boolean | string | number | null;

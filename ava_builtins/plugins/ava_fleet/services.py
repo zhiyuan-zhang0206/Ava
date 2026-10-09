@@ -6,8 +6,8 @@ plugin ships a `services.py` exposing ``services() -> tuple[ServiceSpec, ...]``,
 and `ops.spec.plugin_services()` discovers + folds it into the single
 `build_services()` roster (so watchdog keepalive / `ava start` / `ava status`
 all still derive from one place). Discovery keys on this plugin's code being
-PRESENT on the machine, not the agent-facing enable-state — the cluster-level
-on/off is the explicit `AVA_TASK_MAINTENANCE_ENABLED` settings gate below. See
+PRESENT on the machine, not the agent-facing enable-state — the
+on/off is the host-owned `task_maintenance_enabled` plugin config gate below. See
 `docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md`.
 
 This module is deliberately light: it imports only the ops service contract and
@@ -20,8 +20,11 @@ matching `build_services()`'s use-time contract.
 
 from __future__ import annotations
 
+from functools import partial
+
+from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.cluster.machine import MachineRole
-from base.config import settings
+from base.packages.plugins.config_registration import disk_image_path, read_authority_config
 from ops.roster import healthz_daemon
 from ops.roster.service_spec import ServiceSpec
 
@@ -31,16 +34,16 @@ from ops.roster.service_spec import ServiceSpec
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 
 
-def _task_maintenance_gate() -> str | None:
+def _task_maintenance_gate(config: FleetConfig) -> str | None:
     """Gate reason for task-maintenance, or None when it will start.
 
-    This is the daemon's cluster-level on/off — `AVA_TASK_MAINTENANCE_ENABLED`, an
-    explicit machine/cluster settings field (scope=host), read deterministically at
+    This is the daemon's host-owned on/off, with a cluster-wide business effect — `AVA_TASK_MAINTENANCE_ENABLED`, an
+    explicit host plugin field (scope=host), read deterministically at
     daemon-start and unaffected by any per-agent config overlay. Owned by the
     plugin (not `ops.spec._gate_reason`) so the fleet-domain toggle travels with
     the fleet service, and it — not the plugin's agent-facing enable-state — is
     what decides whether task-maintenance runs."""
-    if not settings.daemon.task_maintenance_enabled:
+    if not config.task_maintenance_enabled:
         return "disabled (AVA_TASK_MAINTENANCE_ENABLED off)"
     return None
 
@@ -50,10 +53,12 @@ def services() -> tuple[ServiceSpec, ...]:
 
     Currently the gateway-side task-maintenance daemon (cluster-wide task
     reminders + escalation). Runs on the gateway capability, like the other
-    cluster-wide daemons; its `AVA_TASK_MAINTENANCE_ENABLED` toggle rides its own
+    cluster-wide daemons; its host-owned `task_maintenance_enabled` toggle rides its own
     `gate`. The cmd is a venv-direct launch (`.venv/bin/python`, relative to the
     source checkout the service starts in) — no `uv run` wrapper.
     """
+    config_path = disk_image_path("ava_fleet")
+    config = read_authority_config("ava_fleet", FleetConfig, config_path)
     return (
         healthz_daemon(
             "task-maintenance",
@@ -62,6 +67,8 @@ def services() -> tuple[ServiceSpec, ...]:
             # assert_schema_current at boot, then it scans the tasks tables — a
             # revive under a dead or drifted DB would just crash-loop it.
             requires_db=True,
-            gate=_task_maintenance_gate,
+            gate=partial(_task_maintenance_gate, config),
+            plugin_config=("ava_fleet", config),
+            config_inputs=(config_path,),
         ),
     )

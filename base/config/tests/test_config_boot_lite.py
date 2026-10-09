@@ -94,12 +94,21 @@ def test_default_boot_is_lite_and_pydantic_settings_free() -> None:
     )
 
 
-def test_exec_child_closure_stays_lite_with_real_pin_map(tmp_path: Path) -> None:
+@pytest.mark.parametrize("existing_images", [False, True], ids=["first-install", "existing-images"])
+def test_exec_child_closure_stays_lite_with_real_pin_map(
+    tmp_path: Path, existing_images: bool
+) -> None:
     """The §5 canary: a crafted exec child booting with the real pin map must
     not upgrade, must not import `pydantic_settings`, and must not import any
     heavy `base.config` submodule. This is the regression gate for BLK-2's
     two direct-import edges (`agent.db` -> base.db.connections, `agent.graph` ->
     exec._crop)."""
+    if existing_images:
+        from base.packages.plugins.enable_config import update_all_disk_images
+
+        updated = update_all_disk_images()
+        assert not any(entry.status == "error" for entry in updated.entries), updated
+        assert (Path(os.environ["AVA_HOME"]) / "configs" / "ava_fleet" / "config.json").is_file()
     request = tmp_path / "req.json"
     result = tmp_path / "res.json"
     code = (
@@ -618,20 +627,11 @@ def test_facade_settings_rebinds_to_the_singleton_after_upgrade() -> None:
 
 
 def test_legacy_names_resolve_after_upgrade() -> None:
-    """E7 (extended, 6303 RECHECK R4): the legacy `base.config` surface stays reachable.
+    """Settings-free facade helpers resolve while lite; other exports upgrade once.
 
-    The six settings-free helpers (five re-exports plus the
-    `refresh_data_plane_settings` call-time shim) and the two registry-backed
-    field faces (`_FIELDS`, `FIELD_INFOS` — reachable without the upgrade,
-    though their first access imports the registry stack) serve while still
-    lite; every other legacy name — `_plant_lite_placeholders` included —
-    resolves through the latch, upgrading once. No legacy name may raise
-    AttributeError/ImportError, and the upgraded surface keeps
-    `Settings.__module__` pinned plus pickle identity. Names deliberately not
-    carried (zero consumers): the four internals `_SettingsProxy`,
-    `_SettingsState`, `_settings_lock`, `_settings_state`; the private
-    `_LITE_REDIS_URL` and `_config_registry`; the third-party re-exports
-    `BaseModel`, `Field`, `RLock`."""
+    The upgraded Settings class retains its module and pickle identity.
+    Removed implementation details are outside the exported facade contract.
+    """
     proc = _spawn(
         "import pickle\n"
         "import base.config as c\n"

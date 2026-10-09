@@ -31,8 +31,8 @@ from collections.abc import Callable
 from typing import Any
 
 from base.host.env.agent_slices import AgentSlices
-from base.host.env.config_registry import DOMAIN_ATTRS, fields
-from base.packages.plugins.config_registration import _field_is_sensitive
+from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS
+from base.host.env.config_registry import DOMAIN_ATTRS
 
 
 class PluginFlagError(Exception):
@@ -138,12 +138,28 @@ def validate_flag_key(key: str) -> str:
     if domain not in DOMAIN_ATTRS:
         raise UnknownFlag(f"unknown plugin flag {key!r}: {domain!r} is not a Settings domain.")
 
-    field_refs = fields()
-    if field not in field_refs or field_refs[field].domain != domain:
+    if FIELD_DOMAINS.get(field) != domain:
         raise UnknownFlag(
             f"unknown plugin flag {key!r}: {field!r} is not a field in the {domain!r} domain."
         )
-    ref = field_refs[field]
-    if _field_is_sensitive(ref.info.json_schema_extra):
+    if field in SENSITIVE_FIELDS:
         raise UnknownFlag(f"unknown plugin flag {key!r}: secrets are not flags.")
     return key
+
+
+def read_declared_flag(key: str, flags: tuple[str, ...]) -> Any:
+    """Read a service's explicit pure-face Core dependency without an SDK registry.
+
+    Secrets remain resources. Unavailable profile domains fail rather than
+    constructing a second full Settings image on a plugin's behalf.
+    """
+    for declared in flags:
+        validate_flag_key(declared)
+    if key not in flags:
+        raise UndeclaredFlag(f"core flag {key!r} is absent from the pure config declaration")
+    domain, field = key.split(".")
+    from base.config import settings
+
+    if not settings.has_domain(domain):
+        raise FlagDomainUnavailable(f"declared core flag {key!r} is unavailable in this profile")
+    return getattr(getattr(settings, domain), field)

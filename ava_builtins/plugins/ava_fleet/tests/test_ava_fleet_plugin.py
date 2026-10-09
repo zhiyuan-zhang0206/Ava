@@ -28,6 +28,7 @@ from ava.sdk_surface import install
 from ava_builtins.plugins.ava_fleet.tests.registry_support import (
     fleet_registry,
     installed_fleet_surface,
+    set_fleet_configuration,
 )
 from base.agents.observation.snapshot import select_one
 from base.host.env.agent_slices import AgentSlices
@@ -142,9 +143,8 @@ def test_peer_communication_survives_human_guidance_toggle(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Turning off human interruption guidance must not remove peer discipline."""
-    from base.config import settings
 
-    monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
+    set_fleet_configuration(reduce_context_switch=False)
     prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
     assert prompt.count("## Agent-to-agent communication") == 1
     assert "## Reduce context switch for the human" not in prompt
@@ -183,17 +183,16 @@ def test_prompt_section_reduce_context_switch_gating(
     _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
     """The platform reduce-context-switch default renders only while the
-    settings.agent.reduce_context_switch toggle is on; off is the escape hatch
+    FleetConfig.reduce_context_switch toggle is on; off is the escape hatch
     back to the pre-platform behavior (empty section)."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         _reduce_context_switch_section,
     )
-    from base.config import settings
 
-    monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
+    set_fleet_configuration(reduce_context_switch=True)
     assert "Queue, never push" in _reduce_context_switch_section(AgentSlices.resolve())
 
-    monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
+    set_fleet_configuration(reduce_context_switch=False)
     assert _reduce_context_switch_section(AgentSlices.resolve()) == ""
 
 
@@ -204,9 +203,8 @@ def test_prompt_section_reduce_context_switch_content(
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         _reduce_context_switch_section,
     )
-    from base.config import settings
 
-    monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
+    set_fleet_configuration(reduce_context_switch=True)
     section = _reduce_context_switch_section(AgentSlices.resolve())
 
     assert "Queue, never push" in section
@@ -225,13 +223,12 @@ def test_reduce_context_switch_reaches_the_prompt(
 ):
     """End to end: the toggle gates the section's presence in the assembled
     system prompt."""
-    from base.config import settings
 
     section, slices = "## Reduce context switch for the human", AgentSlices.resolve()
-    monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
+    set_fleet_configuration(reduce_context_switch=True)
     assert section in build_system_prompt(fleet_registry(), slices, agent_id=1)
 
-    monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
+    set_fleet_configuration(reduce_context_switch=False)
     assert section not in build_system_prompt(fleet_registry(), slices, agent_id=1)
 
 

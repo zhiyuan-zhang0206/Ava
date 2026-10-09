@@ -4230,7 +4230,7 @@
       },
       "put": {
         "summary": "Put Config",
-        "description": "Merge a config patch for `machine` (default = this gateway) into `.env`,\nscope-routed. Persist only — no restart (restart_required says which process\nto restart).\n\nThe body is parsed by `ConfigPatchPlan.parse` (shared with the host-side\nconfig_write_op): the editability gate, scope routing, the merge-patch\nreducer and cluster-scalar coercion all live there as one pure function.\nReducer / JSON-merge-patch semantics: a key with a value is set/replaced, a\nkey mapped to `null` is unset (reverted to its default), and an ABSENT key is\nleft untouched. Deletion is always the explicit null — never inferred from a\nkey's absence — so a partial PUT can never drop a field it did not name (a\nfull-replace once wiped a cluster's secrets that way). Only editable fields\nare accepted; the body is split by scope:\n- cluster-scope keys merge into the gateway's `.env` (machine-independent).\n- host-scope keys merge into the target machine's own `.env`, gated host-side\n  by remote_writable + the capability validator.\nAgent-scope fields have writable=False and are rejected by the writable gate.\n\nA machine-addressed PUT (`?machine=<name>`, including this gateway's own name on\na dual-role box) may carry host-scope fields only — a cluster key in the body\n400s (\"edit it on the Cluster view\"). A machine-addressed PUT also edits that\nhost's fields via the remote_writable gate, EVEN when the name is this gateway\nitself on a dual-role box — keyed on whether `machine` was given, not on\ntarget == this gateway (otherwise an explicit self selection would collapse\ninto the Cluster view and its host-only, remote_writable-gated toggles\n(heartbeat_enabled / task_maintenance_enabled — writable=False) would be\nrejected as read-only). The host-side op is authoritative for per-field host\nverdicts; the returned ConfigWriteResult surfaces them so the frontend can\nshow inline failures + the per-machine restart banner.",
+        "description": "Merge a config patch for `machine` (default = this gateway) into `.env`,\nscope-routed, with one declaration owner per request. Persist only — no restart (restart_required says which process\nto restart).\n\nPlugin fields commit one whole config image; mixed Core/plugin or multi-plugin\nbodies fail before any write. Core fields retain their env writer.\n\nThe body is parsed by `ConfigPatchPlan.parse` (shared with the host-side\nconfig_write_op): the editability gate, scope routing, the merge-patch\nreducer and cluster-scalar coercion all live there as one pure function.\nReducer / JSON-merge-patch semantics: a key with a value is set/replaced, a\nkey mapped to `null` is unset (reverted to its default), and an ABSENT key is\nleft untouched. Deletion is always the explicit null — never inferred from a\nkey's absence — so a partial PUT can never drop a field it did not name (a\nfull-replace once wiped a cluster's secrets that way). Only editable fields\nare accepted; the body is split by scope:\n- cluster-scope keys merge into the gateway's `.env` (machine-independent).\n- host-scope keys merge into the target machine's own `.env`, gated host-side\n  by remote_writable + the capability validator.\nAgent-scope fields have writable=False and are rejected by the writable gate.\n\nA machine-addressed PUT (`?machine=<name>`, including this gateway's own name on\na dual-role box) may carry host-scope fields only — a cluster key in the body\n400s (\"edit it on the Cluster view\"). A machine-addressed PUT also edits that\nhost's fields via the remote_writable gate, EVEN when the name is this gateway\nitself on a dual-role box — keyed on whether `machine` was given, not on\ntarget == this gateway (otherwise an explicit self selection would collapse\ninto the Cluster view and its host-only, remote_writable-gated toggles\n(heartbeat_enabled / task_maintenance_enabled — writable=False) would be\nrejected as read-only). The host-side op is authoritative for per-field host\nverdicts; the returned ConfigWriteResult surfaces them so the frontend can\nshow inline failures + the per-machine restart banner.",
         "operationId": "put_config_api_config_put",
         "parameters": [
           {
@@ -11072,6 +11072,17 @@
             "type": "string",
             "title": "Name"
           },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
           "field_type": {
             "type": "string",
             "title": "Field Type"
@@ -11262,7 +11273,7 @@
           "machine_capabilities"
         ],
         "title": "ConfigView",
-        "description": "GET /api/config response — grouped field list + raw_overrides (PUT body source).\n\nraw_overrides is config.json's current content — the frontend deltas\nagainst this and returns the result via PUT.\n\nmachine_capabilities is the target machine's capability set (`gateway` and/or\n`agent-runner` and/or `observability-station`) — the gateway's own for the\nCluster (self) view, the `?machine=`\nhost's for a remote view. The panel uses it to pick which capability sections to\nrender on a remote view: a pure agent-runner shows only its agent-runner + common\nsections, while a co-located gateway,agent-runner box shows the gateway section too\n(so its gateway-daemon toggles stay editable). The Cluster view always shows all\nsections regardless (it edits every capability's cluster fields)."
+        "description": "GET /api/config response — grouped field list + raw_overrides (PUT body source).\n\nraw_overrides combines owned persisted inputs — the frontend deltas\nagainst this and returns the result via PUT.\n\nmachine_capabilities is the target machine's capability set (`gateway` and/or\n`agent-runner` and/or `observability-station`) — the gateway's own for the\nCluster (self) view, the `?machine=`\nhost's for a remote view. The panel uses it to pick which capability sections to\nrender on a remote view: a pure agent-runner shows only its agent-runner + common\nsections, while a co-located gateway,agent-runner box shows the gateway section too\n(so its gateway-daemon toggles stay editable). The Cluster view always shows all\nsections regardless (it edits every capability's cluster fields)."
       },
       "ConfigWriteResult": {
         "properties": {
@@ -11292,7 +11303,7 @@
           "restart_required"
         ],
         "title": "ConfigWriteResult",
-        "description": "PUT /api/config response — per-field results + whether anything was applied.\n\n`applied` is True iff every field passed and the write committed (atomic:\none bad field -> nothing written). `restart_required` is the union of the\nwritten fields' restart targets (\"agent\" | \"ops\" | \"gateway\" | \"all\"), for\nthe per-machine \"needs restart\" banner."
+        "description": "PUT /api/config response — per-field results + whether anything was applied.\n\n`applied` is True iff every field passed and the write committed (atomic:\none bad field -> nothing written for that owner). `restart_required` is the union of the\nwritten fields' restart targets (\"agent\" | \"ops\" | \"gateway\" | \"all\"), for\nthe per-machine \"needs restart\" banner."
       },
       "ContextBreakdownResponse": {
         "properties": {

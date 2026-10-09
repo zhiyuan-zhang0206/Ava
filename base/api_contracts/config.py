@@ -36,6 +36,7 @@ class ConfigFieldView(BaseModel):
     """
 
     name: str
+    owner: str | None = None  # None is Core; a plugin name owns its config image.
     field_type: str  # "bool" | "string" | "int" | "float" | "enum"
     current_value: object  # bool | str | int | float | None
     default_value: object
@@ -73,7 +74,7 @@ class ConfigFieldView(BaseModel):
 class ConfigView(BaseModel):
     """GET /api/config response — grouped field list + raw_overrides (PUT body source).
 
-    raw_overrides is config.json's current content — the frontend deltas
+    raw_overrides combines owned persisted inputs — the frontend deltas
     against this and returns the result via PUT.
 
     machine_capabilities is the target machine's capability set (`gateway` and/or
@@ -169,7 +170,7 @@ class ConfigWriteResult(BaseModel):
     """PUT /api/config response — per-field results + whether anything was applied.
 
     `applied` is True iff every field passed and the write committed (atomic:
-    one bad field -> nothing written). `restart_required` is the union of the
+    one bad field -> nothing written for that owner). `restart_required` is the union of the
     written fields' restart targets ("agent" | "ops" | "gateway" | "all"), for
     the per-machine "needs restart" banner.
     """

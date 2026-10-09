@@ -33,6 +33,7 @@ from base.packages.plugins.config_registration import (
     get_plugin_config,
     is_per_agent_field,
     merge_disk_image_schema,
+    read_authority_config,
     read_config_image,
     resolve_overlay_targets,
     validate_config_overlay,
@@ -44,6 +45,17 @@ class _FixtureConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     flag: bool = Field(default=True)
     marker: str = Field(default=".git", json_schema_extra={"per_agent": True})
+
+
+def test_authority_path_and_reader_do_not_create_a_missing_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "uncreated-home"
+    monkeypatch.setenv("AVA_HOME", str(home))
+    image = disk_image_path("fixture")
+    assert image == home / "configs" / "fixture" / "config.json"
+    assert read_authority_config("fixture", _FixtureConfig, image).flag is True
+    assert not home.exists()
 
 
 def test_read_config_image_defaults_without_creating_home(tmp_path: Path) -> None:
@@ -229,15 +241,29 @@ def test_merge_disk_image_writes_default_when_missing(isolated_registry, unit_ho
     assert disk_image_path("test_plugin").exists()
 
 
-def test_write_default_disk_image_overwrites(isolated_registry, unit_home):
-    """write_default_disk_image always overwrites with cls() default; existing values are not preserved."""
-    tmp_path = unit_home
-    img = tmp_path / "configs" / "test_plugin" / "config.json"
-    img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
-    img.write_text(json.dumps({"flag": False, "marker": ".old"}))  # pyright: ignore[reportUnknownMemberType]
+def test_write_default_disk_image_preserves_existing(
+    isolated_registry: None, unit_home: Path
+) -> None:
+    """Initialization rejects an existing authority instead of resetting explicit values."""
+    image = unit_home / "configs" / "test_plugin" / "config.json"
+    image.parent.mkdir(parents=True)
+    content = json.dumps({"flag": False, "marker": ".old"})
+    image.write_text(content)
+    with pytest.raises(RuntimeError, match="changed before owned image write"):
+        write_default_disk_image("test_plugin", _FixtureConfig)
+    assert image.read_text() == content
 
-    write_default_disk_image("test_plugin", _FixtureConfig)
-    assert json.loads(img.read_text()) == {"flag": True, "marker": ".git"}  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+def test_default_initialization_rejects_file_created_after_missing_check(
+    isolated_registry: None, unit_home: Path
+) -> None:
+    image = unit_home / "configs" / "test_plugin" / "config.json"
+    assert not image.exists()
+    image.parent.mkdir(parents=True)
+    image.write_text(_FixtureConfig(flag=False, marker="concurrent").model_dump_json())
+    with pytest.raises(RuntimeError, match="changed before owned image write"):
+        write_default_disk_image("test_plugin", _FixtureConfig)
+    assert read_config_image(_FixtureConfig, image).marker == "concurrent"
 
 
 def test_is_per_agent_field_metadata(isolated_registry, unit_home):
@@ -657,3 +683,16 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
         install.uninstall()
     assert not hasattr(ava, "healthy_ns")
     assert "healthy" not in _PLUGIN_CONFIGS
+
+
+def test_authority_path_canonicalizes_a_symlink_home_without_creating_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing_home = tmp_path / "uncreated-target"
+    alias = tmp_path / "home-link"
+    alias.symlink_to(missing_home, target_is_directory=True)
+    monkeypatch.setenv("AVA_HOME", str(alias))
+    path = disk_image_path("canonical-probe")
+    assert path == missing_home.resolve() / "configs" / "canonical-probe" / "config.json"
+    assert read_authority_config("canonical-probe", _FixtureConfig, path) == _FixtureConfig()
+    assert not missing_home.exists()
