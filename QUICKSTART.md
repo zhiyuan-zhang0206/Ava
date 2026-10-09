@@ -137,9 +137,9 @@ A complete Ava cluster is now running on your machine:
 ## Next steps
 
 - **[Deploy guide](ava_builtins/skills/platform/ava-guide/deploy/SKILL.md)** — Multi-machine deployment, China mirrors, full config reference
-- **[Architecture overview](okf/index.ava.okf.md)** — Understanding components and data flow
+- **[Architecture overview](docs/index.ava.okf.md)** — Understanding components and data flow
 - **[Dev environment setup](docs/conventions/dev-setup.md)** — If you want to contribute
-- **[Skill system](okf/skills/skills.ava.okf.md)** — What agents can do
+- **[Skill system](docs/skills/skills.ava.okf.md)** — What agents can do
 
 ---
 
