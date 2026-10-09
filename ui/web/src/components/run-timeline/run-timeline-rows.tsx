@@ -27,7 +27,7 @@ import {
   type BlockClass,
   type Highlight,
   type Viewport,
-} from "./timeline-model";
+} from "./model/timeline-model";
 import {
   ADDED_ROW,
   INPUT_ROW,
@@ -39,16 +39,16 @@ import {
   revealView,
   type NavKey,
   type RowOptions,
-} from "./timeline-nav";
-import { navigateAcross, type AgentSelection, type ViewAgent } from "./agent-view-nav";
-import { AgentGroupHeader, AgentPending } from "./agent-view-group";
-import { barTop, frameOf, layoutsFor, type RowLayout } from "./timeline-canvas-model";
-import { RunTimelineAxis } from "./run-timeline-axis";
-import { TrackCanvas } from "./run-timeline-canvas";
-import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco } from "./run-timeline-paint";
+} from "./model/timeline-nav";
+import { navigateAcross, type AgentSelection, type ViewAgent } from "./agent-view/agent-view-nav";
+import { AgentGroupHeader, AgentPending } from "./agent-view/agent-view-group";
+import { barTop, frameOf, layoutsFor, type RowLayout } from "./model/timeline-canvas-model";
+import { RunTimelineAxis } from "./canvas/run-timeline-axis";
+import { TrackCanvas } from "./canvas/run-timeline-canvas";
+import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco } from "./canvas/run-timeline-paint";
 import { RunTimelineLegend } from "./run-timeline-legend";
 import { RowShell } from "./run-timeline-row-shell";
-import { readoutText } from "./run-timeline-readout";
+import { readoutText } from "./model/run-timeline-readout";
 
 // Track width assumed until the first measurement.
 const DEFAULT_TRACK_PX = 1000;

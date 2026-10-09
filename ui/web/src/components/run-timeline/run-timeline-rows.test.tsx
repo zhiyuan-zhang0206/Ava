@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunTimelineMessageBar, RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import { RunTimelineRows } from "./run-timeline-rows";
-import { ALL_ROWS } from "./timeline-nav";
-import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./run-timeline-test-canvas";
-import type { Selection } from "./timeline-model";
+import { ALL_ROWS } from "./model/timeline-nav";
+import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-test-canvas";
+import type { Selection } from "./model/timeline-model";
 
 vi.mock("@/lib/transport/api", () => ({
   api: { getAgentRoster: vi.fn(() => Promise.resolve({ agents: [], ancestors: [] })), getAgent: vi.fn() },
