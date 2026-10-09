@@ -120,6 +120,11 @@ the external effect but before its result becomes durable.
 
 `python -m cli.fleet_update down` stops every unit with `ava stop -y` and `up`
 starts them again (the runbook's "Updating a networked cluster in source mode").
+A stored-script upgrade blocked by held business admission uses the
+[script-only maintenance operator entry](../../../schedules/README.md#script-repair-during-maintenance)
+with the existing installed runtime. It preserves the stopped hold and schedule
+activation state; it does not waive schedule verification or change HTTP pause
+exemptions.
 A running schedule or PTY can retain old code and DB access outside application
 root, so root exit alone is not a writer barrier: the stop gives persistent
 terminals a bounded completed-work wait, then closes known shells/terminals
