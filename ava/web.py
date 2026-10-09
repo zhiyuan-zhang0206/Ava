@@ -379,7 +379,10 @@ def _answer(
     agent's main model and `ava.understand`'s text model.
 
     Raises:
-        FetchError: the model build or call failed or returned an empty answer.
+        FetchError: the model build failed, a typed provider call failed
+            permanently or exhausted its retries, or the model returned an
+            empty answer. Unknown model invocation errors retain their original
+            type without retries.
     """
     cut = "\n\n[The page was longer than the read limit and was cut off here.]" if truncated else ""
     page = f"# {title}\n{url}\n\n{content}{cut}"

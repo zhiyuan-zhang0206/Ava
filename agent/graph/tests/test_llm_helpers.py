@@ -19,6 +19,9 @@ import asyncio
 from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
+import anthropic
+import httpx2
+import openai
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -472,18 +475,18 @@ def test_record_consecutive_error_tracks_and_clears(ledger: LlmLedger) -> None:
     - same type recorded again → count=2
     - after reset the entry disappears
     """
-    from agent.graph.llm_errors import LLMStreamSilentIdleError
+    from agent.graph.llm_errors import LLMStreamStallTimeoutError
 
     tid = "test-thread-1"
 
-    exc = LLMStreamSilentIdleError("test", output_tokens=1)
+    exc = LLMStreamStallTimeoutError("test")
     ledger.record_consecutive_error(tid, exc)
-    assert ledger.consecutive_error(tid) == ("LLMStreamSilentIdleError", 1), (
+    assert ledger.consecutive_error(tid) == ("LLMStreamStallTimeoutError", 1), (
         "first record should be count=1"
     )
 
     ledger.record_consecutive_error(tid, exc)
-    assert ledger.consecutive_error(tid) == ("LLMStreamSilentIdleError", 2), (
+    assert ledger.consecutive_error(tid) == ("LLMStreamStallTimeoutError", 2), (
         "same type recorded again should be count=2"
     )
 
@@ -497,11 +500,11 @@ def test_check_consecutive_error_cap_raises_fatal_on_exhaustion(ledger: LlmLedge
     Pre-fill the ledger's record to the cap value (default 3),
     `check_consecutive_error_cap` should raise FatalLLMStreamError and pop the entry.
     """
-    from agent.graph.llm_errors import FatalLLMStreamError, LLMStreamSilentIdleError
+    from agent.graph.llm_errors import FatalLLMStreamError, LLMStreamStallTimeoutError
 
     tid = "test-thread-2"
     for _ in range(3):
-        ledger.record_consecutive_error(tid, LLMStreamSilentIdleError("test", output_tokens=1))
+        ledger.record_consecutive_error(tid, LLMStreamStallTimeoutError("test"))
 
     with pytest.raises(FatalLLMStreamError, match="retry cap"):
         ledger.check_consecutive_error_cap(tid)
@@ -514,16 +517,16 @@ def test_check_consecutive_error_cap_raises_fatal_on_exhaustion(ledger: LlmLedge
 
 def test_check_consecutive_error_cap_below_threshold_passes(ledger: LlmLedger) -> None:
     """Below cap, `check_consecutive_error_cap` returns normally without raising."""
-    from agent.graph.llm_errors import LLMStreamSilentIdleError
+    from agent.graph.llm_errors import LLMStreamStallTimeoutError
 
     tid = "test-thread-3"
     for _ in range(2):  # < cap(3)
-        ledger.record_consecutive_error(tid, LLMStreamSilentIdleError("test", output_tokens=1))
+        ledger.record_consecutive_error(tid, LLMStreamStallTimeoutError("test"))
 
     # should not raise
     ledger.check_consecutive_error_cap(tid)
 
-    assert ledger.consecutive_error(tid) == ("LLMStreamSilentIdleError", 2), (
+    assert ledger.consecutive_error(tid) == ("LLMStreamStallTimeoutError", 2), (
         "below cap must not alter entry"
     )
 
@@ -602,13 +605,14 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
 # TRANSIENT class re-raises for the retry loop.
 
 
-class _FakeProviderStatusError(Exception):
-    """anthropic/openai APIStatusError shape used to drive the llm_node classifier."""
+class _FakeProviderStatusError(openai.APIStatusError):
+    """An actual SDK status error with a synthetic response."""
 
-    def __init__(self, status_code: int, body: dict | None = None) -> None:
-        super().__init__(f"HTTP {status_code}")
-        self.status_code = status_code
-        self.body = body  # pyright: ignore[reportUnknownMemberType]
+    def __init__(self, status_code: int, body: object = None) -> None:
+        response = httpx2.Response(
+            status_code, request=httpx2.Request("POST", "https://audit.invalid")
+        )
+        super().__init__(f"HTTP {status_code}", response=response, body=body)
 
 
 def _astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
@@ -658,20 +662,20 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
 # ────────────────────────────────────────────────────────────
 
 
-class _FakeOpenAIError(Exception):
-    """Simulates openai.RateLimitError / openai.APIStatusError shape."""
+class _FakeOpenAIError(openai.APIStatusError):
+    """Actual OpenAI SDK authority for configured fatal-type tests."""
 
-    def __init__(self, body: dict | None = None) -> None:
-        super().__init__("fake error")
-        self.body = body  # pyright: ignore[reportUnknownMemberType]
+    def __init__(self, body: object = None) -> None:
+        response = httpx2.Response(429, request=httpx2.Request("POST", "https://audit.invalid"))
+        super().__init__("fake error", response=response, body=body)
 
 
-class _FakeAnthropicError(Exception):
-    """Simulates anthropic.RateLimitError / anthropic.APIStatusError shape."""
+class _FakeAnthropicError(anthropic.APIStatusError):
+    """Actual Anthropic SDK authority for configured fatal-type tests."""
 
-    def __init__(self, body: dict | None = None) -> None:
-        super().__init__("fake error")
-        self.body = body  # pyright: ignore[reportUnknownMemberType]
+    def __init__(self, body: object = None) -> None:
+        response = httpx2.Response(429, request=httpx2.Request("POST", "https://audit.invalid"))
+        super().__init__("fake error", response=response, body=body)
 
 
 def _fatal(error_type: str | None, configured: str) -> bool:
