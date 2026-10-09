@@ -12,7 +12,7 @@ import os
 from typing import Any
 
 from base.agents.context import AvaContext
-from base.agents.context.clients import ClientSet
+from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity
 from base.native_process.turn_identity import current_turn_agent_id
 
@@ -21,18 +21,67 @@ class ContextOutsideProcessError(AttributeError):
     """The SDK's local context was read outside an execution process."""
 
 
-def process_clients(*, gateway_url: str | None = None) -> ClientSet:
-    """Build a process's lazy clients from its own configuration."""
+def _redis() -> object:
+    import redis as redis_lib
+
+    from base.config import settings
+    from base.events.live.redis_client import RESILIENCE_KWARGS
+
+    url = settings.data_plane.redis_url
+    if not url:
+        raise RuntimeError(
+            "AVA_REDIS_URL not set — Redis ops should not be called in container mode"
+        )
+    client_class: Any = redis_lib.Redis
+    return client_class.from_url(
+        url,
+        decode_responses=True,
+        **{**RESILIENCE_KWARGS, "socket_timeout": 10.0},
+    )
+
+
+def _gateway_url() -> str:
+    from base.cluster.machine import gateway_api_base
+
+    return gateway_api_base()
+
+
+def _gateway(url: str) -> Any:
+    import httpx
+
+    from base.cluster.auth import bearer_header
+    from base.cluster.machine import gateway_bearer
+    from base.config import settings
+    from base.host.net.http_dial import transport_for_url
+
+    bearer = gateway_bearer()
+    return httpx.Client(
+        base_url=url,
+        timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
+        headers=bearer_header(bearer) if bearer else {},
+        transport=transport_for_url(url),
+    )
+
+
+def process_clients(
+    *, gateway_url: str | None = None, database: DatabaseFactory | None = None
+) -> ClientSet:
+    """Build lazy process clients; resolve configuration and credentials only at first use."""
     from ava.sdk_surface import settings
 
-    return ClientSet(gateway_url=gateway_url, database=settings.database)
+    return ClientSet(
+        gateway_url=gateway_url if gateway_url is not None else _gateway_url,
+        database=database if database is not None else settings.database,
+        redis=_redis,
+        gateway=_gateway,
+    )
 
 
 def context_from_description(description: dict[str, Any]) -> AvaContext:
-    """Rebuild an execution context without copying its host's live clients."""
-    from ava.sdk_surface import settings
-
-    return AvaContext.from_description(description, database=settings.database)
+    """Rebuild an execution context without copying its host's live clients or secrets."""
+    return AvaContext.from_description(
+        description, clients=process_clients(gateway_url=description["gateway_url"])
+    )
 
 
 def launched_context() -> AvaContext | None:
