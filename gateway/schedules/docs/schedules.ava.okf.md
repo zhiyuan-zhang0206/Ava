@@ -31,6 +31,7 @@ A **schedule** is a resident process supervised by the `schedule-manager` servic
 - Cron knowledge remains in each script template; neither `ScheduleManager` nor the `schedules` data model learns cron expressions.
 - Startup enumerates boundaries after the latest `schedule_fire_log` claim, using the schedule's `created_at` when no claim exists. It runs at most the two most recent missed slots and logs a WARNING when older candidates remain.
 - Startup catch-up and normal online fires both call `fire_slot_once()`. Its `INSERT ... ON CONFLICT DO NOTHING` commits before the callback, making `(schedule_id, slot_fire_at)` at-most-once across concurrent processes and restarts.
+- The winning callback receives `(slot_fire_at, payload)` explicitly; the slot is normalized to UTC before claiming and dispatch. Window-based reports use that slot for both catch-up and online fires.
 - A crash after the claim but before callback completion leaves the slot claimed. This accepted loss window is the explicit cost of at-most-once behavior; there is no at-least-once retry path.
 
 ## State Machine (`schedules.status`)
