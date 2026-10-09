@@ -15,7 +15,7 @@ import pytest
 
 from scripts.ci.pull_requests import commands as ci_utils
 from scripts.ci.pull_requests import owner_operations, status
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     _APP_CHECK,
     CIStatus,
     _check,
@@ -25,19 +25,19 @@ from scripts.ci.tests.test_ci_monitor import (
     _TrunkResponse,
     _urlopen_sequence,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     diag_gh as diag_gh,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     gh as gh,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     has_workflows as has_workflows,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     no_sleep as no_sleep,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     poll as poll,
 )
 
