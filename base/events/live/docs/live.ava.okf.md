@@ -85,9 +85,11 @@ segments stay globally distinct.
   checkpointer already stores the committed step. To replay code segments after
   a UI restart, read the checkpointer — not this channel.
 - Publishing goes through `base/events/live/bus.py:EventBus` (`publish_best_effort`) — a
-  fire-and-forget primitive that never raises, so a redis hiccup degrades the
-  live UI without breaking the DB write or the agent lifecycle path that
-  triggered it.
+  caller-owned publish. Known Redis/network failures degrade the live UI after
+  bounded recovery; unknown errors propagate to that caller. Publication after
+  a durable write cannot undo its commit. Chat HTTP delivery awaits live
+  `InboundArrived` publication in the current request; it owns no detached task.
+  See [[base/agents/messages/docs/chat_delivery.ava.okf.md]].
 - Each Redis operation owns one bounded authentication retry loop; best-effort
   publish disables command-level retry explicitly and keeps its per-attempt
   timeout. Concurrent operations have independent retry budgets.
