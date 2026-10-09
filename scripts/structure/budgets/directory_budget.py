@@ -2,12 +2,50 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Iterable, Mapping
+from pathlib import Path, PurePosixPath
+
+
+def tracked_children(listing: str) -> dict[str, set[str]]:
+    """Every directory's direct children from Git's NUL-delimited tracked paths."""
+    if listing and not listing.endswith("\0"):
+        raise ValueError("tracked Git paths are not NUL-terminated")
+    children: dict[str, set[str]] = {}
+    for name in listing.split("\0")[:-1]:
+        path = PurePosixPath(name)
+        if not path.parts or path.is_absolute() or ".." in path.parts or path.as_posix() != name:
+            raise ValueError(f"invalid tracked Git path: {name!r}")
+        for depth, child in enumerate(path.parts):
+            directory = "/".join(path.parts[:depth])
+            children.setdefault(directory, set()).add(child)
+    return children
+
+
+def selected_directories(
+    children: Mapping[str, set[str]], targets: Iterable[Path], repo_root: Path
+) -> set[str]:
+    """Select tracked descendants and ancestors; the repository root alone has no cap."""
+    selected: set[str] = set()
+    for target in targets:
+        try:
+            relative = target.relative_to(repo_root).as_posix()
+        except ValueError:
+            continue
+        if relative == ".":
+            selected.update(children)
+            continue
+        selected.update(
+            directory
+            for directory in children
+            if directory == relative or directory.startswith(f"{relative}/")
+        )
+        parts = PurePosixPath(relative).parts
+        selected.update("/".join(parts[:depth]) for depth in range(1, len(parts)))
+    return selected.intersection(children).difference({""})
 
 
 def entries(directory: Path) -> list[Path]:
-    """The members of `directory` the budget looks at: no links, hidden entries,
-    `__pycache__` or migrations subtrees."""
+    """Candidates for the existing Python file-budget scope, without following links."""
     return [
         entry
         for entry in directory.iterdir()
@@ -18,29 +56,8 @@ def entries(directory: Path) -> list[Path]:
     ]
 
 
-def is_tests_layer(directory: Path) -> bool:
-    """A `tests/` directory without `__init__.py`: the test files beside a package's code
-    (or the top-level `tests/`), flat by nature. With `__init__.py` it is a real Python
-    package and is budgeted like any other."""
-    return directory.name == "tests" and not (directory / "__init__.py").exists()
-
-
-def counts_toward_budget(entry: Path) -> bool:
-    """A .py/.pyi file, or a subdirectory with content. A directory holding
-    nothing but `__pycache__` / hidden files (left behind locally when a package
-    is renamed or removed) or nothing at all is not a tree CI checks out, so it
-    never counts. Neither does a `docs/` layer (the package's OKF documentation)
-    or a `tests/` layer without `__init__.py`: neither is code structure (a `docs`
-    directory with `__init__.py` is a real Python package and counts)."""
-    if entry.is_dir():
-        if entry.name == "docs" and not (entry / "__init__.py").exists():
-            return False
-        return not is_tests_layer(entry) and bool(entries(entry))
-    return entry.is_file() and entry.suffix in {".py", ".pyi"}
-
-
 def selected_under(target: Path, scope: Path, repo_root: Path) -> Path | None:
-    """The part of `target` the budgets govern inside `scope`; None when it is out of scope."""
+    """An existing Python file-budget target within its scope, without following links."""
     if target == scope or scope in target.parents:
         selected = target
     elif target in scope.parents:
