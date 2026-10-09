@@ -21,7 +21,9 @@ class _Closable:
 
 
 def test_nothing_is_built_until_first_use() -> None:
-    clients = ClientSet(gateway_url="http://gateway.test")
+    clients = ClientSet(
+        gateway_url="http://gateway.test", gateway=lambda url: httpx.Client(base_url=url)
+    )
 
     assert clients._gateway is None
     assert "not connected" in repr(clients.sql)
@@ -66,7 +68,9 @@ def test_close_closes_the_connections_it_made_and_keeps_going_past_a_failure(
 
 
 def test_using_gateway_routes_and_restores_without_closing_the_provided_client() -> None:
-    clients = ClientSet(gateway_url="http://own.test")
+    clients = ClientSet(
+        gateway_url="http://own.test", gateway=lambda url: httpx.Client(base_url=url)
+    )
     own = clients.gateway
     provided = httpx.Client(base_url="http://provided.test")
 
@@ -100,7 +104,9 @@ def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
     assert description["gateway_url"] == "http://gateway.test:8000"
     assert "secret" not in repr(description).lower()
 
-    child = AvaContext.from_description(description, database=lambda: None)  # type: ignore[arg-type,return-value]
+    child = AvaContext.from_description(
+        description, clients=ClientSet(gateway_url=description["gateway_url"])
+    )
     assert child.identity == host.identity
     assert child.clients.gateway_url == "http://gateway.test:8000"
 
@@ -122,3 +128,18 @@ def test_building_a_context_imports_no_connection_stack() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip().endswith("[]")
+
+
+def test_custom_database_dials_its_own_resource_with_no_process_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.config import settings
+    from base.db import Database
+
+    database = Database.from_settings()
+    clients = ClientSet(database=lambda: database)
+    monkeypatch.setattr(settings.data_plane, "db_url", "")
+    try:
+        assert clients.sql.execute("SELECT 42").fetchone() == (42,)
+    finally:
+        clients.close()
