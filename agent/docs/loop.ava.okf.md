@@ -10,6 +10,10 @@ tags: []
 `services/agent_runner/agent_host/daemon.py` owns the process; `AgentHost` owns local agent
 turns. `TurnScheduler` serializes each agent while allowing bounded concurrency
 between agents. A wake with no work creates no model call; idle ends the task.
+The daemon's background TaskGroup runs memory-guard initialization and its loop
+from `services/agent_runner/agent_host/exec_memory_guard.py`, passing the host
+logger to the guard owner. Its OS pressure source and domain discovery remain
+unchanged.
 
 The pending scan admits new recovery turns through two gates:
 `AVA_HOST_RECOVERY_WAKE_BATCH` limits starts per scan and

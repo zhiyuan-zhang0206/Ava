@@ -18,7 +18,10 @@ from tests.impersonation_support import attested_caller, recorded_tree
 
 
 @pytest.fixture
-def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
+def owner(
+    db_conn: psycopg.Connection[Any], config_authority: ConfigAuthority
+) -> RuntimeIncarnation:
+    """Bind the authority home before recording this machine's native owner."""
     agent_id = create_agent(db_conn)
     incarnation = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
