@@ -588,7 +588,7 @@ def send_system_note(
     tag: str = "task",
     task_id: int | None = None,
     resurrect: bool = True,
-    idempotency_key: str | None = None,
+    idempotency_key: str,
 ) -> int:
     """Deliver a framework system note to another agent.
 
@@ -624,9 +624,9 @@ def send_system_note(
     if task_id is not None and tag != NoteTag.TASK.value:
         raise ValueError("task_id requires tag='task'")
     resurrect = coerce_typed(resurrect, "resurrect", bool)
-    idempotency_key = coerce_str(idempotency_key, "idempotency_key", allow_none=True)
-    if idempotency_key is not None and not 1 <= len(idempotency_key) <= 128:
-        raise ValueError("idempotency_key must contain 1 to 128 characters")
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    idempotency_key = validate_idempotency_key(idempotency_key)
     source = ava.sdk_surface.agent_identity.require_actor()
     return _client.send_system_note(
         agent_id,

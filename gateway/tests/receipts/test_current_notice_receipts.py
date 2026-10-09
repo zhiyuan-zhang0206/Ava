@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -59,7 +60,11 @@ def test_original_snapshot_survives_replacement_and_deletion(
     notice = _insert_notice(db_conn, agent, "A")
     first = _send(client, agent, notice, dismiss)
     assert first.status_code == 200, first.text
-    later = client.post(f"/api/agents/{agent}/notices", json={"title": "B"})
+    later = client.post(
+        f"/api/agents/{agent}/notices",
+        json={"title": "B"},
+        headers={"Idempotency-Key": str(uuid4())},
+    )
     assert later.status_code == 201
     assert _send(client, agent, notice, dismiss, key="fresh").status_code == 409
     replay = _send(client, agent, notice, dismiss)
@@ -293,7 +298,12 @@ def test_creation_waits_for_guarded_owner_lock(
         assert locked.wait(5)
         with pytest.raises(psycopg.errors.LockNotAvailable), db_conn.transaction():
             db_conn.execute("SELECT id FROM agents WHERE id=%s FOR UPDATE NOWAIT", (agent,))
-        later = executor.submit(client.post, f"/api/agents/{agent}/notices", json={"title": "B"})
+        later = executor.submit(
+            client.post,
+            f"/api/agents/{agent}/notices",
+            json={"title": "B"},
+            headers={"Idempotency-Key": "later"},
+        )
         try:
             assert not later.done()
         finally:

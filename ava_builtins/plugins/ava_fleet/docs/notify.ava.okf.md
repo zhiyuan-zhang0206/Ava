@@ -27,10 +27,11 @@ The notification system is the only reliable channel for agents to push messages
 
 ## API
 
-### `ava.ui.notify(title, content=None, *, require_response=False, blocking=False, priority='P2', task=None) -> Notice`
+### `ava.ui.notify(title, content=None, *, require_response=False, blocking=False, priority='P2', task=None, idempotency_key) -> Notice`
 
 Push a notification, automatically superseding any previously unresolved notification from the same agent (resolution=`"superseded"`).
 
+- `idempotency_key` (required): retain this operation key for the same notice across retries; use an absolute expiration deadline. Missing or invalid keys fail before HTTP.
 - `title` (required): A one-line title; this is exactly what the user sees in their queue.
 - `content` (optional): Detailed content displayed when the user opens the notification. When presenting multiple options, label them A/B/C to facilitate single-letter replies.
 - `priority`: `"P0"` (highest) to `"P3"` (lowest), suggesting how the user should sort.

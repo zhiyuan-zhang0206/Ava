@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -40,7 +41,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
 
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("decision needed", require_response=True)  # type: ignore[attr-defined]
+    ava.ui.notify("decision needed", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     ava.ui.dismiss_notice()  # type: ignore[attr-defined]
 
     # The first snapshot announces the newly posted question. Dismissal
@@ -79,9 +80,9 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
 
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("FYI old")  # type: ignore[attr-defined]
-    ava.ui.notify("question", require_response=True)  # type: ignore[attr-defined]
-    ava.ui.notify("FYI new")  # type: ignore[attr-defined]
+    ava.ui.notify("FYI old", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    ava.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    ava.ui.notify("FYI new", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -110,7 +111,7 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     open notice with no id argument."""
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    notice = ava.ui.notify("hold this", content="body", priority="P2")  # type: ignore[attr-defined]
+    notice = ava.ui.notify("hold this", content="body", priority="P2", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert isinstance(notice, int)
     assert int(notice) == notice  # int conversion gives the id
 
@@ -132,7 +133,7 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     assert row[2] == "withdrawn"
 
     # After dismissal, new notify should show pending_count = 1 (the fresh one)
-    nid2 = ava.ui.notify("fresh fyi")  # type: ignore[attr-defined]
+    nid2 = ava.ui.notify("fresh fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert nid2.pending_count == 1  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
     assert nid2.pending_notices[0]["id"] == nid2  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
@@ -143,7 +144,9 @@ def test_notify_with_expire_at_valid(_load_activity_plugin: None, db_conn: psyco
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     # timedelta
-    nid1 = ava.ui.notify("expires in 1h", expire_at=timedelta(hours=1))  # type: ignore[attr-defined]
+    nid1 = ava.ui.notify(
+        "expires in 1h", expire_at=timedelta(hours=1), idempotency_key=str(uuid4())
+    )  # type: ignore[attr-defined]
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
@@ -155,7 +158,7 @@ def test_notify_with_expire_at_valid(_load_activity_plugin: None, db_conn: psyco
 
     # ISO string
     target = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
-    nid2 = ava.ui.notify("expires at ISO", expire_at=target)  # type: ignore[attr-defined]
+    nid2 = ava.ui.notify("expires at ISO", expire_at=target, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
@@ -174,4 +177,4 @@ def test_notify_with_expire_at_in_past_raises_value_error(
     pin_agent(agent_id)
     past = datetime.now(UTC) - timedelta(minutes=5)
     with pytest.raises(ValueError, match="expire_at is in the past"):
-        ava.ui.notify("past notice", expire_at=past)  # type: ignore[attr-defined]
+        ava.ui.notify("past notice", expire_at=past, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]

@@ -637,7 +637,9 @@ class TestSendSystemNote:
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         inbound_id = ava.agents.send_system_note(
-            peer_id, 'Task #1 "t" is now assigned to you (by agent #1).'
+            peer_id,
+            'Task #1 "t" is now assigned to you (by agent #1).',
+            idempotency_key=str(uuid4()),
         )
         assert isinstance(inbound_id, int)
 
@@ -669,7 +671,10 @@ class TestSendSystemNote:
         db_conn.commit()
 
         ava.agents.send_system_note(
-            peer_id, 'Task #42 "t" is now assigned to you.', task_id=task_id
+            peer_id,
+            'Task #42 "t" is now assigned to you.',
+            task_id=task_id,
+            idempotency_key=str(uuid4()),
         )
 
         with db_conn.cursor() as cur:
@@ -688,7 +693,9 @@ class TestSendSystemNote:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
         db_conn.commit()
 
-        inbound_id = ava.agents.send_system_note(peer_id, 'Task #1 "t" is now assigned to you.')
+        inbound_id = ava.agents.send_system_note(
+            peer_id, 'Task #1 "t" is now assigned to you.', idempotency_key=str(uuid4())
+        )
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
             cur.execute("SELECT kind FROM inbound_messages WHERE agent_id = %s", (peer_id,))
@@ -704,7 +711,7 @@ class TestSendSystemNote:
         # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
         # concatenation plus trailing comma.
         content: object = ("Task #1 is now assigned to you.",)
-        inbound_id = ava.agents.send_system_note(peer_id, content)  # pyright: ignore[reportArgumentType]
+        inbound_id = ava.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
             cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (peer_id,))
@@ -721,9 +728,9 @@ class TestSendSystemNote:
 
         content: object = ("Task #1 is now ", "assigned to you.")
         with pytest.raises(TypeError, match="content must be a string"):
-            ava.agents.send_system_note(peer_id, content)  # pyright: ignore[reportArgumentType]
+            ava.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     def test_send_system_note_to_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         pin_agent(_spawn_agent())
         with pytest.raises(AgentNotFound):
-            ava.agents.send_system_note(9999, "ghost")
+            ava.agents.send_system_note(9999, "ghost", idempotency_key=str(uuid4()))
