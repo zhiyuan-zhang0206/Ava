@@ -184,17 +184,17 @@ Every hard function violation fails, including after a file or function rename.
 Complexity and nesting baselines and rename allowances have been removed and
 cannot be reintroduced. Refactor the implementation until it meets the budget.
 
-The remaining site-exemption guard chooses its comparison base in this order:
+The remaining site-exemption guard selects one comparison commit:
 
-1. If `LINT_STRUCTURE_BASELINE_BASE` is set, use its merge base with `HEAD`,
-   or resolve the value directly to a commit if no merge base exists.
-   An unresolvable explicit value is a hard error.
-2. Otherwise use the merge base of `HEAD` and `origin/main` when available;
-   a failed merge-base computation emits a note and falls through.
-3. Otherwise use `HEAD`.
+1. If `LINT_STRUCTURE_BASELINE_BASE` is set, resolve that exact value to a commit,
+   including in a shallow checkout. An empty or unresolvable value is a hard error.
+2. Otherwise use the merge base of `HEAD` and `origin/main`. A missing ref or failed
+   merge-base query is a hard error. A local checkout or fork without `origin/main`
+   can explicitly set `LINT_STRUCTURE_BASELINE_BASE=HEAD` or another fetched revision.
 
-The guard reads the baseline at that revision. An absent baseline emits a
-note and skips comparison. Empty retired budget sections in the comparison
+Git rename-query and historical-read failures are hard errors. The guard reads the
+baseline at the selected commit. Only a valid revision that predates the baseline
+directory emits a note and skips comparison. Empty retired budget sections in the comparison
 revision are discarded; nonempty retired sections or malformed baselines fail.
 Retired sections are always refused in the working tree, including empty ones.
 Every remaining site section stays shrink-only when a lint is added or its rule
