@@ -1,6 +1,6 @@
 """Shared chat-inbound delivery for the gateway routers.
 
-Several endpoints (question / report replies, SDK send_message, file uploads)
+REST/SDK chat, MCP send_message, file uploads and completion digests
 all do the same thing: persist one 'chat' inbound for an agent and announce it
 for the live UI. `deliver_chat_inbound` is that one path, so each route keeps
 only its own precondition (the `prepare` callback) instead of re-inlining the
@@ -11,16 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from collections.abc import Callable, Coroutine
-from typing import Any, NamedTuple
+from collections.abc import Callable
+from typing import NamedTuple
 
 import psycopg
-from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentStatus
-from base.agents.messages.caller_protocol import CallerProtocolUnavailableError
 from base.agents.messages.chat_delivery import (
+    ChatInboundCommittedError,
     ChatInboundReceipt,
     insert_chat_inbound_once,
     reconcile_chat_inbound,
@@ -30,16 +29,8 @@ from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db import Database, publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
-from base.log import logger
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
-
-# Strong references for fire-and-forget publishes: asyncio's event loop holds
-# only a WEAK reference to tasks, so an unreferenced task can be garbage
-# collected mid-flight (audit cc-backend-runtime P2 — the previous noqa
-# comment claimed the loop holds a strong one, which it does not). The
-# done-callback drops each task once it finishes.
-_background_tasks: set[asyncio.Task[object]] = set()
 
 
 class ChatDelivery(NamedTuple):
@@ -47,13 +38,6 @@ class ChatDelivery(NamedTuple):
 
     status: AgentStatus
     inbound_id: int | None
-
-
-def _spawn_background(coro: Coroutine[Any, Any, object]) -> None:
-    """Start `coro` as a fire-and-forget task kept alive until completion."""
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 
 async def deliver_chat_inbound(
@@ -86,78 +70,77 @@ async def deliver_chat_inbound(
     of duplicating it. Returns the delivery-time status and durable inbound id
     for the AgentMessageEnqueued response.
 
-    The Redis publish (InboundArrived for frontend SSE) is dispatched as a
-    background task so a slow Redis never delays the HTTP response — the
-    full content is carried in the event and a large message body used to
-    add publish latency before this was made non-blocking.
+    Live publication completes in this caller. Known transport failures retain
+    the bus's bounded best-effort policy; other post-commit failures propagate
+    with the durable receipt. A failed notification never undoes the INSERT.
     """
-    try:
-        inbound: tuple[int, str, bool, bool] | None = await asyncio.to_thread(
-            _deliver_blocking,
-            pool,
-            db,
-            bus,
-            agent_id,
-            prepare,
-            source,
-            payload,
-            client_message_id,
-            provenance,
-        )
-    except CallerProtocolUnavailableError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # Delivery committed before this best-effort hint. A failure here must
-    # neither roll back the inbound nor skip its arrival/resurrection tail.
-    if refresh_badge:
-        try:
-            await asyncio.to_thread(publish_agent_updated_sync, bus, agent_id)
-        except Exception as exc:
-            logger.warning(
-                "deliver_chat_inbound: badge refresh for agent {aid} failed after "
-                "commit ({exc!r}); the inbound is delivered — degrading the live "
-                "badge update, InboundArrived + resurrect continue.",
-                aid=agent_id,
-                exc=exc,
-            )
+    inbound: tuple[ChatInboundReceipt, str] | None = await asyncio.to_thread(
+        _deliver_blocking,
+        pool,
+        db,
+        bus,
+        agent_id,
+        prepare,
+        source,
+        payload,
+        client_message_id,
+        provenance,
+    )
     if inbound is None:
-        # Nothing delivered (e.g. a report dismissed without a reply) — just
-        # report the delivery-time status, no announce and no resurrect.
-        # Off the event loop: get_agent_status opens a fresh DB connection.
+        if refresh_badge:
+            await asyncio.to_thread(publish_agent_updated_sync, bus, agent_id)
         status = await asyncio.to_thread(get_agent_status, db, agent_id)
         return ChatDelivery(status, None)
-    # Fire-and-forget: publish the InboundArrived event to Redis for the
-    # frontend SSE channel.  The full content is in the event payload;
-    # a large message body can make this publish take non-trivial time,
-    # and there is no reason to hold the HTTP response for it — the DB
-    # commit already guarantees the inbound is queued. The task is held in
-    # a module-level set so the loop's weak reference cannot let it be
-    # GC'd before the publish lands.
-    inbound_id, content, inserted, pending = inbound
-    if pending and not inserted:
-        # A same-key retry is also the recovery path for a process death after
-        # COMMIT but before the original wake. Redis wake is idempotent and the
-        # exact pending-row guard below makes resurrection safe to repeat.
-        await asyncio.to_thread(publish_inbound_wake, db, bus, agent_id, str(inbound_id))
-    if pending:
-        _spawn_background(
-            _ops.publish_inbound_arrived(bus, agent_id, inbound_id, "chat", source, content)
-        )
-        # Auto-resurrect: a chat delivered to a terminated agent should wake it so
-        # the sender's message gets a response — the user's reply (or any peer /
-        # watcher message) implies they want the agent alive to handle it. Shared
-        # with the compact path via `resurrect_if_terminated`.
-        status = await _ops.resurrect_if_terminated(
-            db,
-            bus,
-            agent_id,
-            trigger_inbound_id=inbound_id,
-            trigger_inbound_kind=InboundKind.CHAT,
-        )
-    else:
-        # The durable row was already claimed/done. Reconciliation is a receipt
-        # lookup only in this state: never resurrect from stale work.
-        status = await asyncio.to_thread(get_agent_status, db, agent_id)
-    return ChatDelivery(status, inbound_id)
+    receipt, content = inbound
+    return await _finish_chat_delivery(
+        db,
+        bus,
+        agent_id,
+        receipt,
+        content,
+        source,
+        client_message_id,
+        refresh_badge=refresh_badge,
+    )
+
+
+async def _finish_chat_delivery(
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    receipt: ChatInboundReceipt,
+    content: str,
+    source: str,
+    client_message_id: str | None,
+    *,
+    refresh_badge: bool = False,
+) -> ChatDelivery:
+    """Await separate wake, UI and resurrection effects after durable commit."""
+    try:
+        if refresh_badge:
+            await asyncio.to_thread(publish_agent_updated_sync, bus, agent_id)
+        if receipt.pending:
+            if not receipt.inserted:
+                # Same-key recovery heals a missed wake without another INSERT.
+                await asyncio.to_thread(
+                    publish_inbound_wake, db, bus, agent_id, str(receipt.inbound_id)
+                )
+            await _ops.publish_inbound_arrived(
+                bus, agent_id, receipt.inbound_id, "chat", source, content
+            )
+            status = await _ops.resurrect_if_terminated(
+                db,
+                bus,
+                agent_id,
+                trigger_inbound_id=receipt.inbound_id,
+                trigger_inbound_kind=InboundKind.CHAT,
+            )
+        else:
+            # Claimed/done work is a receipt lookup, never a stale resurrection.
+            status = await asyncio.to_thread(get_agent_status, db, agent_id)
+    except Exception as exc:
+        raise ChatInboundCommittedError(receipt, client_message_id, exc) from exc
+    return ChatDelivery(status, receipt.inbound_id)
 
 
 async def reconcile_chat_delivery(
@@ -189,21 +172,9 @@ async def reconcile_chat_delivery(
     )
     if receipt is None:
         return None
-    if not receipt.pending:
-        status = await asyncio.to_thread(get_agent_status, db, agent_id)
-        return ChatDelivery(status, receipt.inbound_id)
-    await asyncio.to_thread(publish_inbound_wake, db, bus, agent_id, str(receipt.inbound_id))
-    _spawn_background(
-        _ops.publish_inbound_arrived(bus, agent_id, receipt.inbound_id, "chat", source, content)
+    return await _finish_chat_delivery(
+        db, bus, agent_id, receipt, content, source, client_message_id
     )
-    status = await _ops.resurrect_if_terminated(
-        db,
-        bus,
-        agent_id,
-        trigger_inbound_id=receipt.inbound_id,
-        trigger_inbound_kind=InboundKind.CHAT,
-    )
-    return ChatDelivery(status, receipt.inbound_id)
 
 
 def _deliver_blocking(
@@ -216,10 +187,10 @@ def _deliver_blocking(
     payload: dict[str, object] | None,
     client_message_id: str | None,
     provenance: InboundProvenance | None,
-) -> tuple[int, str, bool, bool] | None:
+) -> tuple[ChatInboundReceipt, str] | None:
     """Sync delivery transaction — via to_thread: `prepare` runs inside it (it
     may execute its own DB statements), then the inbound INSERT. Returns
-    (inbound_id, content, inserted, pending) or None when prepare returned None."""
+    (receipt, content) or None when prepare returned None."""
     with pool.connection() as conn:
         content = prepare(conn)
         if content is not None:
@@ -233,7 +204,7 @@ def _deliver_blocking(
                 provenance=provenance,
                 publish_wake=functools.partial(publish_inbound_wake, db, bus),
             )
-            return (receipt.inbound_id, content, receipt.inserted, receipt.pending)
+            return (receipt, content)
     return None
 
 

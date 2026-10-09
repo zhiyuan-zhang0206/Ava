@@ -19,7 +19,9 @@ from typing import Any, cast
 
 import redis as _redis_sync
 import redis.asyncio as aredis
-from redis.exceptions import AuthenticationError, NoPermissionError
+from redis.exceptions import AuthenticationError, NoPermissionError, ResponseError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from base.events.live.redis_resilience import (
     _HEALTH_CHECK_INTERVAL_S,
@@ -283,22 +285,11 @@ _WARN_THROTTLE_S = 60.0
 def _log_publish_failure(
     exc: BaseException, *, channel: str, context: str, warn_last: dict[tuple[str, str], float]
 ) -> None:
-    """Classify + log a best-effort publish failure — never re-raises.
+    """Log a known Redis/network publish failure after bounded recovery.
 
-    The single discipline for every fire-and-forget event / live-UI publish,
-    mirroring the `base/db/__init__.py:publish_inbound_wake` template: pub/sub is only a
-    latency optimization, so a publish must never propagate into (and roll back /
-    crash) the caller's durable DB-write or agent-lifecycle path.
-
-    A `ResponseError` (a redis NOPERM — the cluster redis ACL user is not granted
-    this channel, an ACL / channel-prefix misconfig) would silently disable live
-    updates fleet-wide, so it is logged at WARNING (rate-limited per channel, see
-    the EventBus-owned warning timestamps). A transient failure (redis down,
-    connection dropped) is best-effort and logged at DEBUG; any other exception is a bug, logged at WARNING with
-    its traceback (same throttle) — the durable DB write already happened and the
-    frontend recovers on its next full fetch."""
-    from redis.exceptions import RedisError, ResponseError
-
+    ACL rejection warns with per-bus throttling; transport failures log at DEBUG.
+    Unknown exceptions propagate from the publisher to its calling owner.
+    """
     tag = f" [{context}]" if context else ""
     if isinstance(exc, ResponseError):
         key = (channel, type(exc).__name__)
@@ -323,7 +314,7 @@ def _log_publish_failure(
                 tag=tag,
                 w=_WARN_THROTTLE_S,
             )
-    elif isinstance(exc, (RedisError, OSError, TimeoutError)):
+    elif isinstance(exc, (RedisConnectionError, RedisTimeoutError, OSError, TimeoutError)):
         logger.debug(
             "publish to {ch!r} skipped ({exc!r}){tag} — best-effort; pub/sub is a "
             "latency optimization and the durable DB write is unaffected.",
@@ -331,19 +322,6 @@ def _log_publish_failure(
             exc=exc,
             tag=tag,
         )
-    else:
-        # Not a transport failure: a bug in the publish path. Same per-channel throttle.
-        key = (channel, type(exc).__name__)
-        now = time.monotonic()
-        last = warn_last.get(key)
-        if last is None or now - last >= _WARN_THROTTLE_S:
-            warn_last[key] = now
-            logger.opt(exception=exc).warning(
-                "publish to {ch!r} failed unexpectedly{tag}; the live event is dropped "
-                "(best-effort)",
-                ch=channel,
-                tag=tag,
-            )
 
 
 async def publish_via(
@@ -354,9 +332,11 @@ async def publish_via(
     warn_last: dict[tuple[str, str], float],
     context: str = "",
 ) -> int | None:
-    """`publish_best_effort` on the client `client()` returns (called inside the guarded try, so
-    a failure to open it is a failed publish, not an exception). The handle's publish
-    (`EventBus.publish_best_effort`) and the module-level shim share this one body."""
+    """Publish on the caller-owned client, recovering only known Redis/network errors.
+
+    Client construction is inside the same bounded failure policy as publish.
+    Programming errors in either step propagate to the caller.
+    """
     try:
 
         async def _publish() -> int:
@@ -368,7 +348,7 @@ async def publish_via(
         return await retry_auth_failures_async(
             _publish, attempt_timeout_s=_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S
         )
-    except Exception as exc:
+    except (ResponseError, RedisConnectionError, RedisTimeoutError, OSError, TimeoutError) as exc:
         _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
         return None
 
@@ -394,7 +374,7 @@ def publish_sync_via(
             return retry_auth_failures_sync(_publish)
         finally:
             client.close()
-    except Exception as exc:
+    except (ResponseError, RedisConnectionError, RedisTimeoutError, OSError, TimeoutError) as exc:
         _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
         return None
 
