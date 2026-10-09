@@ -8,7 +8,7 @@ tags: [extensions]
 # Built-in plugins
 
 These packages ship with Ava. The generic registration, contribution surfaces,
-loading and manifest contracts belong to [[okf/plugins/plugins.ava.okf.md]].
+loading and manifest contracts belong to [[docs/plugins/plugins.ava.okf.md]].
 Each implementation below owns its behavior and component documentation.
 
 | Plugin | Responsibility |
