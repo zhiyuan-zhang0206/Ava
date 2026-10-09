@@ -235,7 +235,7 @@ class _Publisher:
     def __init__(self, _redis: object, _channel: str, *, agent_id: int) -> None:
         self.agent_id = agent_id
 
-    async def start(self) -> None: ...
+    async def start(self, _tasks: asyncio.TaskGroup) -> None: ...
 
     async def aclose(self) -> None: ...
 
@@ -511,7 +511,8 @@ class TestPoolIsolation:
     ) -> None:
         """Admitting more agents must not expand either database client pool."""
         from base.db import Database
-        from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
+
+        from ..pools import build_control_pool, build_shared_pool
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", turn_limit)
         monkeypatch.setattr(settings.daemon, "host_db_pool_max_size", 12)
