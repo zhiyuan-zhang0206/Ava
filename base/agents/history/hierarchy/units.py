@@ -216,12 +216,6 @@ def divide_units(messages: Sequence[BaseMessage]) -> list[MessageUnit]:
     return sorted(divider.units, key=lambda unit: unit.i0)
 
 
-# The line an inbound message opens with, naming its sender and time ("Agent 7 [2026-10-03 Sat
-# 11:28:57]:", or a user's "[2026-10-03 Sat 09:40:12]"); the catalog line carries the sender as its
-# type and drops the time.
-_SENDER_LINE = re.compile(r"^[^\n]*?\s*\[\d{4}-\d{2}-\d{2}[^\]\n]*\]:[ \t]*\n+")
-_USER_STAMP = re.compile(r"^\[\d{4}-\d{2}-\d{2}[^\]\n]*\][ \t]*\n+")
-
 # Characters of an inbound / text unit's content in a catalog line, and of each part (reasoning,
 # call, output) of a work unit's line.
 CONTENT_CHARS = 100
@@ -273,12 +267,14 @@ def inbound_type(source: str | None) -> str:
 
 
 def _inbound_content(msg: BaseMessage) -> str:
-    text = msg.text
-    for head in (_SENDER_LINE, _USER_STAMP):
-        match = head.match(text)
-        if match is not None:
-            return text[match.end() :]
-    return text
+    """An inbound's content without its envelope header, cut where the writer recorded
+    the content to start (`ava_inbound_body_start`; the sender is the unit's source).
+
+    Legacy boundary: inbounds written before that field existed carry no offset, and the
+    header is not parsed out of their text; they show whole, header included. Every new
+    inbound records the offset, so this branch only ever sees historical messages."""
+    start = read_ava_kwargs(msg).get("ava_inbound_body_start")
+    return msg.text if start is None else msg.text[start:]
 
 
 def _result_body(msg: ToolMessage) -> str:
