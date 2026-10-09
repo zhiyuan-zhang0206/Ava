@@ -13,6 +13,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from base.agents.messages.delivery_outbox import DeliverySenderConfig
+from base.config.service_read import ConfigAuthority
 from cli.commands.agents import control as _agents
 
 _TARGET = {
@@ -80,10 +82,9 @@ def _outbox_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     from base.agents.messages import delivery_outbox
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(
-        delivery_outbox,
-        "limits",
-        lambda: delivery_outbox.DeliveryOutboxLimits(
+
+    def read_limits(_authority: ConfigAuthority) -> delivery_outbox.DeliveryOutboxLimits:
+        return delivery_outbox.DeliveryOutboxLimits(
             enabled=True,
             retry_backoff_steps=(30.0, 60.0, 300.0, 900.0),
             budget_seconds=43200.0,
@@ -91,8 +92,9 @@ def _outbox_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
             dedup_window_seconds=900.0,
             flush_interval_seconds=30.0,
             max_entries=128,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(delivery_outbox, "limits", read_limits)
     delivery_outbox._reset_caches_for_tests()
     yield
     delivery_outbox._reset_caches_for_tests()
@@ -429,7 +431,8 @@ def test_agents_send_transport_failure_is_recorded(monkeypatch: pytest.MonkeyPat
     recorded: list[dict[str, object]] = []
     seen: dict[str, object] = {}
 
-    def fake_logical_key(**_kw: object) -> str:
+    def fake_logical_key(**kw: object) -> str:
+        seen["sender"] = kw["sender"]
         return "key-cli-1"
 
     def fake_record(**kw: object) -> None:
@@ -444,13 +447,16 @@ def test_agents_send_transport_failure_is_recorded(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(httpx, "post", fail_post)
     with pytest.raises(httpx.ConnectError):
         _agents.cmd_agents_send(5, "notice", "shell:3")
+    sender = seen["sender"]
+    assert isinstance(sender, DeliverySenderConfig)
     assert recorded == [
         {
+            "authority": sender.authority,
+            "origin_agent_id": None,
             "agent_id": 5,
             "source": "shell:3",
             "content": "notice",
             "client_message_id": "key-cli-1",
-            "origin_agent_id": None,
             "completion_notice": False,
         }
     ]

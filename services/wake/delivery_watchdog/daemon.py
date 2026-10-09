@@ -93,8 +93,9 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base import telemetry
-from base.config import settings
+from base import paths, telemetry
+from base.config import Settings, settings
+from base.config.service_read import ConfigAuthority
 from base.daemon import round_loop
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
@@ -505,7 +506,12 @@ async def _scan_loop(
 
 
 async def _run_loops(
-    pool: ConnectionPool, db: Database, bus: EventBus, liveness: LivenessGroup
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    liveness: LivenessGroup,
+    *,
+    authority: ConfigAuthority,
 ) -> None:
     """Own the four resident loops: the scan loop and the three recovery loops
     (resurrect retry, stalled crash-marked harvest, hosted-turn recovery).
@@ -544,7 +550,12 @@ async def _run_loops(
         )
         loops.create_task(
             turn_liveness.hosted_turn_recovery_loop(
-                pool, db, bus, hosted_turn, interval, turn_liveness.hosted_turn_threshold_seconds()
+                pool,
+                db,
+                bus,
+                hosted_turn,
+                interval,
+                turn_liveness.hosted_turn_threshold_seconds(authority),
             )
         )
 
@@ -568,7 +579,12 @@ async def run() -> None:
     db = Database.from_settings()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
-        await _run_loops(pool, db, EventBus.from_settings(), liveness)
+        authority = ConfigAuthority(
+            runtime=settings,
+            all_domains=settings if settings.profile is None else Settings(profile=None),
+            env_path=paths.ava_home() / ".env",
+        )
+        await _run_loops(pool, db, EventBus.from_settings(), liveness, authority=authority)
     finally:
         pool.close()
         await stop_health_server(health)

@@ -55,6 +55,7 @@ from base.config import settings
 from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.db import Database, agent_exists
 from base.host.env.runtime_config import read_env_aliases
+from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError
 
 router = APIRouter()
@@ -315,15 +316,19 @@ def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[Session]]:
     return history, build_sessions(history, boundaries, read_times(history.messages))
 
 
-def build_model(db: Database, agent_id: int) -> str:
-    return agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model)[0]
+def build_model(db: Database, agent_id: int, *, catalog: ModelCatalog) -> str:
+    return agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model, catalog=catalog)[
+        0
+    ]
 
 
-def chunk_size(db: Database, agent_id: int) -> int:
+def chunk_size(db: Database, agent_id: int, *, catalog: ModelCatalog) -> int:
     """The agent's chunk size in tokens: the ratio of its own model's soft compaction threshold,
     with its own overrides (the rule of the live hook)."""
-    model, overrides = agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model)
-    return chunk_threshold(model, overrides, chunk_ratio())
+    model, overrides = agent_model_target(
+        db, agent_id, fallback=settings.lm.hierarchy_model, catalog=catalog
+    )
+    return chunk_threshold(model, overrides, chunk_ratio(), catalog=catalog)
 
 
 def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
@@ -331,8 +336,13 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
     db: Database = request.app.state.db
     history, sessions = _load(db, agent_id)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
-    model = build_model(db, agent_id)
-    jobs = plan_jobs(history, sessions, covered, threshold=chunk_size(db, agent_id))
+    model = build_model(db, agent_id, catalog=request.app.state.catalog)
+    jobs = plan_jobs(
+        history,
+        sessions,
+        covered,
+        threshold=chunk_size(db, agent_id, catalog=request.app.state.catalog),
+    )
     totals = summarize_segments(history)
     return SessionsResponse(
         agent_id=agent_id,
@@ -353,7 +363,11 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
                 exact_fraction=totals[s.segment].exact_fraction,
                 coverage=SessionCoverage(**asdict(coverage_of(history, s, covered))),
                 estimate=_estimate_out(
-                    estimate_cost(model, [j for j in jobs if j.session == s.number])
+                    estimate_cost(
+                        model,
+                        [j for j in jobs if j.session == s.number],
+                        prices=request.app.state.catalog.prices,
+                    )
                 ),
             )
             for s in sessions
@@ -400,8 +414,19 @@ def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> Buil
     history, sessions = _load(db, agent_id)
     chosen = _select(sessions, body)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
-    planned = plan_jobs(history, chosen, covered, threshold=chunk_size(db, agent_id))
-    estimate = _estimate_out(estimate_cost(build_model(db, agent_id), planned))
+    planned = plan_jobs(
+        history,
+        chosen,
+        covered,
+        threshold=chunk_size(db, agent_id, catalog=request.app.state.catalog),
+    )
+    estimate = _estimate_out(
+        estimate_cost(
+            build_model(db, agent_id, catalog=request.app.state.catalog),
+            planned,
+            prices=request.app.state.catalog.prices,
+        )
+    )
     numbers = [s.number for s in chosen]
     enabled = feature_enabled()
     if body.dry_run:
@@ -499,7 +524,9 @@ async def post_understanding_build(
 
 def _progress_blocking(request: Request, agent_id: int, build_id: int) -> BuildProgressResponse:
     _require_agent(request, agent_id)
-    progress = load_build(request.app.state.db_pool, agent_id, build_id)
+    progress = load_build(
+        request.app.state.db_pool, agent_id, build_id, prices=request.app.state.catalog.prices
+    )
     if progress is None:
         raise HTTPException(
             status_code=404, detail=f"build {build_id} of agent {agent_id} not found"

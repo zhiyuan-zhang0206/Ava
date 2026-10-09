@@ -18,13 +18,15 @@ from agent.extensions import catalog as catalog_mod
 from agent.extensions import load_extensions
 from agent.extensions.registry import declarations
 from base import paths
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.gate import ContributionMismatch
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog):
+    monkeypatch.setattr("base.lm.plugin_providers.build_model_catalog", lambda: model_catalog)
     repo = tmp_path / "repo_plugins"
     user = tmp_path / "user_plugins"
     repo.mkdir()
@@ -56,6 +58,7 @@ _DEMO_RUNTIME = """
 from pydantic import BaseModel
 
 from agent.hooks import Hook
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import PluginContributions
 
 
@@ -68,7 +71,7 @@ class _DemoHook(Hook):
         return None
 
 
-def demo_section(_slices: object) -> str:
+def demo_section(_slices: object, *, catalog: ModelCatalog) -> str:
     return "## Demo"
 
 
@@ -207,6 +210,7 @@ def contribute() -> PluginContributions:
 
 _DECLARED_RUNTIME = """
 from agent.hooks import Hook
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import PluginContributions
 
 
@@ -215,7 +219,7 @@ class _DeclaredHook(Hook):
         return None
 
 
-def demo_section(_slices: object) -> str:
+def demo_section(_slices: object, *, catalog: ModelCatalog) -> str:
     return "## Declared"
 
 
@@ -313,10 +317,11 @@ def _gate_runtime(
     return (
         "from pydantic import BaseModel\n\n"
         "from agent.hooks import Hook\n"
+        "from base.lm.catalog import ModelCatalog\n"
         "from base.packages.plugins.extensions import PluginContributions\n\n\n"
         f"{state or ''}\n\n"
         f"{classes}"
-        "def gate_section(_slices: object) -> str:\n"
+        "def gate_section(_slices: object, *, catalog: ModelCatalog) -> str:\n"
         '    return "## Gate"\n\n\n'
         "def contribute() -> PluginContributions:\n"
         f"    return PluginContributions({', '.join(kwargs)})\n"

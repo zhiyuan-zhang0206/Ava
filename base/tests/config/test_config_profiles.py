@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+
+from base.config.service_read import ConfigAuthority
 
 # ── D5: profile-limited singleton must not shrink the config-service reads ──
 #
@@ -12,14 +16,13 @@ import pytest
 # config-SERVICE read paths — bootstrap_config_values (the gateway serves
 # every BOOTSTRAP_FIELDS to agent-runners), current_field_values (the 231-field
 # config panel) and flat_dump (the config-overlay snapshot) — must stay
-# complete, so they resolve a missing domain through a fresh full Settings
-# instance (D5). These tests simulate a profile-limited singleton with a proxy
+# complete, so their explicit authority carries a complete read model (D5). These tests simulate a profile-limited singleton with a proxy
 # that raises exactly like the PR-B construction will.
 
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_service_reads_stay_full_when_singleton_domain_excluded(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """bootstrap / current_field_values / flat_dump serve the same complete
     payload with a gateway-profile-limited singleton as without one."""
@@ -32,6 +35,9 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(
         gateway profile excludes raise AttributeError (fail-fast); every other
         domain reads through to the real singleton."""
 
+        def has_domain(self, name: str) -> bool:
+            return name not in ("agent", "sandbox", "web") and real.has_domain(name)
+
         def __getattr__(self, name: str):
             if name in ("agent", "sandbox", "web"):
                 raise AttributeError(
@@ -39,15 +45,19 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(
                 )
             return getattr(real, name)
 
-    baseline_bootstrap = config.bootstrap_config_values()
-    baseline_values = config.current_field_values()
-    baseline_flat = config.flat_dump(mode="json")
+    authority = ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
+    baseline_bootstrap = authority.bootstrap_config_values(
+        provider_key_envs=(), plugin_cluster_config=""
+    )
+    baseline_values = authority.current_field_values()
+    baseline_flat = authority.flat_dump(mode="json")
 
     monkeypatch.setattr(config, "settings", _GatewayProfileLimited())
 
-    served = config.bootstrap_config_values()
-    values = config.current_field_values()
-    flat = config.flat_dump(mode="json")
+    authority = ConfigAuthority(config.settings, authority.all_domains, authority.env_path)
+    served = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
+    values = authority.current_field_values()
+    flat = authority.flat_dump(mode="json")
 
     # Same payload — the full-instance fallback reads the same os.environ the
     # singleton did, so nothing may change by swapping in a limited singleton.
@@ -224,7 +234,7 @@ def test_explicit_none_profile_is_full(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_and_panel_full_under_real_gateway_profile(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """D5 end-to-end with the REAL profile-limited singleton: swap the module
     singleton for a gateway-profile Settings (agent/sandbox/web excluded) and
@@ -237,9 +247,12 @@ def test_bootstrap_and_panel_full_under_real_gateway_profile(
     os.environ, so the values coincide.)"""
     from base import config
 
-    baseline_bootstrap = config.bootstrap_config_values()
-    baseline_values = config.current_field_values()
-    baseline_flat = config.flat_dump(mode="json")
+    authority = ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
+    baseline_bootstrap = authority.bootstrap_config_values(
+        provider_key_envs=(), plugin_cluster_config=""
+    )
+    baseline_values = authority.current_field_values()
+    baseline_flat = authority.flat_dump(mode="json")
 
     excluded_domains = ("agent", "sandbox", "web")
     excluded_bootstrap_aliases = {
@@ -251,9 +264,10 @@ def test_bootstrap_and_panel_full_under_real_gateway_profile(
     limited = config.Settings(profile="gateway")
     monkeypatch.setattr(config, "settings", limited)
 
-    served = config.bootstrap_config_values()
-    values = config.current_field_values()
-    flat = config.flat_dump(mode="json")
+    authority = ConfigAuthority(limited, authority.all_domains, authority.env_path)
+    served = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
+    values = authority.current_field_values()
+    flat = authority.flat_dump(mode="json")
 
     # Completeness: nothing that was served before disappears under the
     # profile-limited singleton (the gateway serves all 162 BOOTSTRAP_FIELDS).

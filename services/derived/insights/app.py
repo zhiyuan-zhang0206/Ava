@@ -14,13 +14,16 @@ from fastapi import FastAPI
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from base.paths import ava_home
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import history as run_timeline_history
 from services.derived.insights.run_timeline import router as run_timeline_router
 
 
-def build_app(db: Database, pool: ConnectionPool[Any], config: InsightsConfig) -> FastAPI:
+def build_app(
+    db: Database, pool: ConnectionPool[Any], config: InsightsConfig, *, catalog: ModelCatalog
+) -> FastAPI:
     """The app over `db` (checkpoint and audit reads), `pool` (short row lookups) and `config`.
 
     The caller owns both and closes them after the app has stopped serving.
@@ -29,6 +32,7 @@ def build_app(db: Database, pool: ConnectionPool[Any], config: InsightsConfig) -
     app.state.db = db
     app.state.db_pool = pool
     app.state.config = config
+    app.state.catalog = catalog
     app.state.run_timeline_views = run_timeline_history.HistoryViewCache()
     app.include_router(run_timeline_router.router)
 

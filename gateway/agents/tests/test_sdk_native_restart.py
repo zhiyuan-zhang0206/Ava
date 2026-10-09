@@ -14,6 +14,7 @@ from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.config import settings
+from base.lm.plugin_providers import build_model_catalog
 from gateway.agents import lifecycle
 from gateway.app import app
 from gateway.tests.test_idempotency import client as client
@@ -41,7 +42,12 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
         operation = NativeRestartOperation.model_validate(packet)
         assert operation.operation_key == idempotency_key
         result = await restart_native_work_op(
-            app.state.db, app.state.bus, agent_id, operation, app.state.db_pool
+            app.state.db,
+            app.state.bus,
+            agent_id,
+            operation,
+            app.state.db_pool,
+            catalog=build_model_catalog(),
         )
         return result.model_dump(mode="json")
 

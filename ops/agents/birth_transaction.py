@@ -17,7 +17,10 @@ from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.labels import spawn_prompt_with_label
+from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import fetch_one, insert_spawn_prompt_in_transaction
+from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
@@ -134,6 +137,9 @@ def _resolve_birth_overlay(
     cur: psycopg.Cursor[Any],
     config: dict[str, object] | None,
     fork_from: int | None,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> tuple[dict[str, object] | None, dict[str, object]]:
     # THE spawn boundary is this INSERT — every spawn in the system funnels
     # through it (SDK / frontend / scripts all POST /api/agents, which
@@ -152,7 +158,7 @@ def _resolve_birth_overlay(
         # agents_meta.config_overlay, whatever client path composed the map
         # (a bare fork copies the source overlay over verbatim).
         config = dict(config)
-        model_receipt = normalize_overlay_llm_model(config)
+        model_receipt = normalize_overlay_llm_model(config, models=catalog.models)
         if model_receipt is not None:
             logger.warning(
                 "spawn overlay llm_model {requested!r} is withdrawn; stored "
@@ -161,13 +167,19 @@ def _resolve_birth_overlay(
                 requested=model_receipt[0],
                 resolved=model_receipt[1],
             )
-    birth_config = resolve_birth_config(cur, config, inherited=inherited)
+    birth_config = resolve_birth_config(
+        cur, config, inherited=inherited, catalog=catalog, authority=authority
+    )
     from base.agents import InvalidModelConfig
     from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.factory import validate_model_config
 
     try:
-        validate_model_config(config=resolve_agent_config_pins(config, birth_config))
+        validate_model_config(
+            catalog=catalog,
+            llm_override=settings.lm.llm_override,
+            config=resolve_agent_config_pins(config, birth_config),
+        )
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc
     return config, birth_config
@@ -209,6 +221,8 @@ def _insert_fork_history(
 def insert_agent_birth(
     cur: psycopg.Cursor[Any],
     *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
     spawner: str = "user",
     fork_from: int | None = None,
     fork_checkpoint: str | None = None,
@@ -248,7 +262,9 @@ def insert_agent_birth(
             existing.agent_id, existing.birth_config, None, existing.launch_attempt_id, None, None
         )
     new_id = _insert_agent_identity(cur, label)
-    config, birth_config = _resolve_birth_overlay(cur, config, fork_from)
+    config, birth_config = _resolve_birth_overlay(
+        cur, config, fork_from, catalog=catalog, authority=authority
+    )
     # For a fork, spawner records the fork SOURCE — the lineage parent
     # (user ruling 2026-08-28, task #1879). The executor who triggered the
     # fork stays traceable via the fork event's `source` and the fork

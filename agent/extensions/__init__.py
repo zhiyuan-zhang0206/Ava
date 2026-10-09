@@ -167,7 +167,20 @@ def load_extensions(
             _load_face(name, plugin_dir, pkg=pkg, report=report)
 
     registry = build_registry(SURFACE_FACES if surface else ALL_FACES, report)
-    return LoadedExtensions(config, sdk_install.install(registry, report))
+    from base.config import Settings, ensure_eager, settings
+    from base.config.service_read import ConfigAuthority
+    from base.lm.plugin_providers import build_model_catalog
+
+    ensure_eager()
+    authority = ConfigAuthority(
+        runtime=settings,
+        all_domains=settings if settings.profile is None else Settings(profile=None),
+        env_path=paths.ava_home() / ".env",
+    )
+    catalog = build_model_catalog()
+    return LoadedExtensions(
+        config, sdk_install.install(registry, report, catalog=catalog, authority=authority)
+    )
 
 
 def load_agent_faces() -> None:

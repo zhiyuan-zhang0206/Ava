@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.hooks.compact import generate_summary
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 @pytest.mark.asyncio
@@ -26,5 +27,10 @@ async def test_compaction_preserves_fast_accounting_id() -> None:
         ),
         patch("base.lm.usage.log_usage_from_message") as account,
     ):
-        assert await generate_summary([HumanMessage(content="history")], llm, slices) == "summary"
+        assert (
+            await generate_summary(
+                [HumanMessage(content="history")], llm, slices, catalog=build_model_catalog()
+            )
+            == "summary"
+        )
     assert account.call_args.kwargs["model"] == "gpt-6.1-sol-fast"

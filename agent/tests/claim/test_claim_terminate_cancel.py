@@ -23,8 +23,10 @@ from agent.tests.claim.claim_support import (
     _make_runtime,
 )
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 
@@ -66,7 +68,11 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
 
 
 async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """One graph invocation = one TURN: a claim pass that finds nothing to do
     AFTER this invocation already routed work (turn_active=True) ends the
@@ -74,7 +80,7 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
     instead of blocking in _wait_for_batch — that is what closes the per-turn
     root span at the turn boundary. Would hang here if it blocked, so a plain
     return IS the lock."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=True),
@@ -89,7 +95,11 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
 
 
 async def test_claim_hosted_ends_turn_instead_of_parking(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Hosted mode has no process to park: a fresh invocation (turn_active=False)
     that finds nothing must goto END with `turn_idle`, not enter the IDLING wait.
@@ -99,7 +109,7 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
     `exit_requested` stays False: an idle agent is not a terminated one — the
     host drops the task and re-creates it on the next wake.
     """
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
@@ -114,12 +124,16 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
 
 
 async def test_claim_hosted_never_enters_idling_status(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """The hosted claim branch never writes status: `_wait_for_batch` would flip
     to IDLING before it blocks, while the host owns running/idling around the
     task itself. A direct hosted claim therefore leaves its running row alone."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
     db_conn.commit()
@@ -146,11 +160,14 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Hosted mode changes only the empty-batch branch. When the first SELECT
     finds work, dispatch is byte-for-byte the process path — the turn runs, and
     `turn_idle` is NOT set (the host must re-invoke, not end the task)."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     insert_inbound_message(
         db_conn, tid, "hello", kind="chat", source="user", bus=event_bus, database=database
     )
@@ -169,12 +186,16 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
 
 
 async def test_claim_cancel_kind_halts_to_idle_without_marker(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """cancel inbound → pause: halted=True + re-enter CLAIM (-> idle), NOT END
     (process stays alive). No lifecycle marker (a pause leaves no trace); a
     Cancelled SSE is emitted so the live UI clears turn-active state."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     pub = MagicMock()
 
@@ -201,6 +222,9 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """User sends a chat, then clicks Stop while the agent's code is executing;
     both land pending and are claimed in one batch (the interrupt aborts the
@@ -211,7 +235,7 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     co-batched chat in state.messages (surfaced to the UI via InboundCommitted)
     until some later inbound happened to arrive — "message picked up but the
     agent never continued"."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     # chat first (older id), then cancel — the real sequence: message queued,
     # then Stop pressed mid-execution.
     insert_inbound_message(
@@ -248,12 +272,15 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Same as above but the cancel is the OLDER row (user clicks Stop, then
     sends a new message while both are still pending). The wake decision is
     order-independent — a chat anywhere in the cancel batch means new intent to
     process, so goto=before_llm + halted=False regardless of insertion order."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     # cancel first (older id), then chat
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     chat_id = insert_inbound_message(

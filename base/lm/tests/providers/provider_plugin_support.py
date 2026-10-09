@@ -1,18 +1,14 @@
 """Fixture plugin writer for the provider-plugin tests: a `provider.py` + `plugin.py` pair in the
-session's tmp AVA_HOME. The test runs against an empty catalog slot, so its first
-`model_catalog()` builds the catalog afresh from the enabled plugins, the fixture's among them; the
-process's own catalog comes back after the test."""
+session's tmp AVA_HOME. Each test explicitly builds its own catalog after writing its plugins."""
 
 from __future__ import annotations
 
 import shutil
 from collections.abc import Callable, Generator
-from pathlib import Path
 
 import pytest
 
 from base import paths
-from base.lm.plugin_providers import use_catalog
 
 _PLUGIN_SOURCE = """from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
@@ -67,10 +63,12 @@ _PRICE_LINE = """\"{model}\": PriceRates(
 
 @pytest.fixture
 def provider_plugin() -> Generator[Callable[..., None], None, None]:
-    """Write a fixture provider.py + enable config, and give the test an empty catalog slot."""
+    """Write fixture provider declarations for an explicit catalog build."""
     # Tests share one session AVA_HOME — remove anything this test created so
     # a later test's loader scan cannot see leftover plugin dirs.
-    created: list[Path] = []
+    plugin_root = paths.plugins_dir()
+    plugin_root.mkdir(parents=True, exist_ok=True)
+    original = set(plugin_root.iterdir())
 
     def _write(
         prefix: str = "testp-",
@@ -87,7 +85,6 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     ) -> None:
         plugin_dir = paths.plugins_dir() / dir_name
         plugin_dir.mkdir(parents=True, exist_ok=True)
-        created.append(plugin_dir)
         models = (
             _MODEL_LINE.format(
                 model=model,
@@ -115,10 +112,10 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         # empty stub here; it contributes nothing agent-side).
         (plugin_dir / "plugin.py").write_text("# provider plugin stub")
 
-    with use_catalog(None):
+    try:
         yield _write
-
-    for d in created:
-        shutil.rmtree(d, ignore_errors=True)
-    cfg = paths.ava_home() / "plugins_config.json"
-    cfg.unlink(missing_ok=True)
+    finally:
+        for directory in set(plugin_root.iterdir()) - original:
+            shutil.rmtree(directory)
+        cfg = paths.ava_home() / "plugins_config.json"
+        cfg.unlink(missing_ok=True)

@@ -10,12 +10,12 @@ tags:
 
 # Language Model Provider Layer
 
-`base/lm/` — provider-neutral contracts above LangChain, below the agent kernel. Core registers no providers or chat models; enabled plugins own every chat binding and model fact. The repository's eight `lm_*` plugins are enabled by default. Mechanics: [[base/lm/docs/provider-plugins.ava.okf.md]]; design: [model-providers-as-plugins](model-providers-as-plugins.md).
+`base/lm/` — provider-neutral contracts above LangChain, below the agent kernel. Core registers no providers or chat models; enabled plugins own every chat binding and model fact. The repository's eight `lm_*` plugins are enabled by default. Mechanics: [[base/lm/docs/provider-plugins.ava.okf.md]]; design: [model-providers-as-plugins](../model-providers-as-plugins.md).
 
 ## Core Responsibilities
 
 ### factory (`factory.py`)
-`build_chat_model(model)` dispatches through plugin-owned prefix bindings:
+`build_chat_model(model, *, catalog, llm_override, overrides)` dispatches through plugin-owned prefix bindings:
 
 | Prefix | LangChain Class | Key Env |
 |---|---|---|
@@ -28,10 +28,10 @@ tags:
 | `glm-` | ReasoningContentChatModel (Zhipu) | GLM_API_KEY |
 | `qwen` | ReasoningContentChatModel (Alibaba) | DASHSCOPE_API_KEY + `AVA_DASHSCOPE_BASE_URL` |
 
-- `base/lm/catalog.py:ModelCatalog` is an immutable value built from the enabled plugins (`plugin_providers.model_catalog()`). A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
+- `base/lm/catalog.py:ModelCatalog` is an immutable value built from the enabled plugins (`plugin_providers.build_model_catalog()`). A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
 - `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered, explicit effort supported, and key configured, else 400. Effort is validated exactly, never translated to a nearby grade.
 - [[base/lm/docs/model-configuration.ava.okf.md]] — effective agent model validation.
-- Gateway lifespan loads providers; zero bindings raises before the once flag, so a corrected config is retryable.
+- Gateway lifespan builds and retains its catalog; zero bindings rejects boot, and a fresh construction can retry corrected configuration.
 - [[media-capabilities.ava.okf.md]] — per-model media resolution and attachment packing.
 - `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped. Factories receive `factory(model, *, agent_id)`; None means a non-agent caller. Use the argument, not a host SDK binding.
 - `thinking: ThinkingConfig | None` — `TypedDict` for Anthropic extended-thinking (`{"type":"disabled"}`/`{"type":"enabled","budget_tokens":N}`); gemini-*/gpt-* read only `type`, mirroring on/off to reasoning toggles.
@@ -44,19 +44,17 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - `extract_reasoning_tokens()` — `usage_metadata.output_token_details` preferred, else char estimates.
 
 ### stop classification (`stop.py`)
-- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; plugin bindings declare four client-class keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; an unregistered provider key fails.
+- `classify_stop(..., stops=catalog.stops)` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; plugin bindings declare four client-class keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; an unregistered provider key fails.
 
 ### billing (`pricing/billing.py` + `pricing/__init__.py` + `pricing_catalog_archive.json`) — [[pricing.ava.okf.md]]
-- `pricing/billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension. Agent and birth-lineage usage is queried independently of task records. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites only provide the response and usage kind.
+- `pricing/billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension. Agent and birth-lineage usage is queried independently of task records. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites provide the response, usage kind and their explicit catalog.
 - Plugin `PriceRates` are the live chat source and carry full history, tiers, windows, and future periods. The archive is their reconciliation ledger, live only for catalog-only services; `pricing_catalog.json` is an empty shell. `quote()` returns rates and cost atomically; both sources share the child node's parser and selector.
 
 ### durable usage — [[usage.ava.okf.md]]
 
 ### provider errors — [[provider-errors.ava.okf.md]]
 
-### context budget (`context_budget.py`)
-- `resolve_context_budget(model, overrides=None)` → `ContextBudget(max_context_tokens, soft_compact_tokens, hard_compact_tokens)`: hard = `min(auto_compact_fraction × window, auto_compact_ceiling_tokens)`; soft = `compact_reminder_fraction × window` (scaled down when the ceiling bites). One flat rule for the whole roster — soft 30% / hard 40% of each model's own window (`DEFAULT_TUNING` 0.3/0.4, ceiling 0 = no cap, no per-model compact override), per-agent overridable (the agent passes its slices' `overrides`, which `resolve_setting` takes as the explicit layer; the stream timeouts, reasoning effort and thinking budget resolve the same way); registry entry ⇒ correct thresholds, no parallel table. Unregistered models raise `UnknownModelWindowError` (compact hook bubbles it; gateway display degrades to 0/0/0).
-- `latest_input_tokens(messages)` → `input_tokens` from the latest AIMessage with `usage_metadata` (provider's true occupancy), `None` if absent (first turn/post-compact). Shared by compact trigger (`agent/hooks/compact.py`, Option Y) and token-usage endpoint — one unit for gauge/scale/trigger.
+### context budget — [[base/lm/docs/lm/context-budget.ava.okf.md]]
 
 ### provider plugins
 - [[base/lm/docs/provider-plugins.ava.okf.md]] — plugin binding and `key_env`

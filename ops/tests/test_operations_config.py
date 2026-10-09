@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from base.config import get_config_metadata
+from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env import runtime_config
 from ops import host_config as ops
@@ -25,15 +26,15 @@ from ops.host_config import config_audit_read_op, config_read_op, config_write_o
 
 
 @pytest.fixture
-def isolated_host_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def isolated_host_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect runtime_config._ava_home to a fresh per-test tmp dir.
 
     Tests that read/write this machine's .env pin `runtime_config._ava_home`
     directly, so the `.env` they touch is this tmp dir's whatever else the test
     does with `AVA_HOME`.
     """
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
-    return tmp_path
+    monkeypatch.setattr(runtime_config, "_ava_home", lambda: unit_home)
+    return unit_home
 
 
 # ---------------------------------------------------------------------------
@@ -41,18 +42,24 @@ def isolated_host_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _host_field_names() -> list[str]:
-    return [m.name for m in get_config_metadata() if m.scope == "host"]
+def _host_field_names(*, config_authority: ConfigAuthority) -> list[str]:
+    return [m.name for m in get_config_metadata(authority=config_authority) if m.scope == "host"]
 
 
-def _sensitive_host_field_names() -> list[str]:
-    return [m.name for m in get_config_metadata() if m.scope == "host" and m.sensitive]
+def _sensitive_host_field_names(*, config_authority: ConfigAuthority) -> list[str]:
+    return [
+        m.name
+        for m in get_config_metadata(authority=config_authority)
+        if m.scope == "host" and m.sensitive
+    ]
 
 
 _SYNTHETIC_SENSITIVE_HOST = "__test_sensitive_host__"
 
 
-def _inject_sensitive_host_field(monkeypatch: pytest.MonkeyPatch) -> str:
+def _inject_sensitive_host_field(
+    monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
+) -> str:
     """Make the masking path actually reachable.
 
     No real host-scope field is sensitive today — every sensitive field is
@@ -65,7 +72,7 @@ def _inject_sensitive_host_field(monkeypatch: pytest.MonkeyPatch) -> str:
     """
     from base.config import ConfigFieldMeta
 
-    metas = get_config_metadata()
+    metas = get_config_metadata(authority=config_authority)
     field = ConfigFieldMeta(
         name=_SYNTHETIC_SENSITIVE_HOST,
         field_type="str",
@@ -82,7 +89,12 @@ def _inject_sensitive_host_field(monkeypatch: pytest.MonkeyPatch) -> str:
         remote_writable=True,
         per_agent=False,
     )
-    monkeypatch.setattr(ops, "get_config_metadata", lambda: [*metas, field])
+
+    def _metadata(*, authority: ConfigAuthority):
+        assert authority is config_authority
+        return [*metas, field]
+
+    monkeypatch.setattr(ops, "get_config_metadata", _metadata)
     return _SYNTHETIC_SENSITIVE_HOST
 
 
@@ -92,46 +104,48 @@ def _inject_sensitive_host_field(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 def test_config_read_op_returns_all_host_fields(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """config_read_op returns one entry per host-scope field."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = config_read_op()
-    host_names = set(_host_field_names())
+    result = config_read_op(authority=config_authority)
+    host_names = set(_host_field_names(config_authority=config_authority))
     assert host_names == set(result.host_fields.keys())
 
 
 def test_config_read_op_sensitive_field_masked(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """Sensitive field values are replaced with the mask string."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     # The masking path is dead code without a sensitive host-scope field —
     # inject one (see the helper) instead of skipping/failing on the empty
     # real-world list.
-    name = _inject_sensitive_host_field(monkeypatch)
-    result = config_read_op()
+    name = _inject_sensitive_host_field(monkeypatch, config_authority=config_authority)
+    result = config_read_op(authority=config_authority)
     entry = result.host_fields[name]
     assert entry.value == "••••••••", f"{name} should be masked but got {entry.value!r}"
 
 
 def test_config_read_op_overridden_flag_reflects_local_file(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """'overridden' is True for a field present in the local runtime_config.json."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     # Set ops_concurrency in this machine's .env
     runtime_config.write_fields({"ops_concurrency": 7}, set())
-    result = config_read_op()
+    result = config_read_op(authority=config_authority)
     assert result.host_fields["ops_concurrency"].overridden is True
     # A field not in the local file should not be marked overridden
-    not_overridden = [n for n in _host_field_names() if n != "ops_concurrency"]
+    not_overridden = [
+        n for n in _host_field_names(config_authority=config_authority) if n != "ops_concurrency"
+    ]
     for name in not_overridden:
         assert result.host_fields[name].overridden is False, f"{name} should not be overridden"
 
 
 def test_config_read_op_can_enable_for_browser_enabled(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """browser_enabled has a read-time capability hint — can_enable is bool, not None."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
@@ -143,7 +157,7 @@ def test_config_read_op_can_enable_for_browser_enabled(
             config_validators.ValidationResult(ok=True) if name == "browser_enabled" else None
         ),
     )
-    result = config_read_op()
+    result = config_read_op(authority=config_authority)
     entry = result.host_fields["browser_enabled"]
     assert isinstance(entry.can_enable, bool)
     assert entry.can_enable is True
@@ -151,7 +165,7 @@ def test_config_read_op_can_enable_for_browser_enabled(
 
 
 def test_config_read_op_can_enable_false_carries_reason(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """When read_time_capability returns ok=False the reason is propagated."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
@@ -164,18 +178,18 @@ def test_config_read_op_can_enable_false_carries_reason(
             else None
         ),
     )
-    result = config_read_op()
+    result = config_read_op(authority=config_authority)
     entry = result.host_fields["browser_enabled"]
     assert entry.can_enable is False
     assert entry.reason == "no display detected"
 
 
 def test_config_read_op_non_gated_field_has_null_can_enable(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """Fields with no static read-time gate get can_enable=None, reason=None."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = config_read_op()
+    result = config_read_op(authority=config_authority)
     # machine_description has no entry in VALIDATORS and no read_time_capability
     entry = result.host_fields["machine_description"]
     assert entry.can_enable is None
@@ -183,31 +197,32 @@ def test_config_read_op_non_gated_field_has_null_can_enable(
 
 
 def test_config_read_op_raw_overrides_omits_sensitive(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """raw_overrides omits keys that are sensitive host fields."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    name = _inject_sensitive_host_field(monkeypatch)
+    name = _inject_sensitive_host_field(monkeypatch, config_authority=config_authority)
+
     # The synthetic field cannot go through write_fields (not in the alias
     # map) — inject the .env-override premise directly; the assertion under
     # test is config_read_op's sensitive-filtering of raw_overrides.
-    monkeypatch.setattr(
-        ops,
-        "env_override_values",
-        lambda: {name: "secret-val", "ops_concurrency": 3},
-    )
-    result = config_read_op()
+    def _overrides(*, authority: ConfigAuthority):
+        assert authority is config_authority
+        return {name: "secret-val", "ops_concurrency": 3}
+
+    monkeypatch.setattr(ops, "env_override_values", _overrides)
+    result = config_read_op(authority=config_authority)
     raw = result.raw_overrides
     assert name not in raw, f"sensitive field {name} must be omitted from raw_overrides"
     assert raw.get("ops_concurrency") == 3
 
 
 def test_config_read_op_machine_name_in_result(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """Result includes the machine name from machine_name()."""
     monkeypatch.setattr(ops, "machine_name", lambda: "my-host")
-    result = config_read_op()
+    result = config_read_op(authority=config_authority)
     assert result.machine == "my-host"
 
 
@@ -217,49 +232,51 @@ def test_config_read_op_machine_name_in_result(
 
 
 def test_config_write_op_rejects_unknown_field(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """An unknown field name returns ok=False with reason='unknown field'."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = config_write_op({"totally_unknown_field": 42})
+    result = config_write_op({"totally_unknown_field": 42}, authority=config_authority)
     assert result.applied is False
     assert result.results["totally_unknown_field"].ok is False
     assert "unknown field" in (result.results["totally_unknown_field"].reason or "")
 
 
 def test_config_write_op_rejects_non_host_field(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """A cluster-scope field is rejected with reason='not a host-scope field'."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = config_write_op({"llm_model": "something"})
+    result = config_write_op({"llm_model": "something"}, authority=config_authority)
     assert result.applied is False
     assert result.results["llm_model"].ok is False
     assert "host-scope" in (result.results["llm_model"].reason or "")
 
 
 def test_config_write_op_rejects_non_remote_writable(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """A host field with remote_writable=False is rejected."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     # Find a host-scope field that is NOT remote_writable
     non_writable = [
-        m.name for m in get_config_metadata() if m.scope == "host" and not m.remote_writable
+        m.name
+        for m in get_config_metadata(authority=config_authority)
+        if m.scope == "host" and not m.remote_writable
     ]
     if not non_writable:
         raise AssertionError(
             "all host fields are remote_writable — the non-remote-writable "
             "rejection path is no longer exercised (config changed)"
         )
-    result = config_write_op({non_writable[0]: "any-value"})
+    result = config_write_op({non_writable[0]: "any-value"}, authority=config_authority)
     assert result.applied is False
     assert result.results[non_writable[0]].ok is False
     assert "not remotely editable" in (result.results[non_writable[0]].reason or "")
 
 
 def test_config_write_op_local_accepts_writable_host_field(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """A writable-but-not-remote_writable host field (a capability field) is editable
     on a local (self) write — `writable` means a human may edit it on its own host."""
@@ -269,18 +286,20 @@ def test_config_write_op_local_accepts_writable_host_field(
         "validate",
         lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    result = config_write_op({"cross_machine_transfer_backend": "none"}, local=True)
+    result = config_write_op(
+        {"cross_machine_transfer_backend": "none"}, local=True, authority=config_authority
+    )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"cross_machine_transfer_backend"}
 
 
 def test_config_write_op_remote_rejects_writable_only_host_field(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """The same field is rejected on a remote write (local defaults False) — the
     gateway may not edit a remote host's non-remote_writable field."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = config_write_op({"cross_machine_transfer_backend": "none"})
+    result = config_write_op({"cross_machine_transfer_backend": "none"}, authority=config_authority)
     assert result.applied is False
     assert "not remotely editable" in (
         result.results["cross_machine_transfer_backend"].reason or ""
@@ -288,44 +307,48 @@ def test_config_write_op_remote_rejects_writable_only_host_field(
 
 
 def test_config_write_op_rejects_failing_validator(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """A value that fails the field validator is rejected."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     # ops_concurrency must be int in [1, 64] — 0 should fail
-    result = config_write_op({"ops_concurrency": 0})
+    result = config_write_op({"ops_concurrency": 0}, authority=config_authority)
     assert result.applied is False
     assert result.results["ops_concurrency"].ok is False
     assert result.results["ops_concurrency"].reason is not None
 
 
 def test_config_write_op_rejects_unknown_transfer_backend(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """The backend selector is a closed set: a typo (or a stale value from a
     removed option) is rejected at write time, never persisted to .env."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = config_write_op({"cross_machine_transfer_backend": "scp"}, local=True)
+    result = config_write_op(
+        {"cross_machine_transfer_backend": "scp"}, local=True, authority=config_authority
+    )
     assert result.applied is False
     assert result.results["cross_machine_transfer_backend"].ok is False
     assert "must be one of" in (result.results["cross_machine_transfer_backend"].reason or "")
 
 
 def test_config_write_op_atomic_one_bad_writes_nothing(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """Atomic: one bad field + one good field -> nothing written, applied=False."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     # One body mixing a failing field (ops_concurrency out of range) with a
     # passing one (machine_description free text) must write neither — atomicity.
-    result = config_write_op({"ops_concurrency": 0, "machine_description": "ok"})
+    result = config_write_op(
+        {"ops_concurrency": 0, "machine_description": "ok"}, authority=config_authority
+    )
     assert result.applied is False
     # Nothing should be written to .env
     assert runtime_config.read_env_aliases() == {}
 
 
 def test_config_write_op_all_good_writes_file(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """A fully-valid body writes the local file and returns applied=True."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
@@ -334,14 +357,16 @@ def test_config_write_op_all_good_writes_file(
         "validate",
         lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    result = config_write_op({"ops_concurrency": 4, "machine_description": "test"})
+    result = config_write_op(
+        {"ops_concurrency": 4, "machine_description": "test"}, authority=config_authority
+    )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
     assert runtime_config.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_config_write_op_none_unsets_field(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """Reducer semantics: a field mapped to None is unset (reverts to default)."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
@@ -350,17 +375,17 @@ def test_config_write_op_none_unsets_field(
         "validate",
         lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
+    config_write_op({"ops_concurrency": 4, "machine_description": "hi"}, authority=config_authority)
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
     # Explicit None unsets machine_description; ops_concurrency is untouched.
-    result = config_write_op({"machine_description": None})
+    result = config_write_op({"machine_description": None}, authority=config_authority)
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency"}
     assert runtime_config.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_config_write_op_absent_key_left_untouched(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """Reducer semantics: a key ABSENT from the patch is left as-is. A partial
     write never unsets a field it didn't name — the full-replace footgun that
@@ -371,16 +396,16 @@ def test_config_write_op_absent_key_left_untouched(
         "validate",
         lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
+    config_write_op({"ops_concurrency": 4, "machine_description": "hi"}, authority=config_authority)
     # A patch touching only ops_concurrency must NOT drop machine_description.
-    result = config_write_op({"ops_concurrency": 5})
+    result = config_write_op({"ops_concurrency": 5}, authority=config_authority)
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
     assert runtime_config.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "5"
 
 
 def test_config_write_op_empty_patch_is_noop(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """An empty patch touches nothing — it does not unset previously-set fields."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
@@ -389,14 +414,14 @@ def test_config_write_op_empty_patch_is_noop(
         "validate",
         lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    config_write_op({"ops_concurrency": 4})
-    result = config_write_op({})
+    config_write_op({"ops_concurrency": 4}, authority=config_authority)
+    result = config_write_op({}, authority=config_authority)
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency"}
 
 
 def test_config_write_op_does_not_disturb_non_managed_env(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """A write touches only the fields named in the patch — a connection value
     the first start wrote into .env (e.g. AVA_DB_URL) is left alone even when a
@@ -408,14 +433,16 @@ def test_config_write_op_does_not_disturb_non_managed_env(
         lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     isolated_host_home.joinpath(".env").write_text("AVA_DB_URL=postgresql://x@127.0.0.1:1/x\n")
-    config_write_op({"ops_concurrency": 4})
-    config_write_op({"ops_concurrency": None})  # explicit unset must not touch AVA_DB_URL
+    config_write_op({"ops_concurrency": 4}, authority=config_authority)
+    config_write_op(
+        {"ops_concurrency": None}, authority=config_authority
+    )  # explicit unset must not touch AVA_DB_URL
     assert runtime_config.read_env_aliases()["AVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
     assert "AVA_OPS_CONCURRENCY" not in runtime_config.read_env_aliases()
 
 
 def test_config_write_op_restart_required_union(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """restart_required is the sorted union over written fields' restart_required values."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
@@ -424,10 +451,12 @@ def test_config_write_op_restart_required_union(
         "validate",
         lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    result = config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
+    result = config_write_op(
+        {"ops_concurrency": 4, "machine_description": "hi"}, authority=config_authority
+    )
     assert result.applied is True
     # ops_concurrency.restart_required + machine_description.restart_required
-    metas = {m.name: m for m in get_config_metadata()}
+    metas = {m.name: m for m in get_config_metadata(authority=config_authority)}
     expected = sorted(
         {
             v
@@ -440,25 +469,27 @@ def test_config_write_op_restart_required_union(
 
 
 def test_config_write_op_empty_overrides_applied_no_write(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """Empty overrides dict -> applied=True, nothing written, restart_required=[]."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = config_write_op({})
+    result = config_write_op({}, authority=config_authority)
     assert result.applied is True
     assert result.restart_required == []
     assert runtime_config.read_env_aliases() == {}
 
 
 def test_config_write_op_rejects_an_invalid_candidate_without_writing(
-    isolated_host_home: Path,
+    isolated_host_home: Path, *, config_authority: ConfigAuthority
 ) -> None:
     """A value the settings model would refuse at startup is never persisted."""
     runtime_config.write_fields({"db_url": "postgresql://ava@127.0.0.1:5432/ava"}, set())
     env_path = isolated_host_home / ".env"
     before = env_path.read_bytes()
 
-    result = config_write_op({"redis_bin_dir": "relative/bin"}, local=True)
+    result = config_write_op(
+        {"redis_bin_dir": "relative/bin"}, local=True, authority=config_authority
+    )
 
     assert result.applied is False
     assert result.results["redis_bin_dir"].ok is False
@@ -468,11 +499,11 @@ def test_config_write_op_rejects_an_invalid_candidate_without_writing(
 
 
 def test_config_write_op_machine_name_in_result(
-    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """Result includes machine name from machine_name()."""
     monkeypatch.setattr(ops, "machine_name", lambda: "my-host")
-    result = config_write_op({})
+    result = config_write_op({}, authority=config_authority)
     assert result.machine == "my-host"
 
 

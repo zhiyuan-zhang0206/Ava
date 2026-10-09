@@ -39,6 +39,7 @@ from langchain_core.messages import HumanMessage
 from base.agents.history.hierarchy.generate import UNDERSTANDING_RETRY_ATTEMPTS, GenerateError
 from base.clock import Clock
 from base.lm.call import invoke_response
+from base.lm.catalog import ModelCatalog
 
 GROUP_ENGINE_VERSION = "group-0.1"
 GROUP_PROMPT_VERSION = "group-0.8"
@@ -199,6 +200,7 @@ def generate_groups(
     nodes: Sequence[OpenNode],
     *,
     model: str,
+    catalog: ModelCatalog,
     agent_id: int,
     corrections: int,
     clock: Clock,
@@ -225,6 +227,7 @@ def generate_groups(
             response = invoke_response(
                 llm,
                 messages,
+                catalog=catalog,
                 desc=f"{model}, understanding group",
                 error_type=GenerateError,
                 retry_attempts=retry_attempts,

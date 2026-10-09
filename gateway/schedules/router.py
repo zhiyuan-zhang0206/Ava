@@ -484,6 +484,8 @@ async def _draft_schedule(
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,
+        catalog=request.app.state.catalog,
+        authority=request.app.state.config_authority,
         **identity,
     )
     return ScheduleDraftResponse(agent_id=spawned.id)

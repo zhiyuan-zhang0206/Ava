@@ -22,6 +22,7 @@ from base.agents.messages.kwargs import AvaMsgType
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 def _write_png(path: Path) -> None:
@@ -38,6 +39,7 @@ def _context(model_name: str) -> AvaContext:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
 
 

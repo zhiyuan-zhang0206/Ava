@@ -17,6 +17,7 @@ from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import (
 )
 from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import _seed_agent
 from base.agents.observation.snapshot import select_one
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -24,6 +25,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     _load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ):
     """Removing the dismiss snapshot refresh leaves the inspector stale."""
     from gateway.agents import notices as notices_router
@@ -31,7 +33,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     published_awaiting: list[list[str]] = []
 
     def _capture_snapshot(_bus: object, published_agent_id: int) -> None:
-        snapshot = select_one(db_conn, published_agent_id)
+        snapshot = select_one(db_conn, published_agent_id, catalog=model_catalog)
         assert snapshot is not None
         published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
 
@@ -53,6 +55,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     _load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ):
     """Each cross-type replacement announces both consumers' new state."""
     from gateway.agents import notices as notices_router
@@ -62,7 +65,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     resolved: list[int] = []
 
     def _capture_snapshot(_bus: object, published_agent_id: int) -> None:
-        snapshot = select_one(db_conn, published_agent_id)
+        snapshot = select_one(db_conn, published_agent_id, catalog=model_catalog)
         assert snapshot is not None
         published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
 

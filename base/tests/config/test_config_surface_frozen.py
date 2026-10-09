@@ -6,9 +6,13 @@ key, or reshaped the restart_completed snapshot fails loudly here.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from base import config
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 
 # Critical aliases whose exact spelling IS the user-facing `.env` contract — a
 # rename here silently breaks every deployed `.env`, a first start's materialization, and
@@ -29,6 +33,12 @@ _FROZEN_ALIASES = {
 }
 
 
+@pytest.fixture
+def authority(tmp_path: Path) -> ConfigAuthority:
+    """Explicit boot model and config file owned by this test."""
+    return ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
+
+
 def test_env_alias_surface_is_flat_and_frozen() -> None:
     """Every field's `.env` alias is unchanged by the split: the field->alias map
     still covers exactly the field set, and the critical aliases (one per domain)
@@ -43,11 +53,11 @@ def test_env_alias_surface_is_flat_and_frozen() -> None:
     # no domain KEY (lm / data_plane / …) reaches the value surface either.
 
 
-def test_flat_dump_keys_are_leaf_names_no_domain_nesting() -> None:
+def test_flat_dump_keys_are_leaf_names_no_domain_nesting(authority: ConfigAuthority) -> None:
     """`flat_dump()` (backing the config-overlay snapshot) is keyed by leaf field
     NAME with no `lm`/`data_plane`/... domain nesting — the shape the old flat
     `settings.model_dump()` produced."""
-    dump = config.flat_dump(mode="json")
+    dump = config.flat_dump(authority, mode="json")
     assert set(dump) == config.field_names()
 
     domain_attrs = {a for a, _label, _m, _cap in config.DOMAIN_MODELS}
@@ -57,7 +67,7 @@ def test_flat_dump_keys_are_leaf_names_no_domain_nesting() -> None:
         assert name in dump
 
 
-def test_effective_config_snapshot_is_flat_framework_keys() -> None:
+def test_effective_config_snapshot_is_flat_framework_keys(authority: ConfigAuthority) -> None:
     """The `restart_completed` payload carries framework fields at the top
     level by name (no domain nesting) — the event-trail shape is byte-stable across
     the decomposition. Plugin fields are the only prefixed keys (`<plugin>.<field>`).
@@ -72,7 +82,7 @@ def test_effective_config_snapshot_is_flat_framework_keys() -> None:
     )
 
     # No plugins bound -> pure framework snapshot.
-    snap = effective_config_snapshot({})
+    snap = effective_config_snapshot({}, framework_values=authority.flat_dump())
 
     assert {
         name for name in config.field_names() if not _framework_field_is_sensitive(name)
@@ -84,14 +94,18 @@ def test_effective_config_snapshot_is_flat_framework_keys() -> None:
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_bootstrap_payload_keys_are_modeled_or_enabled_plugin_aliases() -> None:
+def test_bootstrap_payload_keys_are_modeled_or_enabled_plugin_aliases(
+    authority: ConfigAuthority, model_catalog: ModelCatalog
+) -> None:
     """Bootstrap serves Settings, enabled-provider keys and the plugin policy carrier."""
     from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
-    from base.lm.plugin_providers import model_catalog
 
-    served = config.bootstrap_config_values()
+    served = authority.bootstrap_config_values(
+        provider_key_envs=(binding.key_env for binding in model_catalog.bindings.values()),
+        plugin_cluster_config="",
+    )
     valid = {config.field_alias(name) for name in config.BOOTSTRAP_FIELDS}
-    valid |= {binding.key_env for binding in model_catalog().bindings.values()}
+    valid |= {binding.key_env for binding in model_catalog.bindings.values()}
     valid.add(PLUGIN_CLUSTER_CONFIG_ENV)
     assert set(served) <= valid
 

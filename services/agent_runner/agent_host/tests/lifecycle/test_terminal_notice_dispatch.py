@@ -7,6 +7,7 @@ import pytest
 
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.tests.test_agent_host import _host, _PendingScanPool
 
@@ -17,6 +18,7 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     held: bool,
     fails: bool,
+    model_catalog: ModelCatalog,
 ) -> None:
     from threading import Event
 
@@ -27,7 +29,12 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     )
 
     pool = _PendingScanPool([(17, False, False)])
-    host = _host(pool=pool, checkpointer=object(), graph=object())
+    host = _host(
+        pool=pool,
+        checkpointer=object(),
+        graph=object(),
+        catalog=model_catalog,
+    )
     expected = [PendingInboundWake(agent_id=17, stale=False, recovery=False)]
     monkeypatch.setattr(
         "services.agent_runner.agent_host.maintenance.pending_wakes",

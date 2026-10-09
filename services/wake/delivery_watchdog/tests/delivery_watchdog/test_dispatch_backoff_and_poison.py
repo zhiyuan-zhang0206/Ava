@@ -9,8 +9,10 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog.daemon import (
     dispatch_wakes,
     select_pending_for_dispatch,
@@ -67,8 +69,12 @@ class TestDispatchBackoffAndPoison:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         calls: list[tuple[int, str]] = []
 
@@ -94,8 +100,12 @@ class TestDispatchBackoffAndPoison:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
         def accept_publish(_db: object, _bus: object, _agent_id: int, _payload: str) -> bool:
@@ -147,8 +157,12 @@ class TestDispatchBackoffAndPoison:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
         def fail_publish(_db: object, _bus: object, *_args: object) -> bool:
@@ -169,8 +183,12 @@ class TestDispatchBackoffAndPoison:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
         def publish_and_claim(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
@@ -197,8 +215,12 @@ class TestDispatchBackoffAndPoison:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
         def accept_publish(_db: object, _bus: object, _agent_id: int, _payload: str) -> bool:
@@ -249,8 +271,12 @@ class TestDispatchBackoffAndPoison:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -278,8 +304,12 @@ class TestDispatchBackoffAndPoison:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -317,8 +347,12 @@ class TestDispatchBackoffAndPoison:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         calls: list[tuple[int, str]] = []
 
@@ -350,8 +384,12 @@ class TestSelectPendingIds:
         pool: ConnectionPool,
         database: Database,
         event_bus: EventBus,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = insert_inbound_message(
             db_conn, aid, "hi", source="user", bus=event_bus, database=database
         )
@@ -375,11 +413,17 @@ class TestDeadLetterStaleClaimed:
     (Task #654)."""
 
     def test_old_claimed_of_terminated_owner_dead_lettered(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_claimed_row(db_conn, aid, claim_age_s=2 * 86400)
 
         assert dead_letter_stale_claimed(pool, 86400.0, 7200.0) == 1
@@ -388,14 +432,20 @@ class TestDeadLetterStaleClaimed:
             assert cur.fetchone() == ("done",)
 
     def test_fresh_claimed_of_terminated_owner_untouched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A young claim keeps the two-phase guarantee: if the agent is
         resurrected, boot reconcile still resets it to 'pending' for
         re-delivery (crash recovery)."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_claimed_row(db_conn, aid, claim_age_s=60)
 
         assert dead_letter_stale_claimed(pool, 86400.0, 7200.0) == 0
@@ -404,16 +454,26 @@ class TestDeadLetterStaleClaimed:
             assert cur.fetchone() == ("claimed",)
 
     def test_claimed_of_idling_and_running_owners_use_distinct_thresholds(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Idling claims age out, while fresh idling and running claims stay."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
 
-        stale_idling = _make_idling_agent(db_conn)
+        stale_idling = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         stale_idling_row = _insert_claimed_row(db_conn, stale_idling, claim_age_s=7201)
-        fresh_idling = _make_idling_agent(db_conn)
+        fresh_idling = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         fresh_idling_row = _insert_claimed_row(db_conn, fresh_idling, claim_age_s=3600)
-        running = _make_running_agent(db_conn)
+        running = _make_running_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         running_row = _insert_claimed_row(db_conn, running, claim_age_s=10 * 86400)
 
         assert dead_letter_stale_claimed(pool, 86400.0, 7200.0) == 1
@@ -429,14 +489,20 @@ class TestDeadLetterStaleClaimed:
             }
 
     def test_null_claimed_at_falls_back_to_created_at(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Rows claimed before the claimed_at column existed (2026-08-02) carry
         NULL claimed_at; created_at is the only age evidence, and it is stale
         by now — they must still be dead-lettered, not immortal."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         old = _insert_claimed_row(db_conn, aid, claim_age_s=None, created_age_s=10 * 86400)
         fresh = _insert_claimed_row(db_conn, aid, claim_age_s=None, created_age_s=60)
 
@@ -451,11 +517,17 @@ class TestDeadLetterStaleClaimed:
 
 class TestDeadLetterStalePendingResurrects:
     def test_only_old_pending_resurrects_are_dead_lettered(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_resurrects
 
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         old = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400)
         fresh = _insert_pending_resurrect_row(db_conn, aid, age_s=60)
         claimed = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, status="claimed")
@@ -482,11 +554,17 @@ class TestDeadLetterStalePendingResurrects:
 
 class TestDeadLetterStalePendingTerminated:
     def test_old_lifecycle_rows_of_terminated_owner_are_dead_lettered(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         rows = {
             _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind=kind)
             for kind in ("terminate", "system_note", "restart_completed")
@@ -504,11 +582,17 @@ class TestDeadLetterStalePendingTerminated:
             )
 
     def test_old_pending_chat_of_terminated_owner_is_untouched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         row = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
 
         assert dead_letter_stale_pending_terminated(pool, 86400.0) == 0
@@ -517,11 +601,17 @@ class TestDeadLetterStalePendingTerminated:
             assert cur.fetchone() == ("pending", None)
 
     def test_fresh_lifecycle_rows_of_terminated_owner_are_untouched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         rows = [
             _insert_pending_resurrect_row(db_conn, aid, age_s=60, kind=kind)
             for kind in ("terminate", "system_note", "restart_completed")
@@ -536,11 +626,17 @@ class TestDeadLetterStalePendingTerminated:
             assert dict(cur.fetchall()) == dict.fromkeys(rows, "pending")
 
     def test_old_lifecycle_rows_of_live_owner_are_untouched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
 
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         rows = [
             _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind=kind)
             for kind in ("terminate", "system_note", "restart_completed")
@@ -557,13 +653,19 @@ class TestDeadLetterStalePendingTerminated:
 
 class TestDeadLetterStalePendingChats:
     def test_old_pending_chat_of_terminated_owner_is_dead_lettered(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Issue #2049: a chat that never claimed its terminated owner is
         archived once past the threshold instead of resurrecting it forever."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_chats
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         row = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
 
         assert dead_letter_stale_pending_chats(pool, 86400.0) == 1
@@ -575,13 +677,19 @@ class TestDeadLetterStalePendingChats:
             assert cur.fetchone() == ("done", True)
 
     def test_fresh_pending_chat_of_terminated_owner_is_untouched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A recent pending chat is still a live resurrect candidate — the G4
         retry window must stay open until the threshold closes it."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_chats
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         row = _insert_pending_resurrect_row(db_conn, aid, age_s=60, kind="chat")
 
         assert dead_letter_stale_pending_chats(pool, 86400.0) == 0
@@ -590,13 +698,19 @@ class TestDeadLetterStalePendingChats:
             assert cur.fetchone() == ("pending", None)
 
     def test_old_pending_chat_of_live_owner_is_untouched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Live owners keep their pending chats: only terminated owners have no
         consumer, so the sweep never touches idling/running queues."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_chats
 
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         row = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
 
         assert dead_letter_stale_pending_chats(pool, 86400.0) == 0
@@ -605,12 +719,18 @@ class TestDeadLetterStalePendingChats:
             assert cur.fetchone() == ("pending",)
 
     def test_old_non_chat_pending_row_is_untouched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Lifecycle kinds keep their own sweep; this one is chat-only."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_chats
 
-        aid = _make_terminated_agent(db_conn)
+        aid = _make_terminated_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         row = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="terminate")
 
         assert dead_letter_stale_pending_chats(pool, 86400.0) == 0

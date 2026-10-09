@@ -77,6 +77,7 @@ def get_run_timeline_context(
             view.segments[found.session],
             found.idx - start,
         ),
+        catalog=request.app.state.catalog,
     )
     return RunTimelineContext(
         **breakdown.model_dump(),

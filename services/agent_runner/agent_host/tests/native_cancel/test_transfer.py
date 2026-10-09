@@ -26,6 +26,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
+from base.lm.catalog import ModelCatalog
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
@@ -74,6 +75,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
     monkeypatch: pytest.MonkeyPatch,
     hops: int,
     database: Database,
+    model_catalog: ModelCatalog,
 ) -> None:
     pool: ConnectionPool
     agent = _agent(db_conn)
@@ -179,6 +181,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
             config,
             replies,
             expected_first=[],
+            model_catalog=model_catalog,
         )
     finally:
         await _reap_child(child)
@@ -213,6 +216,7 @@ async def test_actual_force_observation_then_admission_recovered_stop(
         config,
         replies,
         expected_first=["continued"],
+        model_catalog=model_catalog,
     )
 
 
@@ -227,6 +231,7 @@ async def _assert_successor_turns(
     replies: list[str],
     *,
     expected_first: list[str],
+    model_catalog: ModelCatalog,
 ) -> None:
     receipt = db_conn.execute(
         "SELECT checkpoint_id,recovery_checkpoint_id FROM native_cancel_commands WHERE work_id=%s",
@@ -243,6 +248,7 @@ async def _assert_successor_turns(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
@@ -250,6 +256,7 @@ async def _assert_successor_turns(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     outcome = await host._invoke_until_done(
         target.agent_id,

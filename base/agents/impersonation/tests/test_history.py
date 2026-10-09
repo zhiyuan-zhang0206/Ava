@@ -13,6 +13,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -33,7 +34,9 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
     return incarnation
 
 
-def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
+def start(
+    owner: RuntimeIncarnation, *, authority: ConfigAuthority, active: bool = True
+) -> dict[str, Any]:
     result = sessions.request(
         Database.from_settings(),
         EventBus.from_settings(),
@@ -43,6 +46,7 @@ def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
         provider="codex",
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
+        authority=authority,
     )
     lease = history.resolve(Database.from_settings(), owner.agent_id, result["session_id"])
     if active:
@@ -64,18 +68,20 @@ def test_numbers_are_agent_scoped_and_permanent(
     owner: RuntimeIncarnation,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
-    first = start(owner)
+    first = start(owner, authority=config_authority)
     assert first["session_id"] == 0
     leases.release(database, event_bus, str(first["id"]), attested_caller(first), "First result")
     with pytest.raises(leases.ImpersonationError, match="already has"):
-        start(owner)
+        start(owner, authority=config_authority)
     # Simulate the native checkpoint receipt, then a second session.
     db_conn.execute(
         "UPDATE agent_impersonations SET handoff_applied_at=now() WHERE id=%s", (first["id"],)
     )
     db_conn.commit()
-    second = start(owner)
+    second = start(owner, authority=config_authority)
     assert second["session_id"] == 1
     assert [s["id"] for s in sessions.list_sessions(database, owner.agent_id)] == [1, 0]
     assert sessions.list_sessions(database, owner.agent_id, before=1)[0]["id"] == 0
@@ -88,7 +94,7 @@ def test_numbers_are_agent_scoped_and_permanent(
         (other_agent, machine_name(), other_owner.generation, other_owner.owner),
     )
     db_conn.commit()
-    assert start(other_owner, active=False)["session_id"] == 0
+    assert start(other_owner, active=False, authority=config_authority)["session_id"] == 0
     assert "token_hash" not in sessions.list_sessions(database, owner.agent_id)[0]
     with (
         db_conn.transaction(force_rollback=True),
@@ -97,10 +103,12 @@ def test_numbers_are_agent_scoped_and_permanent(
         db_conn.execute("DELETE FROM agent_impersonations WHERE id=%s", (first["id"],))
 
 
-def test_concurrent_requests_cannot_share_control(owner: RuntimeIncarnation) -> None:
+def test_concurrent_requests_cannot_share_control(
+    owner: RuntimeIncarnation, *, config_authority: ConfigAuthority
+) -> None:
     def attempt(_index: int) -> int | None:
         try:
-            return start(owner, active=False)["session_id"]
+            return start(owner, active=False, authority=config_authority)["session_id"]
         except leases.ImpersonationError:
             return None
 
@@ -117,12 +125,14 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     def workspace_for_agent(_agent_id: int) -> Path:
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    lease = start(owner)
+    lease = start(owner, authority=config_authority)
     inbound = insert_inbound_message(
         db_conn, owner.agent_id, "Please fix login", source="user", bus=event_bus, database=database
     )
@@ -193,10 +203,12 @@ def test_legacy_empty_events_never_certify_a_zero_call_claim(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A NULL protocol version is never inferred to be an empty manifest."""
     request_legacy_leases(monkeypatch)
-    lease = start(owner)
+    lease = start(owner, authority=config_authority)
     leases.release(
         database, event_bus, str(lease["id"]), attested_caller(lease), "SDK sampling was enabled"
     )
@@ -224,6 +236,8 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """An upgrade retry exports the v2 fields the resumption note requires."""
     request_legacy_leases(monkeypatch)
@@ -233,7 +247,7 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    lease = start(owner)
+    lease = start(owner, authority=config_authority)
     leases.release(database, event_bus, str(lease["id"]), attested_caller(lease), "Done")
     db_conn.execute(
         "UPDATE agent_impersonations SET handoff_document=%s WHERE id=%s",
@@ -252,8 +266,10 @@ def test_message_retry_does_not_replace_newer_preview(
     owner: RuntimeIncarnation,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
-    lease = start(owner)
+    lease = start(owner, authority=config_authority)
     history.say(
         database, event_bus, str(lease["id"]), attested_caller(lease), "First", message_key="first"
     )
@@ -278,6 +294,8 @@ def test_public_session_exposes_handoff_applied_at(
     owner: RuntimeIncarnation,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """INC-927 closure read-face: the applied receipt must be visible.
 
@@ -286,7 +304,7 @@ def test_public_session_exposes_handoff_applied_at(
     output with `.get(...)` saw the missing key as an unapplied handoff while
     the column held a value.
     """
-    lease = start(owner)
+    lease = start(owner, authority=config_authority)
     leases.release(database, event_bus, str(lease["id"]), attested_caller(lease), "Done")
     db_conn.execute(
         "UPDATE agent_impersonations SET handoff_applied_at=now() WHERE id=%s", (lease["id"],)

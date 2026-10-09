@@ -23,11 +23,9 @@ def _load_script() -> Any:
     module: Any = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    # `check_sources` loads the host's provider plugins; these tests drive every
-    # comparison with a registry of their own, so keep the suite independent of
-    # the machine's plugin configuration. The load path itself is covered by
-    # test_check_sources_compares_against_the_provider_catalog.
-    module.model_catalog = lambda: SimpleNamespace(models={})
+    # The CLI composition root builds a catalog. These tests replace that
+    # constructor with an explicit test-owned comparison registry.
+    module.build_model_catalog = lambda: SimpleNamespace(models={})
     return module
 
 
@@ -45,7 +43,7 @@ def _write_env_file(tracker: Any, path: Path, *, missing: str | None = None) -> 
 def _known_models(tracker: Any, source: Any) -> list[str]:
     return [
         model_id
-        for model_id, spec in tracker.model_catalog().models.items()
+        for model_id, spec in tracker.build_model_catalog().models.items()
         if spec.provider == source.provider
     ][:1]
 
@@ -321,7 +319,7 @@ def test_check_sources_compares_against_the_provider_catalog(
 
     monkeypatch.setattr(
         tracker,
-        "model_catalog",
+        "build_model_catalog",
         lambda: SimpleNamespace(models={"gemini-3.5-flash-lite": registered}),
     )
     monkeypatch.setattr(
@@ -333,7 +331,11 @@ def test_check_sources_compares_against_the_provider_catalog(
     _write_env_file(tracker, env_file)
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
 
-    reports = tracker.check_sources(tracker._read_env_file(env_file), {"providers": {}})
+    reports = tracker.check_sources(
+        tracker._read_env_file(env_file),
+        {"providers": {}},
+        models=tracker.build_model_catalog().models,
+    )
 
     assert reports["gemini"].candidates == ["gemini-3.6-flash-lite"]
 

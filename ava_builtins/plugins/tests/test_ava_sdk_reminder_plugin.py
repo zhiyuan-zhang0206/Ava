@@ -44,7 +44,7 @@ def _pin_compact_budget(
         soft_compact_tokens=soft_tokens,
         hard_compact_tokens=hard_tokens,
     )
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_: budget)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_, **_kw: budget)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture

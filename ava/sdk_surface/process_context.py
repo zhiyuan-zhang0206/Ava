@@ -100,6 +100,8 @@ def launched_context() -> AvaContext | None:
 
     The SDK entry rejects shared-host startup posture before calling this.
     This function never infers identity from a native turn.
+    Identity binding precedes plugin installation; the execution root attaches
+    its catalog after that installation completes.
     """
     raw = os.environ.get("AVA_AGENT_ID")  # env-ok: launched script identity channel
     if raw is None:

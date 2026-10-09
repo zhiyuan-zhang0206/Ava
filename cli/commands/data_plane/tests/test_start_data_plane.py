@@ -201,7 +201,7 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
         calls.append(f"prepare:{conn}:{dim}")
 
     monkeypatch.setattr(pgvector, "prepare_table", prepare)
-    monkeypatch.setattr(factory, "get_provider", lambda: SimpleNamespace(dim=3072))
+    monkeypatch.setattr(factory, "get_descriptor", lambda: SimpleNamespace(dim=3072))
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
     prepare_memory_vectors()
@@ -237,7 +237,7 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
     patch_database(monkeypatch, connect=provider)
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: pytest.fail("no local admin"))
     monkeypatch.setattr(pgvector, "prepare_table", prepare)
-    monkeypatch.setattr(factory, "get_provider", lambda: SimpleNamespace(dim=768))
+    monkeypatch.setattr(factory, "get_descriptor", lambda: SimpleNamespace(dim=768))
 
     prepare_memory_vectors()
 

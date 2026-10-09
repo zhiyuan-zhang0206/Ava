@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+
+from base import config
+from base.config.service_read import ConfigAuthority
+
+
+@pytest.fixture
+def authority(tmp_path: Path) -> ConfigAuthority:
+    """Explicit boot model and config file owned by this test."""
+    return ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
 
 
 @pytest.mark.parametrize("raw", ["[1, 2.5]", "1,2.5"])
@@ -77,7 +88,7 @@ def test_delivery_outbox_abandoned_retention_rejects_nonpositive(raw: str) -> No
         DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_ABANDONED_RETENTION_DAYS": raw})
 
 
-def test_sdk_code_reminder_cadence_config_contract() -> None:
+def test_sdk_code_reminder_cadence_config_contract(authority: ConfigAuthority) -> None:
     """The code-category reminder cadence is a live per-agent enum whose
     default preserves the existing once-per-context-window behavior."""
     from base.config import FIELD_INFOS, get_config_metadata
@@ -89,7 +100,9 @@ def test_sdk_code_reminder_cadence_config_contract() -> None:
     assert field.alias == "AVA_SDK_CODE_REMINDER_CADENCE"
     assert extra["per_agent"] is True
     assert extra["lifecycle"] == "live"
-    meta = next(m for m in get_config_metadata() if m.name == "sdk_code_reminder_cadence")
+    meta = next(
+        m for m in get_config_metadata(authority=authority) if m.name == "sdk_code_reminder_cadence"
+    )
     assert meta.choices == ["once_per_compaction", "every_time"]
 
 

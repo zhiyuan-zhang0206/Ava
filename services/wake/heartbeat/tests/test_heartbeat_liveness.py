@@ -20,10 +20,12 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.events.contract import payload_keys
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.cluster.rpc import ClusterOpUnreachable
 from services.wake.heartbeat import JITTER_SPAN_S
 from services.wake.heartbeat import daemon as heartbeat_daemon
@@ -89,11 +91,13 @@ def _make_agent(
     lease_s_ahead: float | None = 600.0,
     machine: str = _MACHINE,
     claimed: bool = True,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> int:
     """Spawn an agent on `machine`. `lease_s_ahead` sets lease_expires_at
     relative to now() (None = NULL, negative = expired). `claimed=False`
     models a freshly created idling row whose ownership columns are all NULL."""
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = %s, machine = %s, "
@@ -173,18 +177,28 @@ class TestLivenessPass:
         assert row == (False, None)
 
     def test_missing_probe_never_fabricates_online_or_observation_time(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         _register_machine(db_conn)
-        aid = _make_agent(db_conn)
+        aid = _make_agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
         _merge_liveness(pool)
         assert _state(db_conn, aid) == ("unknown", None)
 
     def test_merge_retains_actual_probe_time(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         _register_machine(db_conn)
-        aid = _make_agent(db_conn)
+        aid = _make_agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
         _set_machine_probe(db_conn, _MACHINE, online=True, failures=0)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -203,6 +217,9 @@ class TestLivenessPass:
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """The pass's probe budget is `settings.gateway.status_probe_timeout_seconds`
         — the SAME setting the roster's probe reads, so the two probes stay
@@ -214,7 +231,13 @@ class TestLivenessPass:
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 12.0)
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=600)
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         seen: dict[str, object] = {}
 
         class RecordingProbe(FakeProbe):
@@ -236,12 +259,23 @@ class TestLivenessPass:
         assert _state(db_conn, aid)[0] == "online"
 
     def test_lease_expired_idling_goes_offline(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """R1 lease is the process-liveness authority: an idling row whose
         lease expired with the machine up is a dead process -> offline."""
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=-10)
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=-10,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         import asyncio
 
         asyncio.run(
@@ -257,10 +291,21 @@ class TestLivenessPass:
         assert probed_at is not None
 
     def test_live_idling_stays_online(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=600)
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         import asyncio
 
         asyncio.run(
@@ -274,14 +319,31 @@ class TestLivenessPass:
         assert _state(db_conn, aid)[0] == "online"
 
     def test_machine_offline_marks_every_agent_offline(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A host judged offline (>= 2 consecutive failed probes) takes every
         non-terminated row on it offline, lease notwithstanding."""
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=_OFFLINE_AFTER_FAILURES)
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=600)
-        aid2 = _make_agent(db_conn, status="running", lease_s_ahead=None)
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
+        aid2 = _make_agent(
+            db_conn,
+            status="running",
+            lease_s_ahead=None,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         # Probe success would reset the failure count — this test exercises
         # the merge judgement directly on a pre-set probe state.
         _merge_liveness(pool)
@@ -289,22 +351,44 @@ class TestLivenessPass:
         assert _state(db_conn, aid2)[0] == "offline"
 
     def test_single_probe_failure_is_not_offline(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """One failed probe is a blip: consecutive_failures must reach
         _OFFLINE_AFTER_FAILURES before the machine reads offline."""
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=1)
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=600)
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         _merge_liveness(pool)
         assert _state(db_conn, aid)[0] == "online"
 
     def test_probe_failures_accumulate_and_reset(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Consecutive failures accumulate across passes; one success resets."""
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=600)
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         import asyncio
 
         fail = FakeProbe({_MACHINE: False})
@@ -356,10 +440,15 @@ class TestLivenessPass:
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A mounted frontend receives online/offline truth without a poll storm."""
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="idling")
+        aid = _make_agent(
+            db_conn, status="idling", model_catalog=model_catalog, config_authority=config_authority
+        )
         announced: list[int] = []
 
         def capture_announcement(_bus: object, agent_id: int) -> None:
@@ -419,12 +508,24 @@ class TestLivenessPass:
         assert announced == [aid]  # offline -> online
 
     def test_preclaim_idling_stays_unknown(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A freshly born idling row has no process claim, so it must not flash
         offline while the launcher is still waiting for the child to claim it."""
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=None, claimed=False)
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=None,
+            claimed=False,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         import asyncio
 
         asyncio.run(
@@ -438,12 +539,23 @@ class TestLivenessPass:
         assert _state(db_conn, aid)[0] == "unknown"
 
     def test_terminated_rows_are_never_judged(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A terminated row already renders dead; the pass must not touch it
         (its status is terminal by intent)."""
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="terminated", lease_s_ahead=None)
+        aid = _make_agent(
+            db_conn,
+            status="terminated",
+            lease_s_ahead=None,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET liveness_state = 'unknown' WHERE id = %s",
@@ -463,11 +575,23 @@ class TestLivenessPass:
         assert _state(db_conn, aid)[0] == "unknown"
 
     def test_unregistered_machine_stays_unknown(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A row whose machine is not in the machines table is not judged —
         stays 'unknown' (rendered conservatively as online)."""
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=-10, machine="ghost-host")
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=-10,
+            machine="ghost-host",
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         import asyncio
 
         asyncio.run(
@@ -478,13 +602,24 @@ class TestLivenessPass:
         assert _state(db_conn, aid)[0] == "unknown"
 
     def test_merge_is_offline_recovery_ready(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A machine that comes back (probe success resets failures) flips its
         agents back online on the next pass — the G5 self-heal path, no
         manual status surgery."""
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="idling", lease_s_ahead=600)
+        aid = _make_agent(
+            db_conn,
+            status="idling",
+            lease_s_ahead=600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         import asyncio
 
         fail = FakeProbe({_MACHINE: False})
@@ -599,10 +734,13 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A failed check-in stays skipped, then becomes a probe when its window ends."""
     idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'idling', "

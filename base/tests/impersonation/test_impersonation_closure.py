@@ -8,6 +8,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -17,7 +18,12 @@ from tests.impersonation_support import attested_caller
 
 @pytest.mark.parametrize("ending", ["released", "expired"])
 def test_closure_restores_six_native_owners(
-    db_conn: psycopg.Connection, ending: str, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    ending: str,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.agents.impersonation.maintenance import reap_impersonations
     from base.db import pool
@@ -34,7 +40,7 @@ def test_closure_restores_six_native_owners(
             (host, owner.agent_id),
         )
         db_conn.commit()
-        lease = _active(owner)
+        lease = _active(owner, authority=config_authority)
         before = db_conn.execute(
             "SELECT runtime_kind,runtime_protocol_version,lease_expires_at FROM agents_meta "
             "WHERE id=%s",
@@ -79,9 +85,15 @@ def test_closure_restores_six_native_owners(
 
 
 @pytest.mark.parametrize("guard", ["consistent", "unowned", "terminated", "machine", "requested"])
-def test_closure_preserves_guarded_rows(db_conn: psycopg.Connection, guard: str) -> None:
+def test_closure_preserves_guarded_rows(
+    db_conn: psycopg.Connection, guard: str, *, config_authority: ConfigAuthority
+) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner) if guard == "requested" else _active(owner)
+    lease = (
+        _request(owner, authority=config_authority)
+        if guard == "requested"
+        else _active(owner, authority=config_authority)
+    )
     foreign = (uuid4(), uuid4())
     if guard != "consistent":
         db_conn.execute(
@@ -131,10 +143,15 @@ def test_closure_preserves_guarded_rows(db_conn: psycopg.Connection, guard: str)
 
 @pytest.mark.parametrize("lease_status", ["accepted", "active"])
 def test_closure_restore_rolls_back_with_lease(
-    db_conn: psycopg.Connection, lease_status: str, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    lease_status: str,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner)
+    lease = _request(owner, authority=config_authority)
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     if lease_status == "active":
         leases.activate(database, event_bus, lease["id"], owner)

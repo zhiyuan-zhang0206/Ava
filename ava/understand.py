@@ -312,13 +312,18 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
     `base/lm/effort.py` rejects unsupported graded values
     (`max` → deepseek's max, `none` → reasoning off via the thinking switch).
     """
+    from ava.sdk_surface import settings as sdk_settings
     from base.lm.call import invoke_text
     from base.lm.factory import build_chat_model
 
+    catalog = sdk_settings.model_catalog()
     model = settings.lm.understand_text_model
     try:
         llm = build_chat_model(
             model,
+            catalog=catalog,
+            llm_override=settings.lm.llm_override,
+            overrides=sdk_settings.model_overrides(),
             reasoning_effort=effort,
             timeout=settings.lm.llm_invoke_timeout_seconds,
         )
@@ -334,6 +339,7 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
         retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
         model=model,
         usage_source="understand",
+        catalog=catalog,
     )
 
 
@@ -354,15 +360,16 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     default `max` selects the configured media thinking level; explicit `none`
     selects the model's lowest thinking level because Gemini cannot turn it off.
     """
+    from ava.sdk_surface import settings as sdk_settings
     from base.lm.call import invoke_text
     from base.lm.factory import build_chat_model, provider_key_of_model
-    from base.lm.plugin_providers import model_catalog
 
+    catalog = sdk_settings.model_catalog()
     model = settings.lm.understand_media_model
     # The media part shape is Gemini-specific (see the module docstring); only
     # the Gemini provider client understands it. Fail fast at build time with a
     # clear error instead of letting a non-Gemini client crash at invoke time.
-    if provider_key_of_model(model) != "gemini":
+    if provider_key_of_model(model, catalog=catalog) != "gemini":
         raise UnderstandError(
             f"media model {model!r} is not supported by ava.understand — the "
             "media path (image/video/audio/PDF) currently supports Gemini "
@@ -379,7 +386,7 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
 
     thinking_level = settings.lm.understand_media_thinking_level
     if effort != ReasoningEffort.MAX:
-        spec = model_catalog().models[model]
+        spec = catalog.models[model]
         levels = spec.effort_levels
         if not levels:
             raise UnderstandError(
@@ -393,6 +400,9 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     try:
         llm = build_chat_model(
             model,
+            catalog=catalog,
+            llm_override=settings.lm.llm_override,
+            overrides=sdk_settings.model_overrides(),
             reasoning_effort=effort,
             timeout=settings.lm.llm_invoke_timeout_seconds,
             media_resolution=res,
@@ -411,6 +421,7 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
         retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
         model=model,
         usage_source="understand.media",
+        catalog=catalog,
     )
 
 

@@ -14,20 +14,28 @@ import ava
 from agent.graph import claim_node
 from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 
 @pytest.fixture
-async def running_agent(aops_pool: AsyncConnectionPool, database: Database):
+async def running_agent(
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
 
     from agent.ownership.hosted import admit_hosted_runtime
     from base.cluster.machine import machine_name
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent_id,
@@ -48,6 +56,9 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """A settled prior command, not marker recency, protects the real successor."""
 

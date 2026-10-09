@@ -48,6 +48,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import ContextBudget
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
 
@@ -134,6 +135,7 @@ def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     return Runtime(context=ctx)
 
@@ -151,7 +153,9 @@ async def test_generate_summary_returns_summary():
     msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
 
     llm = _fake_llm(summary_text="a synthetic summary")
-    summary = await generate_summary(msgs, llm, AgentSlices.resolve())
+    summary = await generate_summary(
+        msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+    )
 
     assert summary == "a synthetic summary"
 
@@ -168,7 +172,9 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
         usage_metadata={"input_tokens": 4321, "output_tokens": 9, "total_tokens": 4330},
         response_metadata={"model_name": "m1"},
     )
-    summary = await generate_summary(msgs, _fake_llm(response=response), AgentSlices.resolve())
+    summary = await generate_summary(
+        msgs, _fake_llm(response=response), AgentSlices.resolve(), catalog=build_model_catalog()
+    )
 
     closing = closing_of(summary)
     assert closing is not None
@@ -177,7 +183,9 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
     assert closing == ClosingRequest(4321, closing.extra_tokens, "m1")
     assert summary == "a synthetic summary"  # still the plain text everywhere else
 
-    bare = await generate_summary(msgs, _fake_llm("no usage"), AgentSlices.resolve())
+    bare = await generate_summary(
+        msgs, _fake_llm("no usage"), AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     assert closing_of(bare) is None
     assert closing_of("an agent-written summary") is None
 
@@ -263,7 +271,9 @@ async def test_generate_summary_emits_agent_billing_span(
     slices = AgentSlices.resolve({"llm_model": "deepseek-flash"})
 
     assert (
-        await generate_summary([HumanMessage(content="conversation")], llm, slices)
+        await generate_summary(
+            [HumanMessage(content="conversation")], llm, slices, catalog=build_model_catalog()
+        )
         == "a complete summary"
     )
 
@@ -294,7 +304,7 @@ async def test_generate_summary_includes_whole_conversation():
     ]
 
     llm = _fake_llm()
-    await generate_summary(convo, llm, AgentSlices.resolve())
+    await generate_summary(convo, llm, AgentSlices.resolve(), catalog=build_model_catalog())
 
     [call] = _compaction_ainvoke(llm).call_args_list
     [llm_input] = call.args
@@ -309,7 +319,9 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
     content: list[AnyMessage] = [HumanMessage(content=f"m-{i}") for i in range(5)]
 
     llm = _fake_llm()
-    await generate_summary([sys_msg, *content], llm, AgentSlices.resolve())
+    await generate_summary(
+        [sys_msg, *content], llm, AgentSlices.resolve(), catalog=build_model_catalog()
+    )
 
     llm.bind_tools.assert_called_once_with([execute_code])
     [call] = _compaction_ainvoke(llm).call_args_list
@@ -325,7 +337,9 @@ async def test_generate_summary_raises_on_empty_llm_text():
     msgs: list[AnyMessage] = [HumanMessage(content=f"m{i}") for i in range(3)]
 
     with pytest.raises(RuntimeError, match="no text"):
-        await generate_summary(msgs, _fake_llm(summary_text=""), AgentSlices.resolve())
+        await generate_summary(
+            msgs, _fake_llm(summary_text=""), AgentSlices.resolve(), catalog=build_model_catalog()
+        )
 
 
 async def test_generate_summary_extracts_text_from_block_content():
@@ -340,7 +354,9 @@ async def test_generate_summary_extracts_text_from_block_content():
     )
 
     llm = _fake_llm(response=block_response)
-    summary = await generate_summary(msgs, llm, AgentSlices.resolve())
+    summary = await generate_summary(
+        msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     assert summary == "the real summary"
 
 
@@ -353,13 +369,23 @@ async def test_generate_summary_raises_on_tool_use_only_block_content():
     )
 
     with pytest.raises(RuntimeError, match="no text"):
-        await generate_summary(msgs, _fake_llm(response=tool_only), AgentSlices.resolve())
+        await generate_summary(
+            msgs,
+            _fake_llm(response=tool_only),
+            AgentSlices.resolve(),
+            catalog=build_model_catalog(),
+        )
 
 
 async def test_generate_summary_raises_on_empty_conversation():
     """Only SystemMessage (no conversation) → ValueError — nothing to summarize."""
     with pytest.raises(ValueError, match="empty"):
-        await generate_summary([SystemMessage(content="<sys>")], _fake_llm(), AgentSlices.resolve())
+        await generate_summary(
+            [SystemMessage(content="<sys>")],
+            _fake_llm(),
+            AgentSlices.resolve(),
+            catalog=build_model_catalog(),
+        )
 
 
 # --- auto_compact_for_llm hook tests ---
@@ -538,6 +564,7 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
@@ -581,6 +608,7 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     state = _over_threshold_state()
 
@@ -741,6 +769,7 @@ def _make_runtime(ops_pool=None, llm=None):
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     from langgraph.runtime import Runtime
 

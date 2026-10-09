@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
@@ -37,7 +38,9 @@ class TestRejectedModelConfig:
         boot_calls: list[int] = []
         error_events: list[str] = []
 
-        async def _record_boot(agent_id: int, llm_model: str, *_: object) -> tuple[_Model, None]:
+        async def _record_boot(
+            agent_id: int, llm_model: str, *_: object, **_kwargs: object
+        ) -> tuple[_Model, None]:
             boot_calls.append(agent_id)
             return _Model(llm_model), None
 
@@ -66,12 +69,14 @@ class TestRejectedModelConfig:
         boot_calls: list[int] = []
         validated_models: list[str] = []
 
-        def _validate_model(*, model: str) -> None:
+        def _validate_model(*, model: str, catalog: ModelCatalog, llm_override: str) -> None:
             validated_models.append(model)
             if model == "fable":
                 raise ValueError("unknown model 'fable'")
 
-        async def _record_boot(agent_id: int, llm_model: str, *_: object) -> tuple[_Model, None]:
+        async def _record_boot(
+            agent_id: int, llm_model: str, *_: object, **_kwargs: object
+        ) -> tuple[_Model, None]:
             boot_calls.append(agent_id)
             return _Model(llm_model), None
 
@@ -103,7 +108,7 @@ class TestRejectedModelConfig:
 
         error_events: list[str] = []
 
-        def _reject_model(*, model: str) -> None:
+        def _reject_model(*, model: str, catalog: ModelCatalog, llm_override: str) -> None:
             raise ValueError(f"unknown model '{model}'")
 
         def _record_error(_message: str, *, event: str, **_details: object) -> None:
@@ -129,29 +134,24 @@ class TestNormalizedModelConfig:
     the turn view, the usage attribution and the exec children re-emitted from
     these pins all see."""
 
-    @pytest.fixture(autouse=True)
-    def _load_provider_plugins(self) -> None:
-        from base.lm.plugin_providers import model_catalog
-
-        model_catalog()
-
     @pytest.fixture
-    def withdrawn_model(self, add_models: AddModels, _load_provider_plugins: None) -> str:
+    def withdrawn_model(
+        self, add_models: AddModels, model_catalog: ModelCatalog
+    ) -> tuple[str, ModelCatalog]:
         from dataclasses import replace
 
-        from base.lm.plugin_providers import model_catalog
-
         model = "deepseek-retired-fixture"
-        add_models(
+        catalog = add_models(
+            model_catalog,
             {
                 model: replace(
-                    model_catalog().models["deepseek-flash"],
+                    model_catalog.models["deepseek-flash"],
                     spawnable=False,
                     unavailable_fallback="deepseek-flash",
                 )
-            }
+            },
         )
-        return model
+        return model, catalog
 
     @pytest.fixture(autouse=True)
     def _isolate_settlement_reconcile(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,11 +161,15 @@ class TestNormalizedModelConfig:
         monkeypatch.setattr(settlement, "reconcile_inbounds_after_turn", AsyncMock())
 
     async def test_a_withdrawn_birth_pin_is_normalized_before_the_turn_binds_it(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch, withdrawn_model: str
+        self,
+        wired: _Build,
+        monkeypatch: pytest.MonkeyPatch,
+        withdrawn_model: tuple[str, ModelCatalog],
     ) -> None:
         """A birth_config pin on a withdrawn model resolves to its
         registered fallback — the same resolution build_chat_model applies only
         at the final build."""
+        model, catalog = withdrawn_model
         import services.agent_runner.agent_host.host as host_mod
 
         warnings: list[tuple[str, dict[str, object]]] = []
@@ -174,7 +178,7 @@ class TestNormalizedModelConfig:
             warnings.append((event, details))
 
         monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
-        host, graph, _ = wired({1: _Row(birth={"llm_model": withdrawn_model})})
+        host, graph, _ = wired({1: _Row(birth={"llm_model": model})}, catalog=catalog)
 
         await asyncio.wait_for(host.run_turn(1), 2)
 
@@ -185,13 +189,17 @@ class TestNormalizedModelConfig:
         # row attributed to the withdrawn pin can be reconciled against it.
         assert [event for event, _ in warnings] == ["host_config_normalized"]
         assert warnings[0][1]["agent_id"] == 1
-        assert warnings[0][1]["requested"] == withdrawn_model
+        assert warnings[0][1]["requested"] == model
         assert warnings[0][1]["resolved"] == "deepseek-flash"
 
     async def test_a_withdrawn_pin_normalizes_and_an_available_pin_is_untouched(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch, withdrawn_model: str
+        self,
+        wired: _Build,
+        monkeypatch: pytest.MonkeyPatch,
+        withdrawn_model: tuple[str, ModelCatalog],
     ) -> None:
         """A withdrawn pin resolves; an available model passes through."""
+        model, catalog = withdrawn_model
         import services.agent_runner.agent_host.host as host_mod
 
         warnings: list[str] = []
@@ -201,10 +209,10 @@ class TestNormalizedModelConfig:
 
         monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
         rows = {
-            1: _Row(overlay={"llm_model": withdrawn_model}),
+            1: _Row(overlay={"llm_model": model}),
             2: _Row(overlay={"llm_model": "gemini-3.7-flash"}),
         }
-        host, graph, _ = wired(rows)
+        host, graph, _ = wired(rows, catalog=catalog)
 
         await asyncio.wait_for(host.run_turn(1), 2)
         await asyncio.wait_for(host.run_turn(2), 2)
@@ -217,10 +225,14 @@ class TestNormalizedModelConfig:
         assert warnings == ["host_config_normalized"]
 
     async def test_the_normalization_warns_once_per_stored_config_state(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch, withdrawn_model: str
+        self,
+        wired: _Build,
+        monkeypatch: pytest.MonkeyPatch,
+        withdrawn_model: tuple[str, ModelCatalog],
     ) -> None:
         """Repeated wakes on the same stale pin stay quiet until the stored
         config changes; the counter still sees every normalized wake."""
+        model, catalog = withdrawn_model
         import services.agent_runner.agent_host.host as host_mod
 
         warnings: list[str] = []
@@ -229,8 +241,8 @@ class TestNormalizedModelConfig:
             warnings.append(event)
 
         monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
-        rows = {1: _Row(overlay={"llm_model": withdrawn_model})}
-        host, graph, _ = wired(rows)
+        rows = {1: _Row(overlay={"llm_model": model})}
+        host, graph, _ = wired(rows, catalog=catalog)
 
         await asyncio.wait_for(host.run_turn(1), 2)
         await asyncio.wait_for(host.run_turn(1), 2)

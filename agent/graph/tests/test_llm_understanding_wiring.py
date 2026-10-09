@@ -25,6 +25,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
@@ -45,6 +46,7 @@ def _runtime(chunks: list[AIMessageChunk]) -> Runtime[AvaContext]:
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
+            catalog=build_model_catalog(),
         )
     )
 

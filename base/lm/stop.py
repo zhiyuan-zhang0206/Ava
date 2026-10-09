@@ -59,20 +59,20 @@ class StopSpec(NamedTuple):
     status_map: Mapping[str, StopCategory] | None = None
 
 
-def classify_stop(final_msg: AIMessage) -> tuple[StopCategory, str | None]:
+def classify_stop(
+    final_msg: AIMessage, *, stops: Mapping[str, StopSpec]
+) -> tuple[StopCategory, str | None]:
     """Return (category, raw_reason) for the message's terminal reason.
 
     Raises:
         ValueError: model_provider is missing or not one build_chat_model emits —
             its provider plugin must register a terminal-reason vocabulary.
     """
-    from base.lm.plugin_providers import model_catalog
-
     metadata = message_response_metadata(final_msg) or {}
     provider = metadata.get("model_provider")
     # provider is a runtime string; a value outside the ProviderKey literal simply
     # misses the mapping (spec stays None) and is rejected just below.
-    spec = model_catalog().stops.get(provider) if isinstance(provider, str) else None  # pyright: ignore[reportArgumentType]
+    spec = stops.get(provider) if isinstance(provider, str) else None  # pyright: ignore[reportArgumentType]
     if spec is None:
         raise ValueError(
             f"unknown model_provider {provider!r} (metadata keys={list(metadata.keys())!r}); "

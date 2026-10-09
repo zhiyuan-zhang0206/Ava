@@ -17,6 +17,8 @@ from agent.hooks import understanding_chunks as uc
 from agent.state_channels import CompactState
 from base.agents.history.hierarchy.chunks import Chunk
 from base.config import settings
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.plugin_providers import build_model_catalog
 
 
 class _Queue:
@@ -55,7 +57,7 @@ _BASELINED = CompactState(understanding_cut_index=1, understanding_cut_tokens=50
 @pytest.fixture(autouse=True)
 def _enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(uc, "chunk_threshold", lambda *_a: 1000)
+    monkeypatch.setattr(uc, "chunk_threshold", lambda *_a, **_kw: 1000)
 
 
 async def test_turn_below_the_threshold_enqueues_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,7 +70,8 @@ async def test_turn_below_the_threshold_enqueues_nothing(monkeypatch: pytest.Mon
         pool=MagicMock(),
         agent_id=3,
         model="m",
-        overrides=None,
+        overrides=ModelOverrides.from_pins({}),
+        catalog=build_model_catalog(),
     )
     assert update == {} and queue.calls == []
 
@@ -85,7 +88,8 @@ async def test_a_segments_first_turn_only_records_the_baseline_past_the_head(
         pool=MagicMock(),
         agent_id=3,
         model="m",
-        overrides=None,
+        overrides=ModelOverrides.from_pins({}),
+        catalog=build_model_catalog(),
     )
     assert queue.calls == []
     assert (
@@ -109,7 +113,8 @@ async def test_a_segments_first_turn_only_records_the_baseline_past_the_head(
         pool=MagicMock(),
         agent_id=3,
         model="m",
-        overrides=None,
+        overrides=ModelOverrides.from_pins({}),
+        catalog=build_model_catalog(),
     )
     assert after["compact"].understanding_cut_index == 2
 
@@ -121,7 +126,14 @@ async def test_turn_past_the_threshold_enqueues_and_moves_the_cut(
     monkeypatch.setattr(uc, "enqueue_chunk", queue)
     compact = _BASELINED.model_copy(update={"version": 4})
     update = await uc.due_chunk_update(
-        compact, _request(10), _reply(1500), pool=MagicMock(), agent_id=3, model="m", overrides=None
+        compact,
+        _request(10),
+        _reply(1500),
+        pool=MagicMock(),
+        agent_id=3,
+        model="m",
+        overrides=ModelOverrides.from_pins({}),
+        catalog=build_model_catalog(),
     )
     assert queue.calls == [
         (3, {"compact_version": 4, "chunk": Chunk(1, 10), "end_msg_id": "m9"}),
@@ -141,7 +153,8 @@ async def test_turn_past_the_threshold_enqueues_and_moves_the_cut(
             pool=MagicMock(),
             agent_id=3,
             model="m",
-            overrides=None,
+            overrides=ModelOverrides.from_pins({}),
+            catalog=build_model_catalog(),
         )
         == {}
     )
@@ -159,7 +172,8 @@ async def test_failed_enqueue_keeps_the_cut_so_the_stretch_is_retried(
             pool=MagicMock(),
             agent_id=3,
             model="m",
-            overrides=None,
+            overrides=ModelOverrides.from_pins({}),
+            catalog=build_model_catalog(),
         )
         == {}
     )
@@ -176,7 +190,8 @@ async def test_disabled_or_poolless_turns_do_nothing(monkeypatch: pytest.MonkeyP
             pool=None,
             agent_id=3,
             model="m",
-            overrides=None,
+            overrides=ModelOverrides.from_pins({}),
+            catalog=build_model_catalog(),
         )
         == {}
     )
@@ -189,7 +204,8 @@ async def test_disabled_or_poolless_turns_do_nothing(monkeypatch: pytest.MonkeyP
             pool=MagicMock(),
             agent_id=3,
             model="m",
-            overrides=None,
+            overrides=ModelOverrides.from_pins({}),
+            catalog=build_model_catalog(),
         )
         == {}
     )
@@ -207,7 +223,8 @@ async def test_turn_without_usage_never_triggers(monkeypatch: pytest.MonkeyPatch
             pool=MagicMock(),
             agent_id=3,
             model="m",
-            overrides=None,
+            overrides=ModelOverrides.from_pins({}),
+            catalog=build_model_catalog(),
         )
         == {}
     )
@@ -387,7 +404,8 @@ async def test_first_turn_baseline_skips_the_whole_compacted_head() -> None:
         pool=MagicMock(),
         agent_id=3,
         model="m",
-        overrides=None,
+        overrides=ModelOverrides.from_pins({}),
+        catalog=build_model_catalog(),
     )
     assert update["compact"].understanding_cut_index == 7
 

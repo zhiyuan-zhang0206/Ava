@@ -15,6 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _agent
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import make_host
 
@@ -46,6 +47,7 @@ async def admit(
     monkeypatch: pytest.MonkeyPatch,
     *,
     interval: int = 100,
+    catalog: ModelCatalog,
 ) -> AcceptedHost:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     agent = _agent(conn)
@@ -59,7 +61,9 @@ async def admit(
     )
     conn.commit()
     ordinary: list[object] = []
-    host, saver, config = await make_host(pool, agent, interval, ordinary, monkeypatch)
+    host, saver, config = await make_host(
+        pool, agent, interval, ordinary, monkeypatch, catalog=catalog
+    )
     await host.run_turn(agent)
     assert len(ordinary) == 1
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential

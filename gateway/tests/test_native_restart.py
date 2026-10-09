@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
+from base.lm.plugin_providers import build_model_catalog
 from gateway.tests.test_idempotency import client as client
 from gateway.tests.test_native_cancel import _headers
 from ops.lifecycle.native_restart import restart_native_work_op
@@ -40,7 +41,12 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
         operation = NativeRestartOperation.model_validate(packet)
         assert idempotency_key == operation.operation_key
         original = await restart_native_work_op(
-            app.state.db, app.state.bus, agent_id, operation, app.state.db_pool
+            app.state.db,
+            app.state.bus,
+            agent_id,
+            operation,
+            app.state.db_pool,
+            catalog=build_model_catalog(),
         )
         if original.status == "refused":
             return original.model_dump(mode="json")

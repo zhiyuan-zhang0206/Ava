@@ -23,7 +23,7 @@ from base import telemetry
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from base.agents.messages.inbound import InboundKind
 from base.agents.observation.db_wait import database_wait_matches
-from base.config.service_read import current_field_values
+from base.config.service_read import ConfigAuthority
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
@@ -260,13 +260,13 @@ async def _recover_hosted_turn(
         _log.exception("[delivery] hosted turn recovery failed for agent %s", wedge.agent_id)
 
 
-def hosted_turn_threshold_seconds() -> float:
+def hosted_turn_threshold_seconds(authority: ConfigAuthority) -> float:
     """Read the runner-owned threshold from the gateway's current `.env` view.
 
     The alias belongs to the agent-runner config projection and is removed from
     the gateway process environment, so the gateway-owned `.env` snapshot is the
     authority an operator override is preserved at."""
-    return float(current_field_values()["wedged_agent_inbound_age_seconds"])
+    return float(authority.current_field_values()["wedged_agent_inbound_age_seconds"])
 
 
 async def _recover_within_deadline(

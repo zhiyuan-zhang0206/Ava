@@ -532,6 +532,12 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     # — the child start stays off the agent runtime either way (task #3633).
     # The install applies the env baseline AVA_SDK_DISABLE as part of the load.
     child.ava.ensure_plugins_loaded()
+    from dataclasses import replace
+
+    import ava
+    from ava.sdk_surface import settings as sdk_settings
+
+    ava.bind_context(replace(ava.context, catalog=sdk_settings.model_catalog()))
     _apply_overlay_scope(birth, overlay, scope="plugin")
     if framework_overlay_applied:
         # Per-agent sdk_disable additions ride the overlay; they apply additively

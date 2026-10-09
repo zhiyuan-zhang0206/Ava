@@ -26,6 +26,7 @@ from base.agents.messages.kwargs import AvaMsgType
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -64,6 +65,7 @@ def _make_runtime(model_name: str | None = None) -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     return Runtime(context=ctx)
 

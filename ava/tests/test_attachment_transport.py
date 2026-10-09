@@ -10,7 +10,9 @@ import pytest
 
 import ava
 from ava.sdk_surface.attachment_transport import attach
+from ava.sdk_surface.install import Installation
 from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.model_catalog import AddModels
 
 
@@ -41,8 +43,9 @@ def _media_capable_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_registers_resolved_path_and_drains_once(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
 
@@ -52,7 +55,10 @@ def test_registers_resolved_path_and_drains_once(
     assert take_attachments() == []
 
 
-def test_rejects_calls_outside_exec_child(tmp_path: Path) -> None:
+def test_rejects_calls_outside_exec_child(
+    tmp_path: Path, *, model_installation: Installation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     ava.unbind_exec_turn()
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
@@ -62,8 +68,9 @@ def test_rejects_calls_outside_exec_child(tmp_path: Path) -> None:
 
 
 def test_validates_path_suffix_size_and_label(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     directory = tmp_path / "directory"
     directory.mkdir()
     text_file = tmp_path / "notes.txt"
@@ -89,8 +96,9 @@ def test_validates_path_suffix_size_and_label(
 
 
 def test_uses_workspace_relative_path_semantics(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("ava.files.agent_identity.agent_id", lambda: None)
     image = tmp_path / "relative.png"
@@ -101,10 +109,13 @@ def test_uses_workspace_relative_path_semantics(
     assert take_attachments() == [{"path": str(image.resolve()), "label": None}]
 
 
-def test_rejects_text_only_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_rejects_text_only_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
+) -> None:
     """A text-only model's attach call fails at the model gate with a clear
     error and registers nothing — the member is hidden from its SDK docs, so
     the call is the only path that can reach it (user ruling 2026-08-28)."""
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
@@ -118,24 +129,33 @@ def test_rejects_text_only_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
 
 def test_rejects_model_withdrawn_to_its_text_only_fallback(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, add_models: AddModels
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    add_models: AddModels,
+    model_catalog: ModelCatalog,
+    *,
+    model_installation: Installation,
 ) -> None:
     """A withdrawn vision pin is gated as its text-only fallback (task #3212)."""
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from dataclasses import replace
 
     from base.config import settings
-    from base.lm.plugin_providers import model_catalog
 
     model = "deepseek-vision-fixture"
-    add_models(
+    model_catalog = add_models(
+        model_catalog,
         {
             model: replace(
-                model_catalog().models["deepseek-flash"],
+                model_catalog.models["deepseek-flash"],
                 spawnable=False,
                 unavailable_fallback="deepseek-flash",
                 media_types=frozenset({"image"}),
             )
-        }
+        },
+    )
+    monkeypatch.setattr(
+        ava, "__plugin_installation__", replace(model_installation, catalog=model_catalog)
     )
     monkeypatch.setattr(settings.lm, "llm_model", model)
     image = tmp_path / "result.png"
@@ -148,11 +168,12 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
 
 
 def test_rejects_modality_not_supported_by_model(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
     """A file whose modality the model's attach set excludes is rejected at
     registration with the allowed set in the error — never a silent pack-time
     skip (user ruling 2026-08-28)."""
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
     # gpt-5.6-sol is image-only.
@@ -167,12 +188,13 @@ def test_rejects_modality_not_supported_by_model(
 
 
 def test_attach_modality_matrix_follows_registry(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
     """The per-model attach-modality matrix drives validation: Gemini accepts
     video (image/pdf/audio/video), Claude rejects it (image/pdf) — the
     registry's declared media matrix is the attach contract (user ruling
     2026-08-28)."""
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
     video = tmp_path / "clip.mp4"

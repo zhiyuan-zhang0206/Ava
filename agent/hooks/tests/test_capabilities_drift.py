@@ -35,6 +35,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 
@@ -50,6 +51,7 @@ def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=build_model_catalog(),
         )
     )
 

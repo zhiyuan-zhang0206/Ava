@@ -39,6 +39,7 @@ persistence.
 ## Notes
 - Port: `AVA_MEMORY_SEARCH_PORT` (default 19531), URI: `AVA_MEMORY_SEARCH_URI`
 - Data dir: `AVA_MEMORY_SEARCH_DATA_DIR` (default `$AVA_HOME/memory-search/`)
+- The store width/fingerprint, HTTP schema vector bound and supervision search probe use `embeddings.factory.get_descriptor()`; these metadata-only paths do not construct an embedding provider or load a model catalog.
 - Selected via `AVA_MEMORY_SEARCH_BACKEND=numpy` (`services/derived/memory_indexer/backends/factory.py`)
 - **Probe limitation (tracked)**: the healthcheck's POST /search probe carries
   no identity payload, so the `PORT_TAKEN` terminal verdict is unreachable for

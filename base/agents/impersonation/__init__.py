@@ -43,7 +43,7 @@ from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.config.service_read import current_field_values
+from base.config.service_read import ConfigAuthority
 from base.db import Database, publish_inbound_wake
 from base.events.live.announce import (
     publish_agent_updated_sync,
@@ -130,6 +130,7 @@ def request(
     bus: EventBus,
     agent_id: int,
     *,
+    authority: ConfigAuthority,
     caller: CallerIdentity,
     ttl_seconds: int = 3600,
     reason: str = "",
@@ -157,7 +158,7 @@ def request(
     )
     relay_token = secrets.token_urlsafe(32) if relay_provider in SESSION_RELAY_PROVIDERS else None
     lease_id = uuid4()
-    delivery_config = current_field_values()
+    delivery_config = authority.current_field_values()
     event_delivery_protocol_version = event_protocol_for_new_lease(automatic=automatic)
     with db.write_transaction() as conn:
         meta = lock_agent(conn, agent_id)

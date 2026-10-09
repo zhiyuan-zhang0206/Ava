@@ -11,10 +11,12 @@ from base.agents import AgentLaunchFailed
 from base.agents.tasks.creation import create_task_in_transaction, ensure_parent_exists
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_spawned_sync, publish_task_created_sync
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 from gateway.agents.creation import recover_launch, scoped_creation_key
 from gateway.agents.task_assignment.receipts import existing_assignment, save_assignment
@@ -46,6 +48,9 @@ def commit_assignment(
     spawn: SpawnAgentRequest,
     target: str,
     preset_name: str | None,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> tuple[TaskAssignmentResult, list[telemetry.Event]]:
     """The second lookup fences concurrent winners after out-of-TX preflight."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -56,6 +61,8 @@ def commit_assignment(
             ensure_parent_exists(cur, body.task.parent)
             birth = insert_agent_birth(
                 cur,
+                catalog=catalog,
+                authority=authority,
                 machine=target,
                 spawner=f"agent:{body.actor_agent_id}",
                 config=spawn.config,
@@ -108,6 +115,8 @@ async def observe_launch(
     key: str,
     request: dict[str, Any],
     result: TaskAssignmentResult,
+    *,
+    catalog: ModelCatalog,
 ) -> TaskAssignmentAccepted:
     """The retained pair is immutable; native current eligibility controls recovery."""
 
@@ -120,7 +129,7 @@ async def observe_launch(
         existing = await asyncio.to_thread(current)
         if existing is None or existing.launch_attempt_id != result.launch_attempt_id:
             return response
-        response.launch = await recover_launch(pool, db, bus, existing)
+        response.launch = await recover_launch(pool, db, bus, existing, catalog=catalog)
     except AgentLaunchFailed as exc:
         response.launch_failure = str(exc)
         response.retry_launch_path = exc.retry_launch_path
@@ -160,7 +169,13 @@ async def post_task_assignment(
         )
         try:
             preset_name, _, _ = await asyncio.to_thread(
-                agent_router._spawn_preflight_blocking, db, target, spawn, pool
+                agent_router._spawn_preflight_blocking,
+                db,
+                target,
+                spawn,
+                pool,
+                catalog=request.app.state.catalog,
+                authority=request.app.state.config_authority,
             )
         except Exception:
             result = await asyncio.to_thread(lookup_assignment, pool, key, raw)
@@ -168,10 +183,19 @@ async def post_task_assignment(
                 raise
         else:
             result, events = await asyncio.to_thread(
-                commit_assignment, pool, key, raw, body, spawn, target, preset_name
+                commit_assignment,
+                pool,
+                key,
+                raw,
+                body,
+                spawn,
+                target,
+                preset_name,
+                catalog=request.app.state.catalog,
+                authority=request.app.state.config_authority,
             )
             if events:
                 await asyncio.to_thread(
                     announce_assignment, events, bus, body.actor_agent_id, result
                 )
-    return await observe_launch(pool, db, bus, key, raw, result)
+    return await observe_launch(pool, db, bus, key, raw, result, catalog=request.app.state.catalog)

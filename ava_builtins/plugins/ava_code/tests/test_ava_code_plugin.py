@@ -16,6 +16,8 @@ import ava
 from agent.state import BaseAgentState, CompactState, build_agent_state
 from ava.sdk_surface import install
 from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
 )
@@ -23,13 +25,15 @@ from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
-def _load_ava_code_plugin(monkeypatch: pytest.MonkeyPatch):
+def _load_ava_code_plugin(
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+):
     """Install ava_code's declared SDK surface (cwd namespace, wraps, skill source) for each
     test and uninstall it after. Use a valid local sampling policy for SDK calls."""
     from base.agents.sdk import call_policy
 
     monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
-    install.install(code_registry())
+    install.install(code_registry(), catalog=model_catalog, authority=config_authority)
 
     yield
 

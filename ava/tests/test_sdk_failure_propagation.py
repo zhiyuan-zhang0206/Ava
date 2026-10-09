@@ -10,6 +10,7 @@ import pytest
 import ava
 from ava.gateway_client.transport import use_client
 from ava.sdk_surface import metering
+from ava.sdk_surface.install import Installation
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage
 from base.agents.sdk.tally import SdkCallTally
@@ -18,8 +19,12 @@ from tests.fixtures.pin_agent import pin_agent
 
 @pytest.mark.parametrize("committed", [False, True])
 def test_installed_send_keeps_unknown_response_when_emission_also_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, committed: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    committed: bool,
+    model_installation: Installation,
 ) -> None:
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     pin_agent(7, owns_loop=False)
     tally = SdkCallTally()
     ava.bind_context(replace(ava.context, sdk_calls=tally))

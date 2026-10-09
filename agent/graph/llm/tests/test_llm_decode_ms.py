@@ -27,6 +27,7 @@ from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_
 from base.agents.observation.turn_progress import TurnProgress
 from base.host.env.agent_slices import AgentSlices
 from base.lm.call import LlmInvocation
+from base.lm.plugin_providers import build_model_catalog
 
 
 class _FakeClock:
@@ -138,7 +139,12 @@ async def test_stream_with_cache_retry_stamps_decode_ms(monkeypatch: pytest.Monk
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
     await _stream_with_cache_retry(
-        fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
+        fake_llm,
+        [],
+        chunks=chunks,
+        handler=handler,
+        agent=AgentSlices.resolve(),
+        catalog=build_model_catalog(),
     )
 
     assert handler.llm_decode_ms == 8000.0  # (1013 - 1005) * 1000
@@ -163,7 +169,12 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
 
     handler = _FakeHandler()
     await _stream_with_cache_retry(
-        fake_llm, [], chunks=[], handler=handler, agent=AgentSlices.resolve()
+        fake_llm,
+        [],
+        chunks=[],
+        handler=handler,
+        agent=AgentSlices.resolve(),
+        catalog=build_model_catalog(),
     )
     assert handler.llm_decode_ms is None
     assert handler.llm_latency_ms == 0.0  # (1000 - 1000) * 1000
@@ -192,7 +203,12 @@ async def test_non_streaming_fallback_decode_ms_none(monkeypatch: pytest.MonkeyP
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
     await _stream_with_cache_retry(
-        fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
+        fake_llm,
+        [],
+        chunks=chunks,
+        handler=handler,
+        agent=AgentSlices.resolve(),
+        catalog=build_model_catalog(),
     )
 
     assert handler.llm_decode_ms is None
@@ -251,7 +267,12 @@ async def test_stale_cache_retry_uses_second_attempt_window(
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
     await _stream_with_cache_retry(
-        fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
+        fake_llm,
+        [],
+        chunks=chunks,
+        handler=handler,
+        agent=AgentSlices.resolve(),
+        catalog=build_model_catalog(),
     )
 
     assert len(recovered) == 1

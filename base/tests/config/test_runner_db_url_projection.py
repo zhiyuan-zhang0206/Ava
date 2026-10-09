@@ -8,11 +8,15 @@ capability.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from pydantic import ValidationError
 
 from base.cluster import derive
+from base.config import Settings
+from base.config.service_read import ConfigAuthority
 
 _OWNER_URL = "postgresql://ava:owner-password@127.0.0.1:5433/ava"
 _RUNNER_URL = "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
@@ -77,15 +81,18 @@ def test_pure_runner_never_projects_a_login(monkeypatch: pytest.MonkeyPatch) -> 
     snapshot.assert_not_called()
 
 
-def test_malformed_config_warning_does_not_log_raw_credentials(
-    monkeypatch: pytest.MonkeyPatch,
+def test_malformed_config_read_does_not_log_raw_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from base.config.service_read import _warn_undecodable_field
-
-    warning = Mock()
+    """A rejected fresh file read never logs a raw credential-bearing input."""
+    runtime = Settings(profile=None)
+    authority = ConfigAuthority(runtime, runtime, tmp_path / ".env")
+    authority.env_path.write_text("AVA_DB_URL=postgresql://owner-password@[::1\n")
+    warning, debug = Mock(), Mock()
     monkeypatch.setattr("base.log.logger.warning", warning)
-    _warn_undecodable_field("db_url", "AVA_DB_URL", _OWNER_URL)
-    warning.assert_called_once()
-    assert "AVA_DB_URL" in warning.call_args.args[0]
-    assert "owner-password" not in warning.call_args.args[0]
-    assert _OWNER_URL not in warning.call_args.args[0]
+    monkeypatch.setattr("base.log.logger.debug", debug)
+
+    with pytest.raises(ValidationError):
+        authority.current_field_values()
+    warning.assert_not_called()
+    debug.assert_not_called()

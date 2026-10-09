@@ -24,6 +24,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import _store, delivery
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -141,12 +142,14 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Actual graph fencing persists through delivery faults; only authority end resumes it."""
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -226,10 +229,12 @@ async def test_unreadable_executor_preserves_authority_across_native_wakes(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Repeated unreadable process evidence cannot spend TTL or consume queued input."""
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     await graph.ainvoke(
@@ -295,6 +300,8 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A newly admitted runtime reads the durable takeover before doing native work."""
     from dataclasses import replace
@@ -302,7 +309,7 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     from base.agents.impersonation import history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
@@ -393,10 +400,12 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Delivery exhaustion limits pushes, but does not revoke a valid controller's receipt."""
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))

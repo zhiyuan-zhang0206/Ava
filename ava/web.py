@@ -387,6 +387,8 @@ def _answer(
     cut = "\n\n[The page was longer than the read limit and was cut off here.]" if truncated else ""
     page = f"# {title}\n{url}\n\n{content}{cut}"
 
+    from ava.sdk_surface import settings as sdk_settings
+
     model = settings.web.web_fetch_model
     resolved_effort = effort if effort is not None else settings.web.web_fetch_reasoning
     return answer_text(
@@ -402,6 +404,9 @@ def _answer(
         retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
         timeout=settings.lm.llm_invoke_timeout_seconds,
         usage_source="web.fetch",
+        catalog=sdk_settings.model_catalog(),
+        llm_override=settings.lm.llm_override,
+        overrides=sdk_settings.model_overrides(),
     )
 
 

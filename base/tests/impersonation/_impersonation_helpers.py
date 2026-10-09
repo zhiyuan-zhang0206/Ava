@@ -10,6 +10,7 @@ import psycopg
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -38,7 +39,11 @@ def _status(owner: RuntimeIncarnation) -> dict[str, Any]:
 
 
 def _request(
-    owner: RuntimeIncarnation, *, provider: str = "codex", thread: str | None = None
+    owner: RuntimeIncarnation,
+    *,
+    authority: ConfigAuthority,
+    provider: str = "codex",
+    thread: str | None = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     if provider == "codex":
@@ -52,12 +57,13 @@ def _request(
         reason="Handle the next message",
         process_metadata=recorded_tree(),
         relay_provider=provider,
+        authority=authority,
         **kwargs,
     )
 
 
-def _active(owner: RuntimeIncarnation) -> dict[str, Any]:
-    lease = _request(owner)
+def _active(owner: RuntimeIncarnation, *, authority: ConfigAuthority) -> dict[str, Any]:
+    lease = _request(owner, authority=authority)
     leases.accept(
         Database.from_settings(),
         EventBus.from_settings(),

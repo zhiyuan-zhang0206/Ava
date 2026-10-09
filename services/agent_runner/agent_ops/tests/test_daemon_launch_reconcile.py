@@ -6,6 +6,8 @@ from uuid import UUID, uuid4
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from ops.cluster import rpc
 from ops.rpc_schemas import OpStatus
 from ops.rpc_schemas.launch_retry import LaunchReconciled, LaunchReconcileRequest
@@ -14,7 +16,10 @@ from services.agent_runner.agent_ops import daemon
 
 @pytest.mark.asyncio
 async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+    op_executor: ThreadPoolExecutor,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     from ops.lifecycle import launch_reconcile
 
@@ -28,7 +33,7 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
         calls.append((body.launch_attempt_id, received_pool))
         return LaunchReconciled(wake_published=True)
 
-    async def forbidden(*_args: object) -> None:
+    async def forbidden(*_args: object, catalog: ModelCatalog) -> None:
         raise AssertionError("reconciliation cannot invoke the creation launch handler")
 
     monkeypatch.setattr(launch_reconcile, "reconcile_launch_op", reconcile)
@@ -40,6 +45,8 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
         workers=set(),
         pool=pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == OpStatus.COMPLETED
     assert result == {"wake_published": True}

@@ -8,6 +8,7 @@ from langchain_openai.chat_models.base import (
 )
 from openai.types.responses import Response, ResponseCompletedEvent
 
+from base.lm.catalog import ModelCatalog
 from base.lm.pricing import tally_tokens
 from base.lm.reasoning import extract_reasoning_tokens
 from base.lm.usage import usage_model
@@ -15,7 +16,9 @@ from base.lm.usage import usage_model
 
 @pytest.mark.parametrize("tier", ["fast", "priority", "default"])
 @pytest.mark.parametrize("stream", [False, True])
-def test_response_receipt_and_token_details(tier: str, stream: bool) -> None:
+def test_response_receipt_and_token_details(
+    tier: str, stream: bool, *, model_catalog: ModelCatalog
+) -> None:
     # SDK network parsing constructs responses without strict enum validation;
     # model_construct reproduces that boundary for the newer 'fast' receipt.
     response = Response.model_construct(
@@ -46,6 +49,6 @@ def test_response_receipt_and_token_details(tier: str, stream: bool) -> None:
     assert isinstance(message, AIMessage)
     assert message.response_metadata["service_tier"] == tier
     expected = "gpt-6.1-sol" if tier == "default" else "gpt-6.1-sol-fast"
-    assert usage_model(message, "gpt-6.1-sol-fast") == expected
+    assert usage_model(message, "gpt-6.1-sol-fast", catalog=model_catalog) == expected
     assert tally_tokens([message]) == (100, 10, 60)
     assert extract_reasoning_tokens(message.usage_metadata) == 4

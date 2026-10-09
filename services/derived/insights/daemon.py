@@ -32,6 +32,7 @@ from base.config import settings
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
 from base.paths import insights_pidfile, insights_socket
 from services.derived.insights.app import build_app
@@ -85,7 +86,7 @@ async def run() -> None:
     try:
         server = uvicorn.Server(
             uvicorn.Config(
-                build_app(db, pool, insights_config()),
+                build_app(db, pool, insights_config(), catalog=build_model_catalog()),
                 log_level="warning",
                 access_log=False,
                 log_config=None,

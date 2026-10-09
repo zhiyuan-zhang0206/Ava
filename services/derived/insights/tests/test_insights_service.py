@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.daemon import bind_socket
@@ -24,12 +25,19 @@ from services.derived.insights.daemon import bind_socket
 _CONFIG = InsightsConfig(run_timeline_message_text_max=20)
 
 
-def _app() -> Any:
-    return build_app(cast(Database, object()), cast(ConnectionPool[Any], object()), _CONFIG)
+def _app(*, model_catalog: ModelCatalog) -> Any:
+    return build_app(
+        cast(Database, object()),
+        cast(ConnectionPool[Any], object()),
+        _CONFIG,
+        catalog=model_catalog,
+    )
 
 
-def test_the_app_serves_the_run_timeline_routes_at_their_public_paths() -> None:
-    paths = set(_app().openapi()["paths"])
+def test_the_app_serves_the_run_timeline_routes_at_their_public_paths(
+    *, model_catalog: ModelCatalog
+) -> None:
+    paths = set(_app(model_catalog=model_catalog).openapi()["paths"])
     assert {
         "/api/agents/{agent_id}/run-timeline",
         "/api/agents/{agent_id}/run-timeline/messages",
@@ -37,14 +45,14 @@ def test_the_app_serves_the_run_timeline_routes_at_their_public_paths() -> None:
     } <= paths
 
 
-def test_healthz_names_the_service_home_and_process() -> None:
-    body = TestClient(_app()).get("/healthz").json()
+def test_healthz_names_the_service_home_and_process(*, model_catalog: ModelCatalog) -> None:
+    body = TestClient(_app(model_catalog=model_catalog)).get("/healthz").json()
     assert body["name"] == "insights"
     assert isinstance(body["pid"], int)
 
 
-def test_a_route_validates_before_it_reads_anything() -> None:
-    client = TestClient(_app())
+def test_a_route_validates_before_it_reads_anything(*, model_catalog: ModelCatalog) -> None:
+    client = TestClient(_app(model_catalog=model_catalog))
     # The state holds no database: only a request rejected at the boundary can answer.
     assert client.get("/api/agents/1/run-timeline/messages?start=3&end=1").status_code == 422
     assert client.get("/api/agents/1/run-timeline/messages?start=-1&end=1").status_code == 422
@@ -70,11 +78,18 @@ def test_the_socket_is_owner_only_and_replaces_a_predecessors_leftover(short_dir
         sock.close()
 
 
-def test_the_app_answers_over_the_bound_socket(short_dir: Path) -> None:
+def test_the_app_answers_over_the_bound_socket(
+    short_dir: Path, *, model_catalog: ModelCatalog
+) -> None:
     path = short_dir / "insights.sock"
     sock: socket.socket = bind_socket(path)
     server = uvicorn.Server(
-        uvicorn.Config(_app(), log_level="warning", access_log=False, log_config=None)
+        uvicorn.Config(
+            _app(model_catalog=model_catalog),
+            log_level="warning",
+            access_log=False,
+            log_config=None,
+        )
     )
     thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
     thread.start()

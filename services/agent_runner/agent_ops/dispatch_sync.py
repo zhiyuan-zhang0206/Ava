@@ -15,6 +15,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from ops import host_config, inventory, uploads
 from ops.cluster import operations as cluster
@@ -46,7 +47,12 @@ _state_write_lock = threading.Lock()
 
 
 def dispatch_sync(
-    kind: str, payload: dict[str, Any], *, pool: ConnectionPool | None, db: Database
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    pool: ConnectionPool | None,
+    db: Database,
+    authority: ConfigAuthority,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Run synchronous ops on the daemon's worker pool, never the event loop.
 
@@ -60,7 +66,9 @@ def dispatch_sync(
         case "status_probe":
             return OpStatus.COMPLETED, cluster.cluster_status_op(db, pool).model_dump(mode="json")
         case "config_read":
-            return OpStatus.COMPLETED, host_config.config_read_op().model_dump(mode="json")
+            return OpStatus.COMPLETED, host_config.config_read_op(authority=authority).model_dump(
+                mode="json"
+            )
         case "config_audit_read":
             ca = ConfigAuditReadPayload.model_validate(payload)
             return OpStatus.COMPLETED, host_config.config_audit_read_op(ca.last).model_dump(
@@ -70,7 +78,11 @@ def dispatch_sync(
             cw = ConfigWritePayload.model_validate(payload)
             with _state_write_lock:
                 return OpStatus.COMPLETED, host_config.config_write_op(
-                    cw.overrides, local=cw.local, actor=cw.actor, trace_id=cw.trace_id
+                    cw.overrides,
+                    authority=authority,
+                    local=cw.local,
+                    actor=cw.actor,
+                    trace_id=cw.trace_id,
                 ).model_dump(mode="json")
         case "inventory_read":
             return OpStatus.COMPLETED, inventory.inventory_read_op().model_dump(mode="json")

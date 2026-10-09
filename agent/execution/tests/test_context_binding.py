@@ -22,10 +22,15 @@ from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally
+from base.lm.plugin_providers import build_model_catalog
 
 
 def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[str], Path]:
-    context = AvaContext(identity=AgentIdentity(agent_id, True), clients=process_clients())
+    context = AvaContext(
+        identity=AgentIdentity(agent_id, True),
+        catalog=build_model_catalog(),
+        clients=process_clients(),
+    )
     request = make_request_path(tmp_path / "exec", agent_id=agent_id)
     result = make_result_path(tmp_path / "exec", agent_id=agent_id)
     write_request(

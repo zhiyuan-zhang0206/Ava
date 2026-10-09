@@ -18,8 +18,9 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugins import load_report
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.config_registration import (
     DuplicateRegistration,
     InvalidConfigOverlay,
@@ -312,16 +313,21 @@ def test_resolve_overlay_targets_per_agent_resolves(
 
 
 def test_validate_config_overlay_type_error_raises(
-    isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
 ):
     """marker is a str field, passing int triggers Pydantic ValidationError → InvalidConfigOverlay."""
     _setup_overlayable_plugin(isolated_registry)
     with pytest.raises(InvalidConfigOverlay, match="type validation"):
-        validate_config_overlay({"marker": 123}, configs=isolated_registry)
+        validate_config_overlay(
+            {"marker": 123}, configs=isolated_registry, models=model_catalog.models
+        )
 
 
 def test_validate_config_overlay_uses_declaring_model_in_gateway_profile(
-    monkeypatch: pytest.MonkeyPatch, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_registry: dict[str, BaseModel],
+    unit_home,
 ) -> None:
     """Framework validation must not read a domain absent from the gateway profile."""
     import base.config as base_config
@@ -329,13 +335,24 @@ def test_validate_config_overlay_uses_declaring_model_in_gateway_profile(
 
     monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
 
-    validate_config_overlay({"completion_notice_policy": "hourly"}, configs=isolated_registry)
+    validate_config_overlay(
+        {"completion_notice_policy": "hourly"},
+        configs=isolated_registry,
+        models=model_catalog.models,
+    )
     with pytest.raises(InvalidConfigOverlay, match="completion_notice_policy"):
-        validate_config_overlay({"completion_notice_policy": "bogus"}, configs=isolated_registry)
+        validate_config_overlay(
+            {"completion_notice_policy": "bogus"},
+            configs=isolated_registry,
+            models=model_catalog.models,
+        )
 
 
 def test_validate_config_overlay_runs_declaring_model_validators_in_gateway_profile(
-    monkeypatch: pytest.MonkeyPatch, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_registry: dict[str, BaseModel],
+    unit_home,
 ) -> None:
     """Declaring-model validation preserves before and field validators."""
     import base.config as base_config
@@ -343,43 +360,48 @@ def test_validate_config_overlay_runs_declaring_model_validators_in_gateway_prof
 
     monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
 
-    validate_config_overlay({"skills_to_expand_at_start": "a,b"}, configs=isolated_registry)
+    validate_config_overlay(
+        {"skills_to_expand_at_start": "a,b"}, configs=isolated_registry, models=model_catalog.models
+    )
     with pytest.raises(InvalidConfigOverlay, match="only accepts"):
         validate_config_overlay(
-            {"eval_network_allowlist": ["web", "shell"]}, configs=isolated_registry
+            {"eval_network_allowlist": ["web", "shell"]},
+            configs=isolated_registry,
+            models=model_catalog.models,
         )
 
 
 def test_validate_config_overlay_unknown_llm_model_raises(
-    isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
 ):
     with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
         validate_config_overlay(
-            {"llm_model": "deepseek-v4-flash-vision"}, configs=isolated_registry
+            {"llm_model": "deepseek-v4-flash-vision"},
+            configs=isolated_registry,
+            models=model_catalog.models,
         )
 
     assert "deepseek-flash" in str(exc_info.value)
 
 
 def test_validate_config_overlay_registered_llm_model_passes(
-    isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
 ):
-    validate_config_overlay({"llm_model": "claude-opus-5"}, configs=isolated_registry)
+    validate_config_overlay(
+        {"llm_model": "claude-opus-5"}, configs=isolated_registry, models=model_catalog.models
+    )
 
 
 def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
-    """File-level isolation (task #3138, same class as the compact gate's budget):
-    a process whose FIRST registry use is this validation must pass a registered
-    model id — pre-fix the empty registry false-rejected it ("valid models: "
-    empty). This test process already has the registry loaded (the other overlay
-    tests here depend on it), so the scenario runs in a fresh interpreter."""
+    """A fresh process admits a registered model through its explicit catalog."""
     code = textwrap.dedent(
         """
         from base.lm import plugin_providers
         from base.packages.plugins.config_registration import validate_config_overlay
 
-        assert plugin_providers._STATE.catalog is None, "fresh process must start with no catalog"
-        validate_config_overlay({"llm_model": "deepseek-flash"})
+        assert not hasattr(plugin_providers, "_STATE"), "catalog has no ambient holder"
+        catalog = plugin_providers.build_model_catalog()
+        validate_config_overlay({"llm_model": "deepseek-flash"}, models=catalog.models)
         print("ok")
         """
     )
@@ -396,35 +418,45 @@ def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
 
 
 def test_validate_config_overlay_unknown_reasoning_effort_raises(
-    isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
 ):
     with pytest.raises(InvalidConfigOverlay, match="valid values"):
-        validate_config_overlay({"reasoning_effort": "turbo"}, configs=isolated_registry)
+        validate_config_overlay(
+            {"reasoning_effort": "turbo"}, configs=isolated_registry, models=model_catalog.models
+        )
 
 
 @pytest.mark.parametrize("effort", ["", "high"])
 def test_validate_config_overlay_known_reasoning_effort_passes(
-    isolated_registry: dict[str, BaseModel], unit_home, effort: str
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home, effort: str
 ):
-    validate_config_overlay({"reasoning_effort": effort}, configs=isolated_registry)
+    validate_config_overlay(
+        {"reasoning_effort": effort}, configs=isolated_registry, models=model_catalog.models
+    )
 
 
 def test_validate_config_overlay_does_not_range_check_plugin_fields(
-    isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
 ):
     _setup_overlayable_plugin(isolated_registry)
-    validate_config_overlay({"marker": "any string"}, configs=isolated_registry)
+    validate_config_overlay(
+        {"marker": "any string"}, configs=isolated_registry, models=model_catalog.models
+    )
 
 
 @pytest.mark.parametrize("field", ["llm_model", "memory_recall_filter_model"])
 def test_validate_config_overlay_unknown_model_field_raises(
-    isolated_registry: dict[str, BaseModel], unit_home, field: str
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home, field: str
 ):
     """Every model-name overlay field rejects an unregistered id (same failure
     class as the llm_model incident — an unregistered memory filter model would
     crash the agent in the before_llm hook via build_chat_model)."""
     with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
-        validate_config_overlay({field: "deepseek-v4-flash-vision"}, configs=isolated_registry)
+        validate_config_overlay(
+            {field: "deepseek-v4-flash-vision"},
+            configs=isolated_registry,
+            models=model_catalog.models,
+        )
 
     assert "deepseek-flash" in str(exc_info.value)
     assert field in str(exc_info.value)
@@ -432,17 +464,21 @@ def test_validate_config_overlay_unknown_model_field_raises(
 
 @pytest.mark.parametrize("field", ["llm_model", "memory_recall_filter_model"])
 def test_validate_config_overlay_registered_model_field_passes(
-    isolated_registry: dict[str, BaseModel], unit_home, field: str
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home, field: str
 ):
-    validate_config_overlay({field: "claude-opus-5"}, configs=isolated_registry)
+    validate_config_overlay(
+        {field: "claude-opus-5"}, configs=isolated_registry, models=model_catalog.models
+    )
 
 
 def test_validate_config_overlay_none_reasoning_effort_passes(
-    isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
 ):
     """None = unset (field is `str | None`); a None overlay is a legal no-op
     that pre-PR validation accepted — the range check must not regress it."""
-    validate_config_overlay({"reasoning_effort": None}, configs=isolated_registry)
+    validate_config_overlay(
+        {"reasoning_effort": None}, configs=isolated_registry, models=model_catalog.models
+    )
 
 
 @pytest.mark.parametrize(
@@ -486,10 +522,16 @@ def test_validate_config_overlay_none_reasoning_effort_passes(
     ],
 )
 def test_validate_config_overlay_out_of_range_rejected(
-    isolated_registry: dict[str, BaseModel], unit_home, field: str, value: object
+    model_catalog: ModelCatalog,
+    isolated_registry: dict[str, BaseModel],
+    unit_home,
+    field: str,
+    value: object,
 ):
     with pytest.raises(InvalidConfigOverlay, match=field):
-        validate_config_overlay({field: value}, configs=isolated_registry)
+        validate_config_overlay(
+            {field: value}, configs=isolated_registry, models=model_catalog.models
+        )
 
 
 @pytest.mark.parametrize(
@@ -512,9 +554,13 @@ def test_validate_config_overlay_out_of_range_rejected(
     ],
 )
 def test_validate_config_overlay_boundary_values_accepted(
-    isolated_registry: dict[str, BaseModel], unit_home, field: str, value: object
+    model_catalog: ModelCatalog,
+    isolated_registry: dict[str, BaseModel],
+    unit_home,
+    field: str,
+    value: object,
 ):
-    validate_config_overlay({field: value}, configs=isolated_registry)
+    validate_config_overlay({field: value}, configs=isolated_registry, models=model_catalog.models)
 
 
 def test_apply_config_overlay_mutates_plugin_config(
@@ -616,7 +662,7 @@ def test_skills_to_inject_is_per_agent_overlayable(
 
 
 def test_eval_isolation_fields_are_per_agent_overlayable(
-    isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
 ) -> None:
     """The eval boundary is selected at spawn and its network exceptions are explicit."""
     targets = resolve_overlay_targets(
@@ -627,25 +673,31 @@ def test_eval_isolation_fields_are_per_agent_overlayable(
         "eval_network_allowlist": (None, "eval_network_allowlist"),
     }
     validate_config_overlay(
-        {"eval_isolation": True, "eval_network_allowlist": ["web"]}, configs=isolated_registry
+        {"eval_isolation": True, "eval_network_allowlist": ["web"]},
+        configs=isolated_registry,
+        models=model_catalog.models,
     )
 
 
 def test_eval_network_allowlist_rejects_unknown_capability(
-    isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
 ) -> None:
     with pytest.raises(InvalidConfigOverlay, match="only accepts"):
         validate_config_overlay(
-            {"eval_network_allowlist": ["web", "shell"]}, configs=isolated_registry
+            {"eval_network_allowlist": ["web", "shell"]},
+            configs=isolated_registry,
+            models=model_catalog.models,
         )
 
 
 def test_effective_config_snapshot_namespaces_plugin_fields(
-    isolated_registry: dict[str, BaseModel], unit_home
+    config_authority: ConfigAuthority, isolated_registry: dict[str, BaseModel], unit_home
 ):
     """snapshot prefixes plugin fields with `<plugin>.<field>` to avoid collisions with same-named framework fields."""
     _setup_overlayable_plugin(isolated_registry)
-    snap = effective_config_snapshot(configs=isolated_registry)
+    snap = effective_config_snapshot(
+        configs=isolated_registry, framework_values=config_authority.flat_dump()
+    )
     assert "overlay_test.marker" in snap
     assert snap["overlay_test.marker"] == ".git"
     # framework fields are not prefixed; sensitive ones (e.g. db_url, which
@@ -655,7 +707,7 @@ def test_effective_config_snapshot_namespaces_plugin_fields(
 
 
 def test_effective_config_snapshot_excludes_sensitive_fields(
-    isolated_registry: dict[str, BaseModel], unit_home
+    config_authority: ConfigAuthority, isolated_registry: dict[str, BaseModel], unit_home
 ):
     """Fields marked `sensitive=True` never enter the snapshot — it is stored as
     plain JSON on every restart_completed inbound row, so a sensitive value must
@@ -671,106 +723,9 @@ def test_effective_config_snapshot_excludes_sensitive_fields(
 
     bind_plugin_config("sensitive_test", _SensitiveConfig, configs=isolated_registry)
 
-    snap = effective_config_snapshot(configs=isolated_registry)
+    snap = effective_config_snapshot(
+        configs=isolated_registry, framework_values=config_authority.flat_dump()
+    )
     assert "sensitive_test.marker" in snap
     assert "sensitive_test.webhook_secret" not in snap
     assert "plain-text-secret" not in str(snap)
-
-
-def test_syntax_fix_ruff_format_overlay_is_accepted() -> None:
-    """Per-agent A/B of the ruff format gate (task #1858 follow-up, user chose
-    a paired experiment): the field must accept a spawn config_overlay, like
-    prompt_codeact_enabled after #719."""
-    from base.packages.plugins.config_registration import validate_config_overlay
-
-    validate_config_overlay({"syntax_fix_ruff_format": True})  # must not raise
-    validate_config_overlay({"syntax_fix_ruff_format": False})
-
-
-def test_bind_undo_drops_the_binding(isolated_registry: dict[str, BaseModel], unit_home):
-    undo = bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
-    assert is_per_agent_field("test_plugin", "marker", configs=isolated_registry) is True
-    undo()
-
-    assert "test_plugin" not in isolated_registry
-    assert is_per_agent_field("test_plugin", "marker", configs=isolated_registry) is False
-    bind_plugin_config(
-        "test_plugin", _FixtureConfig, configs=isolated_registry
-    )  # a rebind after the undo is legal
-
-
-def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_rest(
-    isolated_registry: dict[str, BaseModel], unit_home, monkeypatch: pytest.MonkeyPatch
-):
-    """A config that cannot bind (SchemaDriftError) is a load failure of that plugin alone: it is
-    rolled back whole (its earlier namespace too), reported, and absent from the returned registry,
-    while the plugins around it install."""
-    from types import SimpleNamespace
-
-    import ava
-    from ava.sdk_surface import install
-    from base.packages.plugins.extensions import (
-        ExtensionRegistry,
-        PluginContributions,
-        SdkNamespace,
-    )
-
-    drifted = disk_image_path("drifted")
-    drifted.parent.mkdir(parents=True)
-    drifted.write_text(json.dumps({"flag": True, "marker": ".git", "extra_field": 42}))
-
-    reported: list[tuple[str, BaseException]] = []
-
-    def _capture(name: str, exc: BaseException) -> None:
-        reported.append((name, exc))
-
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
-    registry = ExtensionRegistry(
-        (
-            (
-                "drifted",
-                PluginContributions(
-                    sdk_namespaces=(SdkNamespace("drifted_ns", SimpleNamespace()),),
-                    config=_FixtureConfig,
-                ),
-            ),
-            (
-                "healthy",
-                PluginContributions(
-                    sdk_namespaces=(SdkNamespace("healthy_ns", SimpleNamespace()),),
-                    config=_FixtureConfig,
-                ),
-            ),
-        )
-    )
-
-    admitted = install.install(registry)
-    try:
-        assert [name for name, _ in admitted.plugins] == ["healthy"]
-        assert [name for name, _ in reported if name == "drifted"] == ["drifted"]
-        assert isinstance(
-            next(exc for name, exc in reported if name == "drifted"), SchemaDriftError
-        )
-        assert not hasattr(ava, "drifted_ns")
-        assert hasattr(ava, "healthy_ns")
-        current = install.installed()
-        assert current is not None
-        assert "drifted" not in current.configs
-        assert "healthy" in current.configs
-    finally:
-        install.uninstall()
-    assert not hasattr(ava, "healthy_ns")
-    assert install.installed() is None
-
-
-def test_authority_path_canonicalizes_a_symlink_home_without_creating_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    missing_home = tmp_path / "uncreated-target"
-    alias = tmp_path / "home-link"
-    alias.symlink_to(missing_home, target_is_directory=True)
-    monkeypatch.setenv("AVA_HOME", str(alias))
-    path = disk_image_path("canonical-probe")
-    assert path == missing_home.resolve() / "configs" / "canonical-probe" / "config.json"
-    assert read_authority_config("canonical-probe", _FixtureConfig, path) == _FixtureConfig()
-    assert not missing_home.exists()

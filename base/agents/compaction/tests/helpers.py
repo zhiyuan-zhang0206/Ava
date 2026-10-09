@@ -9,6 +9,8 @@ from agent.impersonation import flush_checkpoint
 from base.agents.compaction.commands import observe
 from base.agents.compaction.models import CompactTarget
 from base.config import settings
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.source import produce_source
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
@@ -17,7 +19,13 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
 
-async def source(conn: psycopg.Connection, pool: AsyncConnectionPool) -> tuple[Any, ...]:
+async def source(
+    conn: psycopg.Connection,
+    pool: AsyncConnectionPool,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+) -> tuple[Any, ...]:
     incarnation, work = await managed_work(conn, pool)
     graph, saver, config, history = await _prepare_graph(pool, work.agent_id, 1, [])
     await graph.aupdate_state(
@@ -40,7 +48,15 @@ async def source(conn: psycopg.Connection, pool: AsyncConnectionPool) -> tuple[A
     )
     conn.commit()
     assert not settings.lm.llm_override
-    await produce_source(pool, saver, work.agent_id, incarnation.owner, HostedTurnResources())
+    await produce_source(
+        pool,
+        saver,
+        work.agent_id,
+        incarnation.owner,
+        HostedTurnResources(),
+        catalog=model_catalog,
+        llm_override=config_authority.runtime.lm.llm_override,
+    )
     with ConnectionPool[psycopg.Connection](conn.info.dsn) as sync_pool:
         target: CompactTarget = observe(sync_pool, work.agent_id)
     return incarnation, target, graph, saver, config, history

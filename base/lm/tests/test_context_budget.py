@@ -1,7 +1,7 @@
 """Tests for `base/lm/context_budget.py` — per-model compaction thresholds
 derived from each model's context window, and the provider-truth occupancy read.
-The file-level-isolation test runs a fresh interpreter: the budget call must
-trigger the provider-plugin load itself (task #3138).
+The file-level-isolation test runs a fresh interpreter with an explicitly
+constructed catalog before the first budget read.
 """
 
 from __future__ import annotations
@@ -14,150 +14,217 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from base.config import settings
+from base.config import get_field, settings
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import (
     UnknownModelWindowError,
     latest_input_tokens,
     resolve_context_budget,
 )
-from base.lm.plugin_providers import model_catalog
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _load_provider_plugins() -> None:
-    model_catalog()
-
-
-def test_budget_is_thirty_forty_percent_of_a_1m_window() -> None:
+def test_budget_is_thirty_forty_percent_of_a_1m_window(*, model_catalog: ModelCatalog) -> None:
     """The roster-wide rule on a 1M-window model: remind at 30%, force-compact
     at 40% of the window."""
-    budget = resolve_context_budget("claude-sonnet-5")
+    budget = resolve_context_budget(
+        "claude-sonnet-5",
+        catalog=model_catalog,
+        overrides=ModelOverrides.from_pins(
+            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+        ),
+    )
     assert budget.max_context_tokens == 1_000_000
     assert budget.hard_compact_tokens == 400_000
     assert budget.soft_compact_tokens == 300_000
 
 
-def test_deepseek_budget_is_374k_soft_512k_hard() -> None:
+def test_deepseek_budget_is_374k_soft_512k_hard(*, model_catalog: ModelCatalog) -> None:
     """User decision (2026-08-29): the deepseek entry opts out of the flat
     rule with per-model fractions — soft 374k / hard 512k on its 1M
     window."""
-    budget = resolve_context_budget("deepseek-flash")
+    budget = resolve_context_budget(
+        "deepseek-flash",
+        catalog=model_catalog,
+        overrides=ModelOverrides.from_pins(
+            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+        ),
+    )
     assert budget.max_context_tokens == 1_000_000
     assert budget.soft_compact_tokens == 374_000
     assert budget.hard_compact_tokens == 512_000
 
 
-def test_budget_scales_to_a_smaller_window() -> None:
+def test_budget_scales_to_a_smaller_window(*, model_catalog: ModelCatalog) -> None:
     """Same 30/40 rule on a 200K-window model — the whole point of expressing it
     as a fraction: one absolute token count was unreachable here (never
     compacted) while being far too loose on a 1M model."""
-    budget = resolve_context_budget("claude-haiku-4-5-20251001")
+    budget = resolve_context_budget(
+        "claude-haiku-4-5-20251001",
+        catalog=model_catalog,
+        overrides=ModelOverrides.from_pins(
+            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+        ),
+    )
     assert budget.max_context_tokens == 200_000
     assert budget.hard_compact_tokens == 80_000
     assert budget.soft_compact_tokens == 60_000
 
 
-def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule() -> None:
+def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule(
+    *, model_catalog: ModelCatalog
+) -> None:
     """The roster carries no per-model compact fraction or ceiling, so EVERY
     model's thresholds are exactly 30% / 40% of its own context window — except
     the deepseek entries, which carry the user-pinned 0.374 / 0.512 (see
     test_deepseek_budget_is_374k_soft_512k_hard)."""
-    for models in model_catalog().supported_models.values():
+    for models in model_catalog.supported_models.values():
         for model in models:
             if model == "deepseek-flash":
                 continue
-            budget = resolve_context_budget(model)
+            budget = resolve_context_budget(
+                model,
+                catalog=model_catalog,
+                overrides=ModelOverrides.from_pins(
+                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                ),
+            )
             window = budget.max_context_tokens
             assert budget.soft_compact_tokens == round(0.3 * window), model
             assert budget.hard_compact_tokens == round(0.4 * window), model
 
 
-def test_fractions_are_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fractions_are_configurable(
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+) -> None:
     """The thresholds track the configured fractions (per-agent overridable)."""
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.5)
     monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.25)
-    budget = resolve_context_budget("deepseek-flash")
+    budget = resolve_context_budget(
+        "deepseek-flash",
+        catalog=model_catalog,
+        overrides=ModelOverrides.from_pins(
+            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+        ),
+    )
     assert budget.hard_compact_tokens == 500_000
     assert budget.soft_compact_tokens == 250_000
 
 
-def test_ceiling_caps_the_hard_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ceiling_caps_the_hard_threshold(
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+) -> None:
     """The whole point of the absolute cap: on a 1M-window model the fraction
     alone lands at 800K, far past where any lab triggers its own agent's
     compaction. The ceiling wins whenever it is the smaller of the two."""
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.8)
     monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.6)
     monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 150_000)
-    budget = resolve_context_budget("deepseek-flash")
+    budget = resolve_context_budget(
+        "deepseek-flash",
+        catalog=model_catalog,
+        overrides=ModelOverrides.from_pins(
+            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+        ),
+    )
     assert budget.hard_compact_tokens == 150_000
     # The reminder is compressed by the same 150K/800K factor, so it keeps its
     # 0.75 lead instead of sitting above the forced ceiling at 600K.
     assert budget.soft_compact_tokens == 112_500
 
 
-def test_ceiling_above_the_fraction_is_inert(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ceiling_above_the_fraction_is_inert(
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+) -> None:
     """A ceiling that never binds must leave both thresholds byte-identical to
     the pure-fraction result — a model whose evidence says "no cap needed"
     carries 0 and behaves exactly as before."""
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.8)
     monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.6)
     monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 900_000)
-    capped = resolve_context_budget("deepseek-flash")
+    capped = resolve_context_budget(
+        "deepseek-flash",
+        catalog=model_catalog,
+        overrides=ModelOverrides.from_pins(
+            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+        ),
+    )
     monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 0)
-    uncapped = resolve_context_budget("deepseek-flash")
+    uncapped = resolve_context_budget(
+        "deepseek-flash",
+        catalog=model_catalog,
+        overrides=ModelOverrides.from_pins(
+            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+        ),
+    )
     assert capped == uncapped
     assert uncapped.hard_compact_tokens == 800_000
     assert uncapped.soft_compact_tokens == 600_000
 
 
-def test_soft_stays_below_hard_for_every_spawnable_model() -> None:
+def test_soft_stays_below_hard_for_every_spawnable_model(*, model_catalog: ModelCatalog) -> None:
     """Registry invariant across the whole roster: the reminder must fire
     strictly before the forced compaction, whatever combination of per-model
     fraction and ceiling the entry carries."""
-    for models in model_catalog().supported_models.values():
+    for models in model_catalog.supported_models.values():
         for model in models:
-            budget = resolve_context_budget(model)
+            budget = resolve_context_budget(
+                model,
+                catalog=model_catalog,
+                overrides=ModelOverrides.from_pins(
+                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                ),
+            )
             assert 0 < budget.soft_compact_tokens < budget.hard_compact_tokens, model
             assert budget.hard_compact_tokens <= budget.max_context_tokens, model
 
 
-def test_unknown_model_raises() -> None:
-    """A model with no model_catalog().context_windows entry cannot have thresholds derived —
+def test_unknown_model_raises(*, model_catalog: ModelCatalog) -> None:
+    """A model with no build_model_catalog().context_windows entry cannot have thresholds derived —
     fail-fast rather than borrow a wrong window."""
     with pytest.raises(UnknownModelWindowError, match="no-such-model"):
-        resolve_context_budget("no-such-model")
+        resolve_context_budget(
+            "no-such-model",
+            catalog=model_catalog,
+            overrides=ModelOverrides.from_pins(
+                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            ),
+        )
 
 
-def test_every_supported_model_resolves() -> None:
+def test_every_supported_model_resolves(*, model_catalog: ModelCatalog) -> None:
     """Registry invariant: every spawnable model has a context window, so the
     compact hook's resolve never raises for a legitimately-spawned agent. This
     is what lets the hook let UnknownModelWindowError surface (it only fires on a
     developer registry gap, which this test catches in CI, not prod)."""
-    for models in model_catalog().supported_models.values():
+    for models in model_catalog.supported_models.values():
         for model in models:
-            assert model in model_catalog().context_windows, (
-                f"{model} is spawnable but missing from model_catalog().context_windows — "
+            assert model in model_catalog.context_windows, (
+                f"{model} is spawnable but missing from build_model_catalog().context_windows — "
                 f"add it so its compaction thresholds can be derived"
             )
             # And it actually resolves without raising.
-            resolve_context_budget(model)
+            resolve_context_budget(
+                model,
+                catalog=model_catalog,
+                overrides=ModelOverrides.from_pins(
+                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                ),
+            )
 
 
-def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
-    """File-level isolation (task #3138): a process whose FIRST registry use is
-    the budget must resolve it — the provider loader is triggered by this call,
-    not assumed from an earlier model build. This test process already loaded
-    the providers via the module fixture, which would mask the failure, so the
-    scenario runs in a fresh interpreter (pre-fix it raised
-    UnknownModelWindowError against the empty registry)."""
+def test_owned_catalog_resolves_budget_in_a_fresh_process() -> None:
+    """A cold root explicitly builds the catalog before resolving a budget."""
     model = settings.lm.llm_model
     code = textwrap.dedent(
         f"""
         from base.lm.context_budget import resolve_context_budget
         from base.lm import plugin_providers
 
-        assert plugin_providers._STATE.catalog is None, "fresh process must start with no catalog"
-        budget = resolve_context_budget({model!r})
+        from base.host.env.agent_slices import ModelOverrides
+        assert not hasattr(plugin_providers, "_STATE")
+        catalog = plugin_providers.build_model_catalog()
+        budget = resolve_context_budget({model!r}, catalog=catalog, overrides=ModelOverrides.from_pins({{}}))
         print(budget.max_context_tokens)
         """
     )

@@ -35,6 +35,8 @@ from agent.tests.claim.claim_status_support import _compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
 from base.agents.context import AvaContext
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.units import spawn_agent
 
@@ -54,11 +56,15 @@ from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_resurrect_kind_appends_marker_and_continues(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """resurrect inbound (delivered to the new process by resurrect_agent) → claim appends
     lifecycle marker 'You have been resurrected by {source}' + goto BEFORE_LLM."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
     cmd = await claim_node(
@@ -80,10 +86,14 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
 
 
 async def test_claim_resurrect_batch_appends_only_latest_marker(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Repeated failed recoveries are consumed together but render one marker."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     first = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="system:retry")
     latest = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
@@ -112,10 +122,14 @@ async def test_claim_resurrect_batch_appends_only_latest_marker(
 
 
 async def test_unowned_resurrect_notification_cannot_cancel_pending_terminate(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """A newer notification is not admission or proof that prior intent completed."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     # id == insertion order: terminate older than the resurrect that follows it
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
@@ -163,7 +177,11 @@ async def test_claim_resurrect_then_terminate_still_dies(
 
 
 async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Auto-resurrect-on-compact path: a /compact delivered to a terminated agent
     inserts the compact_request then a resurrect (newer id). The resurrect wins the
@@ -171,7 +189,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     (exit_kind is None), so it still runs — the history is compacted and the
     resurrect marker is appended after the summary. Without auto-resurrect the
     compact_request would sit pending with no live process to claim it."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
@@ -202,7 +220,11 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
 
 
 async def test_claim_fork_kind_appends_identity_marker_and_continues(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """fork inbound (delivered to the new process by spawn_agent on fork) → claim appends
     identity marker: contains the fork source from source (agent:M) + new agent's own id (N) +
@@ -210,7 +232,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     (inherited history from source agent), so no SystemMessage injection; marker appended at
     the end, then the `on_fork` notes (fork_notes stubbed here — its membership is pinned in
     test_fork_notes.py, issue #1320)."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     monkeypatch = pytest.MonkeyPatch()
 
@@ -253,7 +275,11 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
 
 
 async def test_claim_fork_strips_inherited_source_notes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """The fork strip (issue #1320): inherited head notes that name the SOURCE —
     its agent id, its per-agent memory, its preloaded skills — are removed, and
@@ -261,7 +287,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     cluster-wide: the inherited copy is kept and NOT re-grafted."""
     from langchain_core.messages import RemoveMessage
 
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
 
     def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:

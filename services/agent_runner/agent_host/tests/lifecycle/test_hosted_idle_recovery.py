@@ -25,11 +25,13 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.cohort import _classify, _RuntimeRow
 from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host import runtime as runtime_module
@@ -130,8 +132,12 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
     monkeypatch: pytest.MonkeyPatch,
     evidence: str,
     released: bool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
@@ -170,6 +176,7 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
         checkpointer=saver,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     scheduler = TurnScheduler(host.run_turn)
     dispatcher = InboundWakeDispatcher(
@@ -192,8 +199,12 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     db_conn.execute(
         "UPDATE agents_meta SET status='idling',lease_expires_at=now()-interval '1s' WHERE id=%s",
@@ -206,6 +217,7 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
         checkpointer=AsyncMock(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert [wake.agent_id for wake in await host.pending_inbound_wakes(60)] == [agent]
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()

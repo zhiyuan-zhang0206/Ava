@@ -10,6 +10,8 @@ import ava.skills as skills_mod
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import _write_skill
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
@@ -361,7 +363,12 @@ def test_help_skills_index_lists_read(
 
 
 def test_consuming_a_skill_lands_a_skill_invoked_row(
-    fake_skills_dir: Path, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    fake_skills_dir: Path,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """End to end with a real database: consuming a skill body leaves a
     `skill_invoked` row in `audit_events` for the consuming agent, carrying the
@@ -370,7 +377,7 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
     from tests.fixtures.units import spawn_agent
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: agent_id)
 
     skills_mod.read("alpha")

@@ -14,6 +14,8 @@ from base.agents.recovery.breaker import (
     halt_automatic_recovery,
     record_permanent_reject_turn,
 )
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 
@@ -26,9 +28,13 @@ def test_clear_literal_matches_the_halt_threshold() -> None:
 
 
 async def test_record_increments_and_halt_suppresses_until_human(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
 
     assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 1
     reason_row = db_conn.execute(
@@ -54,11 +60,15 @@ async def test_record_increments_and_halt_suppresses_until_human(
 
 
 async def test_halt_replaces_another_reasons_window(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A bounded `resurrect_failed` window is weaker than the until-human halt:
     the trip replaces it (and an expired window even of its own reason)."""
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
         "wake_suppress_reason = 'resurrect_failed' WHERE id = %s",
@@ -90,13 +100,17 @@ def test_billing_reason_literal_matches_the_circuit_reason() -> None:
 
 
 async def test_recorded_reason_is_the_billing_whitelist_value(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """End-to-end anti-drift (task #3919): the reason the breaker WRITES is the
     value the billing batch-recovery whitelist PICKS UP."""
     from ops.lifecycle.billing_recovery import enumerate_candidates
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 1
     assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 2
     db_conn.execute(

@@ -38,6 +38,7 @@ from agent.llm.cache import prepare_invocation
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.call import ProviderCallBinding, recover_invocation
+from base.lm.catalog import ModelCatalog
 from base.lm.errors import normalize_provider_transport_error
 from base.log import logger
 
@@ -69,6 +70,7 @@ async def _consume_llm(
     chunks: list[AIMessageChunk],
     handler: RedisStreamHandler,
     agent: AgentSlices,
+    catalog: ModelCatalog,
 ) -> tuple[float | None, float | None]:
     """Unified LLM call entry — streaming-first, falls back once to non-stream on recoverable errors.
 
@@ -123,7 +125,10 @@ async def _consume_llm(
     # per-agent overlay win (a slow provider gets a longer bound without
     # loosening every model's stall detection).
     stall_segment_timeout = resolve_setting(
-        "llm_stream_ttft_timeout_seconds", model=model, overrides=agent.overrides
+        "llm_stream_ttft_timeout_seconds",
+        model=model,
+        models=catalog.models,
+        explicit=agent.overrides.llm_stream_ttft_timeout_seconds,
     )
     stream_started = time.monotonic()
     try:
@@ -133,10 +138,16 @@ async def _consume_llm(
             handler=handler,
             ttft_timeout=stall_segment_timeout,
             total_timeout=resolve_setting(
-                "llm_stream_total_timeout_seconds", model=model, overrides=agent.overrides
+                "llm_stream_total_timeout_seconds",
+                model=model,
+                models=catalog.models,
+                explicit=agent.overrides.llm_stream_total_timeout_seconds,
             ),
             inter_chunk_timeout=resolve_setting(
-                "llm_stream_inter_chunk_timeout_seconds", model=model, overrides=agent.overrides
+                "llm_stream_inter_chunk_timeout_seconds",
+                model=model,
+                models=catalog.models,
+                explicit=agent.overrides.llm_stream_inter_chunk_timeout_seconds,
             ),
         )
     except LLMStreamStallTimeoutError as e:
@@ -152,7 +163,7 @@ async def _consume_llm(
             event="stream_stalled_retry",
             error_type=type(e).__name__,
             error=str(e)[:200],
-            vendor=provider_key_of_model(model),
+            vendor=provider_key_of_model(model, catalog=catalog),
             model=model,
             stage=e.stage,
             elapsed_s=round(time.monotonic() - stream_started, 1),
@@ -176,7 +187,7 @@ async def _consume_llm(
                 "two adjacent stalls — non-streaming fallback timed out after "
                 "{timeout_s:.1f}s; terminating the call for a delayed retry",
                 event="stream_stall_pair_terminated",
-                vendor=provider_key_of_model(model),
+                vendor=provider_key_of_model(model, catalog=catalog),
                 model=model,
                 stage=e.stage,
                 timeout_s=stall_segment_timeout,
@@ -366,6 +377,7 @@ async def _stream_with_cache_retry(
     chunks: list[AIMessageChunk],
     handler: RedisStreamHandler,
     agent: AgentSlices,
+    catalog: ModelCatalog,
     binding: ProviderCallBinding | None = None,
 ) -> None:
     """Stream the LLM response into `chunks`, retrying once on a stale cache.
@@ -409,6 +421,7 @@ async def _stream_with_cache_retry(
                 chunks=chunks,
                 handler=handler,
                 agent=agent,
+                catalog=catalog,
             )
         except Exception as exc:
             plain = recover_invocation(invocation, exc)
@@ -428,6 +441,7 @@ async def _stream_with_cache_retry(
                 chunks=chunks,
                 handler=handler,
                 agent=agent,
+                catalog=catalog,
             )
         handler.llm_latency_ms = (time.monotonic() - call_started) * 1000.0
         # Decode-stage wall-clock: first-token → last-token arrival from the

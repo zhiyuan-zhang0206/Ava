@@ -26,6 +26,8 @@ from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import (
     EMPTY,
     ContextNote,
@@ -52,6 +54,7 @@ def _runtime(
             extensions=extensions,
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=build_model_catalog(),
         )
     )
 
@@ -110,7 +113,7 @@ async def test_a_plugin_declaration_reaches_the_head_through_the_context_registr
     registry — and are absent from a context that carries none."""
     tid = create_agent(db_conn)
 
-    def plugin_section(_slices: AgentSlices) -> str:
+    def plugin_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         return "## Declared by a plugin"
 
     def plugin_note(_ctx: AvaContext) -> HumanMessage:
@@ -374,14 +377,19 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )
     monkeypatch.setattr(
         "agent.hooks.compact.resolve_context_budget",
-        lambda *_: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_, **_kw: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
             max_context_tokens=1_000_000, soft_compact_tokens=1, hard_compact_tokens=1
         ),
     )
     summary_text = "compacted summary " * 100
 
     async def _fake_generate_summary(
-        messages: list[AnyMessage], llm: object, _model: str, *, binding: object = None
+        messages: list[AnyMessage],
+        llm: object,
+        _model: str,
+        *,
+        binding: object = None,
+        catalog: ModelCatalog,
     ) -> str:
         return summary_text
 

@@ -43,6 +43,7 @@ from agent.graph.llm_errors import (
 from agent.hooks.compact import CompactionFailedError
 from base.config import settings
 from base.host.net.resilience import jittered
+from base.lm.catalog import ModelCatalog
 from base.lm.errors import is_retryable_provider_error
 
 RETRY_JITTER_SPAN_S = 10.0
@@ -92,7 +93,14 @@ def _retryable_failure(exc: Exception) -> bool:
 
 
 def retry_wait(
-    exc: Exception, attempts: int, *, model: str, agent_id: int, ledger: LlmLedger
+    exc: Exception,
+    attempts: int,
+    *,
+    model: str,
+    agent_id: int,
+    ledger: LlmLedger,
+    catalog: ModelCatalog,
+    max_attempts_pin: int | None,
 ) -> float | None:
     """Seconds to sleep before the next try after the `attempts`-th failed one; None ends the node.
 
@@ -102,7 +110,12 @@ def retry_wait(
         return None
     from base.lm.registry import resolve_setting
 
-    max_attempts = resolve_setting("llm_retry_max_attempts", model=model)
+    max_attempts = resolve_setting(
+        "llm_retry_max_attempts",
+        model=model,
+        models=catalog.models,
+        explicit=max_attempts_pin,
+    )
     max_pairs = settings.lm.llm_stall_retry_max_consecutive
     if isinstance(exc, LLMStreamStallPairError) and max_pairs > 0:
         thread = str(agent_id)

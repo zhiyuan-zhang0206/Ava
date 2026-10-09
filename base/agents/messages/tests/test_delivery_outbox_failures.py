@@ -11,7 +11,10 @@ import pytest
 from psycopg_pool import ConnectionPool, PoolClosed
 
 from base.agents.messages import delivery_outbox as outbox
+from base.config.service_read import ConfigAuthority
 from base.db import create_agent
+
+from .test_delivery_outbox_sender import authority as authority
 
 _NOW = datetime(2026, 9, 17, 9, 30, 0, tzinfo=UTC)
 
@@ -49,7 +52,11 @@ def pool() -> Iterator[ConnectionPool]:
 
 def _patch_limits(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
     snapshot = _limits(**overrides)
-    monkeypatch.setattr(outbox, "limits", lambda: snapshot)
+
+    def read_limits(_authority: ConfigAuthority) -> outbox.DeliveryOutboxLimits:
+        return snapshot
+
+    monkeypatch.setattr(outbox, "limits", read_limits)
     outbox._reset_caches_for_tests()
 
 
@@ -67,6 +74,7 @@ def _agent(db_conn: psycopg.Connection, status: str = "running") -> int:
 
 
 def _record(
+    authority: ConfigAuthority,
     *,
     agent_id: int,
     source: str = "watcher:7",
@@ -75,6 +83,7 @@ def _record(
     now: datetime | None = None,
 ) -> Path | None:
     return outbox.record_failed_send(
+        authority=authority,
         agent_id=agent_id,
         origin_agent_id=None,
         source=source,
@@ -96,12 +105,13 @@ def _inbounds(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str
 
 def test_unknown_postcommit_wake_error_preserves_receipt_and_journal(
     journal: Path,
+    authority: ConfigAuthority,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _agent(db_conn)
-    path = _record(agent_id=agent_id, key="committed-key", now=_NOW)
+    path = _record(authority, agent_id=agent_id, key="committed-key", now=_NOW)
     assert path is not None
     before = path.read_bytes()
     error = RuntimeError("wake implementation bug")
@@ -110,11 +120,16 @@ def test_unknown_postcommit_wake_error_preserves_receipt_and_journal(
         raise error
 
     with pytest.raises(RuntimeError) as raised:
-        outbox.flush(pool, broken_wake, now=_NOW + timedelta(seconds=43201))
+        outbox.flush(pool, broken_wake, authority=authority, now=_NOW + timedelta(seconds=43201))
     assert error in (raised.value, raised.value.__cause__)
     assert path.read_bytes() == before
     assert _inbounds(db_conn, agent_id) == [("the daily check fired", "watcher:7", "committed-key")]
-    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=43202)).delivered == 1
+    assert (
+        outbox.flush(
+            pool, publish_wake, authority=authority, now=_NOW + timedelta(seconds=43202)
+        ).delivered
+        == 1
+    )
     assert len(_inbounds(db_conn, agent_id)) == 1
     assert not path.exists()
 
@@ -124,40 +139,52 @@ def test_unknown_postcommit_wake_error_preserves_receipt_and_journal(
 )
 def test_unknown_database_failure_preserves_journal(
     journal: Path,
+    authority: ConfigAuthority,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     publish_wake: Callable[[int, str], bool],
     error: psycopg.OperationalError,
 ) -> None:
-    path = _record(agent_id=_agent(db_conn), now=_NOW)
+    path = _record(authority, agent_id=_agent(db_conn), now=_NOW)
     assert path is not None
     before = path.read_bytes()
 
-    def broken_delivery(*_args: object) -> int:
+    def broken_delivery(*_args: object, authority: ConfigAuthority) -> int:
         raise error
 
     monkeypatch.setattr(outbox, "_deliver", broken_delivery)
     with pytest.raises(type(error)) as raised:
-        outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=43201))
+        outbox.flush(pool, publish_wake, authority=authority, now=_NOW + timedelta(seconds=43201))
     assert raised.value is error
     assert path.read_bytes() == before
 
 
 def test_known_pool_timeout_retains_bounded_recovery(
     journal: Path,
+    authority: ConfigAuthority,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _agent(db_conn)
-    path = _record(agent_id=agent_id, now=_NOW)
+    path = _record(authority, agent_id=agent_id, now=_NOW)
     assert path is not None
     _patch_limits(monkeypatch, flush_interval_seconds=0.01)
     with pool.connection(), pool.connection():
-        assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31)).deferred == 1
+        assert (
+            outbox.flush(
+                pool, publish_wake, authority=authority, now=_NOW + timedelta(seconds=31)
+            ).deferred
+            == 1
+        )
     entry = outbox._read(path)
     assert entry is not None and entry.flush_attempts == 1
-    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=92)).delivered == 1
+    assert (
+        outbox.flush(
+            pool, publish_wake, authority=authority, now=_NOW + timedelta(seconds=92)
+        ).delivered
+        == 1
+    )
     assert len(_inbounds(db_conn, agent_id)) == 1

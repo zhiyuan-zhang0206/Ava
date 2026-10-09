@@ -12,6 +12,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import recording
@@ -29,6 +30,8 @@ def active(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> ActiveSession:
     from base.host.env import runtime_config
 
@@ -56,6 +59,7 @@ def active(
         reason="Test ACK exhaustion",
         relay_provider="claude",
         process_metadata=recorded_tree(),
+        authority=config_authority,
     )
     assert (lease["ack_window_seconds"], lease["max_delivery_attempts"]) == (window, attempts)
     leases.accept(

@@ -66,15 +66,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from base import paths
 from base.agents import AvaAgentError
 from base.cluster.auth import cookie_name
 from base.cluster.authority.api import AcceptanceCache
 from base.cluster.rate_limit import LoginRateLimiter
-from base.config import settings
+from base.config import Settings, settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.system.cron import register_os_cron
-from base.lm.plugin_providers import model_catalog
+from base.lm.plugin_providers import build_model_catalog
 from gateway.agents import launch_retry as agents_launch_retry_router
 from gateway.agents import lifecycle as agents_lifecycle_router
 from gateway.agents import notices as notices_router
@@ -202,7 +204,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     The agent host handles native lifecycle work. Auto label generation
     runs in the separate services/derived/labeler daemon.
     """
-    model_catalog()  # load the provider plugins now: a broken provider setup fails the boot
+    app.state.catalog = build_model_catalog()
+    app.state.config_authority = ConfigAuthority(
+        runtime=settings,
+        all_domains=settings if settings.profile is None else Settings(profile=None),
+        env_path=paths.ava_home() / ".env",
+    )
 
     # Runtime consumer -> `Database.pool()` dials the pooled URL (PgBouncer when
     # enabled, else direct) and decides the connection kwargs in one place:
@@ -275,7 +282,11 @@ async def _background_lifetime(
     mcp_manager = None
     if settings.gateway.mcp_endpoint_enabled:
         mcp_manager = mcp_server_endpoint.build_manager(
-            app.state.db_pool, app.state.db, app.state.bus
+            app.state.db_pool,
+            app.state.db,
+            app.state.bus,
+            catalog=app.state.catalog,
+            authority=app.state.config_authority,
         )
         app.state.mcp_manager = mcp_manager
 

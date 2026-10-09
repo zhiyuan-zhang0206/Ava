@@ -14,9 +14,11 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog import attempts, resurrect_retry, rounds
 from services.wake.delivery_watchdog import daemon as delivery_daemon
 from services.wake.delivery_watchdog import turn_liveness as watchdog
@@ -38,10 +40,12 @@ def _make_hosted_running_agent(
     *,
     machine: str = "runner-a",
     age_s: float = _THRESHOLD_S + 60.0,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(spawner="user")
+    agent_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     db.execute(
         "UPDATE agents_meta SET status='running', runtime_kind='hosted', machine=%s, "
         "last_active_at=now() - make_interval(secs => %s) WHERE id=%s",
@@ -60,25 +64,37 @@ class FakeRedis:
 
 
 def test_gateway_reads_hosted_turn_threshold_from_current_config_view(
-    monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
 ) -> None:
-    monkeypatch.setattr(
-        watchdog,
-        "current_field_values",
-        lambda: {"wedged_agent_inbound_age_seconds": 2500.0},
-    )
+    config_authority.env_path.write_text("AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS=2500\n")
+    assert watchdog.hosted_turn_threshold_seconds(config_authority) == 2500.0
 
-    assert watchdog.hosted_turn_threshold_seconds() == 2500.0
+    config_authority.env_path.write_text("AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS=2600\n")
+    assert watchdog.hosted_turn_threshold_seconds(config_authority) == 2600.0
 
 
 def test_select_hosted_turn_candidates_uses_db_wall_clock_and_exact_runtime_state(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    stale_hosted = _make_hosted_running_agent(db_conn)
-    fresh_hosted = _make_hosted_running_agent(db_conn, age_s=_THRESHOLD_S - 1.0)
-    process_agent = _make_hosted_running_agent(db_conn)
-    idling_hosted = _make_hosted_running_agent(db_conn)
+    stale_hosted = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
+    fresh_hosted = _make_hosted_running_agent(
+        db_conn,
+        age_s=_THRESHOLD_S - 1.0,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+    )
+    process_agent = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
+    idling_hosted = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     db_conn.execute("UPDATE agents_meta SET runtime_kind='process' WHERE id=%s", (process_agent,))
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (idling_hosted,))
     db_conn.commit()
@@ -94,9 +110,17 @@ def test_select_hosted_turn_candidates_uses_db_wall_clock_and_exact_runtime_stat
 async def test_live_progress_prevents_recovery_after_db_age_exceeds_threshold(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A long turn remains healthy beyond 2400s while node/chunk marks stay fresh."""
-    agent_id = _make_hosted_running_agent(db_conn, age_s=_THRESHOLD_S + 600.0)
+    agent_id = _make_hosted_running_agent(
+        db_conn,
+        age_s=_THRESHOLD_S + 600.0,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+    )
     redis = FakeRedis(
         {
             "host_turn_progress:runner-a": json.dumps(
@@ -129,8 +153,13 @@ async def test_missing_or_stale_host_progress_is_a_wedge(
     expected_age: float,
     expected_marks: tuple[float, ...],
     heartbeat_missing: bool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     if heartbeat is not None:
         heartbeat = heartbeat.replace("{agent_id}", str(agent_id))
     redis = FakeRedis({"host_turn_progress:runner-a": heartbeat})
@@ -147,8 +176,13 @@ async def test_missing_or_stale_host_progress_is_a_wedge(
 async def test_invalid_host_progress_cannot_authorize_recovery(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     redis = FakeRedis(
         {
             "host_turn_progress:runner-a": json.dumps(
@@ -222,8 +256,13 @@ async def test_recovery_commits_the_marked_wake_with_the_termination(
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     _silence_recovery_side_effects(monkeypatch)
     triggers = _stub_resurrect(monkeypatch)
 
@@ -319,6 +358,9 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """BLOCK regression (Ava #3242): the queued recovery trigger is
     source='system', so the plain notice guard used to cut the chain before
@@ -328,7 +370,9 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     matched would reach no dispatch and fail the assert."""
     from ops.cluster import rpc as cluster_rpc
 
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     _silence_recovery_side_effects(monkeypatch)
     dispatched: list[dict[str, object]] = []
 
@@ -372,6 +416,9 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The force terminate used to commit alone and the wake was queued by a
     separate later step; a process death or a failed insert between them left
@@ -383,7 +430,9 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
     import base.db
     from ops import lifecycle
 
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     _silence_recovery_side_effects(monkeypatch)
     triggers = _stub_resurrect(monkeypatch)
     if failure == "process_killed_after_terminate":
@@ -430,11 +479,16 @@ async def test_a_committed_recovery_is_never_recovered_twice(
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Idempotency by state: the recovery's terminate takes the row out of the
     `running` set the wedge scan selects from, so a re-scan finds nothing to
     recover and the single wake is never duplicated."""
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     _silence_recovery_side_effects(monkeypatch)
     _stub_resurrect(monkeypatch)
     await watchdog._recover_hosted_turn(
@@ -474,10 +528,15 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The clock is a database row, so a watchdog restart resumes the cooldown
     instead of recovering the same agent again at once."""
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     _wedged_runner_redis(monkeypatch)
     recovered: list[int] = []
 
@@ -509,8 +568,13 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     _wedged_runner_redis(monkeypatch)
 
     async def hang(db_pool: object, _db: object, _bus: EventBus, wedge: object) -> None:
@@ -535,10 +599,15 @@ async def test_a_slow_recovery_is_never_started_twice(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Single flight is the loop's sequencing: while a recovery spans many
     intervals the loop is inside the round, and afterwards inside the cooldown."""
-    agent_id = _make_hosted_running_agent(db_conn)
+    agent_id = _make_hosted_running_agent(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     _wedged_runner_redis(monkeypatch)
     release = asyncio.Event()
     recovered: list[int] = []

@@ -30,6 +30,7 @@ import logging
 from psycopg_pool import ConnectionPool
 
 from base.agents.messages import delivery_outbox
+from base.config.service_read import ConfigAuthority
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, publish_inbound_wake
@@ -58,6 +59,8 @@ async def outbox_round(
     bus: EventBus,
     progress: LoopProgress,
     cadence: list[float],
+    *,
+    authority: ConfigAuthority,
 ) -> None:
     """One redelivery round: read the live knobs, then flush. A quiesced unit never
     gets here: `run_rounds` skips the round.
@@ -65,7 +68,7 @@ async def outbox_round(
     `cadence` is the one-slot cell the loop reads its next wait from: the interval
     in force when the round started.
     """
-    knobs = await asyncio.to_thread(delivery_outbox.limits)
+    knobs = await asyncio.to_thread(delivery_outbox.limits, authority)
     cadence[:] = [knobs.flush_interval_seconds]
     progress.timeout_s = liveness_timeout_s(knobs.flush_interval_seconds)
     report = await asyncio.to_thread(
@@ -73,6 +76,7 @@ async def outbox_round(
         pool,
         functools.partial(publish_inbound_wake, db, bus),
         on_record=progress.beat,
+        authority=authority,
     )
     if report.touched or report.expired:
         _log.info(
@@ -88,17 +92,22 @@ async def outbox_round(
 
 
 async def outbox_loop(
-    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    *,
+    authority: ConfigAuthority,
 ) -> None:
     """The outbox redelivery as a resident sequential loop, one immediate round
     first (so a restart right after a recovery backfills at once)."""
     cadence: list[float] = []
 
     async def one_round() -> None:
-        await outbox_round(pool, db, bus, progress, cadence)
+        await outbox_round(pool, db, bus, progress, cadence, authority=authority)
 
     def next_wait_s() -> float:
         # A quiesced unit skips its rounds, so the first wait can precede the first read.
-        return cadence[0] if cadence else delivery_outbox.limits().flush_interval_seconds
+        return cadence[0] if cadence else delivery_outbox.limits(authority).flush_interval_seconds
 
     await round_loop.run_rounds("delivery-outbox", progress, next_wait_s, one_round)

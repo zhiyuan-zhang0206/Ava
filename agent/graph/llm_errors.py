@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
+from base.lm.catalog import ModelCatalog
 from base.lm.errors import ErrorClass, classify_error, emit_provider_error
 
 
@@ -172,7 +173,7 @@ def _is_fatal_provider_error_type(exc: BaseException, llm_policy: LlmCallPolicy)
 
 
 def _classify_and_log_provider_error(
-    exc: Exception, agent: AgentSlices
+    exc: Exception, agent: AgentSlices, *, catalog: ModelCatalog
 ) -> FatalProviderError | None:
     """Classify a provider exception, emit the structured postmortem log, and
     return a `FatalProviderError` to raise when the turn must fail fast — else None
@@ -200,12 +201,14 @@ def _classify_and_log_provider_error(
     fatal = classification.error_class is ErrorClass.PERMANENT or fatal_type_hit
     context_overflow = classification.context_overflow
     model = agent.brain.llm_model
-    emit_provider_error(exc, model=model, fatal=fatal, classification=classification)
+    emit_provider_error(
+        exc, model=model, fatal=fatal, classification=classification, catalog=catalog
+    )
     if not fatal:
         return None
     from base.lm.factory import provider_key_of_model
 
-    vendor = provider_key_of_model(model)
+    vendor = provider_key_of_model(model, catalog=catalog)
     if classification.billing:
         reason = "provider rejected the request for billing: the key is out of credit or quota"
     elif classification.error_class is ErrorClass.PERMANENT:

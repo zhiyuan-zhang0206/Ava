@@ -98,9 +98,12 @@ def _installed() -> Iterator[None]:
 # ── transparency ──────────────────────────────────────────────────────────────
 
 
-def test_help_is_byte_identical_across_install() -> None:
+def test_help_is_byte_identical_across_install(
+    monkeypatch: pytest.MonkeyPatch, model_installation: install.Installation
+) -> None:
     """Acceptance for the transparency contract: metering must not change a single
     byte of what the agent sees via `ava.help`."""
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     before_root = _help(ava)
     before_ns = _help(ava.files)
     before_fn = _help(ava.files.read)

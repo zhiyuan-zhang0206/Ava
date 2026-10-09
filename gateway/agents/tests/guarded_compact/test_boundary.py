@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 
@@ -20,8 +21,10 @@ async def test_strict_target_rejects_before_creating_another_receipt(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     invalid: str,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     body = dict(accepted.target)
     if invalid == "protocol_bool":
         body["protocol"] = True
@@ -46,8 +49,10 @@ async def test_verified_principal_scope_key_and_changed_original_body(
     aops_pool: AsyncConnectionPool,
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     for omitted in ("Idempotency-Key", "Idempotency-Scope"):
         headers = {k: v for k, v in accepted.headers.items() if k != omitted}
         assert (
@@ -84,8 +89,10 @@ async def test_path_bounds_before_domain_access(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     agent_id: int,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     path = f"/api/keyed/v1/agents/{agent_id}"
     assert client.get(path + "/compact-target", headers=accepted.headers).status_code == 422
     assert (

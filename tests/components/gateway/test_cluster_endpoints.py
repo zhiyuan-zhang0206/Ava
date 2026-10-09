@@ -15,12 +15,14 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.native_process.root_control import client as root_client
 from gateway.app import app
 from gateway.events import telemetry_rows
@@ -674,13 +676,18 @@ def _seed_away_machine(
 
 
 def _seed_agent_on_machine(
-    db_conn: psycopg.Connection, machine: str, *, status: str = "idling"
+    db_conn: psycopg.Connection,
+    machine: str,
+    *,
+    status: str = "idling",
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> int:
     """One live agent row homed on `machine` (test spawn helper + machine
     stamp; the row-creation path moved gateway-side, Task #1236 follow-up)."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET machine = %s, status = %s WHERE id = %s",

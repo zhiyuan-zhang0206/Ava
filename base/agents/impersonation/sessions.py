@@ -5,6 +5,7 @@ from typing import Any
 from base.agents import impersonation as control
 from base.agents.impersonation.history import public_session, resolve
 from base.agents.messages.caller_identity import CallerIdentity
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 
@@ -14,6 +15,7 @@ def request(
     bus: EventBus,
     agent_id: int,
     *,
+    authority: ConfigAuthority,
     name: str,
     executor_name: str,
     provider: str,
@@ -36,6 +38,7 @@ def request(
         bus,
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject=provider),
+        authority=authority,
         name=name,
         executor_name=executor_name,
         process_metadata=process_metadata,

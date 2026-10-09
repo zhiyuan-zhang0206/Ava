@@ -28,6 +28,7 @@ from agent.state import AgentState, MemoryState
 from base.agents.context import AvaContext
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, PluginContributions
 
@@ -157,7 +158,7 @@ stale — fix it at the source. A checked-in doc the code contradicts is worth
 reporting, not silently working around."""
 
 
-def memory_discipline_section(slices: AgentSlices) -> str:
+def memory_discipline_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_memory_behavior_enabled (env
     AVA_SYSTEM_PROMPT_MEMORY, default on). Empty when both stores are switched
     off — with nothing to write to, the discipline would describe a capability
@@ -166,7 +167,12 @@ def memory_discipline_section(slices: AgentSlices) -> str:
     deliberately does not repeat them."""
     from base.lm.registry import resolve_setting
 
-    if not resolve_setting("prompt_memory_behavior_enabled", model=slices.brain.llm_model):
+    if not resolve_setting(
+        "prompt_memory_behavior_enabled",
+        model=slices.brain.llm_model,
+        models=catalog.models,
+        explicit=slices.read("agent", "prompt_memory_behavior_enabled"),
+    ):
         return ""
     if not (
         settings.agent.memory_index_inject_enabled or settings.agent.memory_per_agent_inject_enabled
@@ -209,7 +215,7 @@ class _PassiveMemoryRecallHook(Hook):
         if not tail_has_recallable_inbound(state.messages):
             return None
 
-        if auto_compact_will_fire(state, agent):
+        if auto_compact_will_fire(state, agent, catalog=runtime.context.require_catalog()):
             logger.info(
                 "[{label}] {body}",
                 label="passive-recall",

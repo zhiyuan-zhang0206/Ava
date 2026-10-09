@@ -26,10 +26,18 @@ actual resolved model and effort before commit.
 `validate_restart_model_config` checks only edits to `llm_model` or
 `reasoning_effort`. It merges the proposed overlay over the stored overlay and
 birth stamp while holding the metadata row lock. Legacy rows without a pinned
-model use the live default through `agent_setting`; pinned rows retain their
+model use the caller's explicit current default; pinned rows retain their
 model. Unsupported model/effort combinations raise `InvalidModelConfig` before
 configuration or restart writes. Guarded receipt replay precedes validation.
 
 The factory's `check_provider_key=False` skips credentials only; model membership
 and exact effort validation still apply. Self restart commits the config edit
 and restart inbound together before raising `AgentRestart`.
+
+Catalog membership belongs to admission, using the corresponding Installation or
+request owner. `RestartAgentRequest` validates only structure and numeric/effort
+ranges. Gateway admission retains its 422 refusal before forwarding; runner
+membership and provider validation retain typed `InvalidModelConfig` 400 errors
+before entering the write transaction. Guarded native receipt replay precedes
+fresh validation, preserving the original accepted command. SDK and native
+acceptance pass catalog, override and current-default inputs explicitly.

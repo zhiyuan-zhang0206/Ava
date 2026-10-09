@@ -15,6 +15,7 @@ from uuid import uuid4
 import pytest
 
 from base import paths
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.enable_config import write_local
 
 # Every dotted name `load_extensions` can register a plugin module under.
@@ -22,7 +23,8 @@ _PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog):
+    monkeypatch.setattr("base.lm.plugin_providers.build_model_catalog", lambda: model_catalog)
     repo = tmp_path / "repo_plugins"
     user = tmp_path / "user_plugins"
     repo.mkdir()
@@ -244,7 +246,7 @@ _CONTRIBUTING_FACE = """
 from base.packages.plugins.extensions import ContextNote, PluginContributions
 
 
-def {name}_section(_slices):
+def {name}_section(_slices, *, catalog):
     return "## {name}"
 
 

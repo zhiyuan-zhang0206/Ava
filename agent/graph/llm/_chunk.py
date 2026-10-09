@@ -20,6 +20,7 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
+from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks
 from base.log import logger
 
@@ -73,7 +74,7 @@ def _sanitize_thinking_blocks(final_msg: AIMessage) -> None:
 _TOOL_CLAIMED_REASONS: frozenset[str] = frozenset({"tool_use", "tool_calls"})
 
 
-def _validate_stop_reason(final_msg: AIMessage) -> None:
+def _validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> None:
     """Fail-fast on a missing or abnormal terminal reason, normalized across providers.
 
     Uses `classify_stop` (dispatched on response_metadata['model_provider']) so
@@ -84,7 +85,7 @@ def _validate_stop_reason(final_msg: AIMessage) -> None:
     """
     from base.lm.stop import StopCategory, classify_stop
 
-    category, raw = classify_stop(final_msg)
+    category, raw = classify_stop(final_msg, stops=catalog.stops)
     output_tokens = (final_msg.usage_metadata or {}).get("output_tokens", 0)  # pyright: ignore[reportUnknownMemberType]
     if category is StopCategory.CORRUPTED:
         raise LLMStreamCorruptedError(
@@ -119,7 +120,7 @@ def _validate_stop_reason(final_msg: AIMessage) -> None:
         )
 
 
-def _assemble_final_message(chunks: list[AIMessageChunk]) -> AIMessage:
+def _assemble_final_message(chunks: list[AIMessageChunk], *, catalog: ModelCatalog) -> AIMessage:
     """Fold streamed chunks into a single AIMessage + fail-fast validation.
 
     Accumulation via chunk addition merges content + usage_metadata;
@@ -158,5 +159,5 @@ def _assemble_final_message(chunks: list[AIMessageChunk]) -> AIMessage:
     # 2026-07-25). In-place repair keeps the turn's text/tool blocks instead
     # of aborting into a doubled re-request.
     _sanitize_thinking_blocks(final_msg)
-    _validate_stop_reason(final_msg)
+    _validate_stop_reason(final_msg, catalog=catalog)
     return final_msg

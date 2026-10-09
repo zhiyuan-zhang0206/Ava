@@ -12,6 +12,8 @@ import pytest
 import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus
+from ava.sdk_surface.install import Installation
+from base.config.service_read import ConfigAuthority
 from gateway.tests.agents.test_agents_sdk import (
     _sdk_via_inprocess_gateway as _sdk_via_inprocess_gateway,
 )
@@ -187,9 +189,9 @@ class TestListAgents:
         ]
 
     def test_default_scope_includes_all_nonterminated_states(
-        self, db_conn: psycopg.Connection
+        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
     ) -> None:
-        ids = [_spawn_agent() for _ in range(3)]
+        ids = [_spawn_agent(config_authority=config_authority) for _ in range(3)]
         for agent_id, status in zip(ids, ("running", "idling", "terminated"), strict=True):
             db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent_id))
         db_conn.commit()
@@ -199,8 +201,10 @@ class TestListAgents:
         assert [row.agent_id for row in page.agents] == list(reversed(ids[:2]))
         assert page.next_cursor is None
 
-    def test_terminated_pages_preserve_cursor_and_search(self, db_conn: psycopg.Connection) -> None:
-        ids = [_spawn_agent() for _ in range(5)]
+    def test_terminated_pages_preserve_cursor_and_search(
+        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+    ) -> None:
+        ids = [_spawn_agent(config_authority=config_authority) for _ in range(5)]
         for agent_id in ids:
             db_conn.execute(
                 "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
@@ -303,8 +307,10 @@ class TestListAgents:
         assert row.fork_source_agent_id == fork_source_agent_id
         assert row.spawner == "agent:8"
 
-    def test_agent_row_keeps_domain_fields(self, db_conn: psycopg.Connection) -> None:
-        pin_agent(_spawn_agent())
+    def test_agent_row_keeps_domain_fields(
+        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+    ) -> None:
+        pin_agent(_spawn_agent(config_authority=config_authority))
         agent_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
         db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))
@@ -327,10 +333,13 @@ class TestListAgents:
 
 
 class TestSpawnConfig:
-    def test_spawn_passes_validated_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_spawn_passes_validated_config(
+        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
+    ) -> None:
         """spawn(config_overlay=...) passes validated config through to _client.spawn."""
         from ava import agents
 
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
@@ -338,12 +347,13 @@ class TestSpawnConfig:
         assert seen["config"] == {"llm_model": "claude-sonnet-5"}
 
     def test_spawn_preset_inside_config_passes_through(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
     ) -> None:
         """config_overlay={"preset": name} is the primary input surface and rides
         the config map untouched."""
         from ava import agents
 
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
@@ -354,16 +364,17 @@ class TestSpawnConfig:
         assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
 
     def test_spawn_preset_key_must_be_nonempty_string(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
     ) -> None:
         from ava import agents
 
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         with pytest.raises(ValueError, match="non-empty string"):
             agents.spawn(config_overlay={"preset": ""}, idempotency_key=str(uuid4()))
 
     def test_spawn_config_with_preset_skips_preset_key_in_overlay_validation(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
     ) -> None:
         """The `preset` key is spawn-boundary metadata: the overlay validators
         (which reject unknown keys) must not see it, while the other fields are
@@ -371,6 +382,7 @@ class TestSpawnConfig:
         from ava import agents
         from base.packages.plugins.config_registration import InvalidConfigOverlay
 
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
@@ -385,11 +397,14 @@ class TestSpawnConfig:
                 idempotency_key=str(uuid4()),
             )
 
-    def test_spawn_rejects_non_per_agent_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_spawn_rejects_non_per_agent_config(
+        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
+    ) -> None:
         """spawn(config_overlay=...) rejects fields not marked per_agent — raises before spawning."""
         from ava import agents
         from base.packages.plugins.config_registration import InvalidConfigOverlay
 
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         with pytest.raises(InvalidConfigOverlay):
             agents.spawn(config_overlay={"db_url": "postgres://nope"}, idempotency_key=str(uuid4()))

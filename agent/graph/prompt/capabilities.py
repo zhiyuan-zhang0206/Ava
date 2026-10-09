@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from typing import Any, NamedTuple
 
 from base.host.env.agent_slices import AgentSlices, Prompt
+from base.lm.catalog import ModelCatalog
 from base.lm.registry import resolve_setting
 from base.packages.skills.names import match_key
 
@@ -371,7 +372,7 @@ def capability_index_is_empty(prompt: Prompt) -> bool:
     return not _skill_index_lines(prompt) and not _mcp_index_lines(prompt.sdk_disable)
 
 
-def capabilities_section(slices: AgentSlices) -> str:
+def capabilities_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Always-on index of capabilities this agent already has — skills (reusable
     playbooks) and live MCP tool servers — so a concrete task starts from what
     exists instead of being rebuilt from general knowledge. Names + one-line
@@ -403,7 +404,12 @@ def capabilities_section(slices: AgentSlices) -> str:
         intro.append(_MCP_HOWTO)
 
     parts = ["# Capabilities\n\n" + " ".join(intro) + "\n\n" + _MATCH_EVERY_TASK]
-    if resolve_setting("prompt_capabilities_match_first_enabled", model=slices.brain.llm_model):
+    if resolve_setting(
+        "prompt_capabilities_match_first_enabled",
+        model=slices.brain.llm_model,
+        models=catalog.models,
+        explicit=slices.read("agent", "prompt_capabilities_match_first_enabled"),
+    ):
         parts.append(_MATCH_FIRST)
     if skill_lines:
         parts.append("**Skills** — reusable playbooks:\n" + "\n".join(skill_lines))

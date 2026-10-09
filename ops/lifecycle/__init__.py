@@ -34,6 +34,7 @@ from psycopg_pool import ConnectionPool
 from base.agents import (
     AgentStatus,
     CrashRecoveryResult,
+    InvalidModelConfig,
     MachinePaused,
     RestartResult,
     ResurrectAlreadyAlive,
@@ -49,9 +50,11 @@ from base.agents.incarnation.native_restart_models import (
 )
 from base.agents.messages.inbound import WakeTriggerKind
 from base.cluster.machine import machine_name
+from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
 from ops.agents import (
     get_agent_machine,
@@ -470,7 +473,13 @@ async def resurrect_if_terminated(
 
 
 def _restart_blocking(
-    db: Database, bus: EventBus, agent_id: int, body: RestartAgentRequest, db_pool: ConnectionPool
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    body: RestartAgentRequest,
+    db_pool: ConnectionPool,
+    *,
+    catalog: ModelCatalog,
 ) -> int | None:
     """Sync restart section — via to_thread. Returns the inbound id, or None
     when the agent is already terminated."""
@@ -478,6 +487,16 @@ def _restart_blocking(
 
     from base.agents.incarnation.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
     from base.db.transaction import write_transaction
+    from base.packages.plugins.config_registration import (
+        InvalidConfigOverlay,
+        validate_config_overlay,
+    )
+
+    if body.config_overlay:
+        try:
+            validate_config_overlay(body.config_overlay, models=catalog.models)
+        except InvalidConfigOverlay as exc:
+            raise InvalidModelConfig(str(exc)) from exc
 
     with write_transaction(db_pool) as conn:
         row = conn.execute(
@@ -497,9 +516,16 @@ def _restart_blocking(
             # Settle a withdrawn llm_model before the overlay is stored — the
             # provider-outage model-switch channel must not persist a stale id (#4306).
             overlay = dict(body.config_overlay)
-            model_receipt = normalize_overlay_llm_model(overlay)
+            model_receipt = normalize_overlay_llm_model(overlay, models=catalog.models)
             with conn.cursor() as cur:
-                validate_restart_model_config(cur, agent_id, overlay)
+                validate_restart_model_config(
+                    cur,
+                    agent_id,
+                    overlay,
+                    catalog=catalog,
+                    llm_override=settings.lm.llm_override,
+                    default_model=settings.lm.llm_model,
+                )
             if model_receipt is not None:
                 _log.warning(
                     "restart overlay llm_model %r is withdrawn; storing the "
@@ -535,10 +561,18 @@ def _restart_blocking(
 
 
 async def restart_agent_op(
-    db: Database, bus: EventBus, agent_id: int, body: RestartAgentRequest, db_pool: ConnectionPool
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    body: RestartAgentRequest,
+    db_pool: ConnectionPool,
+    *,
+    catalog: ModelCatalog,
 ) -> RestartAgentResponse:
     """Local-target restart — INSERT one kind='restart' inbound."""
-    iid = await asyncio.to_thread(_restart_blocking, db, bus, agent_id, body, db_pool)
+    iid = await asyncio.to_thread(
+        _restart_blocking, db, bus, agent_id, body, db_pool, catalog=catalog
+    )
     if iid is None:
         return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
     await publish_inbound_arrived(bus, agent_id, iid, "restart", body.source, "")
@@ -635,6 +669,7 @@ async def lifecycle_op(
     body: dict[str, Any],
     db_pool: ConnectionPool,
     *,
+    catalog: ModelCatalog,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
 ) -> (
@@ -676,7 +711,7 @@ async def lifecycle_op(
         from ops.lifecycle.native_restart import restart_native_work_op
 
         return await restart_native_work_op(
-            db, bus, agent_id, NativeRestartOperation.model_validate(body), db_pool
+            db, bus, agent_id, NativeRestartOperation.model_validate(body), db_pool, catalog=catalog
         )
     if action == "terminate":
         return await terminate_agent_op(
@@ -706,7 +741,7 @@ async def lifecycle_op(
         return await recover_crash_marked_op(db, bus, agent_id)
     if action == "restart":
         return await restart_agent_op(
-            db, bus, agent_id, RestartAgentRequest.model_validate(body), db_pool
+            db, bus, agent_id, RestartAgentRequest.model_validate(body), db_pool, catalog=catalog
         )
     raise AssertionError(f"unreachable: action={action!r}")
 

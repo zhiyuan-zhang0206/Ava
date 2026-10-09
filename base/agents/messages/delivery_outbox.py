@@ -68,6 +68,7 @@ from base.agents.messages.delivery_outbox_types import (
     PermanentDeliveryError as PermanentDeliveryError,
 )
 from base.agents.messages.delivery_retry import retryable_database_error
+from base.config.service_read import ConfigAuthority
 from base.daemon.schedules import completion_notices
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
@@ -93,17 +94,9 @@ class DeliveryOutboxLimits:
     max_entries: int
 
 
-def limits() -> DeliveryOutboxLimits:
-    """Read the outbox knobs through the live config path (`.env` file primary).
-
-    One `current_field_values()` read costs tens of milliseconds (the dotenv
-    resolution dominates), so callers on hot paths cache the pair they need —
-    see `send_path_settings` (sender processes) — while the flush tick and the
-    failure recorder read fresh.
-    """
-    from base.config.service_read import current_field_values
-
-    values = current_field_values()
+def limits(authority: ConfigAuthority) -> DeliveryOutboxLimits:
+    """Read one fresh knob snapshot; sender owners cache only their first-send pair."""
+    values = authority.current_field_values()
     return DeliveryOutboxLimits(
         enabled=bool(values["delivery_outbox_enabled"]),
         retry_backoff_steps=tuple(
@@ -117,30 +110,29 @@ def limits() -> DeliveryOutboxLimits:
     )
 
 
-_send_path_cache: tuple[bool, float] | None = None
-_send_path_lock = threading.Lock()
+class DeliverySenderConfig:
+    """One sender's authority and first-send snapshot; flushers continue reading fresh."""
+
+    def __init__(self, authority: ConfigAuthority) -> None:
+        self.authority = authority
+        self._snapshot: tuple[bool, float] | None = None
+        self._lock = threading.Lock()
+
+    def settings(self) -> tuple[bool, float]:
+        """Read the enabled/dedup pair once, at this owner's first send."""
+        with self._lock:
+            if self._snapshot is None:
+                snapshot = limits(self.authority)
+                self._snapshot = (snapshot.enabled, snapshot.dedup_window_seconds)
+            return self._snapshot
 
 
-def send_path_settings() -> tuple[bool, float]:
-    """`(enabled, dedup_window)` for sender processes — read once per process.
-
-    A delivery send must not pay a config read it cannot use: the sender side
-    of the switch (recording, key reuse) lands at the next process start, while
-    the flusher half stays live per tick. That is the repo's standard
-    field-application semantics, and it is what makes the kill switch cheap.
-    """
-    global _send_path_cache  # noqa: PLW0603 — lazily-filled process cache
-    with _send_path_lock:
-        if _send_path_cache is None:
-            snapshot = limits()
-            _send_path_cache = (snapshot.enabled, snapshot.dedup_window_seconds)
-        return _send_path_cache
+def send_path_settings(sender: DeliverySenderConfig) -> tuple[bool, float]:
+    """The first-send pair owned by the supplied process sender."""
+    return sender.settings()
 
 
 def _reset_caches_for_tests() -> None:
-    global _send_path_cache  # noqa: PLW0603
-    with _send_path_lock:
-        _send_path_cache = None
     with _registry_lock:
         _registry.clear()
 
@@ -363,6 +355,7 @@ _registry: dict[str, tuple[str, float]] = {}
 
 def logical_key(
     *,
+    sender: DeliverySenderConfig,
     agent_id: int,
     source: str,
     content: Content,
@@ -377,7 +370,7 @@ def logical_key(
     successful send, an identical later message is a NEW logical message and
     gets a fresh key.
     """
-    enabled, window = send_path_settings()
+    enabled, window = send_path_settings(sender)
     if not enabled:
         return uuid.uuid4().hex
     message_fingerprint = fingerprint(
@@ -438,8 +431,9 @@ def retire_send(
 
 def record_failed_send(
     *,
-    agent_id: int,
+    authority: ConfigAuthority,
     origin_agent_id: int | None,
+    agent_id: int,
     source: str,
     content: Content,
     client_message_id: str,
@@ -456,7 +450,7 @@ def record_failed_send(
     Never raises: a failed record must leave the send's own error untouched.
     """
     try:
-        snapshot = limits()
+        snapshot = limits(authority)
         if not snapshot.enabled:
             return None
         moment = now or datetime.now(UTC)
@@ -533,6 +527,8 @@ def _deliver(
     publish_wake: Callable[[int, str], bool],
     entry: OutboxEntry,
     connect_timeout_s: float,
+    *,
+    authority: ConfigAuthority,
 ) -> int | None:
     """Commit one entry through the canonical chat-inbound path; returns the id."""
     from base.agents.messages.caller_protocol import CallerProtocolUnavailableError
@@ -554,7 +550,7 @@ def _deliver(
                 conn,
                 entry.agent_id,
                 notice,
-                completion_notices.current_default_completion_notice_policy(),
+                completion_notices.current_default_completion_notice_policy(authority),
             )
             conn.commit()
         if not required:
@@ -673,6 +669,8 @@ def _flush_path(
     path: Path,
     snapshot: DeliveryOutboxLimits,
     moment: datetime,
+    *,
+    authority: ConfigAuthority,
 ) -> str | None:
     """One entry's flush outcome (a `FlushReport` counter name); None for a non-record."""
     from psycopg import OperationalError
@@ -698,7 +696,9 @@ def _flush_path(
     if moment < _due_at(entry, snapshot.retry_backoff_steps):
         return "deferred"
     try:
-        inbound_id = _deliver(pool, publish_wake, entry, snapshot.flush_interval_seconds)
+        inbound_id = _deliver(
+            pool, publish_wake, entry, snapshot.flush_interval_seconds, authority=authority
+        )
     except PermanentDeliveryError as exc:
         _abandon(path, entry, exc.reason, moment, detail=exc.detail)
         return "abandoned"
@@ -758,36 +758,27 @@ def flush(
     pool: FlushPool,
     publish_wake: Callable[[int, str], bool],
     *,
+    authority: ConfigAuthority,
     now: datetime | None = None,
     on_record: Callable[[], None] | None = None,
 ) -> FlushReport:
-    """One redelivery pass over this machine's records.
+    """Redeliver this machine's records using one fresh limit snapshot.
 
-    A record is delivered through `insert_chat_inbound_once` (idempotent by its
-    stored key), retired on success, retried per the backoff ladder while
-    transiently failing, and abandoned — loudly — on a permanent failure or on
-    the first failed attempt at or after its budget. The budget decision sits
-    after the attempt, never before it: an entry owed a retry at budget time
-    still gets it (a flusher stalled across the budget gives the message its
-    chance once services return), and a successful attempt delivers at any age.
-    An abandoned record is also expired — this pass prunes it — once
-    `delivery_outbox_abandoned_retention_days` have elapsed since abandonment.
-    A file that fails to parse (bad JSON, drifted schema, unparseable
-    timestamps) is counted unreadable and kept for inspection; it never stops
-    the pass. While the outbox is disabled, nothing is touched and records
-    stay for a re-enable or the operator. `on_record` is called before each
-    directory entry, for a caller that tracks the pass's progress. `publish_wake` is the
-    best-effort wake for a delivered inbound (`base.db.publish_inbound_wake` bound to the
-    flusher's handles); this module stays free of the database stack.
+    Stored logical keys keep replay idempotent. Successful records retire at
+    any age; a failed attempt at or beyond the budget abandons the record.
+    Unreadable records remain for inspection, and abandoned records expire
+    after their retention window. Disabling leaves every record untouched.
+    `on_record` tracks pass progress; `publish_wake` is the best-effort hint
+    bound to the flusher's handles. This module does not import the DB stack.
     """
-    snapshot = limits()
+    snapshot = limits(authority)
     moment = now or datetime.now(UTC)
     directory = journal_dir()
     if not directory.is_dir():
         return FlushReport()
     outcomes: Counter[str] = Counter()
     for path in _paced(sorted(directory.iterdir()), on_record):
-        outcome = _flush_path(pool, publish_wake, path, snapshot, moment)
+        outcome = _flush_path(pool, publish_wake, path, snapshot, moment, authority=authority)
         if outcome is not None:
             outcomes[outcome] += 1
     return FlushReport(**outcomes)
