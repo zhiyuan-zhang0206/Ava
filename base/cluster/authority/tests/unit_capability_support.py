@@ -79,7 +79,6 @@ def runner_boot(
     env_file = runner_home / ".env"
     env_file.write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
     monkeypatch.setenv("AVA_HOME", str(runner_home))
-    monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", None)
     for key in (
         "AVA_PROCESS_PROFILE",
         dotenv_boot.LAUNCHER_PROFILE_ENV_KEY,
