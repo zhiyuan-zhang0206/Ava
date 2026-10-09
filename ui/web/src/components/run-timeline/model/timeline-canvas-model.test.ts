@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { RunTimelineMessageBar, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
   aggregateColumns,
-  barLayout,
-  blockLayout,
+  barValue,
+  rowLayout,
   buildHitIndex,
   frameOf,
   hitTest,
@@ -14,7 +14,7 @@ import {
   type Place,
 } from "./timeline-canvas-model";
 import { timeAxis } from "./timeline-model";
-import { ADDED_ROW, INPUT_ROW, UNITS_ROW } from "./timeline-nav";
+import { INPUT_ROW, UNITS_ROW } from "./timeline-nav";
 
 const place = (key: string, x0: number, x1: number, weight = 0): Place => ({ key, x0, x1, weight });
 
@@ -88,77 +88,84 @@ describe("snap", () => {
 describe("row layouts", () => {
   const T = Date.parse("2026-10-04T12:00:00Z");
   const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
-  const unit = (i0: number, from: number, to: number): RunTimelineUnit => ({
+  const unit = (i0: number, from: number, to: number, own: number | null, total: number | null): RunTimelineUnit => ({
     kind: "text", i0, i1: i0, start: iso(from), end: iso(to), source: null, preview: "", parent: null,
-    context_tokens: null, generation_tokens: null, estimated: null,
+    context_tokens: own, generation_tokens: null, estimated: null, session: 0, context_total: total, request: null,
   });
   const node = (id: string, from: number, to: number): RunTimelineNode => ({
     id, level: 1, parent: null, start: iso(from), end: iso(to), span_start: 0, span_end: 1, summary: id,
     usage: { calls: 0, input: 0, cache_read: 0, output: 0, cache_write: 0, cost_usd: 0, cost_calls: 0 }, generation: null, context_tokens: null, estimated: null,
   });
-  const message = (idx: number, from: number, to: number, own: number, total: number): RunTimelineMessageBar => ({
-    idx, start: iso(from), end: iso(to), session: 0, context_tokens: own, estimated: false, context_total: total, request: null,
-  });
   const data = {
     nodes: [node("a", 0, 100)],
-    units: [unit(0, 0, 50), unit(1, 50, 100)],
-    messages: [message(0, 0, 50, 4, 10), message(1, 50, 100, 16, 30)],
+    units: [unit(0, 0, 50, 4, 10), unit(1, 50, 100, 16, 30)],
   };
   const whole = { from: T, to: T + 100_000 };
   const axis = timeAxis(whole);
+  const view = axis.viewU(whole);
+  const layoutOf = (row: string, d = data, px = 1000) => rowLayout(row, d, axis, view, px);
 
   it("keys items by what they select, and looks them up from the layout", () => {
-    const layout = blockLayout(UNITS_ROW, data, axis, axis.viewU(whole), 1000);
+    const layout = layoutOf(UNITS_ROW);
     expect(layout.wide.map((p) => p.key)).toEqual(["utext-0-0", "utext-1-1"]);
     expect(layout.items.get("utext-1-1")?.selection).toEqual({ kind: "unit", i0: 1, i1: 1, unitKind: "text" });
     expect(selectionKey({ kind: "node", id: "a" })).toBe("na");
-    expect(selectionKey({ kind: "message", idx: 4 })).toBe("m4");
   });
 
-  it("puts a message's bars exactly under the block that shows it, in both context rows", () => {
-    const view = axis.viewU(whole);
-    const units = blockLayout(UNITS_ROW, data, axis, view, 1000);
-    for (const row of [INPUT_ROW, ADDED_ROW]) {
-      const bars = barLayout(row, data, axis, view, 1000);
-      expect(bars.wide.map((p) => [p.x0, p.x1])).toEqual(units.wide.map((p) => [p.x0, p.x1]));
-      // A bar's frame hugs the box it is drawn in.
-      const bar = bars.wide.find((p) => p.key === "m1");
-      expect(bars.boxes.get("m1")).toEqual({ x0: bar?.x0, x1: bar?.x1 });
-    }
+  it("draws the Context size row block for block like the Messages row: same count, same coordinates", () => {
+    const units = layoutOf(UNITS_ROW);
+    const bars = layoutOf(INPUT_ROW);
+    expect(bars.wide.length).toBe(units.wide.length);
+    expect(bars.wide.map((p) => [p.key, p.x0, p.x1])).toEqual(units.wide.map((p) => [p.key, p.x0, p.x1]));
+    // A bar's frame hugs the box it is drawn in.
+    expect(bars.boxes).toEqual(units.boxes);
   });
 
-  it("gives an instant message the minimum width at its time, in every row alike", () => {
-    const instant = { ...data, units: [unit(0, 20, 20)], messages: [message(0, 20, 20, 1, 1)] };
-    const view = axis.viewU(whole);
-    for (const row of [UNITS_ROW, INPUT_ROW, ADDED_ROW]) {
-      const layout = row === UNITS_ROW ? blockLayout(row, instant, axis, view, 1000) : barLayout(row, instant, axis, view, 1000);
-      // 20 s of 100 s on 1000 px: starts at 200 and is MIN_ITEM_PX wide (a narrow item: one painted run of columns).
-      const key = row === UNITS_ROW ? "utext-0-0" : "m0";
-      expect(layout.boxes.get(key)).toEqual({ x0: 200, x1: 203 });
-      expect(layout.cells).toEqual([{ x0: 200, x1: 203, key }]);
-    }
-  });
-
-  it("lets neighbouring instants inside one pixel column share it: one painted item, the heavier bar", () => {
-    const close = {
-      ...data,
-      units: [unit(0, 20, 20), unit(1, 20.1, 20.1)],
-      messages: [message(0, 20, 20, 1, 5), message(1, 20.1, 20.1, 1, 50)],
+  it("keeps them identical in a crowd and with instants, at any scale", () => {
+    const crowd = {
+      nodes: [],
+      units: Array.from({ length: 40 }, (_, i) => unit(i, i * 2.5, i * 2.5 + (i % 3 === 0 ? 0 : 1), 1 + i, 10 + i)),
     };
-    const view = axis.viewU(whole);
-    const units = blockLayout(UNITS_ROW, close, axis, view, 1000);
+    for (const px of [1000, 120, 7]) {
+      const units = layoutOf(UNITS_ROW, crowd, px);
+      const bars = layoutOf(INPUT_ROW, crowd, px);
+      expect(bars.wide).toEqual(units.wide.map((p) => ({ ...p, weight: bars.values?.get(p.key) })));
+      expect(bars.cells.map((c) => [c.x0, c.x1])).toEqual(units.cells.map((c) => [c.x0, c.x1]));
+    }
+  });
+
+  it("gives an instant block the minimum width at its time, in every row alike", () => {
+    const instant = { nodes: [], units: [unit(0, 20, 20, 1, 1)] };
+    for (const row of [UNITS_ROW, INPUT_ROW]) {
+      const layout = layoutOf(row, instant);
+      // 20 s of 100 s on 1000 px: starts at 200 and is MIN_ITEM_PX wide (a narrow item: one painted run of columns).
+      expect(layout.boxes.get("utext-0-0")).toEqual({ x0: 200, x1: 203 });
+      expect(layout.cells).toEqual([{ x0: 200, x1: 203, key: "utext-0-0" }]);
+    }
+  });
+
+  it("lets neighbouring instants inside one pixel column share it: one painted item, the taller block", () => {
+    const close = { nodes: [], units: [unit(0, 20, 20, 1, 5), unit(1, 20.1, 20.1, 100, 50)] };
+    const units = layoutOf(UNITS_ROW, close);
     // Both blocks are drawn from their own times, overlapping, and each column is painted once.
     expect(units.boxes.get("utext-1-1")?.x0).toBeCloseTo(201);
     const columns = units.cells.flatMap((c) => Array.from({ length: c.x1 - c.x0 }, (_, i) => c.x0 + i));
     expect(new Set(columns).size).toBe(columns.length);
-    const bars = barLayout(INPUT_ROW, close, axis, view, 1000);
-    expect(bars.cells.find((c) => c.x0 <= 201 && 201 < c.x1)?.key).toBe("m1");
+    expect(units.cells.find((c) => c.x0 <= 201 && 201 < c.x1)?.key).toBe("utext-1-1");
+    expect(layoutOf(INPUT_ROW, close).cells.find((c) => c.x0 <= 201 && 201 < c.x1)?.key).toBe("utext-1-1");
   });
 
-  it("lays bars out with their values: the context through the message, or its own weight by square root", () => {
-    expect(barLayout(INPUT_ROW, data, axis, axis.viewU(whole), 1000).values?.get("m1")).toBe(30);
-    expect(barLayout(ADDED_ROW, data, axis, axis.viewU(whole), 1000).values?.get("m1")).toBe(4);
-    const crowded = barLayout(INPUT_ROW, data, axis, axis.viewU(whole), 3);
+  it("leaves a block no request has read out of the Context size row, and gives it no height there", () => {
+    const partly = { nodes: [], units: [unit(0, 0, 50, 4, 10), unit(1, 50, 100, null, null)] };
+    expect(layoutOf(UNITS_ROW, partly).wide).toHaveLength(2);
+    expect(layoutOf(INPUT_ROW, partly).wide.map((p) => p.key)).toEqual(["utext-0-0"]);
+  });
+
+  it("values a Messages block by the square root of its tokens and a bar by the context through it", () => {
+    expect(layoutOf(UNITS_ROW).values?.get("utext-1-1")).toBe(4);
+    expect(layoutOf(INPUT_ROW).values?.get("utext-1-1")).toBe(30);
+    expect(barValue(UNITS_ROW, { context_tokens: null, context_total: null })).toBe(0);
+    const crowded = layoutOf(INPUT_ROW, data, 3);
     expect(crowded.wide).toEqual([]);
     expect(crowded.cells.length).toBeGreaterThan(0);
   });

@@ -40,7 +40,7 @@ function renderNode(summary: string, usage?: Partial<RunTimelineNode["usage"]>) 
 describe("NodeDetail summary", () => {
   it("shows the node's context tokens, marked when estimated", () => {
     renderNode("s");
-    expect(screen.getByTestId("run-timeline-detail-tokens").textContent).toBe("1.5k tokens (estimated)");
+    expect(screen.getByTestId("run-timeline-detail-tokens").textContent).toBe("~1.5k tokens");
   });
 
   it("shows the recorded cost, and says unknown rather than estimating when none is recorded", () => {
