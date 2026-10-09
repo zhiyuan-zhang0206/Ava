@@ -102,8 +102,8 @@ async def _race_stream_vs_cancel(
             # non-streaming fallback in _consume_llm) becomes a FatalProviderError:
             # the retry policy skips it and the host settles the turn to idle
             # instead of exhausting the full backoff budget and dying into
-            # terminated. A TRANSIENT / UNKNOWN class re-raises the original so the
-            # retry loop retries — unknown is never guessed into fail-fast.
+            # terminated. TRANSIENT errors reach the explicit retry predicate;
+            # UNKNOWN errors propagate once with their original traceback.
             fatal = _classify_and_log_provider_error(e, ctx.require_agent())
             if fatal is not None:
                 raise fatal from e

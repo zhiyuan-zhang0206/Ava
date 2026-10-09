@@ -36,6 +36,7 @@ from agent.llm.cache import prepare_invocation
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.call import ProviderCallBinding, recover_invocation
+from base.lm.errors import normalize_provider_transport_error
 from base.log import logger
 
 
@@ -147,9 +148,8 @@ async def _consume_llm(
             # Second adjacent stall: the non-streaming retry was not served
             # either, inside the same bound. Terminate the call here as a
             # first-class LLMStreamError so the delayed stall schedule (not the
-            # generic transient retry) owns the next attempt; a bare
-            # TimeoutError would read as one more transport blip and burn the
-            # provider's stalled segments until the turn died.
+            # generic transient retry) owns the next attempt. A bare timeout
+            # has no authority to enter that owned stall schedule.
             logger.warning(
                 "two adjacent stalls — non-streaming fallback timed out after "
                 "{timeout_s:.1f}s; terminating the call for a delayed retry",
@@ -204,10 +204,8 @@ async def _ainvoke_single_chunk(
     AIMessage, wrapped as a single chunk and stuffed into chunks list, so the
     caller's chunk-accumulation code does not change.
 
-    `_consume_llm` calls this function as fallback when stream hits
-    `LLMStreamCorruptedError`; handler gets one full chunk and publishes
-    at once (UI that turn has no progressive display, a corruption-recovery
-    trade-off).
+    `_consume_llm` uses this once for an owned stall or a configured provider
+    overload. The handler publishes one full chunk without progressive display.
 
     Returns `(None, None)` — a single non-stream HTTP fetch has no
     first-token → last-token window (the whole message arrives at once), so
@@ -218,10 +216,16 @@ async def _ainvoke_single_chunk(
     Extracted to module level to reduce `_llm_node_impl`'s statement count
     (PLR0915 50-line cap).
     """
-    msg = await asyncio.wait_for(
-        bound_llm.ainvoke(messages),  # type: ignore[attr-defined]
-        timeout=timeout,
-    )
+    try:
+        msg: AIMessage = await asyncio.wait_for(
+            bound_llm.ainvoke(messages),  # type: ignore[attr-defined]
+            timeout=timeout,
+        )
+    except Exception as exc:
+        normalized = normalize_provider_transport_error(exc)
+        if normalized is exc:
+            raise
+        raise normalized from exc
     assert isinstance(msg, AIMessage)  # noqa: S101 — bind_tools returns Runnable but ChatModel still returns AIMessage
     chunk = AIMessageChunk(
         content=msg.content,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -234,6 +238,16 @@ async def _ainvoke_single_chunk(
     chunks.append(chunk)
     handler.process_chunk(chunk)
     return (None, None)
+
+
+async def _next_model_chunk(stream_iter: AsyncIterator[AIMessage], timeout: float) -> AIMessage:
+    try:
+        return await asyncio.wait_for(stream_iter.__anext__(), timeout=timeout)
+    except Exception as exc:
+        normalized = normalize_provider_transport_error(exc)
+        if normalized is exc:
+            raise
+        raise normalized from exc
 
 
 async def _consume_stream_with_stall_timeout(
@@ -284,7 +298,7 @@ async def _consume_stream_with_stall_timeout(
             stage_timeout, total_timeout, started_at, chunk_idx
         )
         try:
-            chunk = await asyncio.wait_for(stream_iter.__anext__(), timeout=timeout)
+            chunk = await _next_model_chunk(stream_iter, timeout)
         except StopAsyncIteration:
             if total_timeout is not None and time.monotonic() - started_at >= total_timeout:
                 raise _total_stall(total_timeout, chunk_idx) from None
