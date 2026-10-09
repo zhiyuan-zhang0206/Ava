@@ -1,7 +1,6 @@
 """Collection diagnostics own their worker and preserve the command's verdict."""
 
 import faulthandler
-import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -80,39 +79,40 @@ def test_diagnostic_failure_reaches_owner(tmp_path: Path, monkeypatch: pytest.Mo
     assert_worker_stopped()
 
 
-def run_isolated(code: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    # The parent enforces a wall-clock deadline even if the inferior's GIL stalls.
-    return subprocess.run(  # noqa: S603 — fixed isolated interpreter, stdlib-only snippets
-        [
-            sys.executable,
-            "-I",
-            "-S",
-            "-c",
-            f"import sys; sys.path.insert(0, {str(ROOT)!r})\n" + code,
-        ],
-        capture_output=True,
-        text=True,
+def run_isolated(pytester: pytest.Pytester, code: str) -> pytest.RunResult:
+    # Pytester's owner supplies the cwd, output capture and hard timeout kill/wait.
+    assert Path.cwd() == pytester.path
+    return pytester.run(
+        sys.executable,
+        "-I",
+        "-S",
+        "-c",
+        f"import sys; sys.path.insert(0, {str(ROOT)!r})\n" + code,
         timeout=3,
-        check=False,
-        cwd=cwd,
     )
 
 
 @pytest.mark.parametrize("exit_code", [0, 4])
-def test_collection_exit_preserved_and_worker_joined(tmp_path: Path, exit_code: int) -> None:
+def test_collection_exit_preserved_and_worker_joined(
+    tmp_path: Path, pytester: pytest.Pytester, exit_code: int
+) -> None:
     result = run_isolated(
+        pytester,
         "import threading\n"
         "from scripts.ci.collection_tracebacks import periodic_tracebacks\n"
         f"with open({str(tmp_path / 'stacks.log')!r}, 'w') as stacks:\n"
         "    with periodic_tracebacks(stacks):\n"
-        f"        raise SystemExit({exit_code})\n"
+        f"        raise SystemExit({exit_code})\n",
     )
-    assert result.returncode == exit_code, result.stderr
+    assert result.ret == exit_code, str(result.stderr)
 
 
-def test_frame_churn_finishes_with_complete_tracebacks(tmp_path: Path) -> None:
+def test_frame_churn_finishes_with_complete_tracebacks(
+    tmp_path: Path, pytester: pytest.Pytester
+) -> None:
     output = tmp_path / "stacks.log"
     result = run_isolated(
+        pytester,
         "import threading, time\n"
         "from scripts.ci.collection_tracebacks import periodic_tracebacks\n"
         "def recurse(depth):\n"
@@ -127,9 +127,9 @@ def test_frame_churn_finishes_with_complete_tracebacks(tmp_path: Path) -> None:
         "        worker = threading.Thread(target=churn)\n"
         "        worker.start()\n"
         "        worker.join()\n"
-        "assert not any(t.name == 'collection-tracebacks' for t in threading.enumerate())\n"
+        "assert not any(t.name == 'collection-tracebacks' for t in threading.enumerate())\n",
     )
-    assert result.returncode == 0, result.stderr
+    assert result.ret == 0, str(result.stderr)
     trace = output.read_text()
     assert "Periodic traceback" in trace
     assert 'File "' in trace and ", line " in trace
@@ -138,7 +138,9 @@ def test_frame_churn_finishes_with_complete_tracebacks(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("workflow", ["ci.yml", "file-shard-proof.yml"])
 @pytest.mark.parametrize("exit_code", [0, 4])
-def test_workflow_planner_preserves_verdict(tmp_path: Path, workflow: str, exit_code: int) -> None:
+def test_workflow_planner_preserves_verdict(
+    pytester: pytest.Pytester, workflow: str, exit_code: int
+) -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"]
     script = next(
         step["run"]
@@ -147,8 +149,9 @@ def test_workflow_planner_preserves_verdict(tmp_path: Path, workflow: str, exit_
         if "periodic_tracebacks" in step.get("run", "")
     )
     body = script.split("<<'PY'", 1)[1].split("\n", 1)[1].split("\nPY", 1)[0]
-    (tmp_path / "tmp/file-shards").mkdir(parents=True)
+    (pytester.path / "tmp/file-shards").mkdir(parents=True)
     result = run_isolated(
+        pytester,
         "import types\n"
         "pytest = types.ModuleType('pytest')\n"
         "def main(args):\n"
@@ -158,8 +161,7 @@ def test_workflow_planner_preserves_verdict(tmp_path: Path, workflow: str, exit_
         "pytest.main = main\n"
         "sys.modules['pytest'] = pytest\n"
         f"exec(compile({body!r}, 'workflow-planner', 'exec'))\n",
-        cwd=tmp_path,
     )
-    assert result.returncode == exit_code, result.stderr
-    assert "planner called" in result.stdout
-    assert len(list((tmp_path / "tmp").rglob("*-stacks.log"))) == 1
+    assert result.ret == exit_code, str(result.stderr)
+    assert "planner called" in str(result.stdout)
+    assert len(list((pytester.path / "tmp").rglob("*-stacks.log"))) == 1
