@@ -25,6 +25,7 @@ import uvicorn
 from base.config import settings
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.host.net import block_httpx_cli
 from base.log import init_gateway_process
 from services.derived.memory_indexer.embeddings.factory import get_provider
 from services.derived.memory_search.app import build_app
@@ -80,6 +81,7 @@ async def run(config: MemorySearchConfig) -> None:
 
 def main() -> None:
     """Entry point: pidfile -> log init -> serve -> cleanup."""
+    block_httpx_cli()
     config = memory_search_config()
     if _is_running(config):
         sys.exit(1)

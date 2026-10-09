@@ -8,7 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base import config
+from base.config.domains.storage.data_plane import self_machine_host
 from base.host.env import bootstrap
+from base.host.net.predicates import is_loopback_host
+from base.host.net.url_secret import url_with_host
 from gateway.app import app
 
 
@@ -40,9 +43,9 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     # address for remote runners.
     runner = served_gateway_home.roles.runner
     expected = str(config.settings.data_plane.db_url)
-    reachable = config._self_machine_host()
-    if not config.is_loopback_host(reachable):
-        expected = config.url_with_host(expected, reachable)
+    reachable = self_machine_host()
+    if not is_loopback_host(reachable):
+        expected = url_with_host(expected, reachable)
     actual_parts = urlsplit(values["AVA_DB_URL"])
     expected_parts = urlsplit(expected)
     # libpq dial hints such as hostaddr are implementation-specific query
