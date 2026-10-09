@@ -70,6 +70,7 @@ from loguru import logger
 
 from base.host.env.agent_slices import LlmCallPolicy
 from base.lm.call import LlmInvocation, ProviderCallContext
+from base.lm.errors import ErrorClass, classify_error
 
 # Cache lifetime. 3600s is also the API default; stated explicitly so the
 # refresh arithmetic has one source. Storage bills per token-hour, so a
@@ -134,8 +135,15 @@ def is_stale_cache_error(exc: BaseException) -> bool:
     google.genai.errors.ClientError carries ``code`` (403) and the message
     "CachedContent not found (or permission denied)" — expiry deletes the
     object server-side, so a lapsed TTL lands here exactly like a bogus name.
+    Only trusted provider types (including official model wrappers) authorize
+    recovery; matching attributes on an application error do not.
     """
-    return getattr(exc, "code", None) == 403 and "CachedContent not found" in str(exc)
+    classified = classify_error(exc)
+    return (
+        classified.error_class is ErrorClass.PERMANENT
+        and classified.status == 403
+        and "CachedContent not found" in str(exc)
+    )
 
 
 def invalidate(ref: CacheRef) -> None:
