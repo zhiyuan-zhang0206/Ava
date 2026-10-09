@@ -9,7 +9,7 @@ attribute access on the singleton `ava` module, so the module itself is the one 
 passed around as a value — the write to it is concentrated here, once per process.
 
 `install` produces one **`Installation`**: the admitted registry, the expansions, the wrap layers, the
-skill providers, the metering ledger, the applied SDK-disable entries, the faces flag, and the undos —
+skill providers, resolved plugin configs, the metering ledger, SDK-disable entries, the faces flag, and undos —
 frozen, so nothing outside it is written after plugin load. The holder is a single slot on the `ava`
 module (`__plugin_installation__`); a change (an additive SDK-disable entry, a scoped skill root, the
 agent-runtime faces loading) builds a new value and swaps the holder. `uninstall` reverses the surface
@@ -43,6 +43,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from pydantic import BaseModel
+
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
@@ -70,6 +72,7 @@ class Installation:
     disabled: frozenset[str]
     faces: bool
     undo: tuple[Callable[[], None], ...]
+    configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
 
 
 # The installation is recorded on the `ava` module object itself — the one process-wide thing it
@@ -257,7 +260,9 @@ def _apply(
     for key in contributions.flags:
         flags.validate_flag_key(key)
     if contributions.config is not None:
-        build.undo.append(config_registration.bind_plugin_config(plugin, contributions.config))
+        build.undo.append(
+            config_registration.bind_plugin_config(plugin, contributions.config, build.configs)
+        )
     return promoted
 
 
@@ -270,6 +275,7 @@ class _Build:
     providers: list[_SkillProvider] = field(default_factory=list)
     expansions: list[str] = field(default_factory=list)
     undo: list[Callable[[], None]] = field(default_factory=list)
+    configs: dict[str, BaseModel] = field(default_factory=dict[str, BaseModel])
 
 
 def _run(undo: list[Callable[[], None]], primary: BaseException | None = None) -> None:
@@ -352,9 +358,23 @@ def install(
         disabled=frozenset(disabled),
         faces=False,
         undo=tuple(build.undo),
+        configs=MappingProxyType(dict(build.configs)),
     )
     setattr(ava_module(), _SLOT, installation)
     return installation.registry
+
+
+def apply_config_overlay(overlay: dict[str, object]) -> None:
+    """Apply this exec child's plugin overlay to its installed config image."""
+    from base.packages.plugins import config_registration
+
+    current = installed()
+    if current is None:
+        raise RuntimeError("the SDK surface must be installed before applying plugin config")
+    configs = config_registration.apply_config_overlay(
+        overlay, configs=current.configs, scope="plugin"
+    )
+    setattr(ava_module(), _SLOT, replace(current, configs=MappingProxyType(configs)))
 
 
 def uninstall() -> None:
