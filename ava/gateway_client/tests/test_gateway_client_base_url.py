@@ -6,14 +6,14 @@ from typing import Any, cast
 import pytest
 
 import ava
+from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
-from base.agents.context.clients import ClientSet
 
 
 @pytest.fixture(autouse=True)
 def _fresh_clients() -> Any:
     """Each test builds the gateway client itself: a context with a clean `ClientSet`."""
-    context = AvaContext(clients=ClientSet())
+    context = AvaContext(clients=process_clients())
     ava.context = context
     try:
         yield
