@@ -100,6 +100,7 @@ class Plan(BaseModel):
 _PLAN = pytest.StashKey[Plan]()
 _RUNTIME = pytest.StashKey[dict[str, "RuntimeNode"]]()
 _COLLECTION_SECONDS = pytest.StashKey[float]()
+_DURATION_DIGEST = pytest.StashKey[str]()
 
 
 class RuntimeNode(BaseModel):
@@ -171,6 +172,9 @@ def _configure_runtime(config: pytest.Config) -> None:
         raise pytest.UsageError("Runtime evidence requires a shard group")
     _report_path(config, "file_shard_runtime_report").unlink(missing_ok=True)
     config.stash[_RUNTIME] = {}
+    # pytest-split writes new measurements at session finish; evidence identifies
+    # the input that selected this generation, before that output replaces it.
+    config.stash[_DURATION_DIGEST] = _durations(config)[1]
 
 
 def _durations(config: pytest.Config) -> tuple[dict[str, float], str]:
@@ -404,7 +408,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         exitstatus=exitstatus,
         pytest_version=pytest.__version__,
         pytest_split_version=version("pytest-split"),
-        durations_sha256=_durations(config)[1],
+        durations_sha256=config.stash[_DURATION_DIGEST],
         pytest_config_sha256=_configuration_digest(config),
         collection_seconds=config.stash.get(_COLLECTION_SECONDS, 0.0),
         nodes=config.stash[_RUNTIME],
