@@ -54,7 +54,7 @@ def create(
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
-    operation_key: str | None = None,
+    operation_key: str,
 ) -> Task:
     """Args:
     title: unique among in_progress tasks.
@@ -88,7 +88,7 @@ def _create(
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
-    operation_key: str | None = None,
+    operation_key: str,
 ) -> Task:
     """Apply create with one explicit context, including admission revalidation."""
     from base.agents.tasks.creation import create_task_in_transaction
@@ -96,8 +96,7 @@ def _create(
 
     from ._task_creation_receipts import record_creation, replay_creation
 
-    if operation_key is not None:
-        operation_key = validate_idempotency_key(operation_key)
+    operation_key = validate_idempotency_key(operation_key)
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
     parent = coerce_typed(parent, "parent", int)
@@ -213,7 +212,7 @@ def update(
     priority: str | None = None,
     parent_id: int | None = _UNSET,  # type: ignore[assignment]
     note: str | None = None,
-    operation_key: str | None = None,
+    operation_key: str,
 ) -> None:
     """Any write resets the reminder clock. Owner changes notify both owners; other
     updates tell the owner who changed it; a parent-only reparent stays silent.
@@ -225,7 +224,7 @@ def update(
         owner: agent id to reassign to; a task always has an owner.
         remind_interval_seconds: None = unchanged; reminders cannot be disabled; capped at 24h.
         parent_id: reparent (explicit None = system root; int = set parent).
-        operation_key: optional stable key for this agent and task; reuse it to
+        operation_key: required stable key for this agent and task; reuse it to
             replay a committed update without another note or notification.
             Different effective fields with the same key raise ValueError.
     """
@@ -263,7 +262,7 @@ def _update(
     priority: str | None = None,
     parent_id: int | _Unset | None = _UNSET,
     note: str | None = None,
-    operation_key: str | None = None,
+    operation_key: str,
 ) -> None:
     """Apply update with one explicit context, including admission revalidation."""
     task_id = coerce_typed(task_id, "task_id", int)
@@ -367,16 +366,11 @@ def _update(
 
     telemetry.emit_prepared(updated_event)
 
-    # Agent-scoped side effects run after the row change commits: telling an
-    # agent auto-wakes it, so keep it out of the transaction. System tooling
-    # has no actor for a task note or TaskUpdated; like gateway PATCH, its
-    # committed write relies on the board's normal poll.
-    if actor is not None:  # agent_id() is None before bootstrap; system tooling has no actor.
-        for event in note_events:
-            telemetry.emit_prepared(event)
-        from base.events.live import announce, bus  # deferred (task #3816)
+    for event in note_events:
+        telemetry.emit_prepared(event)
+    from base.events.live import announce, bus  # deferred (task #3816)
 
-        announce.publish_task_updated_sync(bus.EventBus.from_settings(), actor, task_id)
+    announce.publish_task_updated_sync(bus.EventBus.from_settings(), actor, task_id)
 
 
 def _queue_after_update(
@@ -385,7 +379,7 @@ def _queue_after_update(
     title: str,
     old_owner: int | None,
     new_owner: int | None,
-    actor: int | None,
+    actor: int,
     changes: builtins.list[str],
     *,
     owner_changed: bool,
@@ -396,7 +390,7 @@ def _queue_after_update(
         from base.agents.tasks.delivery import supersede_task_assignments
 
         supersede_task_assignments(cur, task_id)
-    if actor is None or parent_only:
+    if parent_only:
         return []
     if owner_changed:
         return _queue_owner_change(
@@ -466,14 +460,11 @@ def _is_terminated(cur: psycopg.Cursor, agent_id: int) -> bool:
     return meta is None or meta[0] == "terminated"
 
 
-def log(task_id: int, message: str, *, operation_key: str | None = None) -> None:
+def log(task_id: int, message: str, *, operation_key: str) -> None:
     """Append one timestamped line; reuse operation_key to replay without appending again."""
     task_id = coerce_typed(task_id, "task_id", int)
     message = coerce_str(message, "message")
-    if operation_key is None:
-        update(task_id, note=message)
-    else:
-        update(task_id, note=message, operation_key=operation_key)
+    update(task_id, note=message, operation_key=operation_key)
 
 
 def get(task_id: int) -> Task:

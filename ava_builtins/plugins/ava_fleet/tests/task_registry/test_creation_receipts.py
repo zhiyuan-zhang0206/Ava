@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from threading import Barrier
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -77,8 +78,10 @@ def test_lost_response_returns_original_after_mutation_and_title_reuse(
     assert snapshot is not None
     original = task_registry.Task(**snapshot[0])
     monkeypatch.setattr(telemetry, "emit_prepared", real_emit)
-    task_registry.update(original.id, title="renamed", status="done")
-    task_registry.create("original", "another work", parent=root_task_id)
+    task_registry.update(original.id, title="renamed", status="done", operation_key=str(uuid4()))
+    task_registry.create(
+        "original", "another work", parent=root_task_id, operation_key=str(uuid4())
+    )
     before = _facts(db_conn)
     monkeypatch.setattr(telemetry, "emit_prepared", fail)
     assert (
@@ -92,7 +95,7 @@ def test_deleted_task_and_parent_replay_snapshot(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     pin_agent(_seed_agent(db_conn))
-    parent = task_registry.create("parent", "work", parent=root_task_id)
+    parent = task_registry.create("parent", "work", parent=root_task_id, operation_key=str(uuid4()))
     original = task_registry.create("child", "work", parent=parent.id, operation_key="deleted")
     db_conn.execute("DELETE FROM agent_tasks WHERE id IN (%s,%s)", (original.id, parent.id))
     db_conn.commit()
@@ -198,7 +201,7 @@ def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(
 ) -> None:
     pin_agent(_seed_agent(db_conn))
     snapshot: dict[str, object] = asdict(
-        task_registry.create("snapshot", "work", parent=root_task_id)
+        task_registry.create("snapshot", "work", parent=root_task_id, operation_key=str(uuid4()))
     )
     for invalid in (
         {k: v for k, v in snapshot.items() if k != "priority"},
