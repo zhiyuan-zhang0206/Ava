@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { categoryColor } from "@/lib/context-colors";
-import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineMessageBar, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineMessagePart, RunTimelineNode,  RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
   axisBox,
@@ -9,12 +9,9 @@ import {
   timeAxis,
   chainIds,
   layoutSpans,
-  maxContextTokens,
+  contextUnits,
+  maxBlockTokens,
   maxContextTotal,
-  messageLit,
-  messageSelection,
-  messageUnits,
-  unitHasMessage,
   MIN_ITEM_PX,
   panView,
   projectBox,
@@ -35,7 +32,6 @@ import {
   classCategory,
   contextPoint,
   hoverLit,
-  unitKey,
   inboundSources,
   matchesHighlight,
   nodeAncestors,
@@ -44,7 +40,7 @@ import {
 import {
   navigate,
   revealView,
-  ADDED_ROW,
+  navItems,
   navRowIds,
   selectionRoles,
   INPUT_ROW,
@@ -81,6 +77,9 @@ function unit(partial: Partial<RunTimelineUnit>): RunTimelineUnit {
     preview: "",
     parent: null,
     context_tokens: null, generation_tokens: null, estimated: null,
+    session: 0,
+    context_total: null,
+    request: null,
     ...partial,
   };
 }
@@ -277,6 +276,9 @@ describe("highlight and hover model", () => {
     context_tokens: null,
     generation_tokens: null,
     estimated: null,
+    session: 0,
+    context_total: null,
+    request: null,
   });
   const treeNode = (id: string, level: number, parent: string | null, span: [number, number]): RunTimelineNode => ({
     ...node(level, id),
@@ -316,7 +318,7 @@ describe("highlight and hover model", () => {
     const onNode = hoverLit({ kind: "node", id: "b" }, nodes, units);
     expect([...onNode.nodeIds].sort()).toEqual(["b", "c"]);
     expect([...onNode.unitKeys]).toEqual(["text-7-7"]);
-    expect(hoverLit({ kind: "message", idx: 99 }, nodes, units).nodeIds.size).toBe(0);
+    expect(hoverLit({ kind: "unit", i0: 99, i1: 99, unitKind: "text" }, nodes, units).nodeIds.size).toBe(0);
     expect(hoverLit(null, nodes, units).unitKeys.size).toBe(0);
   });
 
@@ -326,38 +328,45 @@ describe("highlight and hover model", () => {
     expect(nodeChildren(nodes[2], nodes).map((n) => n.id)).toEqual(["a", "b"]);
   });
 
-  const bar = (idx: number, iso: string, total = 10, request = true): RunTimelineMessageBar => ({
-    idx,
-    start: iso,
-    end: iso,
-    session: 0,
-    context_tokens: total / 2,
-    estimated: false,
-    context_total: total,
-    request: request ? { calls: 1, input: total, cache_read: 0, output: 0, cache_write: 0, cost_usd: 0, cost_calls: 0 } : null,
-  });
-  const messages = [bar(2, "2026-10-04T12:10:00Z", 50), bar(3, "2026-10-04T12:20:00Z", 60, false), bar(8, "2026-10-04T12:50:00Z", 20)];
+  const reply = (i0: number, iso: string, total: number, request: boolean): RunTimelineUnit =>
+    unit({
+      kind: "thinking",
+      i0,
+      i1: i0,
+      start: iso,
+      end: iso,
+      context_tokens: total / 2,
+      context_total: total,
+      request: request ? { calls: 1, input: total, cache_read: 0, output: 0, cache_write: 0, cost_usd: 0, cost_calls: 0 } : null,
+    });
+  // Blocks 2 and 8 belong to AIMessages (requests); 3 is the tool result of 2, in context but no request.
+  const blocks = [
+    reply(2, "2026-10-04T12:10:00Z", 50, true),
+    reply(3, "2026-10-04T12:20:00Z", 60, false),
+    reply(8, "2026-10-04T12:50:00Z", 20, true),
+    unit({ kind: "inbound", i0: 9, i1: 9, start: "2026-10-04T12:55:00Z", end: "2026-10-04T12:55:00Z" }),
+  ];
   const view = (from: string, to: string) => ({ from: Date.parse(from), to: Date.parse(to) });
 
-  it("follows a selection's own message, else the last LLM request in view, else the nearest", () => {
+  it("follows a selection's own block, else the last LLM request in view, else the nearest", () => {
     const whole = view("2026-10-04T12:00:00Z", "2026-10-04T13:00:00Z");
-    expect(contextPoint({ kind: "message", idx: 3 }, nodes, messages, whole)).toBe(3);
-    expect(contextPoint({ kind: "unit", i0: 5, i1: 5, unitKind: "text" }, nodes, messages, whole)).toBe(5);
-    expect(contextPoint({ kind: "node", id: "b" }, nodes, messages, whole)).toBe(5);
-    // A message that was no request (3) is never the default point.
-    expect(contextPoint(null, nodes, messages, whole)).toBe(8);
-    expect(contextPoint(null, nodes, messages, view("2026-10-04T12:00:00Z", "2026-10-04T12:30:00Z"))).toBe(2);
+    expect(contextPoint({ kind: "unit", i0: 5, i1: 5, unitKind: "text" }, nodes, blocks, whole)).toBe(5);
+    expect(contextPoint({ kind: "node", id: "b" }, nodes, blocks, whole)).toBe(5);
+    // A block that was no request (3, 9) is never the default point.
+    expect(contextPoint(null, nodes, blocks, whole)).toBe(8);
+    expect(contextPoint(null, nodes, blocks, view("2026-10-04T12:00:00Z", "2026-10-04T12:30:00Z"))).toBe(2);
     // nothing in view: the last one before it
-    expect(contextPoint(null, nodes, messages, view("2026-10-04T12:20:00Z", "2026-10-04T12:30:00Z"))).toBe(2);
-    expect(contextPoint(null, nodes, messages, view("2026-10-04T11:00:00Z", "2026-10-04T11:30:00Z"))).toBe(2);
+    expect(contextPoint(null, nodes, blocks, view("2026-10-04T12:20:00Z", "2026-10-04T12:30:00Z"))).toBe(2);
+    expect(contextPoint(null, nodes, blocks, view("2026-10-04T11:00:00Z", "2026-10-04T11:30:00Z"))).toBe(2);
     expect(contextPoint(null, nodes, [], whole)).toBeNull();
   });
 
-  it("scales the Context size row to the largest context total and Added context to the largest message", () => {
-    expect(maxContextTotal(messages)).toBe(60);
-    expect(maxContextTokens(messages)).toBe(30);
+  it("scales Context size to the largest context total and Messages to the largest block", () => {
+    expect(contextUnits(blocks).map((x) => x.i0)).toEqual([2, 3, 8]);
+    expect(maxContextTotal(blocks)).toBe(60);
+    expect(maxBlockTokens(blocks)).toBe(30);
     expect(maxContextTotal([])).toBe(0);
-    expect(maxContextTokens([])).toBe(0);
+    expect(maxBlockTokens([])).toBe(0);
   });
 });
 
@@ -402,21 +411,11 @@ describe("time axis", () => {
   });
 });
 
-describe("message bars", () => {
+describe("context bars", () => {
   const T = Date.parse("2026-10-04T12:00:00Z");
   const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
-  const u = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: number, parent: string | null = null, i1 = i0): RunTimelineUnit =>
-    unit({ kind, i0, i1, start: iso(from), end: iso(to), parent, preview: `${kind}${i0}` });
-  const msg = (idx: number, from: number, to: number, total: number, request = false): RunTimelineMessageBar => ({
-    idx,
-    start: iso(from),
-    end: iso(to),
-    session: 0,
-    context_tokens: 5,
-    estimated: false,
-    context_total: total,
-    request: request ? { calls: 1, input: total - 5, cache_read: 0, output: 5, cache_write: 0, cost_usd: 0, cost_calls: 0 } : null,
-  });
+  const u = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: number, parent: string | null, total: number | null): RunTimelineUnit =>
+    unit({ kind, i0, i1: i0, start: iso(from), end: iso(to), parent, preview: `${kind}${i0}`, context_tokens: total === null ? null : 5, context_total: total });
   const nd = (id: string, level: number, parent: string | null, from: number, to: number, s0: number, s1: number): RunTimelineNode => ({
     ...node(level, id),
     parent,
@@ -425,53 +424,28 @@ describe("message bars", () => {
     span_start: s0,
     span_end: s1,
   });
-  // Level 2: P over everything; level 1: A (messages 0-1), B (2-3). Message 0 and 2 are inbound; 1 and 3 are AIMessages
-  // (thinking blocks, and a request each).
+  // Level 2: P over everything; level 1: A (messages 0-1), B (2-3). The last block no request has read: no bar.
   const data = {
     nodes: [nd("P", 2, null, 0, 40, 0, 3), nd("A", 1, "P", 0, 20, 0, 1), nd("B", 1, "P", 20, 40, 2, 3)],
-    units: [u("inbound", 0, 0, 10, "A"), u("thinking", 1, 10, 20, "A"), u("inbound", 2, 20, 30, "B"), u("thinking", 3, 30, 40, "B")],
-    messages: [msg(0, 0, 10, 5), msg(1, 10, 20, 10, true), msg(2, 20, 30, 15), msg(3, 30, 40, 20, true)],
+    units: [u("inbound", 0, 0, 10, "A", 5), u("thinking", 1, 10, 20, "A", 10), u("inbound", 2, 20, 30, "B", 15), u("thinking", 3, 30, 40, "B", null)],
   };
   const whole = { from: T, to: T + 40_000 };
   const unitSel = (i0: number, kind: RunTimelineUnit["kind"]) => ({ kind: "unit" as const, i0, i1: i0, unitKind: kind });
   const go = (key: "left" | "right" | "up" | "down", row: string | null, selection: Parameters<typeof navigate>[1] extends infer C ? (C extends { selection: infer S } ? S : never) : never) =>
     navigate(key, { row, selection }, data, timeAxis(whole), whole);
 
-  it("says which message a block shows: a turn block its AIMessage, an output block the messages after it", () => {
-    expect(unitHasMessage({ kind: "thinking", i0: 4, i1: 4 }, 4)).toBe(true);
-    expect(unitHasMessage({ kind: "call", i0: 4, i1: 4 }, 5)).toBe(false);
-    expect(unitHasMessage({ kind: "inbound", i0: 7, i1: 7 }, 7)).toBe(true);
-    // An output block opened by the AIMessage 4 shows the tool result 5, not the AIMessage itself.
-    expect(unitHasMessage({ kind: "output", i0: 4, i1: 5 }, 5)).toBe(true);
-    expect(unitHasMessage({ kind: "output", i0: 4, i1: 5 }, 4)).toBe(false);
-    // A tool result with no open call is an output block of its own message.
-    expect(unitHasMessage({ kind: "output", i0: 6, i1: 6 }, 6)).toBe(true);
-    expect(messageUnits(1, data.units).map((x) => x.i0)).toEqual([1]);
+  it("draws the Context size row for the blocks a request has read, and only when asked", () => {
+    expect(navRowIds(data)).toEqual(["level-2", "level-1", UNITS_ROW, INPUT_ROW]);
+    expect(navRowIds(data, { levels: null, contextSize: false })).toEqual(["level-2", "level-1", UNITS_ROW]);
+    expect(navRowIds({ nodes: [], units: [unit({ i0: 1 })] })).toEqual([UNITS_ROW]);
+    expect(navItems(INPUT_ROW, data, timeAxis(whole)).map((item) => item.unit?.i0)).toEqual([0, 1, 2]);
   });
 
-  it("selects the block that shows a message for the details pane, the AIMessage's thinking first", () => {
-    const turn = [u("call", 1, 20, 20), u("text", 1, 20, 22), u("thinking", 1, 10, 20)];
-    expect(messageSelection(1, turn)).toEqual(unitSel(1, "thinking"));
-    expect(messageSelection(1, turn.slice(0, 2))).toEqual(unitSel(1, "text"));
-    expect(messageSelection(0, data.units)).toEqual(unitSel(0, "inbound"));
-    expect(messageSelection(99, data.units)).toBeNull();
-  });
-
-  it("lights a message's bars for the message itself, or any block that shows it, hovered", () => {
-    expect(messageLit(1, { kind: "message", idx: 1 })).toBe(true);
-    expect(messageLit(1, unitSel(1, "thinking"))).toBe(true);
-    expect(messageLit(1, unitSel(0, "inbound"))).toBe(false);
-    expect(messageLit(1, { kind: "node", id: "A" })).toBe(false);
-    expect(messageLit(1, null)).toBe(false);
-  });
-
-  it("selecting a message lights the nodes over the blocks that show it, up to the top", () => {
-    const sel = { kind: "message" as const, idx: 3 };
+  it("selecting a block lights the nodes over it, up to the top", () => {
+    const sel = unitSel(2, "inbound");
     expect([...chainIds(sel, data.nodes, data.units)].sort()).toEqual(["B", "P"]);
-    expect(chainIds({ kind: "message", idx: 99 }, data.nodes, data.units).size).toBe(0);
     const lit = hoverLit(sel, data.nodes, data.units);
     expect([...lit.nodeIds].sort()).toEqual(["B", "P"]);
-    expect([...lit.unitKeys]).toEqual([unitKey(data.units[3])]);
   });
 
   it("moves left and right within a row and stops at the ends", () => {
@@ -479,7 +453,7 @@ describe("message bars", () => {
     expect(go("left", UNITS_ROW, unitSel(0, "inbound"))).toBeNull();
     expect(go("right", "level-1", { kind: "node", id: "A" })?.item.selection).toEqual({ kind: "node", id: "B" });
     expect(go("right", "level-1", { kind: "node", id: "B" })).toBeNull();
-    expect(go("right", INPUT_ROW, { kind: "message", idx: 1 })?.item.selection).toEqual({ kind: "message", idx: 2 });
+    expect(go("right", INPUT_ROW, unitSel(1, "thinking"))?.item.selection).toEqual(unitSel(2, "inbound"));
   });
 
   it("goes up to the parent and down to the first child", () => {
@@ -490,21 +464,12 @@ describe("message bars", () => {
     expect(go("down", "level-1", { kind: "node", id: "B" })).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(2, "inbound") } });
   });
 
-  it("moves between the Messages row and the context rows by the message a block shows", () => {
-    // Messages down to the context rows: the message the block shows.
-    expect(go("down", UNITS_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { message: { idx: 1 } } });
-    expect(go("down", UNITS_ROW, unitSel(2, "inbound"))?.item.message?.idx).toBe(2);
-    // Context rows up: the block that shows the message; between the two context rows: the same message.
-    expect(go("up", INPUT_ROW, { kind: "message", idx: 3 })).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(3, "thinking") } });
-    expect(go("down", INPUT_ROW, { kind: "message", idx: 3 })).toMatchObject({ row: ADDED_ROW, item: { message: { idx: 3 } } });
-    expect(go("up", ADDED_ROW, { kind: "message", idx: 1 })).toMatchObject({ row: INPUT_ROW, item: { message: { idx: 1 } } });
-    expect(go("down", ADDED_ROW, { kind: "message", idx: 1 })).toBeNull();
-    // With the Context size row hidden, the Messages row goes straight down to Added context.
-    const rows = navRowIds(data, { levels: null, context: "added" });
-    expect(navigate("down", { row: UNITS_ROW, selection: unitSel(1, "thinking") }, data, timeAxis(whole), whole, rows)).toMatchObject({
-      row: ADDED_ROW,
-      item: { message: { idx: 1 } },
-    });
+  it("moves between a block in the Messages row and its bar in the Context size row", () => {
+    expect(go("down", UNITS_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { unit: { i0: 1 } } });
+    expect(go("up", INPUT_ROW, unitSel(2, "inbound"))).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(2, "inbound") } });
+    expect(go("down", INPUT_ROW, unitSel(2, "inbound"))).toBeNull();
+    // A block no request has read has no bar: down lands on the bar overlapping it most.
+    expect(go("down", UNITS_ROW, unitSel(3, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { unit: { i0: 2 } } });
     // A unit without a parent goes to the level-1 node covering its time.
     const orphan = { ...data, units: data.units.map((x) => (x.i0 === 2 ? { ...x, parent: null } : x)) };
     expect(navigate("up", { row: UNITS_ROW, selection: unitSel(2, "inbound") }, orphan, timeAxis(whole), whole)?.item.selection).toEqual({ kind: "node", id: "B" });
@@ -519,7 +484,7 @@ describe("message bars", () => {
     expect(go("right", "level-2", unitSel(0, "inbound"))?.item.selection).toEqual(unitSel(1, "thinking"));
     const inView = { from: T + 25_000, to: T + 40_000 };
     expect(navigate("right", null, data, timeAxis(whole), inView)?.item.selection).toEqual(unitSel(2, "inbound"));
-    expect(navigate("left", null, { nodes: [], units: [], messages: [] }, timeAxis(whole), whole)).toBeNull();
+    expect(navigate("left", null, { nodes: [], units: [] }, timeAxis(whole), whole)).toBeNull();
   });
 
   it("pans to an item outside the view without changing the zoom, and leaves a visible one alone", () => {
@@ -539,8 +504,8 @@ describe("message bars", () => {
 describe("selectionRoles", () => {
   const T = Date.parse("2026-10-04T12:00:00Z");
   const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
-  const u = (i0: number, parent: string | null): RunTimelineUnit =>
-    unit({ kind: "text", i0, i1: i0, start: iso(i0 * 10), end: iso(i0 * 10 + 10), parent });
+  const u = (i0: number, parent: string | null, total: number | null): RunTimelineUnit =>
+    unit({ kind: "text", i0, i1: i0, start: iso(i0 * 10), end: iso(i0 * 10 + 10), parent, context_tokens: total === null ? null : 1, context_total: total });
   const nd = (id: string, level: number, parent: string | null, s0: number, s1: number): RunTimelineNode => ({
     ...node(level, id),
     parent,
@@ -549,41 +514,33 @@ describe("selectionRoles", () => {
     span_start: s0,
     span_end: s1,
   });
-  const mb = (idx: number): RunTimelineMessageBar => ({
-    idx, start: iso(idx * 10), end: iso(idx * 10 + 10), session: 0, context_tokens: 1, estimated: false, context_total: 1, request: null,
-  });
-  // P (level 2) over A (0-1) and B (2-3); one text block and one message per index.
+  // P (level 2) over A (0-1) and B (2-3); one text block per index, the last unread (no bar).
   const data = {
     nodes: [nd("P", 2, null, 0, 3), nd("A", 1, "P", 0, 1), nd("B", 1, "P", 2, 3)],
-    units: [u(0, "A"), u(1, "A"), u(2, "B"), u(3, "B")],
-    messages: [mb(0), mb(1), mb(2), mb(3)],
+    units: [u(0, "A", 1), u(1, "A", 2), u(2, "B", 3), u(3, "B", null)],
   };
   const keys = (roles: ReturnType<typeof selectionRoles>, row: string) => [...(roles.linked.get(row) ?? [])].sort();
 
-  it("a message is the one primary item; it links one hop: its block, the block's ancestors, the same message in the other row", () => {
-    const roles = selectionRoles({ row: INPUT_ROW, selection: { kind: "message", idx: 2 } }, data);
-    expect(roles.primary).toEqual({ row: INPUT_ROW, key: "m2" });
-    expect(keys(roles, UNITS_ROW)).toEqual(["utext-2-2"]);
-    expect(keys(roles, "level-1")).toEqual(["nB"]);
-    expect(keys(roles, "level-2")).toEqual(["nP"]);
-    expect(keys(roles, ADDED_ROW)).toEqual(["m2"]);
-    // Nothing links back down from the ancestors: the other messages under the same nodes stay unlit.
-    expect(keys(roles, INPUT_ROW)).toEqual([]);
-    expect(roles.linked.get(UNITS_ROW)?.has("utext-3-3")).toBe(false);
+  it("a block is primary in the row the cursor is in, and its twin in the other row is linked", () => {
+    const messages = selectionRoles({ row: UNITS_ROW, selection: { kind: "unit", i0: 2, i1: 2, unitKind: "text" } }, data);
+    expect(messages.primary).toEqual({ row: UNITS_ROW, key: "utext-2-2" });
+    expect(keys(messages, INPUT_ROW)).toEqual(["utext-2-2"]);
+    expect(keys(messages, "level-1")).toEqual(["nB"]);
+    expect(keys(messages, "level-2")).toEqual(["nP"]);
+    const bar = selectionRoles({ row: INPUT_ROW, selection: { kind: "unit", i0: 2, i1: 2, unitKind: "text" } }, data);
+    expect(bar.primary).toEqual({ row: INPUT_ROW, key: "utext-2-2" });
+    expect(keys(bar, UNITS_ROW)).toEqual(["utext-2-2"]);
+    expect(keys(bar, INPUT_ROW)).toEqual([]);
+    // Nothing links back down from the ancestors: the other blocks under the same nodes stay unlit.
+    expect(bar.linked.get(UNITS_ROW)?.has("utext-3-3")).toBe(false);
   });
 
-  it("the cursor row decides which context row is primary, and the other one is linked", () => {
-    const added = selectionRoles({ row: ADDED_ROW, selection: { kind: "message", idx: 2 } }, data);
-    expect(added.primary).toEqual({ row: ADDED_ROW, key: "m2" });
-    expect(keys(added, INPUT_ROW)).toEqual(["m2"]);
-    expect(keys(added, ADDED_ROW)).toEqual([]);
+  it("a block no request has read has no twin to link", () => {
+    const unread = selectionRoles({ row: UNITS_ROW, selection: { kind: "unit", i0: 3, i1: 3, unitKind: "text" } }, data);
+    expect(unread.linked.has(INPUT_ROW)).toBe(false);
   });
 
-  it("a block links to its ancestors and the messages it shows; a node links only upward", () => {
-    const block = selectionRoles({ row: UNITS_ROW, selection: { kind: "unit", i0: 2, i1: 2, unitKind: "text" } }, data);
-    expect(keys(block, "level-1")).toEqual(["nB"]);
-    expect(keys(block, INPUT_ROW)).toEqual(["m2"]);
-    expect(keys(block, ADDED_ROW)).toEqual(["m2"]);
+  it("a node links only upward", () => {
     const top = selectionRoles({ row: "level-2", selection: { kind: "node", id: "P" } }, data);
     expect(top.primary).toEqual({ row: "level-2", key: "nP" });
     expect([...top.linked.keys()]).toEqual([]);
