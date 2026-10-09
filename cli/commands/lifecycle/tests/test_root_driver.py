@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -136,7 +137,9 @@ def test_mac_helper_protocol_refuses_fallback(
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
     monkeypatch.setattr(driver, "_helper_wire_ok", lambda: False)
     with pytest.raises(RuntimeError, match="root_stop_intent_v1"):
-        driver._bring_up_root(tmp_path, tmp_path, tmp_path / "manifest", object(), {})
+        driver._bring_up_root(
+            tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=[]
+        )
 
 
 @pytest.mark.parametrize("missing", ["root_stop_intent_v1", "helper_shutdown_v1", None])
@@ -174,7 +177,9 @@ def test_collector_config_bytes_change_the_live_unit_generation(
 def test_windows_adapter_gap_is_explicit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(driver.sys, "platform", "win32")
     with pytest.raises(RuntimeError, match="Windows root supervision requires"):
-        driver._bring_up_root(tmp_path, tmp_path, tmp_path / "manifest", object(), {})
+        driver._bring_up_root(
+            tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=[]
+        )
 
 
 def test_obsolete_custody_records_do_not_block_an_absent_root(
@@ -289,6 +294,7 @@ def test_linux_root_launch_never_consults_a_helper(
 
     monkeypatch.setattr(driver.sys, "platform", "linux")
     spawned: list[Path] = []
+    children: list[subprocess.Popen[bytes]] = []
 
     def spawn(
         run_dir: Path,
@@ -296,7 +302,10 @@ def test_linux_root_launch_never_consults_a_helper(
         _manifests: Path,
         _env: dict[str, str],
         _runtime: object = None,
+        *,
+        retained_children: list[subprocess.Popen[bytes]],
     ) -> SimpleNamespace:
+        assert retained_children is children
         spawned.append(run_dir)
         return SimpleNamespace(pid=123)
 
@@ -310,7 +319,10 @@ def test_linux_root_launch_never_consults_a_helper(
     monkeypatch.setattr(driver, "_helper_wire_ok", helper)
     monkeypatch.setattr(driver, "_await_root_status", await_status)
     assert (
-        driver._bring_up_root(tmp_path, tmp_path, tmp_path / "manifest", object(), {}) == status()
+        driver._bring_up_root(
+            tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=children
+        )
+        == status()
     )
     assert spawned == [tmp_path]
 
@@ -359,7 +371,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     monkeypatch.setattr(driver, "_require_root_owner", owned)
     monkeypatch.setattr(driver, "_stop_root_process", no_stop)
     result = driver._ensure_root_service_tree(
-        requested, tmp_path, roles=frozenset({"gateway"}), reconcile=True
+        requested, tmp_path, roles=frozenset({"gateway"}), reconcile=True, retained_children=[]
     )
     assert result.failed
     assert published.read_text() == "old generation"
@@ -633,11 +645,11 @@ def test_root_signals_use_start_ticks_when_wall_birth_moves(
     assert signals == ["term"]
 
 
+@pytest.mark.parametrize("readiness_fails", [False, True])
 def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, readiness_fails: bool
 ) -> None:
     import gc
-    import subprocess
     import sys
     import time
 
@@ -649,11 +661,25 @@ def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
     def command(_run: Path, _manifest: Path, _runtime: object = None) -> list[str]:
         return [sys.executable, "-c", "pass"]
 
+    def await_status(_client: object, _run_dir: Path, **_kwargs: object) -> dict[str, Any]:
+        if readiness_fails:
+            raise driver._RootDriverError("readiness failed")
+        return status()
+
     monkeypatch.setattr(driver, "_root_argv", command)
-    monkeypatch.setattr(driver, "_direct_root_child", None)
-    process = driver._spawn_direct(tmp_path, tmp_path, tmp_path / "manifest", {})
-    pid = process.pid
-    del process
+    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: False)
+    monkeypatch.setattr(driver, "_await_root_status", await_status)
+    children: list[subprocess.Popen[bytes]] = []
+    try:
+        driver._bring_up_root(
+            tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=children
+        )
+    except driver._RootDriverError:
+        assert readiness_fails
+    else:
+        assert not readiness_fails
+    assert len(children) == 1
+    pid = children[0].pid
     gc.collect()
     deadline = time.monotonic() + 5
     try:
@@ -661,13 +687,11 @@ def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
             assert time.monotonic() < deadline, "child did not exit"
             time.sleep(0.01)
         # Popen cleans its abandoned-child table here. Our retained child must
-        # stay unreaped, keeping this PID unavailable until the CLI exits.
+        # stay unreaped while the caller retains it after the launch returns.
         subprocess.run([sys.executable, "-c", "pass"], check=True, timeout=5)
         assert psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
     finally:
-        retained = driver._direct_root_child
-        if retained is not None:
-            retained.wait(timeout=5)
+        children[0].wait(timeout=5)
 
 
 def test_plugin_birth_config_is_part_of_the_existing_unit_generation(

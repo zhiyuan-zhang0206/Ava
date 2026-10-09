@@ -435,7 +435,12 @@ def _cmd_start_body(
     serving_generation = start_serving.begin_start()
     _record_running_sha(repo)
     launch = _root_driver_commands._launch_service_tree(
-        roster, repo, roles, reconcile=persist_services, runtime=runtime
+        roster,
+        repo,
+        roles,
+        reconcile=persist_services,
+        retained_children=state.retained_children,
+        runtime=runtime,
     )
     started = launch.started
     # 4a) hand the launch failures to whoever runs this start from another process.
