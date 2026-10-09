@@ -58,9 +58,10 @@ async def test_fresh_processes_bind_the_same_winning_image(unit_home: Path) -> N
             assert sys.stdin.readline() == 'CREATE\\n'
             return original(plugin, cls)
 
+        configs = {}
         with patch.object(registration, 'write_default_disk_image', synchronized_write):
-            registration.bind_plugin_config('boot-race', Config)
-        bound = registration.get_plugin_config('boot-race', AgentSlices.resolve(), Config)
+            registration.bind_plugin_config('boot-race', Config, configs)
+        bound = registration.get_plugin_config('boot-race', AgentSlices.resolve(plugin_configs=configs), Config)
         print(bound.marker, flush=True)
         """
     )
@@ -98,6 +99,7 @@ async def test_fresh_processes_bind_the_same_winning_image(unit_home: Path) -> N
 def test_bind_rereads_image_created_after_the_missing_read(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    configs: dict[str, BaseModel] = {}
     reader = config_registration.read_plugin_config
     image = disk_image_path("read-race")
 
@@ -112,9 +114,14 @@ def test_bind_rereads_image_created_after_the_missing_read(
         return instance
 
     monkeypatch.setattr(config_registration, "read_plugin_config", competing_read)
-    undo = bind_plugin_config("read-race", BootConfig)
+    undo = bind_plugin_config("read-race", BootConfig, configs)
     try:
-        assert get_plugin_config("read-race", AgentSlices.resolve(), BootConfig).marker == "winner"
+        assert (
+            get_plugin_config(
+                "read-race", AgentSlices.resolve(plugin_configs=configs), BootConfig
+            ).marker
+            == "winner"
+        )
         assert json.loads(image.read_text()) == {"marker": "winner"}
     finally:
         undo()
@@ -135,6 +142,7 @@ def test_bind_rejects_invalid_winning_image(
     content: str,
     expected_error: type[Exception],
 ) -> None:
+    configs: dict[str, BaseModel] = {}
     original = config_registration.write_default_disk_image
     image = disk_image_path("invalid-winner")
 
@@ -145,9 +153,9 @@ def test_bind_rejects_invalid_winning_image(
 
     monkeypatch.setattr(config_registration, "write_default_disk_image", competing_write)
     with pytest.raises(expected_error):
-        bind_plugin_config("invalid-winner", BootConfig)
+        bind_plugin_config("invalid-winner", BootConfig, configs)
     with pytest.raises(KeyError):
-        get_plugin_config("invalid-winner", AgentSlices.resolve(), BootConfig)
+        get_plugin_config("invalid-winner", AgentSlices.resolve(plugin_configs=configs), BootConfig)
     assert image.read_text() == content
 
 
@@ -155,6 +163,7 @@ def test_bind_rejects_invalid_winning_image(
 def test_bind_propagates_unknown_creation_errors(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
 ) -> None:
+    configs: dict[str, BaseModel] = {}
     error = error_type("unexpected create failure")
 
     def fail_write(plugin: str, cls: type[BaseModel]) -> Path:
@@ -162,11 +171,13 @@ def test_bind_propagates_unknown_creation_errors(
 
     monkeypatch.setattr(config_registration, "write_default_disk_image", fail_write)
     with pytest.raises(error_type) as captured:
-        bind_plugin_config("unknown-writer-error", BootConfig)
+        bind_plugin_config("unknown-writer-error", BootConfig, configs)
     assert captured.value is error
     assert not disk_image_path("unknown-writer-error").exists()
     with pytest.raises(KeyError):
-        get_plugin_config("unknown-writer-error", AgentSlices.resolve(), BootConfig)
+        get_plugin_config(
+            "unknown-writer-error", AgentSlices.resolve(plugin_configs=configs), BootConfig
+        )
 
 
 def test_default_writer_still_rejects_an_existing_image(unit_home: Path) -> None:
@@ -185,6 +196,7 @@ def test_default_writer_still_rejects_an_existing_image(unit_home: Path) -> None
 def test_bind_does_not_replace_a_disappearing_winner_with_defaults(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    configs: dict[str, BaseModel] = {}
     image = disk_image_path("missing-winner")
 
     def disappearing_write(plugin: str, cls: type[BaseModel]) -> Path:
@@ -195,16 +207,17 @@ def test_bind_does_not_replace_a_disappearing_winner_with_defaults(
 
     monkeypatch.setattr(config_registration, "write_default_disk_image", disappearing_write)
     with pytest.raises(FileNotFoundError):
-        bind_plugin_config("missing-winner", BootConfig)
+        bind_plugin_config("missing-winner", BootConfig, configs)
     assert not image.exists()
     with pytest.raises(KeyError):
-        get_plugin_config("missing-winner", AgentSlices.resolve(), BootConfig)
+        get_plugin_config("missing-winner", AgentSlices.resolve(plugin_configs=configs), BootConfig)
 
 
 @pytest.mark.parametrize("error_type", [OSError, RuntimeError, ValueError])
 def test_bind_propagates_unknown_winning_image_errors(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
 ) -> None:
+    configs: dict[str, BaseModel] = {}
     parser = config_registration.config_from_image
     error = error_type("unexpected winning image failure")
     image = disk_image_path("unknown-read-error")
@@ -216,8 +229,10 @@ def test_bind_propagates_unknown_winning_image_errors(
 
     monkeypatch.setattr(config_registration, "config_from_image", fail_read)
     with pytest.raises(error_type) as captured:
-        bind_plugin_config("unknown-read-error", BootConfig)
+        bind_plugin_config("unknown-read-error", BootConfig, configs)
     assert captured.value is error
     assert json.loads(image.read_text()) == {"marker": "default"}
     with pytest.raises(KeyError):
-        get_plugin_config("unknown-read-error", AgentSlices.resolve(), BootConfig)
+        get_plugin_config(
+            "unknown-read-error", AgentSlices.resolve(plugin_configs=configs), BootConfig
+        )

@@ -24,7 +24,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import model_catalog
 from base.log import logger
 from base.native_process.turn_identity import HostedTurnResources
-from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from services.agent_runner.agent_host.db_recovery import recover_database
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
@@ -115,7 +114,6 @@ async def _source_model(pool: AsyncConnectionPool, agent_id: int) -> str | None:
         return None
     slices = AgentSlices.resolve(
         resolve_agent_config_pins(stored.config_overlay, stored.birth_config),
-        resolve_agent_plugin_pins(stored.config_overlay),
     )
     model = slices.brain.llm_model
     if not isinstance(model, str) or not any(
