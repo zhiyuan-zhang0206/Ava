@@ -52,6 +52,12 @@ def test_units_are_service_packages_not_groups(tmp_path: Path) -> None:
         ("daemon.py", "from ...redis_bridge import relay", "services.redis_bridge"),
         ("daemon.py", "from ... import pidfile", "services.pidfile"),
         ("daemon.py", "from services.wake import dispatch", "services.wake.dispatch"),
+        ("daemon.py", "from ...redis_bridge.relay import start, stop", "services.redis_bridge"),
+        (
+            "daemon.py",
+            "from services.redis_bridge.relay import start, stop",
+            "services.redis_bridge",
+        ),
     ],
 )
 def test_production_import_edges_resolve_cross_unit_module_members(
@@ -62,7 +68,7 @@ def test_production_import_edges_resolve_cross_unit_module_members(
         {
             f"services/wake/heartbeat/{rel}": text,
             "services/wake/dispatch/runner.py": "",
-            "services/redis_bridge/relay.py": "",
+            "services/redis_bridge/relay.py": "def start(): pass\ndef stop(): pass\n",
             "services/pidfile.py": "",
         },
     )
