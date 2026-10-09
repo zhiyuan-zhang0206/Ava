@@ -109,7 +109,7 @@ bundled `scripts/read_instructions.py`
 with the session id and `--agent`. Read its output in full: the system prompt and
 configured preloaded skill notes saved in the current native context window,
 not a newly rendered prompt. Restore relevant memory, tasks and workspace
-context separately; follow the [impersonator guide](../../../.agents/skills/impersonator-guide/SKILL.md)
+context separately; follow the [impersonator guide](../../../ava_builtins/skills/platform/impersonator-guide/SKILL.md)
 for translating native execution instructions to your host.
 
 An attachment binds the borrowed identity and saved configuration. SDK calls,

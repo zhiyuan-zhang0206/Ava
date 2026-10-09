@@ -14,7 +14,7 @@ from types import ModuleType
 
 import pytest
 
-from ava.shell.coding_tools import _claude_checks, _common, claude
+from ava.shell.coding_tools import _claude_checks, _common, claude, impersonator_guide
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 
@@ -124,10 +124,10 @@ def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) ->
     assert "--plugin-dir" not in manual
 
     fallback = claude._takeover_bootstrap_message(
-        1, "Fix login", "brief", _common.impersonator_guide(), relay_resident=False
+        1, "Fix login", "brief", impersonator_guide(), relay_resident=False
     )
     resident_message = claude._takeover_bootstrap_message(
-        1, "Fix login", "brief", _common.impersonator_guide(), relay_resident=True
+        1, "Fix login", "brief", impersonator_guide(), relay_resident=True
     )
     assert "Immediately start the Claude Monitor relay" in fallback
     assert "do not arm a Monitor watch" in resident_message
