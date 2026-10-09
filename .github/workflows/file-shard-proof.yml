@@ -109,6 +109,35 @@ jobs:
           COVERAGE_FILE: tmp/proof/candidate/${{ matrix.group }}/coverage-data
         run: |
           mkdir -p tmp/proof/candidate/${{ matrix.group }}
+          set -euo pipefail
+          timeout --kill-after=15s 4m uv run python -u - <<'PY' 2>&1 | tee tmp/proof/candidate/${{ matrix.group }}/local-plan-collection.log
+          import faulthandler
+
+          with open("tmp/proof/candidate/${{ matrix.group }}/local-plan-stacks.log", "w") as stacks:
+              faulthandler.dump_traceback_later(60, repeat=True, file=stacks)
+              try:
+                  import pytest
+
+                  raise SystemExit(pytest.main([
+                      "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-qq",
+                      "--ignore=tests/e2e", "-m", "not flaky", "--omit-static-tests",
+                      "-o", "junit_family=xunit1", "-o", "faulthandler_timeout=300",
+                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=16",
+                      "--file-shard-plan=tmp/proof/candidate/${{ matrix.group }}/local-plan.json",
+                  ]))
+              finally:
+                  faulthandler.cancel_dump_traceback_later()
+          PY
+          uv run python - <<'PY_CHECK'
+          from pathlib import Path
+
+          from scripts.ci.file_shard_shadow import Plan
+
+          master = Plan.model_validate_json(Path("tmp/file-plan.json").read_bytes())
+          local = Plan.model_validate_json(Path("tmp/proof/candidate/${{ matrix.group }}/local-plan.json").read_bytes())
+          if master.model_dump(exclude={"collection_seconds"}) != local.model_dump(exclude={"collection_seconds"}):
+              raise SystemExit("Runner-local complete snapshot differs from the independent proof snapshot")
+          PY_CHECK
           uv run pytest -c pyproject.toml --rootdir=. -q --ignore=tests/e2e \
             --omit-static-tests -m 'not flaky' -n 4 \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
@@ -116,7 +145,7 @@ jobs:
             --junit-xml=tmp/proof/candidate/${{ matrix.group }}/junit.xml \
             -o junit_family=xunit1 -o faulthandler_timeout=300 \
             -p scripts.ci.file_shard_shadow --file-shard-execute \
-            --file-shard-check=tmp/file-plan.json --file-shard-group=${{ matrix.group }} \
+            --file-shard-check=tmp/proof/candidate/${{ matrix.group }}/local-plan.json --file-shard-group=${{ matrix.group }} \
             --file-shard-report=tmp/proof/candidate/${{ matrix.group }}/collection.json \
             --file-shard-runtime-report=tmp/proof/candidate/${{ matrix.group }}/runtime.json
       - name: Validate baseline native results

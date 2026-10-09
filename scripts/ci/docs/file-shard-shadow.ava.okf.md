@@ -80,6 +80,14 @@ sources. Neither population retries. The baseline always runs first; this
 experiment establishes execution equivalence and reports collection/test-phase
 costs, but one pair does not establish a statistically stable latency gain.
 
+The candidate step also creates a complete runner-local plan before execution,
+counting that planning cost in its elapsed time. It validates the local plan
+against the independent proof snapshot with the existing `Plan` model, excluding
+only `collection_seconds`, then executes its checked group from that local plan.
+The master snapshot remains independent certification evidence; it does not model
+a required cross-runner planning dependency in the candidate's execution cost.
+Each group's artifact retains its local plan and collection diagnostics.
+
 Each worker records setup/call/teardown outcomes and times, plus the actual
 resolved fixture name, implementation and scope after the call. This includes
 `getfixturevalue()` bindings through pytest's pinned-version fixture request
