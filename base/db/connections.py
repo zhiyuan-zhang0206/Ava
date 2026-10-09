@@ -243,7 +243,7 @@ def _refuse_placeholder(url: str) -> None:
         )
 
 
-def _guard_db_url(url: str) -> str:
+def _guard_db_url(url: str, *, refusal: str | None = None) -> str:
     """Refuse the placeholder URL and an undelivered credential-free endpoint;
     return the url otherwise. The single point every settings-resolved connection
     passes through, so both footguns are caught once here rather than at each
@@ -255,9 +255,6 @@ def _guard_db_url(url: str) -> str:
             login was delivered to this process, and url carries no password.
     """
     _refuse_placeholder(url)
-    from base.host.env import dotenv_boot
-
-    refusal = dotenv_boot.db_authority_refusal()
     if refusal is not None:
         try:
             password = urlsplit(url).password
@@ -415,7 +412,9 @@ def connect(
     from base.config.domains.storage.data_plane import sslmode_for_url
 
     cfg = config or db_config_from_settings()
-    url = _guard_db_url(cfg.db_url if not direct else direct_db_url(cfg))
+    url = _guard_db_url(
+        cfg.db_url if not direct else direct_db_url(cfg), refusal=cfg.db_authority_refusal
+    )
     sslmode = sslmode_for_url(url, cfg.db_sslmode)
     conn = psycopg.connect(
         url,
@@ -538,7 +537,9 @@ def pool(
     from base.config.domains.storage.data_plane import resolved_pool_size, sslmode_for_url
 
     cfg = config or db_config_from_settings()
-    url = _guard_db_url(cfg.db_url if not direct else direct_db_url(cfg))
+    url = _guard_db_url(
+        cfg.db_url if not direct else direct_db_url(cfg), refusal=cfg.db_authority_refusal
+    )
     min_size, max_size = resolved_pool_size(
         min_size, max_size, cfg.db_pool_min_size, cfg.db_pool_max_size
     )
@@ -618,7 +619,7 @@ def async_pool(
     cfg = config or db_config_from_settings()
     sslmode = sslmode_for_url(cfg.db_url, cfg.db_sslmode)
     return pool_class(
-        _guard_db_url(cfg.db_url),
+        _guard_db_url(cfg.db_url, refusal=cfg.db_authority_refusal),
         min_size=min_size,
         max_size=max_size,
         timeout=timeout,
