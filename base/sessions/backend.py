@@ -18,7 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from base.native_process.os_platform import IS_MACOS
+from base.native_process.os_platform import is_macos
 from base.paths import logs_dir
 from base.sessions.pty import client
 from base.sessions.pty.keys import keys_to_bytes
@@ -457,7 +457,7 @@ def helper_spawn_enabled() -> bool:
     a spawn-identity commitment, so actual helper-call failures remain loud and
     never fall back after this decision.
     """
-    if not IS_MACOS:
+    if not is_macos():
         return False
     try:
         from base.config import settings

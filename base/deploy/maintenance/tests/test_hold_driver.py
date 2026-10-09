@@ -24,7 +24,7 @@ import psutil
 import pytest
 
 from base.deploy.maintenance.hold_driver import HoldDriver, ProcessRef, liveness, mint_driver
-from base.native_process.os_platform import IS_LINUX
+from base.native_process.os_platform import is_linux
 
 _REPO = Path(__file__).resolve().parents[4]
 
@@ -242,7 +242,7 @@ def test_missing_and_dead_read_as_such() -> None:
     assert liveness(HoldDriver(root=ghost)) == "dead"
 
 
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_probe_reads_a_vanished_entry_after_validation_as_gone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -274,7 +274,7 @@ def test_probe_reads_a_vanished_entry_after_validation_as_gone(
             child.wait()
 
 
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_probe_keeps_unreadable_when_a_present_process_cannot_be_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
