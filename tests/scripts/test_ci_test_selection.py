@@ -85,9 +85,10 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
         actual = _backend_verdict(script, "true", results | changes, mode=mode, decision=decision)
         assert actual.returncode == expected, actual.stdout
     for job in results:
-        actual = _backend_verdict(script, "true", results | {job: "failure"})
-        # FULL has no enforced subset.
-        assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
+        for outcome in ("failure", "cancelled", "skipped"):
+            actual = _backend_verdict(script, "true", results | {job: outcome})
+            # FULL has no enforced subset; every required dependency must succeed.
+            assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
 
 
 def test_enforce_is_the_default_and_test_select_republishes_the_mode() -> None:
@@ -111,9 +112,8 @@ def test_shards_are_skipped_only_on_the_enforced_subset_path(tmp_path: Path) -> 
     shard = _workflow_jobs()["backend-shard"]
     assert shard["needs"] == ["classify", "test-select"]
     condition = shard["if"]
-    # always(): a skipped test-select (push-to-main) must not propagate a skip
-    # down the needs chain into skipped shards.
-    assert "always()" in condition
+    # A status function admits skipped needs on main, but respects run cancellation.
+    assert "!cancelled()" in condition
     assert "needs.test-select.outputs.mode != 'enforce'" in condition
     assert "needs.test-select.outputs.decision != 'SELECTED'" in condition
     run = _step(shard, "Run pytest shard")["run"]
@@ -246,7 +246,7 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
         "helper-signing-smoke",
     ]
     assert aggregator["if"] == (
-        "${{ always() && needs.classify.result == 'success' && "
+        "${{ !cancelled() && needs.classify.result == 'success' && "
         "(needs.classify.outputs.backend == 'true' || "
         "needs.backend-structure.result != 'success') }}"
     )
