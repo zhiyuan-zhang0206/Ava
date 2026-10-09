@@ -19,7 +19,11 @@ tags:
 - `search(queries, count=10, max_concurrent=12) → list[list[SearchResult]]` — Concurrently search multiple queries. `queries` is a list of strings; `count` max results per query (limit 20). Results returned in input order.
 - `fetch(targets, max_chars=50000, max_concurrent=12) → list[str]` — Concurrently fetch multiple web pages and answer a `prompt` for each. `targets` is a list of `(url, prompt)` tuples; results returned in input order.
 
-Both are batch-only. By default each batch has a 12-item ceiling; pass a positive `max_concurrent=N` to choose another in-flight limit. The shared DeepSeek cap queues excess provider calls, and terminal failures propagate as `SearchError` / `FetchError`.
+Both are batch-only. By default each batch has a 12-item ceiling; pass a positive `max_concurrent=N` to choose another in-flight limit. The shared DeepSeek cap queues excess provider calls, and terminal typed provider failures propagate as `SearchError` / `FetchError`.
+
+Unknown model-invocation errors in `fetch()` preserve their original exception
+and traceback after one attempt; error wording alone never grants provider
+retry authority. Reader failures and empty model answers still raise `FetchError`.
 
 ## Data Types
 - `SearchResult`: title, url, snippet, kind (`kind` is the source partition: web / news / videos / discussions)
