@@ -29,6 +29,14 @@ of freshness. Different heads may consume capacity concurrently: a new commit
 does not automatically cancel its old head. Exact obsolete runs can be cancelled
 by an authorized maintainer without losing completed evidence.
 
+CI fan-out and summary jobs use `!cancelled()` to admit failed or skipped needs
+without resisting an issued workflow cancellation. Required summaries still
+reject non-success dependencies when the workflow has not been cancelled;
+step-level cleanup and diagnostic uploads retain their `always()` conditions.
+GitHub documents this distinction in its
+[status functions](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)
+and [cancellation sequence](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation).
+
 GitHub documents that [reruns preserve the original SHA and ref](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs),
 and that [concurrency can replace pending runs even without cancelling running runs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
 Changing only `cancel-in-progress` cannot close the cross-head race. These native

@@ -380,8 +380,8 @@ def test_the_total_job_is_informational_and_needs_only_read_access() -> None:
         "backend-shard",
         "backend-serial",
     }
-    # The fan-out condition of backend-shard, without the always(): a cancelled run stops.
-    assert job["if"] == _JOBS["backend-shard"]["if"].replace("always()", "!cancelled()")
+    # Fan-out and counts share routing and both respect workflow cancellation.
+    assert job["if"] == _JOBS["backend-shard"]["if"]
     # Nothing waits on it: the required aggregator does not list it.
     assert "backend-test-counts" not in _JOBS["backend"]["needs"]
     for step in job["steps"]:
