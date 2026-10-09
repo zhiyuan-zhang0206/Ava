@@ -9,12 +9,18 @@ current context, thread patch or live clients.
 from __future__ import annotations
 
 import os
+from enum import StrEnum
 from typing import Any
 
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.native_process.turn_identity import current_turn_agent_id
+
+
+class SdkProcessPurpose(StrEnum):
+    """Non-agent startup posture stored in the SDK's existing process entry."""
+
+    SHARED_HOST = "shared_host"
 
 
 class ContextOutsideProcessError(AttributeError):
@@ -38,11 +44,9 @@ def context_from_description(description: dict[str, Any]) -> AvaContext:
 def launched_context() -> AvaContext | None:
     """Construct a launched script's context from its explicit environment channel.
 
-    A native host turn is not a launched script. Its identity is used only to
-    reject this bootstrap, never as an SDK context or identity fallback.
+    The SDK entry rejects shared-host startup posture before calling this.
+    This function never infers identity from a native turn.
     """
-    if current_turn_agent_id() is not None:
-        return None
     raw = os.environ.get("AVA_AGENT_ID")  # env-ok: launched script identity channel
     if raw is None:
         return None
