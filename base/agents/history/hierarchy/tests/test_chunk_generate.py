@@ -285,7 +285,7 @@ _TWO = '<group first="1" last="2">look</group><group first="3" last="3">run</gro
 
 
 def _gen(llm: Any, **kw: Any) -> Any:
-    return generate_chunk(llm, _PREFIX, 1, model="m", tools=["T"], **kw)
+    return generate_chunk(llm, _PREFIX, 1, model="m", agent_id=7, tools=["T"], **kw)
 
 
 def test_request_is_prefix_plus_one_instruction_with_tools_bound() -> None:
@@ -427,7 +427,7 @@ def test_unknown_chunk_invocation_error_is_recorded_once_and_preserved(error: Ex
 def test_a_chunk_is_numbered_from_its_own_first_unit() -> None:
     # A chunk that starts at the second work turn: its catalog numbers from 1 there.
     llm = _Recorder([AIMessage(content='<group first="1" last="1">a</group>')])
-    out = generate_chunk(llm, _PREFIX, 4, model="m", tools=["T"])
+    out = generate_chunk(llm, _PREFIX, 4, model="m", agent_id=7, tools=["T"])
     catalog = llm.requests[0][-1].content.split("whole units):\n")[1]
     assert catalog.startswith("[1] ") and "pytest -x" in catalog and "[2]" not in catalog
     assert [u.i0 for u in out.units] == [0]
@@ -439,4 +439,16 @@ def test_a_chunk_is_numbered_from_its_own_first_unit() -> None:
         ]
     )
     with pytest.raises(GenerateError, match=r"first 2 is not in the catalog \(units 1 to 1\)"):
-        generate_chunk(llm, _PREFIX, 4, model="m", tools=["T"])
+        generate_chunk(llm, _PREFIX, 4, model="m", agent_id=7, tools=["T"])
+
+
+def test_chunk_calls_log_their_usage_under_the_job_agent(
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    usage: Any = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+    _gen(_Recorder([AIMessage(content=_TWO, usage_metadata=usage)]))
+    [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
+    extra = record["extra"]
+    assert extra["agent_id"] == 7
+    assert extra["source"] == "hierarchy.generate"
+    assert extra["usage_kind"] == "chat"
