@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable, Sequence
-from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Generic, TypeVar
@@ -21,13 +20,6 @@ from base.daemon.schedules.watcher import previous_fire
 from base.db import Database
 
 _log = logging.getLogger(__name__)
-
-# The slot currently being dispatched, set around the winner's ``fire``
-# invocation by ``fire_slot_once``. A slot-aware fire callback (window-based
-# reconciliation — the C9 daily report) reads it through ``claimed_slot()``;
-# callbacks that do not care stay unchanged. Context-local, so nested or
-# concurrent dispatches each see their own slot.
-_claimed_slot: ContextVar[datetime | None] = ContextVar("catchup_claimed_slot", default=None)
 
 MAX_CATCH_UP_SLOTS = 2
 
@@ -78,27 +70,18 @@ def _catch_up_baseline(db: Database, schedule_id: int) -> datetime:
     return _as_utc(row[0], field="catch-up baseline")
 
 
-def claimed_slot() -> datetime | None:
-    """The fire slot of the enclosing ``fire_slot_once`` dispatch, or None.
-
-    Set only around the winner's callback (a losing claim never invokes it),
-    and restored afterwards, so an outer dispatch's slot survives a nested
-    one. Callbacks that do not need the slot ignore this getter.
-    """
-    return _claimed_slot.get()
-
-
 def fire_slot_once(
     db: Database,
     slot_fire_at: datetime,
     payload: _Payload,
     *,
-    fire: Callable[[_Payload], None],
+    fire: Callable[[datetime, _Payload], None],
     schedule_id: int | None = None,
 ) -> bool:
     """Claim one cron slot and invoke ``fire`` exactly when this caller wins.
 
     The durable claim gives concurrent processes and later restarts one winner.
+    The callback receives the claimed UTC slot and its payload after commit.
     ``True`` means this caller claimed and invoked the callback; ``False`` means
     the slot was already claimed. Callback failures propagate while the claim
     remains committed, preserving the feature's explicit at-most-once posture.
@@ -115,11 +98,7 @@ def fire_slot_once(
         claimed = cur.fetchone() is not None
     if not claimed:
         return False
-    token = _claimed_slot.set(slot)
-    try:
-        fire(payload)
-    finally:
-        _claimed_slot.reset(token)
+    fire(slot, payload)
     return True
 
 
@@ -128,13 +107,14 @@ def catch_up(
     triggers: Sequence[tuple[str, _Payload]],
     *,
     timezone: str | None,
-    fire: Callable[[_Payload], None],
+    fire: Callable[[datetime, _Payload], None],
     now: datetime | None = None,
     limit: int = MAX_CATCH_UP_SLOTS,
     schedule_id: int | None = None,
 ) -> list[datetime]:
     """Fire at most the most recent ``limit`` missed cron slots on startup.
 
+    Each winning callback receives its claimed UTC slot and trigger payload.
     The newest durable claim is the lower bound. On first use, schedule
     creation is the lower bound, so a schedule cannot replay time before it
     existed. Only ``limit + 1`` candidates per trigger are inspected: enough
