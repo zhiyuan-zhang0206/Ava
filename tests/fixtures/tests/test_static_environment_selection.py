@@ -1,11 +1,13 @@
 """Exercise process ownership through real pytest collection and execution."""
 
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 @pytest.fixture
@@ -117,3 +119,35 @@ def test_static_collection_refuses_a_descendant_symlink_to_native_tests(owned_tr
     result = _run(owned_tree, "--test-environment=static", "--collect-only")
     assert result.returncode == pytest.ExitCode.USAGE_ERROR, result.stdout + result.stderr
     assert "Non-static tests reached the static process" in result.stderr
+
+
+def test_actual_ci_warning_policy_rejects_background_native_driver_calls(owned_tree: Path) -> None:
+    (owned_tree / "tools/tests/test_tool.py").write_text(
+        "import threading\nimport psycopg\n"
+        "def test_forbidden_background_call():\n"
+        "    thread = threading.Thread(target=psycopg.connect, "
+        "args=('postgresql://unused@127.0.0.1:1/unused',))\n"
+        "    thread.start()\n    thread.join()\n",
+        encoding="utf-8",
+    )
+    workflow = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
+    jobs = yaml.safe_load(workflow.read_text())["jobs"]
+    command = next(
+        step["run"]
+        for job in jobs.values()
+        for step in job["steps"]
+        if step.get("name") == "Run static pytest contracts"
+    )
+    arguments = shlex.split(command)
+    warning_args: list[str] = []
+    for index, argument in enumerate(arguments):
+        if argument == "-W":
+            warning_args.extend((argument, arguments[index + 1]))
+        elif argument.startswith("-W"):
+            warning_args.append(argument)
+    result = _run(
+        owned_tree, "--test-environment=static", "tools/tests/test_tool.py", *warning_args
+    )
+    assert result.returncode == pytest.ExitCode.TESTS_FAILED, result.stdout + result.stderr
+    assert "PytestUnhandledThreadExceptionWarning" in result.stdout + result.stderr
+    assert "Static tests cannot use Postgres or Redis" in result.stdout + result.stderr
