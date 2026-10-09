@@ -7,7 +7,10 @@ import json
 import logging
 from typing import cast
 
+import psycopg
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import ResponseError
 
 from base.agents.observation import turn_progress as progress_module
 from base.agents.observation.db_wait import DatabaseWaits
@@ -16,7 +19,8 @@ from base.deploy.maintenance import admission as maintenance_admission
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import open_async_redis
 from base.events.live.tests.fakes import patch_async_redis
-from services.agent_runner.agent_host import daemon as host_daemon
+
+from ... import daemon as host_daemon
 
 
 class _FakeAdmission:
@@ -96,7 +100,7 @@ async def test_agent_host_progress_publish_failure_is_warning_with_traceback(
 ) -> None:
     class BrokenRedis:
         async def set(self, key: str, value: str, *, ex: int) -> None:
-            raise RuntimeError("redis unavailable")
+            raise RedisConnectionError("redis unavailable")
 
     patch_async_redis(monkeypatch, BrokenRedis)
 
@@ -524,7 +528,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
         async def renew_ownership(self) -> None:
             nonlocal renew_calls
             renew_calls += 1
-            raise RuntimeError("database unavailable")
+            raise psycopg.OperationalError("database unavailable")
 
     class FakeScheduler:
         active_agents = frozenset[int]()
@@ -569,3 +573,55 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
         next_beat.cancel()
         await asyncio.gather(next_beat, return_exceptions=True)
         await host_daemon._stop_ownership_beat(beat)
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, psycopg.ProgrammingError])
+async def test_unknown_renewal_error_is_retained_until_owner_join(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+) -> None:
+    error = error_type("renewal defect")
+    entered = asyncio.Event()
+
+    class BrokenHost:
+        async def renew_ownership(self) -> None:
+            entered.set()
+            raise error
+
+    class FakeLiveness:
+        def beat(self) -> None:
+            pass
+
+    monkeypatch.setattr(maintenance_admission, "quiesced", lambda: False)
+    tasks, beat = await host_daemon._start_ownership_beat(
+        cast(host_daemon.Liveness, FakeLiveness()),
+        cast(host_daemon.AgentHost, BrokenHost()),
+        cast(host_daemon.TurnScheduler, object()),
+        "runner-a",
+        EventBus.from_settings(),
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        completed, _ = await asyncio.wait({beat}, timeout=0.1)
+        assert completed == {beat}, "unknown renewal errors must stop instead of retrying"
+    finally:
+        with pytest.raises(error_type) as caught:
+            await host_daemon._close_ownership_beat(beat, tasks)
+        assert caught.value is error
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, ResponseError])
+async def test_unknown_progress_error_is_not_a_recoverable_outage(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+) -> None:
+    error = error_type("invalid progress command")
+
+    class BrokenRedis:
+        async def set(self, key: str, value: str, *, ex: int) -> None:
+            raise error
+
+    patch_async_redis(monkeypatch, BrokenRedis)
+    with pytest.raises(error_type) as caught:
+        await host_daemon._publish_turn_progress_heartbeat(
+            EventBus.from_settings(), "runner-a", set(), DatabaseWaits(), TurnProgress()
+        )
+    assert caught.value is error

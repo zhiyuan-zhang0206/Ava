@@ -98,6 +98,12 @@ segments stay globally distinct.
 - The channel name is cluster-scoped (`ava:*`), which is also the scope of the
   per-cluster redis ACL user.
 
+## Invocation publisher ownership
+
+The invocation worker lifetime, bounded drain, failure propagation and known
+Redis recovery contracts are documented in
+[[base/events/live/docs/live/invocation-publisher.ava.okf.md|Invocation Publisher Ownership]].
+
 ## Key Dependencies
 
 - [[agents-contract.ava.okf.md]] — the sibling agent ↔ gateway contract; lifecycle hints carry only `agent_id` and `role`, while authoritative state comes from roster/directory/detail reads.
