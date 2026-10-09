@@ -34,7 +34,7 @@ from typing import Any, TypedDict, cast
 
 from base.deploy.release.runtime_interpreter import external_plugin_read_root
 from base.host.system.probes import display_available, unix_sockets_available
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.paths import ava_home, mcps_dir, repo_root
 
 
@@ -188,7 +188,7 @@ def resolve_command(cmd: str) -> str:
     machine entry's own command line — is returned untouched: those are a third
     party's argv and must not be reinterpreted.
     """
-    if IS_WINDOWS and cmd == _POSIX_VENV_PYTHON:
+    if is_windows() and cmd == _POSIX_VENV_PYTHON:
         return _WINDOWS_VENV_PYTHON
     return cmd
 

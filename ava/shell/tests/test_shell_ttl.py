@@ -7,10 +7,10 @@ import psycopg
 import pytest
 
 import ava
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 
 pytestmark = [
-    pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
+    pytest.mark.skipif(is_windows(), reason="PTY supervisor is POSIX-only"),
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 

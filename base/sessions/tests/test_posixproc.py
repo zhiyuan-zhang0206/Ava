@@ -20,7 +20,7 @@ import psutil
 import pytest
 
 from base.native_process import pid_starttime_ticks
-from base.native_process.os_platform import IS_WINDOWS, is_linux
+from base.native_process.os_platform import is_linux, is_windows
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
 from base.sessions.tests.process_evidence import (
@@ -31,7 +31,7 @@ from base.sessions.tests.process_evidence import (
 )
 from tests.components.base.poll_until import poll_until
 
-pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
+pytestmark = pytest.mark.skipif(is_windows(), reason="posixproc is the POSIX supervisor")
 
 # A long-lived child that outlives the test body; each test kills it explicitly.
 _SLEEP = ["/bin/sleep", "300"]
