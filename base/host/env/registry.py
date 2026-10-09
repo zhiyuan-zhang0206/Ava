@@ -1,48 +1,22 @@
-"""The env-key registry and its projections (R2 design, convergence point A).
+"""The env-key declaration registry and its boot/child projections.
 
-Every env key this system forwards, forces, or drops is declared here or
-in the Settings class metadata — except removable provider keys, whose enabled
-plugin binding is their declaration:
+Settings fields declare aliases and metadata in ``base/config/``;
+``config_registry.py`` reads class declarations without instantiating Settings.
+Pre-Settings authority projections use the generated ``config_lite_table``
+index, avoiding a full configuration import at boot. Non-Settings passthrough
+keys are ``EnvField`` rows here. Enabled provider-plugin bindings declare their
+removable provider keys, loaded at the delivery boundaries that consume them.
 
-- **Settings fields** declare themselves in `base/config/<domain>.py`
-  (`json_schema_extra` metadata); `base/host/env/config_registry.py` builds the flat
-  field registry from class metadata only (no Settings instantiation), and
-  every projection below is a pure function of it — a new cluster-scoped field
-  is force/dropped by the env-authority pass, forwarded to sessions, and
-  distributed via /api/bootstrap with no hand-written set edit (the "env
-  allowlist six-gap" incident class is structurally impossible: A3).
-  The projections `load_ava_env` runs BEFORE Settings exists (the env-authority
-  force/drop families) read the generated boot-lite static index
-  (`base/host/env/config_lite_table.py`) instead of the live registry — building the
-  registry there would pull pydantic + all 15 sub-models into every boot
-  (#3621); the index is generated from the same declarations and locked
-  equal to the registry by tests/components/base/test_config_lite_table.py.
-- **Non-Settings keys** (ambient display vars,
-  overlay/birth JSON carriers, temp-dir vars, ...) are registered as
-  `EnvField` passthrough rows below — one row per key (A1: exactly one
-  declaration; a row whose key is also a Settings alias fails fast).
+Consumption roles are explicit. ``_HEALTH_PORT_SERVICES``, ``_IDENTITY_FIELDS``
+and ``_DERIVED_FIELDS`` remain hand-maintained classifications of declared
+Settings fields; adding a declaration does not automatically decide every
+projection. Capability/scope metadata validates those consumption choices.
 
-The old hand-written snapshots (`base/env_keys.py`, 12 definitions) are gone.
-The authority for which projection a key lands in is the **consumption matrix**
-(which process kind actually reads the key — the per-projection declarations
-below); capability/scope metadata only validates (deriving env sets from
-capability was the 2026-08-06 #1570 P0).
-
-Projections (the design's boundary currency):
-- `child_env(role)` — the parent->child forwarding view of a daemon / session
-  child (SESSION/HOST_PASSTHROUGH semantics); `role` is the gateway or runner
-  `AVA_PROCESS_PROFILE` — daemons belong to those profiles.
-- `env_keep_set(role)` / `env_authority_drop_set(role)` — the dotenv_boot
-  env-authority force/drop families (set membership queries, not env dicts).
-
-The derived sets use the generated static index and are memoized on first use.
-The module stays importable before Settings exists: `dotenv_boot` runs its
-authority pass at `.env`-load time. Provider-plugin declarations load lazily
-only at the delivery boundaries that consume them.
-
-Delivery is the backend env-dict handoff (`base.sessions.env_forwarding.forward_env_dict`).
-KEY=VALUE argv delivery stays forbidden (secrets never ride
-argv — docs/decisions/data/security/2026-07-30-secrets-never-ride-argv.md).
+``child_env(role)`` supplies daemon/session environment dicts;
+``env_keep_set(role)`` and ``env_authority_drop_set(role)`` supply dotenv_boot's
+set-membership projections. Native delivery uses
+``base.sessions.env_forwarding.forward_env_dict``; secrets never ride argv.
+Current structure: base/host/env/docs/registry.ava.okf.md.
 """
 
 from __future__ import annotations

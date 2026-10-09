@@ -36,7 +36,7 @@ changing them. A request to inspect or discuss does not authorize edits.
 - [Import layering](docs/conventions/import-layering.md) explains the contracts
   enforced by `pyproject.toml`; [technology selection](docs/conventions/technology-selection.md)
   explains dependency choices.
-- [OKF index](okf/index.ava.okf.md) and component-local `docs/` describe the
+- [OKF index](docs/index.ava.okf.md) and component-local `docs/` describe the
   current system. Update the relevant owner in the same PR as the code.
 - [Documentation maintenance](docs/conventions/doc-maintenance.md) owns placement:
   current cross-cutting rules in `docs/conventions/`, choices in

@@ -6,7 +6,7 @@ check_doc_references.py validates that docs point at things that exist
 that is actually there. This script adds three narrative-fact checks, each
 extracted from the code and asserted against the doc that owns the fact:
 
-  A. skill catalog  — every slug-like skill name in okf/skills/skills.ava.okf.md
+  A. skill catalog  — every slug-like skill name in docs/skills/skills.ava.okf.md
      functional-group rows must resolve under ava_builtins/skills/ or
      ava_builtins/plugins/ (catches a removed skill still listed — the
      2026-08-03 telegram residual class).
@@ -52,7 +52,7 @@ def _skill_group_names(doc: str) -> list[str]:
 
 
 def check_skill_catalog() -> list[str]:
-    doc_path = ROOT / "okf/skills/skills.ava.okf.md"
+    doc_path = ROOT / "docs/skills/skills.ava.okf.md"
     doc = doc_path.read_text(errors="replace")
     problems = []
     for name in _skill_group_names(doc):
@@ -64,7 +64,7 @@ def check_skill_catalog() -> list[str]:
             or (ROOT / f"ava_builtins/skills/{name}.ava.okf.md").is_file()
         ):
             problems.append(
-                f"okf/skills/skills.ava.okf.md lists skill `{name}` but no "
+                f"docs/skills/skills.ava.okf.md lists skill `{name}` but no "
                 f"ava_builtins/skills/<group>/{name}/ or ava_builtins/plugins/{name}/ exists — "
                 f"removed skill still in the catalog?"
             )
