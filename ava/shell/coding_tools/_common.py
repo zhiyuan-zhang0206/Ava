@@ -1,6 +1,5 @@
 """Launch plumbing both coding-tool launchers share: workspace paths, a new
-owner generation, owner-record status and cancel, and where the impersonator
-guide lives."""
+owner generation, owner-record status and cancel."""
 
 from __future__ import annotations
 
