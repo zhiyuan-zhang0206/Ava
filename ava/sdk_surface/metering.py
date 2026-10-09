@@ -19,8 +19,8 @@ Transparency contract — the recorder MUST NOT perturb the SDK surface:
     resolves the original signature byte-for-byte, and function-attached members
     (``ava.understand.UnderstandError``) survive via the ``__dict__`` copy.
   - A valid sampling policy is captured before the outer call executes. Invalid
-    configuration prevents execution; transient fetch failures may use its last
-    valid snapshot. Once admitted, event-sink failures are logged without changing
+    configuration or caller identity prevents execution; transient fetch failures
+    may use its last valid snapshot. Once admitted, event-sink failures are logged without changing
     the call's return or exceptions, including lifecycle exceptions
     (``AgentTermination`` / ``AgentRestart``).
 
@@ -33,15 +33,13 @@ MCP calls are wrapped at their common call funnel.
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import inspect
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import ava
-from base.telemetry import report_sink_failure
 
 # A recorder marks itself with a reference to itself. `is_recorder` tests that identity, so
 # `install()` skips a target only when the current top callable *is* a recorder — robust to
@@ -60,38 +58,22 @@ def is_recorder(fn: object) -> bool:
     return getattr(fn, _RECORDER_MARK, None) is fn
 
 
-@contextlib.contextmanager
-def _caller() -> Generator[None, None, None]:
-    """Snapshot provenance before the call; metering never changes SDK behavior."""
+def _caller() -> dict[str, Any]:
+    """Snapshot this call's provenance; invalid identity rejects admission."""
     from base.agents.messages.external_caller import external_caller
-    from base.agents.sdk import telemetry as sdk_usage_telemetry
 
-    identity = {}
-    try:
-        bound = getattr(ava, "context", None)
-        own = None if bound is None else bound.identity
-        borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
-        agent_id = borrowed
-        if agent_id is None and own is not None:
-            agent_id = own.agent_id
-        external = external_caller()
-        actor = own.actor if own is not None else None
-        source = f"agent:{agent_id}" if agent_id else (actor or "system")
-        if external and borrowed is None:
-            source = external.source()
-        identity = {
-            "agent_id": agent_id,
-            "source": source,
-        }
-    except Exception as exc:
-        # Runs on every SDK call: reported first and every 50th. sdk_call events carry no
-        # agent id or source while it fails.
-        report_sink_failure("SDK metering caller-identity capture", exc)
-    token = sdk_usage_telemetry.set_identity(identity)
-    try:
-        yield
-    finally:
-        sdk_usage_telemetry.reset_identity(token)
+    bound = getattr(ava, "context", None)
+    own = None if bound is None else bound.identity
+    borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
+    agent_id = borrowed
+    if agent_id is None and own is not None:
+        agent_id = own.agent_id
+    external = external_caller()
+    actor = own.actor if own is not None else None
+    source = f"agent:{agent_id}" if agent_id else (actor or "system")
+    if external and borrowed is None:
+        source = external.source()
+    return {"agent_id": agent_id, "source": source}
 
 
 def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
@@ -102,8 +84,7 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
     def recorder(*args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        with _caller():
-            return run_metered(fq, original, args, kwargs)
+        return run_metered(fq, original, args, kwargs, identity=_caller())
 
     if inspect.iscoroutinefunction(original):
 
@@ -111,8 +92,9 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
             from base.agents.sdk import telemetry as sdk_usage_telemetry
 
-            with _caller():
-                return await sdk_usage_telemetry.run_metered_async(fq, original, args, kwargs)
+            return await sdk_usage_telemetry.run_metered_async(
+                fq, original, args, kwargs, identity=_caller()
+            )
 
         return _recorder(async_recorder)
 
@@ -133,8 +115,9 @@ def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
     def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        with _caller():
-            return run_metered(f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs)
+        return run_metered(
+            f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs, identity=_caller()
+        )
 
     return _recorder(recorder)
 
