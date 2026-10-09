@@ -83,17 +83,18 @@ from base.log import logger
 from base.paths import computer_mcp_socket
 from base.telemetry import audit_events
 
+from ..permissions_helper import client as helper
+from ..permissions_helper.client import PermissionsHelperError
+
 # Re-export of the shared OCR module object (test compat: the suite patches
 # mcp_daemon.ocr_mod attributes, and every OCR caller sees the same object).
-from services.desktop.computer.ax_ids import AxSession
-from services.desktop.computer.config import ComputerUseConfig
-from services.desktop.computer.execute import _TOOLS, _execute_tool, _mcp_result, _priority
-from services.desktop.computer.execute import ocr_mod as ocr_mod
-from services.desktop.computer.protocol import Request, Response
-from services.desktop.computer.session import ScreenSession
-from services.desktop.computer.task_sessions import TaskSessionTracker
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import PermissionsHelperError
+from .ax_ids import AxSession
+from .config import ComputerUseConfig
+from .execute import _TOOLS, _execute_tool, _mcp_result, _priority
+from .execute import ocr_mod as ocr_mod
+from .protocol import Request, Response
+from .session import ScreenSession
+from .task_sessions import TaskSessionTracker
 
 # A snapshot PNG can be multi-MB on one line; lift the stream buffer cap well
 # above StreamReader's 64KiB default (same limit as the browser daemon).
@@ -102,15 +103,19 @@ _LINE_LIMIT = 64 * 1024 * 1024
 
 def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None) -> str | None:
     """The compact "where / what" string of a computer_action audit row."""
-    if tool == "click" and "x" in args:
+    if tool in {"click", "move"} and "x" in args:
         return f"{args['x']},{args['y']}"
+    if tool == "drag":
+        return (
+            f"{args.get('start_x')},{args.get('start_y')}->{args.get('end_x')},{args.get('end_y')}"
+        )
     if tool == "click_text" and result is not None:
         # click_text resolves its own target via OCR: audit the center it
         # clicked (physical pixels), not an argument coordinate.
         return f"{result.get('x')},{result.get('y')}"
     if tool == "ax_act" and result is not None:
         # The element's center and the action — never the value written.
-        return f"{result.get('x')},{result.get('y')},{result.get('action')}"
+        return f"{result.get('x')},{result.get('y')},{result.get('native_action', result.get('action'))}"
     if tool == "scroll":
         return f"{args.get('x')},{args.get('y')},{args.get('dy')}"
     if tool == "key":
@@ -300,8 +305,8 @@ class ComputerMcpDaemon:
     def __init__(self, config: ComputerUseConfig, db: Database, sock: str | None = None) -> None:
         self._db = db
         self._sock = sock or str(computer_mcp_socket())
-        # Last pointer position in PHYSICAL pixels (set by click / explicit
-        # scroll); the scroll fallback when the caller gives no x/y.
+        # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
+        # Scroll without x/y reads the actual native cursor.
         self._pointer: tuple[float, float] | None = None
         # Last measured physical->logical scale (snapshot PNG vs logical size).
         # None until the first snapshot; click/scroll use it via _current_scale.
@@ -373,7 +378,7 @@ class ComputerMcpDaemon:
 
     def _track_tool_effects(self, tool: str, args: dict[str, Any], result: dict[str, Any]) -> None:
         """Remember the scale and pointer the tool's result established, for later conversions."""
-        if tool == "snapshot":
+        if tool == "snapshot" and "frame" not in result:
             # click/scroll convert with the scale the caller saw.
             self._scale = float(result["screen"]["scale"])
         elif tool == "click_text":
@@ -382,8 +387,12 @@ class ComputerMcpDaemon:
             # click/scroll convert like this call did.
             self._scale = float(result["scale"])
             self._pointer = (float(result["x"]), float(result["y"]))
-        if tool == "click" or (tool == "scroll" and "x" in args and "y" in args):
+        if "frame" in args:
+            return
+        if tool in {"click", "move"} or (tool == "scroll" and "x" in args and "y" in args):
             self._pointer = (float(args["x"]), float(args["y"]))
+        elif tool == "drag":
+            self._pointer = (float(args["end_x"]), float(args["end_y"]))
 
     async def _renew_and_note(self, agent_id: int, tool: str, args: dict[str, Any]) -> None:
         """A live caller renews the lease (success or failure — it is still acting on the

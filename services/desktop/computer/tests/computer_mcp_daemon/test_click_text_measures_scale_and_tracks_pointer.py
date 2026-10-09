@@ -10,12 +10,14 @@ from typing import Any
 
 import pytest
 
-import services.desktop.computer.mcp_daemon as daemon_mod
-import services.desktop.computer.screen as screen_mod
 from base.db import Database
-from services.desktop.computer.protocol import Response
-from services.desktop.computer.tests.slices import computer_use_config, short_sock_dir
-from services.desktop.computer.tests.test_computer_mcp_daemon import (
+
+from ....permissions_helper.client import PermissionsHelperError
+from ... import mcp_daemon as daemon_mod
+from ... import screen as screen_mod
+from ...protocol import Response
+from ..slices import computer_use_config, short_sock_dir
+from ..test_computer_mcp_daemon import (
     SHORT_SESSION,
     FakeHelper,
     FakeOcr,
@@ -23,16 +25,15 @@ from services.desktop.computer.tests.test_computer_mcp_daemon import (
     _daemon,
     _ok_result,
 )
-from services.desktop.computer.tests.test_computer_mcp_daemon import (
+from ..test_computer_mcp_daemon import (
     audit_log as audit_log,
 )
-from services.desktop.computer.tests.test_computer_mcp_daemon import (
+from ..test_computer_mcp_daemon import (
     fake_helper as fake_helper,
 )
-from services.desktop.computer.tests.test_computer_mcp_daemon import (
+from ..test_computer_mcp_daemon import (
     fake_ocr as fake_ocr,
 )
-from services.desktop.permissions_helper.client import PermissionsHelperError
 
 
 async def test_click_text_measures_scale_and_tracks_pointer(
@@ -56,10 +57,9 @@ async def test_click_text_measures_scale_and_tracks_pointer(
     result = await _ok_result(d, "click_text", {"text": "search"})
     assert result["scale"] == 1.0
     assert ("click", {"x": 540.0, "y": 112.0, "double": False}) in fh.calls
-    # scroll without coordinates follows the click_text pointer (physical
-    # 540,112 → logical 540,112 on the 1x display)
+    # A user may move the cursor after click_text: read its live logical position.
     await _ok_result(d, "scroll", {"dy": -10})
-    assert ("scroll", {"x": 540.0, "y": 112.0, "dy": -10}) in fh.calls
+    assert ("scroll", {"x": 321.0, "y": 123.0, "dy": -10}) in fh.calls
     # a plain click converts with the 1x scale click_text measured, not the
     # helper's stale 2x claim
     await _call(d, "click", {"x": 81, "y": 15})
@@ -123,7 +123,7 @@ async def test_missing_required_argument_fails_cleanly(
     assert audit_log[0]["payload"]["outcome"] == "error"
     resp2 = await _call(d, "scroll", {"x": 1, "y": 2})
     assert resp2["ok"] is False
-    assert "scroll requires argument 'dy'" in resp2["error"]
+    assert "scroll requires dx or dy" in resp2["error"]
     assert audit_log[1]["payload"]["outcome"] == "error"
 
 
@@ -163,11 +163,11 @@ async def test_key_unknown_name_fails_cleanly(fake_helper: FakeHelper, audit_log
     d = _daemon()
     resp = await _call(d, "key", {"key": "wibble"})
     assert resp["ok"] is False
-    assert "key needs a key name" in resp["error"]
+    assert "unknown key name" in resp["error"]
     assert audit_log[0]["payload"]["outcome"] == "error"
     resp2 = await _call(d, "key")
     assert resp2["ok"] is False
-    assert "key needs a key name" in resp2["error"]
+    assert "key requires exactly one" in resp2["error"]
 
 
 async def test_key_result_maps_helper_echo_to_pressed(
@@ -181,33 +181,30 @@ async def test_key_result_maps_helper_echo_to_pressed(
     assert result == {"pressed": 36, "cmd": True}
 
 
-async def test_scroll_defaults_pointer_to_last_click(
+async def test_scroll_uses_live_cursor_after_click(
     fake_helper: FakeHelper,
     audit_log: list,
 ) -> None:
-    """scroll with only dy scrolls at the last click's position (physical
-    pixels converted to logical points)."""
+    """Scroll follows a cursor moved since the last synthetic click."""
     d = _daemon()
     await _ok_result(d, "click", {"x": 100, "y": 200})
     result = await _ok_result(d, "scroll", {"dy": -10})
     assert result == {"scrolled": -10}
-    assert ("scroll", {"x": 50.0, "y": 100.0, "dy": -10}) in fake_helper.calls
+    assert ("scroll", {"x": 321.0, "y": 123.0, "dy": -10}) in fake_helper.calls
 
 
-async def test_scroll_without_pointer_uses_screen_center(
+async def test_scroll_uses_live_cursor_before_first_click(
     fake_helper: FakeHelper,
     audit_log: list,
 ) -> None:
     d = _daemon()
     result = await _ok_result(d, "scroll", {"dy": 5})
     assert result == {"scrolled": 5}
-    # fake screen 1512x982 @2x → the logical center (756, 491) is passed
-    # straight through — the old code divided it AGAIN by the scale and
-    # scrolled at the upper-left quarter of the screen.
-    assert ("scroll", {"x": 756.0, "y": 491.0, "dy": 5}) in fake_helper.calls
+    # Live cursor is already logical; never divide it by the screenshot scale.
+    assert ("scroll", {"x": 321.0, "y": 123.0, "dy": 5}) in fake_helper.calls
 
 
-async def test_scroll_explicit_xy_updates_tracked_pointer(
+async def test_scroll_live_cursor_overrides_previous_explicit_position(
     fake_helper: FakeHelper,
     audit_log: list,
 ) -> None:
@@ -215,8 +212,8 @@ async def test_scroll_explicit_xy_updates_tracked_pointer(
     await _ok_result(d, "scroll", {"x": 40, "y": 60, "dy": -5})
     result = await _ok_result(d, "scroll", {"dy": -1})
     assert result == {"scrolled": -1}
-    # second scroll uses the tracked physical (40, 60) → logical (20, 30)
-    assert ("scroll", {"x": 20.0, "y": 30.0, "dy": -1}) in fake_helper.calls
+    # The second call ignores the previous explicit point when the cursor has moved.
+    assert ("scroll", {"x": 321.0, "y": 123.0, "dy": -1}) in fake_helper.calls
 
 
 async def test_audit_emitted_on_success(
@@ -246,7 +243,7 @@ async def test_audit_emitted_on_error(fake_helper: FakeHelper, audit_log: list) 
     await _call(d, "key", {"key": "wibble"})
     assert len(audit_log) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert audit_log[0]["payload"]["outcome"] == "error"
-    assert "key needs a key name" in audit_log[0]["payload"]["error"]
+    assert "unknown key name" in audit_log[0]["payload"]["error"]
 
 
 async def test_no_audit_row_for_anonymous_call(audit_log: list) -> None:
