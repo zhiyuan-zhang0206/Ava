@@ -22,7 +22,7 @@ checkout (`ava.cwd` under the repo) and never enter Ava's fleet-wide runtime
 skill load directory. One deliberately narrower host integration copies the complete
 `ava-guide` package into already-present Codex and Claude Code global skill
 roots; it is an external-client projection, not an Ava runtime skill source —
-see [[okf/skills/external-agent-operator-bridge.ava.okf.md]].
+see [[docs/skills/external-agent-operator-bridge.ava.okf.md]].
 The five general skills mirrored alongside them — `ava-serious-engineering`,
 `ava-serious-research`, `ava-deep-research`, `ava-corp`, and
 `telegram-send-file` — are instead built-ins converged into `~/.ava/skills/`;
@@ -34,5 +34,5 @@ The repo-specific `review-contribution` skill routes a contributor self-check to
 current convention and component owners; it does not require a reviewer agent.
 
 ## Key Dependencies
-- [[okf/skills/skills.ava.okf.md|Skill System]] — the mount/scan machinery this node extends
+- [[docs/skills/skills.ava.okf.md|Skill System]] — the mount/scan machinery this node extends
 - `ava_builtins/plugins/ava_code/_walk.py` — `project_skill_roots`, the three candidate paths

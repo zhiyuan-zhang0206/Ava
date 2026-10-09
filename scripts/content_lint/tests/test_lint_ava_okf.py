@@ -7,7 +7,7 @@ does not exist must report the missing target on stderr and exit 1, not print
 E009 (overview position) is judged on the logical path, so a node in a
 package's `docs/` layer is checked as if it sat where the layer sits, and a
 directory counts as existing when any node's logical path lies under it. E014
-(docs layer) requires every node outside `okf/` and `.github/` to sit in a
+(docs layer) requires every node outside `.github/` to sit in a
 `docs/` layer and names where it belongs.
 """
 
@@ -120,7 +120,7 @@ def test_e014_names_the_layer_beside_the_nearest_code(tmp_path: Path) -> None:
     (tmp_path / "agent" / "loop.py").write_text("", encoding="utf-8")
     (msg,) = _e014(tmp_path, "agent/foo.ava.okf.md")
     assert "'agent/docs/foo.ava.okf.md'" in msg
-    assert "okf/ and .github/ are exempt" in msg
+    assert ".github/ is exempt" in msg
 
 
 def test_e014_keeps_the_subdirectory_below_the_layer(tmp_path: Path) -> None:
@@ -154,9 +154,16 @@ def test_e014_accepts_layered_and_exempt_nodes(tmp_path: Path) -> None:
     assert _e014(tmp_path, "agent/docs/foo.ava.okf.md") == []
     assert _e014(tmp_path, "agent/graph/docs/notes/x.ava.okf.md") == []
     assert _e014(tmp_path, "docs/top.ava.okf.md") == []
-    assert _e014(tmp_path, "okf/index.ava.okf.md") == []
-    assert _e014(tmp_path, "okf/plugins/module-loading/two-faces.ava.okf.md") == []
+    assert _e014(tmp_path, "docs/index.ava.okf.md") == []
+    assert _e014(tmp_path, "docs/plugins/module-loading/two-faces.ava.okf.md") == []
     assert _e014(tmp_path, ".github/.github.ava.okf.md") == []
+
+
+@pytest.mark.parametrize(
+    "path", ["okf/index.ava.okf.md", "okf/plugins/module-loading/two-faces.ava.okf.md"]
+)
+def test_e014_has_no_legacy_index_directory_exemption(tmp_path: Path, path: str) -> None:
+    assert _e014(tmp_path, path)
 
 
 def test_e014_blocks_the_gate(
