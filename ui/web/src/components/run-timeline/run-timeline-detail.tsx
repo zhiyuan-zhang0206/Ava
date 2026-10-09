@@ -8,10 +8,10 @@ import { FileText, GitBranch, Info, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Metric, Section } from "@/components/inspector/inspector-section";
-import { formatTokensCompact } from "@/lib/format/format-number";
+import { approx, formatTokensCompact } from "@/lib/format/format-number";
 import { FLEX } from "@/lib/layout/layout";
 import { formatAbsolute } from "@/lib/format/time";
-import type { RunTimelineMessageBar, RunTimelineNode, RunTimelineUnit, RunTimelineUsage } from "@/lib/contracts/types";
+import type { RunTimelineNode, RunTimelineUnit, RunTimelineUsage } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
 import { TimelineMarkdown } from "./run-timeline-markdown";
@@ -46,14 +46,13 @@ function UsageMetrics({ usage }: { usage: RunTimelineUsage }) {
   );
 }
 
-/** The LLM request an AIMessage was: what it sent and what it generated, priced from what the call recorded. */
-function RequestSection({ message }: { message: RunTimelineMessageBar & { request: RunTimelineUsage } }) {
+/** The LLM request an AIMessage was, shown on each of its turn blocks: what it sent and generated, priced from what the call recorded. */
+function RequestSection({ session, request }: { session: number; request: RunTimelineUsage }) {
   const t = useTranslations("runTimeline");
-  const { request } = message;
   return (
     <Section icon={<Send className="size-3" />} title={t("requestHeading")}>
       <div className="grid grid-cols-2 gap-1" data-testid="run-timeline-request">
-        <Metric label={t("requestSession")} value={String(message.session + 1)} />
+        <Metric label={t("requestSession")} value={String(session + 1)} />
         <Metric label={t("input")} value={formatTokensCompact(request.input)} />
         <Metric label={t("cacheRead")} value={formatTokensCompact(request.cache_read)} />
         <Metric label={t("cacheWrite")} value={formatTokensCompact(request.cache_write)} />
@@ -100,7 +99,7 @@ function Details({
         {tokens !== null ? (
           <Metric
             label={t("contextTokens")}
-            value={`${t("tokensValue", { tokens: formatTokensCompact(tokens) })}${estimated === true ? ` ${t("estimatedSuffix")}` : ""}`}
+            value={t("tokensValue", { tokens: `${approx(estimated)}${formatTokensCompact(tokens)}` })}
             valueTestId="run-timeline-detail-tokens"
           />
         ) : null}
@@ -184,13 +183,10 @@ export function UnitDetail({
   agentId,
   unit,
   parent = null,
-  message = null,
   onSelectNode = () => undefined,
 }: {
   agentId: number;
   unit: RunTimelineUnit;
-  /** The weighed AIMessage this block is a part of, when it was an LLM request. */
-  message?: RunTimelineMessageBar | null;
   /** The level-1 node that covers this block, when it is loaded. */
   parent?: RunTimelineNode | null;
   onSelectNode?: (id: string) => void;
@@ -221,7 +217,7 @@ export function UnitDetail({
         estimated={unit.estimated}
         source={unit.source}
       />
-      {message?.request ? <RequestSection message={{ ...message, request: message.request }} /> : null}
+      {unit.request !== null ? <RequestSection session={unit.session} request={unit.request} /> : null}
       {parent !== null ? (
         <Chips heading={t("coveredByHeading")} nodes={[parent]} onSelect={onSelectNode} />
       ) : (

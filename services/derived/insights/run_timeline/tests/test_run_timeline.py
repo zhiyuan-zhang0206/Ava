@@ -368,22 +368,46 @@ def test_a_view_behind_the_tree_is_rebuilt_but_not_more_than_every_two_seconds(
     assert len(loads) == 2
 
 
-def test_a_reply_carries_its_request_and_the_context_through_each_message(
+def test_a_block_carries_the_context_through_it_and_a_reply_its_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    world = World(monkeypatch)
-    by_idx = {m.idx: m for m in read(world).messages}
-    # The two replies are the two requests (input 100 and 200, one output token each).
-    assert [(i, m.request.input, m.request.output) for i, m in by_idx.items() if m.request] == [
-        (2, 100, 1),
-        (4, 200, 1),
+    units = {(u.kind, u.i0): u for u in read(World(monkeypatch)).units}
+    # The first request sent 100 tokens (the prompt and the ask); the ask is the context through it.
+    assert units[("inbound", 1)].context_total == 100
+    # The reply's one output token is split between its thinking and its call: they add up to it.
+    thinking, call = units[("thinking", 2)], units[("call", 2)]
+    assert thinking.context_total == 100 + (thinking.context_tokens or 0)
+    assert call.context_total == 101
+    # The tool result adds its 99; the next request sent exactly that.
+    assert units[("output", 2)].context_total == 200
+    assert units[("text", 4)].context_total == 201
+    assert {u.session for u in units.values()} == {0}
+    # The reply's blocks carry its request (200 is the second one's input); other blocks carry none.
+    assert [(k, i) for (k, i), u in units.items() if u.request is not None] == [
+        ("thinking", 2),
+        ("call", 2),
+        ("text", 4),
     ]
-    assert by_idx[1].request is None
-    # The context through the message before a reply is that request's input; each message adds its own weight.
-    assert by_idx[1].context_total == 100  # the prompt and the ask are what the first request sent
-    assert by_idx[3].context_total == 200
-    assert by_idx[3].context_total - by_idx[2].context_total == by_idx[3].context_tokens
-    assert {m.session for m in by_idx.values()} == {0}
+    assert thinking.request is not None and (thinking.request.input, thinking.request.output) == (
+        100,
+        1,
+    )
+    assert units[("text", 4)].request is not None and units[("text", 4)].request.input == 200  # type: ignore[union-attr]
+
+
+def test_a_block_no_request_has_read_has_no_context_total(monkeypatch: pytest.MonkeyPatch) -> None:
+    world = World(monkeypatch)
+    world.view = view(
+        [
+            *history_messages(),
+            HumanMessage(
+                content="later",
+                additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(20)},
+            ),
+        ]
+    )
+    later = [u for u in read(world).units if u.i0 == 5]
+    assert [(u.context_total, u.request) for u in later] == [(None, None)]
 
 
 def test_units_carry_their_tokens_and_whether_they_are_estimated(
@@ -451,50 +475,3 @@ def test_a_node_no_request_has_read_has_no_tokens(monkeypatch: pytest.MonkeyPatc
     world.nodes = [stored(1, level=1, span=(5, 5), start=20, end=20)]
     node = read(world).nodes[0]
     assert (node.context_tokens, node.estimated) == (None, None)
-
-
-def test_each_read_message_is_served_with_the_extent_of_its_blocks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    response = read(World(monkeypatch))
-    units = list(response.units)
-    by_idx = {m.idx: m for m in response.messages}
-    # The system prompt belongs to no block; every other message has a bar.
-    assert sorted(by_idx) == [1, 2, 3, 4]
-    inbound = next(u for u in units if u.kind == "inbound")
-    assert (by_idx[1].start, by_idx[1].end) == (inbound.start, inbound.end)
-    # The AIMessage is its turn blocks together: thinking through call.
-    turn = [u for u in units if u.i0 == 2 and u.kind in ("thinking", "text", "call")]
-    assert (by_idx[2].start, by_idx[2].end) == (
-        min(u.start for u in turn),
-        max(u.end for u in turn),
-    )
-    # The tool result is the output block alone (its AIMessage belongs to the turn blocks).
-    output = next(u for u in units if u.kind == "output")
-    assert (by_idx[3].start, by_idx[3].end) == (output.start, output.end)
-
-
-def test_a_message_carries_its_own_count_not_its_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
-    by_idx = {m.idx: m for m in read(World(monkeypatch)).messages}
-    # The AIMessage's 1 output token, the result's 99; the ask shares the first input, so it is a share.
-    assert by_idx[2].context_tokens == 1
-    assert (by_idx[3].context_tokens, by_idx[3].estimated) == (99, False)
-    assert by_idx[1].estimated is True
-
-
-def test_a_message_no_request_has_read_has_no_bar_and_the_window_filters_them(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    world = World(monkeypatch)
-    world.view = view(
-        [
-            *history_messages(),
-            HumanMessage(
-                content="later",
-                additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(20)},
-            ),
-        ]
-    )
-    assert 5 not in {m.idx for m in read(world).messages}
-    narrow = read(world, T0 + timedelta(minutes=9), T0 + timedelta(minutes=11))
-    assert [m.idx for m in narrow.messages] == [4]
