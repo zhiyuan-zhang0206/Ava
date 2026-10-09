@@ -12,7 +12,6 @@
   "sections": "System prompt sections",
   "expand": "Expand {target}",
   "collapse": "Collapse {target}",
-  "estimatedSuffix": "(estimated)",
   "categories": {
     "system_prompt": "System prompt",
     "compact_summary": "Compact summary",
