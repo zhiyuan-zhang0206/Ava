@@ -9,9 +9,20 @@ from urllib.parse import urlsplit
 import pytest
 
 from base import paths
+from base.config.service_read import ConfigAuthority, plugin_bootstrap_config
 from base.host.env.dotenv_file import upsert_env
+from base.lm.plugin_providers import build_model_catalog
 
 pytest_plugins = ("base.lm.tests.providers.test_provider_plugins",)
+
+
+@pytest.fixture
+def bootstrap_authority(plugin_env: Path) -> ConfigAuthority:
+    """Name the tested gateway snapshot without switching its home."""
+    from base import config
+
+    complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
+    return ConfigAuthority(config.settings, complete, plugin_env)
 
 
 @pytest.fixture
@@ -37,7 +48,7 @@ def _write_bootstrap_env(path: Path, contents: str) -> None:
 
 
 def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
-    provider_plugin: Callable[..., None], plugin_env: Path
+    provider_plugin: Callable[..., None], plugin_env: Path, bootstrap_authority: ConfigAuthority
 ) -> None:
     """A split runner receives the raw key text from the gateway's `.env` file."""
     from base import config
@@ -46,14 +57,18 @@ def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
     provider_plugin()
     _write_bootstrap_env(plugin_env, "TESTP_API_KEY=sk-x\n")
 
-    payload = config.bootstrap_config_values()
+    payload = config.bootstrap_config_values(
+        bootstrap_authority,
+        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
+        plugin_cluster_config=plugin_bootstrap_config(),
+    )
     assert payload["TESTP_API_KEY"] == "sk-x"
     valid = {config.field_alias(name) for name in config.BOOTSTRAP_FIELDS}
     assert set(payload) <= valid | {"TESTP_API_KEY", PLUGIN_CLUSTER_CONFIG_ENV}
 
 
 def test_bootstrap_omits_an_absent_plugin_key(
-    provider_plugin: Callable[..., None], plugin_env: Path
+    provider_plugin: Callable[..., None], plugin_env: Path, bootstrap_authority: ConfigAuthority
 ) -> None:
     """A plugin key missing from the raw `.env` file is not synthesized."""
     from base import config
@@ -61,11 +76,15 @@ def test_bootstrap_omits_an_absent_plugin_key(
     provider_plugin()
     _write_bootstrap_env(plugin_env, "")
 
-    assert "TESTP_API_KEY" not in config.bootstrap_config_values()
+    assert "TESTP_API_KEY" not in config.bootstrap_config_values(
+        bootstrap_authority,
+        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
+        plugin_cluster_config=plugin_bootstrap_config(),
+    )
 
 
 def test_bootstrap_omits_a_disabled_plugin_key(
-    provider_plugin: Callable[..., None], plugin_env: Path
+    provider_plugin: Callable[..., None], plugin_env: Path, bootstrap_authority: ConfigAuthority
 ) -> None:
     """A file key for a disabled plugin never crosses the bootstrap boundary."""
     from base import config
@@ -76,11 +95,15 @@ def test_bootstrap_omits_a_disabled_plugin_key(
         '{"plugins": {"test_provider": {"enabled": false}}}'
     )
 
-    assert "TESTP_API_KEY" not in config.bootstrap_config_values()
+    assert "TESTP_API_KEY" not in config.bootstrap_config_values(
+        bootstrap_authority,
+        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
+        plugin_cluster_config=plugin_bootstrap_config(),
+    )
 
 
 def test_bootstrap_serves_a_duplicate_plugin_key_once(
-    provider_plugin: Callable[..., None], plugin_env: Path
+    provider_plugin: Callable[..., None], plugin_env: Path, bootstrap_authority: ConfigAuthority
 ) -> None:
     """Two bindings may share a key without duplicating or rejecting bootstrap."""
     from base import config
@@ -89,21 +112,37 @@ def test_bootstrap_serves_a_duplicate_plugin_key_once(
     provider_plugin(prefix="testq-", model="testq-1", dir_name="test_provider_q")
     _write_bootstrap_env(plugin_env, "TESTP_API_KEY=sk-x\n")
 
-    payload = config.bootstrap_config_values()
+    payload = config.bootstrap_config_values(
+        bootstrap_authority,
+        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
+        plugin_cluster_config=plugin_bootstrap_config(),
+    )
     assert payload["TESTP_API_KEY"] == "sk-x"
     assert list(payload).count("TESTP_API_KEY") == 1
 
 
 def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
-    provider_plugin: Callable[..., None], plugin_env: Path, monkeypatch: pytest.MonkeyPatch
+    provider_plugin: Callable[..., None],
+    plugin_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bootstrap_authority: ConfigAuthority,
 ) -> None:
     """A plugin key matching a Settings alias cannot undo its bootstrap transform."""
     from base import config
 
     provider_plugin(key_env="AVA_DB_URL")
     _write_bootstrap_env(plugin_env, "AVA_DB_URL=postgresql://ava:pw@127.0.0.1:5433/ava\n")
-    monkeypatch.setattr(
-        "base.config.domains.storage.data_plane.self_machine_host", lambda: "10.0.0.3"
-    )
+    monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
 
-    assert urlsplit(config.bootstrap_config_values()["AVA_DB_URL"]).hostname == "10.0.0.3"
+    assert (
+        urlsplit(
+            config.bootstrap_config_values(
+                bootstrap_authority,
+                provider_key_envs=(
+                    binding.key_env for binding in build_model_catalog().bindings.values()
+                ),
+                plugin_cluster_config=plugin_bootstrap_config(),
+            )["AVA_DB_URL"]
+        ).hostname
+        == "10.0.0.3"
+    )

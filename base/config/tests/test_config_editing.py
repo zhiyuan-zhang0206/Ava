@@ -17,6 +17,7 @@ from base.config.admin.editing import (
     field_editable,
     split_reducer_patch,
 )
+from base.config.service_read import ConfigAuthority
 
 
 def _meta(
@@ -99,13 +100,13 @@ def test_gate_matrix(
     assert field_editable(meta, local=not is_remote) is editable
 
 
-def test_field_editable_consistent_with_metadata() -> None:
+def test_field_editable_consistent_with_metadata(config_authority: ConfigAuthority) -> None:
     """Every real config field's editability follows the same rule the gate
     implements — a drift lock: if someone flips writable / remote_writable on a
     field (or the gate's rule), this test fails and the change is reviewed
     explicitly. `local` is the Cluster view / own-host edit; `remote` is a
     machine-addressed edit."""
-    for meta in get_config_metadata():
+    for meta in get_config_metadata(authority=config_authority):
         assert field_editable(meta, local=True) is meta.writable, meta.name
         if meta.scope == "host":
             assert field_editable(meta, local=False) is meta.remote_writable, meta.name
@@ -317,10 +318,12 @@ _OUTBOUND_CREDENTIALS = {
 
 
 @pytest.mark.parametrize("field", sorted(_AUTHORITY_KEYS))
-def test_every_config_write_refuses_an_authority_key(field: str) -> None:
+def test_every_config_write_refuses_an_authority_key(
+    field: str, config_authority: ConfigAuthority
+) -> None:
     """Setting or unsetting an authority key is a violation on the local and the
     machine-addressed path alike, so nothing is written."""
-    metas = {meta.name: meta for meta in get_config_metadata()}
+    metas = {meta.name: meta for meta in get_config_metadata(authority=config_authority)}
     assert metas[field].env_var == _AUTHORITY_KEYS[field]
     for value in ("chosen-by-the-caller-" + "x" * 32, None):
         for is_remote in (False, True):
@@ -329,13 +332,13 @@ def test_every_config_write_refuses_an_authority_key(field: str) -> None:
             assert not plan.cluster_writes and not plan.cluster_removals
 
 
-def test_every_writable_secret_is_an_outbound_credential() -> None:
+def test_every_writable_secret_is_an_outbound_credential(config_authority: ConfigAuthority) -> None:
     """A newly added sensitive field a config write may set must be classified
     here: an outbound credential stays writable, anything that authenticates
     callers to this cluster is read-only."""
     writable_secrets = {
         meta.env_var
-        for meta in get_config_metadata()
+        for meta in get_config_metadata(authority=config_authority)
         if meta.sensitive and (meta.writable or meta.remote_writable)
     }
     assert writable_secrets == _OUTBOUND_CREDENTIALS

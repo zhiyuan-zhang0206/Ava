@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from base import config
 from base.cluster.authority.api import telemetry_token
 from base.config.domains.observability.settings import ObservabilitySettings
+from base.config.service_read import ConfigAuthority
 from base.host.env import runtime_config
 from cli.commands.observability import otel_collector as collector
 from gateway.app import app
@@ -113,8 +114,8 @@ def test_an_invalid_gateway_projection_names_its_problem() -> None:
     assert "non-loopback" in problem
 
 
-def test_local_otlp_config_stays_host_owned() -> None:
-    metadata = {row.name: row for row in config.get_config_metadata()}
+def test_local_otlp_config_stays_host_owned(config_authority: ConfigAuthority) -> None:
+    metadata = {row.name: row for row in config.get_config_metadata(authority=config_authority)}
     for field in ("telemetry_otlp_endpoint", "telemetry_otlp_port"):
         assert metadata[field].scope == "host"
         assert field not in config.BOOTSTRAP_FIELDS

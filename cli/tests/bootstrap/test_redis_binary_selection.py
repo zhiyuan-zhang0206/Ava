@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from cli.commands.data_plane import cluster_instance as instance
 
 
@@ -139,10 +140,16 @@ def test_directory_setting_rejects_ambient_path_interpretation(value: str) -> No
         )
 
 
-def test_config_is_local_writable_and_not_a_runner_bootstrap_fact() -> None:
+def test_config_is_local_writable_and_not_a_runner_bootstrap_fact(
+    config_authority: ConfigAuthority,
+) -> None:
     from base.config import BOOTSTRAP_FIELDS, get_config_metadata
 
-    field = next(item for item in get_config_metadata() if item.name == "redis_bin_dir")
+    field = next(
+        item
+        for item in get_config_metadata(authority=config_authority)
+        if item.name == "redis_bin_dir"
+    )
     assert field.scope == "host"
     assert field.writable and not field.remote_writable
     assert field.env_var == "AVA_REDIS_BIN_DIR"

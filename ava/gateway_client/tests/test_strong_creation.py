@@ -1,26 +1,20 @@
 """Explicit strong creation never downgrades an uncertain intent."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import httpx
 import pytest
 
 from ava.gateway_client import spawn, transport
-from ava.gateway_client.tests.test_gateway_client import _client_mock
+from ava.gateway_client.tests.test_gateway_client import mock_client as mock_client
 from base.agents import GatewayUnavailable
-from base.agents.context import AvaContext
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    client = MagicMock()
-
-    def http_client(_context: AvaContext | None = None) -> MagicMock:
-        return client
-
-    monkeypatch.setattr(transport, "_http", http_client)
+def client(monkeypatch: pytest.MonkeyPatch, mock_client: MagicMock) -> MagicMock:
+    client = mock_client
 
     def no_delay(*_args: object) -> int:
         return 0
@@ -131,7 +125,6 @@ def test_transport_scope_rejects_invalid_admission(
 
 
 class TestSpawn:
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_spawn_returns_agent_id(self, mock_client: MagicMock):
         from ava.gateway_client import spawn
 
@@ -150,7 +143,6 @@ class TestSpawn:
         )
         assert agent_id == 42
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_spawn_without_prompt(self, mock_client: MagicMock):
         from ava.gateway_client import spawn
 
@@ -169,7 +161,6 @@ class TestSpawn:
         )
         assert agent_id == 7
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_spawn_read_timeout_is_not_retried(self, mock_client: MagicMock):
         """Spawn is non-idempotent: a ReadTimeout means the gateway may have
         already created the agent (response lost, not request lost). Retrying
@@ -197,7 +188,6 @@ class TestSpawn:
             httpx.PoolTimeout("pool busy"),
         ],
     )
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_spawn_pre_send_error_is_retried(
         self, mock_client: MagicMock, error: httpx.TransportError
@@ -226,7 +216,6 @@ class TestSpawn:
         ]
         assert keys[0] == keys[1] and keys[0]
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_spawn_read_timeout_after_connect_error_retries_connect_only(
         self, mock_client: MagicMock

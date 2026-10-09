@@ -14,6 +14,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from base.config.service_read import ConfigAuthority
+
 _REPO = Path(__file__).resolve().parents[2]
 _ROOTS = ("agent", "ava", "ava_builtins", "base", "cli", "gateway", "ops", "services", "schedules")
 
@@ -117,13 +119,13 @@ _DELETED_SYMBOLS = (
 )
 
 
-def test_deleted_config_fields_stay_unregistered() -> None:
+def test_deleted_config_fields_stay_unregistered(config_authority: ConfigAuthority) -> None:
     """The removed keys must not re-enter the settings registry (a merge restored one once)."""
     from base.config import FIELD_INFOS, get_config_metadata
 
     for name in _DELETED_FIELDS:
         assert name not in FIELD_INFOS, f"{name} must not re-enter the settings registry"
-    env_vars = {meta.env_var for meta in get_config_metadata()}
+    env_vars = {meta.env_var for meta in get_config_metadata(authority=config_authority)}
     for alias in _DELETED_ALIASES:
         assert alias not in env_vars, f"{alias} must not re-enter the config surface"
 

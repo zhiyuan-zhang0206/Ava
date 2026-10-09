@@ -21,8 +21,10 @@ from base.agents.messages.native_restart import (
     lookup_native_restart,
     native_restart_progress,
 )
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.transaction import async_write_transaction
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.native_cancel.test_transfer import (
     _CHILD,
     _child_failure,
@@ -30,7 +32,10 @@ from services.agent_runner.agent_host.tests.native_cancel.test_transfer import (
 
 
 async def test_dead_original_host_is_superseded_without_new_restart_target(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     agent = _agent(db_conn)
     db_conn.execute(
@@ -58,7 +63,15 @@ async def test_dead_original_host_is_superseded_without_new_restart_target(
         request = NativeRestartRequest(target=target)
         with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
             accepted = await asyncio.to_thread(
-                accept_native_restart, pool, "dead-original", agent, request, lambda _request: None
+                accept_native_restart,
+                pool,
+                "dead-original",
+                agent,
+                request,
+                lambda _request: None,
+                catalog=model_catalog,
+                llm_override=config_authority.all_domains.lm.llm_override,
+                default_model=config_authority.all_domains.lm.llm_model,
             )
             assert child.stdin is not None
             child.stdin.write("exit\n")
