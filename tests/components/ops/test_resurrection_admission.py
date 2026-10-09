@@ -603,6 +603,7 @@ def _earlier_life_receipt(db: psycopg.Connection) -> int:
     wake.resurrect_agent(
         Database.from_settings(), EventBus.from_settings(), aid, resurrected_by="user"
     )
+    # This later life has an unknown allocation; its earlier force receipt cannot close it.
     db.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user', "
         "incarnation_resources=NULL WHERE id=%s",
