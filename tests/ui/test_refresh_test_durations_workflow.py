@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -94,16 +95,26 @@ def test_existing_ci_command_records_main_only_and_reseeds_before_retry(
     group: int,
     fail_first: bool,
 ) -> None:
-    """Execute the shipped shell; a fake pytest corrupts attempt 1's timing input."""
+    """Planning succeeds separately; fake pytest corrupts attempt 1's timing input."""
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
+    fake_timeout = fake_bin / "timeout"
+    fake_timeout.write_text('#!/bin/sh\nshift 2\nexec "$@"\n')
+    fake_timeout.chmod(0o755)
     fake_uv = fake_bin / "uv"
-    fake_uv.write_text("""#!/usr/bin/env python3
+    fake_uv.write_text(
+        f"#!{sys.executable}\n"
+        + """
 import json
 import os
 import sys
 from pathlib import Path
 args = sys.argv[1:]
+if args[:2] == ['run', 'python']:
+    with Path('planning.jsonl').open('a') as output:
+        output.write(json.dumps({'args': args, 'script': sys.stdin.read()}) + '\\n')
+    sys.exit(0)
+assert args[:2] == ['run', 'pytest']
 log = Path('calls.jsonl')
 calls = len(log.read_text().splitlines()) if log.exists() else 0
 measurement = None
@@ -114,7 +125,8 @@ if '--durations-path' in args:
 with log.open('a') as output:
     output.write(json.dumps({'args': args, 'seed': measurement}) + '\\n')
 sys.exit(1 if os.environ['FAIL_FIRST'] == 'true' and calls == 0 else 0)
-""")
+"""
+    )
     fake_uv.chmod(0o755)
     seed = {"existing::timing": 3.0}
     (tmp_path / ".test_durations").write_text(json.dumps(seed))
@@ -139,8 +151,17 @@ sys.exit(1 if os.environ['FAIL_FIRST'] == 'true' and calls == 0 else 0)
             "COVERAGE_FILE": "coverage-data",
         },
     )
-    calls = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
     assert result.returncode == (1 if group == 8 else 0), result.stderr
+    planning = tmp_path / "planning.jsonl"
+    if suite == "backend":
+        plans = [json.loads(line) for line in planning.read_text().splitlines()]
+        assert len(plans) == 1
+        assert plans[0]["args"] == ["run", "python", "-u", "-"]
+        assert '"--collect-only"' in plans[0]["script"]
+        assert '"--file-shard-count=16"' in plans[0]["script"]
+    else:
+        assert not planning.exists()
+    calls = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
     assert len(calls) == (2 if suite == "backend" and group != 8 else 1)
     _assert_calls(calls, suite=suite, record=record, group=group, seed=seed)
     assert json.loads((tmp_path / ".test_durations").read_text()) == seed
@@ -157,16 +178,25 @@ def _assert_calls(
     for call in calls:
         assert call["seed"] == (seed if record else None)
         args = call["args"]
-        assert args[args.index("--group") + 1] == str(group)
-        assert args[args.index("--splits") + 1] == ("16" if suite == "backend" else "4")
         assert args[args.index("-n") + 1] == ("4" if suite == "backend" else "2")
-        assert args[args.index("--splitting-algorithm") + 1] == "least_duration"
         assert ("--store-durations" in args) is record
         assert ("--clean-durations" in args) is record
         if suite == "backend":
-            assert "--omit-static-tests" in args
-            assert "--ignore=tests/e2e" in args
-            assert args[args.index("-m") + 1] == "not flaky"
+            _assert_backend_group(args, group)
+        else:
+            assert args[args.index("--group") + 1] == str(group)
+            assert args[args.index("--splits") + 1] == "4"
+            assert args[args.index("--splitting-algorithm") + 1] == "least_duration"
+
+
+def _assert_backend_group(args: list[str], group: int) -> None:
+    assert f"--file-shard-group={group}" in args
+    assert "--file-shard-check=tmp/file-shards/plan.json" in args
+    assert "--file-shard-execute" in args
+    assert not {"--group", "--splits", "--splitting-algorithm"}.intersection(args)
+    assert "--omit-static-tests" in args
+    assert "--ignore=tests/e2e" in args
+    assert args[args.index("-m") + 1] == "not flaky"
 
 
 def test_main_duration_upload_failure_cannot_change_required_ci_gates() -> None:
