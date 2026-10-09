@@ -18,7 +18,8 @@ from ava.gateway_client import MemorySearchResult
 from base.agents import IndexerUnavailable
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 
 
@@ -408,7 +409,7 @@ async def test_retrieval_is_wider_than_injection(
 
 
 async def test_only_what_the_filter_kept_is_injected(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
     for rel in ("a.md", "b.md", "c.md"):
@@ -423,15 +424,23 @@ async def test_only_what_the_filter_kept_is_injected(
     )
 
     async def _keep_b(
-        _query: str, _candidates: list, _memory: object, _log_key: bytes
+        _query: str,
+        _candidates: list,
+        _memory: object,
+        _log_key: bytes,
+        *,
+        catalog: ModelCatalog,
+        overrides: ModelOverrides,
+        llm_override: str,
     ) -> list[str]:
+        assert catalog is model_catalog
         return ["b.md"]
 
     monkeypatch.setattr(recall, "filter_candidates", _keep_b)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
+        context=AvaContext(catalog=model_catalog),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -442,7 +451,7 @@ async def test_only_what_the_filter_kept_is_injected(
 
 
 async def test_nothing_is_injected_when_the_filter_keeps_nothing(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """The point of having a filter: an unfiltered recall always had its top-k to
     show, however weakly they matched."""
@@ -451,15 +460,23 @@ async def test_nothing_is_injected_when_the_filter_keeps_nothing(
     _set_search(monkeypatch, [MemorySearchResult(path="a.md", description="one")])
 
     async def _keep_none(
-        _query: str, _candidates: list, _memory: object, _log_key: bytes
+        _query: str,
+        _candidates: list,
+        _memory: object,
+        _log_key: bytes,
+        *,
+        catalog: ModelCatalog,
+        overrides: ModelOverrides,
+        llm_override: str,
     ) -> list[str]:
+        assert catalog is model_catalog
         return []
 
     monkeypatch.setattr(recall, "filter_candidates", _keep_none)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
+        context=AvaContext(catalog=model_catalog),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -467,7 +484,7 @@ async def test_nothing_is_injected_when_the_filter_keeps_nothing(
 
 
 async def test_the_filter_sees_the_type_tag_search_returned(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """Tags travel from the search result into the candidate — without them the
     filter cannot be stricter with a profile note than with a procedure."""
@@ -480,8 +497,16 @@ async def test_the_filter_sees_the_type_tag_search_returned(
     seen: dict[str, list] = {}
 
     async def _capture(
-        _query: str, candidates: list, _memory: object, _log_key: bytes
+        _query: str,
+        candidates: list,
+        _memory: object,
+        _log_key: bytes,
+        *,
+        catalog: ModelCatalog,
+        overrides: ModelOverrides,
+        llm_override: str,
     ) -> list[str]:
+        assert catalog is model_catalog
         seen["candidates"] = candidates
         return []
 
@@ -489,7 +514,7 @@ async def test_the_filter_sees_the_type_tag_search_returned(
 
     await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),
+        context=AvaContext(catalog=model_catalog),
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )  # pyright: ignore[reportUnknownArgumentType]
@@ -498,7 +523,7 @@ async def test_the_filter_sees_the_type_tag_search_returned(
 
 
 async def test_already_injected_notes_still_reach_the_filter_then_dedup(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """The filter judges the full candidate set even when some are already
     injected: dropping them first would leave a second, similar message with
@@ -518,8 +543,16 @@ async def test_already_injected_notes_still_reach_the_filter_then_dedup(
     seen: dict[str, list] = {}
 
     async def _capture(
-        _query: str, candidates: list, _memory: object, _log_key: bytes
+        _query: str,
+        candidates: list,
+        _memory: object,
+        _log_key: bytes,
+        *,
+        catalog: ModelCatalog,
+        overrides: ModelOverrides,
+        llm_override: str,
     ) -> list[str]:
+        assert catalog is model_catalog
         seen["candidates"] = candidates
         # filter judges both notes relevant — the already-injected one included
         return [c.path for c in candidates]  # pyright: ignore[reportUnknownMemberType]
@@ -528,7 +561,7 @@ async def test_already_injected_notes_still_reach_the_filter_then_dedup(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
+        context=AvaContext(catalog=model_catalog),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
         agent=AgentSlices.resolve(),
         log_key=_KEY,
@@ -543,7 +576,7 @@ async def test_already_injected_notes_still_reach_the_filter_then_dedup(
 
 
 async def test_returns_none_when_everything_the_filter_kept_is_already_injected(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """The filter picks the same relevant note again on a similar second
     message; it is already in front of the agent, so nothing new is injected —
@@ -560,14 +593,24 @@ async def test_returns_none_when_everything_the_filter_kept_is_already_injected(
         ],
     )
 
-    async def _keep_a(_query: str, candidates: list, _memory: object, _log_key: bytes) -> list[str]:
+    async def _keep_a(
+        _query: str,
+        candidates: list,
+        _memory: object,
+        _log_key: bytes,
+        *,
+        catalog: ModelCatalog,
+        overrides: ModelOverrides,
+        llm_override: str,
+    ) -> list[str]:
+        assert catalog is model_catalog
         return ["a.md"]
 
     monkeypatch.setattr(recall, "filter_candidates", _keep_a)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
+        context=AvaContext(catalog=model_catalog),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
         agent=AgentSlices.resolve(),
         log_key=_KEY,

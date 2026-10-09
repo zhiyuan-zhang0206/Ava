@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.host import AgentHost
@@ -14,20 +15,27 @@ from services.agent_runner.agent_host.host import AgentHost
 
 @pytest.mark.parametrize("pinned", [True, False])
 async def test_the_runtime_is_built_with_the_agents_overrides(
-    monkeypatch: pytest.MonkeyPatch, pinned: bool
+    monkeypatch: pytest.MonkeyPatch, pinned: bool, *, model_catalog: ModelCatalog
 ) -> None:
     built: list[tuple[str, ModelOverrides]] = []
 
     async def _boot(
-        _agent_id: int, llm_model: str, overrides: ModelOverrides
+        _agent_id: int,
+        llm_model: str,
+        overrides: ModelOverrides,
+        *,
+        catalog: ModelCatalog,
+        llm_override: str,
     ) -> tuple[object, None]:
+        assert catalog is model_catalog
+        assert isinstance(llm_override, str)
         built.append((llm_model, overrides))
         return object(), None
 
     monkeypatch.setattr(host_module, "reconcile_claimed_inbounds_at_startup", AsyncMock())
     monkeypatch.setattr(host_module, "repair_dangling_tool_use_at_startup", AsyncMock())
     monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
-    host = AgentHost(pool=Mock(), checkpointer=Mock(), graph=Mock(), bus=Mock(), db=Mock())
+    host = AgentHost(pool=Mock(), checkpointer=Mock(), graph=Mock(), bus=Mock(), db=Mock(), catalog=model_catalog)
     pins = {"reasoning_effort": "low", "claude_thinking_budget_tokens": 777} if pinned else {}
     slices = AgentSlices.resolve({"llm_model": "pinned-model", **pins})
 

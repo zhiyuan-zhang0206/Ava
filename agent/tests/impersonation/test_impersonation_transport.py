@@ -157,9 +157,20 @@ def recovery_lease(
     from base.agents.messages.caller_identity import CallerIdentity
     from base.cluster.machine import machine_name
     from base.db import create_agent
+    from base.db.test_db_guard import assert_test_db_url
     from base.native_process.runtime_incarnation import RuntimeIncarnation
     from base.sessions import env_forwarding
     from tests.impersonation_support import recorded_tree
+
+    # The real relay boots this test-owned unit instead of inheriting cluster secrets.
+    url = config_authority.runtime.data_plane.db_url
+    assert_test_db_url(url, context="real impersonation relay fixture")
+    config_authority.env_path.write_text(
+        f"AVA_DB_URL={url}\n"
+        f"AVA_REDIS_URL={config_authority.runtime.data_plane.redis_url}\n"
+        f"AVA_MACHINE_NAME={machine_name()}\n",
+        encoding="utf-8",
+    )
 
     # Test-only gateway isolation is the same skip posture as env_bootstrap;
     # production still re-sources its admitted unit configuration normally.

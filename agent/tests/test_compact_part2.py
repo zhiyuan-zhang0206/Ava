@@ -38,7 +38,8 @@ from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import ContextBudget
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
@@ -80,7 +81,13 @@ def _patch_compact_config(
         soft_compact_tokens=compact_reminder_tokens,
         hard_compact_tokens=auto_compact_tokens,
     )
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_: budget)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fixed_budget(
+        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
+    ) -> ContextBudget:
+        return budget
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixed_budget)
 
 
 def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:

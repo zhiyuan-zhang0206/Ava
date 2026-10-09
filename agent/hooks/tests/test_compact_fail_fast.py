@@ -12,13 +12,17 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from agent.hooks import compact
 from base.host.env.agent_slices import AgentSlices
 from base.lm.call import ProviderCallBinding
+from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 
 
 @pytest.mark.parametrize("emergency", [False, True])
 @pytest.mark.parametrize("provider_cause", [False, True])
 async def test_compaction_programming_error_stops_once_without_history_change(
-    monkeypatch: pytest.MonkeyPatch, emergency: bool, provider_cause: bool
+    monkeypatch: pytest.MonkeyPatch,
+    emergency: bool,
+    provider_cause: bool,
+    model_catalog: ModelCatalog,
 ) -> None:
     messages: list[AnyMessage] = [HumanMessage(content="Original history")]
     original = list(messages)
@@ -34,9 +38,11 @@ async def test_compaction_programming_error_stops_once_without_history_change(
         llm: BaseChatModel,
         slices: AgentSlices,
         *,
+        catalog: ModelCatalog,
         single_attempt: bool = False,
         binding: ProviderCallBinding | None = None,
     ) -> compact.SummaryText:
+        assert catalog is model_catalog
         calls.append(inputs)
         raise error
 
@@ -44,7 +50,7 @@ async def test_compaction_programming_error_stops_once_without_history_change(
     with pytest.raises(TypeError) as raised:
         if emergency:
             await compact.emergency_compact_summary(
-                messages, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+                messages, llm, AgentSlices.resolve(), catalog=model_catalog
             )
         else:
             await compact._auto_compact_summary(
@@ -52,7 +58,7 @@ async def test_compaction_programming_error_stops_once_without_history_change(
                 llm,
                 content_count=1,
                 slices=AgentSlices.resolve(),
-                catalog=build_model_catalog(),
+                catalog=model_catalog,
             )
     assert raised.value is error
     assert len(calls) == 1

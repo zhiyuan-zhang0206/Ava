@@ -30,6 +30,8 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.turn_identity import HostedTurnResources
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -40,9 +42,14 @@ from tests.fixtures.pin_agent import exec_context as ctx_of
 
 
 def _allow_model_config(
-    *, model: str | None = None, config: dict[str, object] | None = None
+    *,
+    model: str | None = None,
+    overrides: ModelOverrides | None = None,
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> str:
     """Return the model name unchanged; fake-host tests carry no provider keys."""
+    del overrides, catalog, llm_override
     return model or "deepseek-v4-flash-vision-exp"
 
 
@@ -60,7 +67,11 @@ def _blocking_work(entered: threading.Event, release: threading.Event) -> None:
 
 
 def _observed_host(
-    pool: AsyncConnectionPool, graph: Mock, patch: pytest.MonkeyPatch
+    pool: AsyncConnectionPool,
+    graph: Mock,
+    patch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> tuple[AgentHost, list[str]]:
     host = AgentHost(
         pool=pool,
@@ -69,6 +80,7 @@ def _observed_host(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     patch.setattr(host, "_runtime_for", AsyncMock(return_value=Mock(llm=None)))
     original = host._run_turn
@@ -141,6 +153,8 @@ async def _prove_successor_ignores_old_cancel(
     payload: bytes,
     entered: asyncio.Event,
     release: asyncio.Event,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     # Simulate explicit resurrection's allocation, not a claim of RPC coverage.
     conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent_id,))
@@ -152,6 +166,7 @@ async def _prove_successor_ignores_old_cancel(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     patch.setattr(replacement, "_runtime_for", AsyncMock(return_value=Mock()))
     scheduler = TurnScheduler(replacement.run_turn)
@@ -191,6 +206,8 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
     tmp_path: Path,
     work_kind: str,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent_id = _agent(db_conn)
     entered, release = threading.Event(), threading.Event()
@@ -227,7 +244,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
 
     graph = Mock()
     graph.ainvoke = AsyncMock(side_effect=graph_return)
-    host, errors = _observed_host(aops_pool, graph, monkeypatch)
+    host, errors = _observed_host(aops_pool, graph, monkeypatch, model_catalog=model_catalog)
     monkeypatch.setattr("services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S", 0.05)
     scheduler = TurnScheduler(host.run_turn)
     scheduler.wake(agent_id)
@@ -263,6 +280,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
             payload,
             successor_entered,
             successor_release,
+            model_catalog=model_catalog,
         )
         assert calls == 2
     finally:
@@ -273,7 +291,11 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
 
 
 async def test_idle_force_only_original_live_host_can_observe(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database: Database
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent_id = _agent(db_conn)
     host = AgentHost(
@@ -283,6 +305,7 @@ async def test_idle_force_only_original_live_host_can_observe(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await hosted.admit_hosted_runtime(
@@ -310,6 +333,8 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A dead host owner must not strand a force when no exec domain survived."""
     agent_id = _agent(db_conn)
@@ -320,6 +345,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await hosted.admit_hosted_runtime(
@@ -353,6 +379,8 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A command torn into `done` with the pointer alive (task #3678) is blind to
     the claimed-only boot recovery; the widened candidate predicate settles it."""
@@ -364,6 +392,7 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await hosted.admit_hosted_runtime(
@@ -417,6 +446,8 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A request envelope survives its parent and forbids guessed quiescence."""
     agent_id = _agent(db_conn)
@@ -427,6 +458,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await hosted.admit_hosted_runtime(
@@ -487,6 +519,8 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Old-owner evidence is preserved, not deleted, and stops fencing the force."""
     agent_id = _agent(db_conn)
@@ -497,6 +531,7 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await hosted.admit_hosted_runtime(
@@ -563,6 +598,8 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The 6285 shape: a zero-byte remnant no longer defers boot recovery."""
 
@@ -574,6 +611,7 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await hosted.admit_hosted_runtime(
@@ -620,6 +658,8 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A fresh remnant may still settle: the bound is not a cleanup timer."""
 
@@ -631,6 +671,7 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await hosted.admit_hosted_runtime(
@@ -667,6 +708,8 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A live matching child defers; the same evidence recovers on the next boot."""
     agent_id = _agent(db_conn)
@@ -677,6 +720,7 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await hosted.admit_hosted_runtime(

@@ -7,8 +7,7 @@ Low-level lifecycle (spawn_agent / resurrect_agent / respawn_agent) covered by
     + real DB, exercising full link wire protocol)
   - resurrect automatically passes resurrected_by=f"agent:{ava.self.AGENT_ID}", underlying INSERT
     lifecycle 'resurrect' inbound + optional chat prompt same transaction
-  - send_message posts inbound (source=f'agent:{ava.self.AGENT_ID}'), idling agent
-    sleep 1s then recheck status
+  - send_message posts inbound with source=f'agent:{ava.self.AGENT_ID}'
 
 `gateway._agent_launch._launch_agent_process` monkeypatch (not actually start a process); SDK's
 httpx client redirected to in-process FastAPI app via autouse fixture.
@@ -28,6 +27,7 @@ import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
 from ava.gateway_client.transport import use_client
+from ava.sdk_surface.install import Installation
 from base.agents import ShellSessionKillTiming
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -506,9 +506,15 @@ class TestTerminate:
 
 class TestSendMessage:
     def test_send_message_inserts_chat_inbound_with_agent_source(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        monkeypatch: pytest.MonkeyPatch,
+        model_installation: Installation,
     ) -> None:
         """send_message purely INSERT inbound — no status check, no wait, no SendResult return."""
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         pin_agent(_spawn_agent(config_authority=config_authority))
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
@@ -520,10 +526,16 @@ class TestSendMessage:
         ]
 
     def test_send_message_to_terminated_is_fine(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        monkeypatch: pytest.MonkeyPatch,
+        model_installation: Installation,
     ) -> None:
         """send_message to terminated agent also INSERT inbound.
         SDK doesn't care about target state — purely send message, auto-resurrect is gateway-side detail."""
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         pin_agent(_spawn_agent(config_authority=config_authority))
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
@@ -539,14 +551,23 @@ class TestSendMessage:
     def test_send_message_to_nonexistent_raises(
         self,
         db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        model_installation: Installation,
     ) -> None:
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         with pytest.raises(AgentNotFound):
             ava.agents.send_message(9999, "ghost")
 
     def test_send_message_does_not_touch_agents_lifecycle(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        monkeypatch: pytest.MonkeyPatch,
+        model_installation: Installation,
     ) -> None:
         """send_message only INSERT inbound, doesn't modify agents.status."""
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         pin_agent(_spawn_agent(config_authority=config_authority))
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         ava.agents.send_message(peer_id, "hi")
@@ -633,10 +654,16 @@ class TestSendMessage:
             agents.send_message(7, 42)  # pyright: ignore[reportArgumentType]
 
     def test_send_message_tuple_content_inserts_unwrapped_inbound(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        monkeypatch: pytest.MonkeyPatch,
+        model_installation: Installation,
     ) -> None:
         """End-to-end: the trailing-comma tuple lands as the string it wraps,
         never as a JSON array (which the gateway would reject 422)."""
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         pin_agent(_spawn_agent(config_authority=config_authority))
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 

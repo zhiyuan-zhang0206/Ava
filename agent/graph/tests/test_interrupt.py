@@ -27,6 +27,7 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -421,7 +422,9 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     tid = create_agent(db_conn)
     monkeypatch.setattr("agent.graph.interrupt._INTERRUPT_POLL_S", 0.01)
 
-    def small_budget(_model: str, _overrides: object = None) -> ContextBudget:
+    def small_budget(
+        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
+    ) -> ContextBudget:
         return ContextBudget(
             max_context_tokens=10_000, soft_compact_tokens=1, hard_compact_tokens=1
         )
@@ -430,7 +433,12 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     started, settled = asyncio.Event(), asyncio.Event()
 
     async def summarizing(
-        _messages: object, _llm: object, _model: str, *, binding: object = None
+        _messages: object,
+        _llm: object,
+        _slices: AgentSlices,
+        *,
+        catalog: ModelCatalog,
+        binding: object = None,
     ) -> str:
         started.set()
         try:
@@ -530,7 +538,9 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from base.lm.context_budget import ContextBudget
     from tests.fixtures.units import spawn_agent
 
-    def small_budget(_model: str, _overrides: object = None) -> ContextBudget:
+    def small_budget(
+        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
+    ) -> ContextBudget:
         return ContextBudget(10_000, 1, 1)
 
     def apply(state: AgentState, command: Command[Any]) -> AgentState:
@@ -543,7 +553,11 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
 
     def standing_head(
-        _extensions: ExtensionRegistry, _slices: AgentSlices, *, agent_id: int | None
+        _extensions: ExtensionRegistry,
+        _slices: AgentSlices,
+        *,
+        agent_id: int | None,
+        catalog: ModelCatalog,
     ) -> str:
         assert agent_id is None
         return "standing head"

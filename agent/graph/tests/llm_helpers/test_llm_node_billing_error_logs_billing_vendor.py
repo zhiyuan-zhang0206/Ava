@@ -28,7 +28,7 @@ from agent.graph.tests.test_llm_helpers import (
     ledger as ledger,
 )
 from agent.state import AgentState
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 
@@ -42,7 +42,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     from base.lm.context_budget import ContextBudget
 
     def fixture_budget(
-        _model: str, _overrides: object = None, *, catalog: ModelCatalog
+        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
     ) -> ContextBudget:
         return ContextBudget(10_000, 3_000, 4_000)
 
