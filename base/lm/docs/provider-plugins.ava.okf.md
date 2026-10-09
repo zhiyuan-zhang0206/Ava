@@ -25,7 +25,7 @@ be retried by constructing a new catalog.
 - A plugin's `provider.py` registers nothing: it exports `contribute()` returning
   `PluginContributions(providers=(ProviderContribution(binding, models, pricing),))`.
   The loader (`base/lm/plugin_providers.py`) builds the model catalog: it checks
-  the plugin's manifest `providers` key against the declaration, then installs it into a `CatalogBuilder` (`base/lm/catalog.py`).
+  the plugin's manifest `providers` key against the declaration, then installs it into a `CatalogBuilder` (`base/lm/catalog/__init__.py`).
   The prefix map is flat: duplicate or nested prefixes fail at load time, and a
   model id must begin with its binding prefix. Prices must name a registered
   model; they must be finite, non-negative, HTTPS-provenanced, and carry a

@@ -19,12 +19,12 @@ from dataclasses import dataclass
 from functools import cached_property
 from types import MappingProxyType
 
-from base.lm.pricing import ModelPrice, PriceBook, load_archive, plugin_model_price
-from base.lm.provider_contract import (
+from base.lm.catalog.provider_contract import (
     ProviderBinding,
     ProviderContribution,
     ProviderRegistrationError,
 )
+from base.lm.pricing import ModelPrice, PriceBook, load_archive, plugin_model_price
 from base.lm.registry import ModelSpec, validate_models, validate_spec
 from base.lm.stop import StopSpec
 

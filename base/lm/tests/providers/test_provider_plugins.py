@@ -21,8 +21,8 @@ from langchain_core.messages import AIMessage
 
 from base import paths
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import pricing, provider_api, provider_contract, stop
-from base.lm.catalog import CatalogBuilder, ModelCatalog
+from base.lm import pricing, provider_api, stop
+from base.lm.catalog import CatalogBuilder, ModelCatalog, provider_contract
 from base.lm.factory import (
     build_chat_model,
     model_supports_vision,

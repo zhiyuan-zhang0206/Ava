@@ -29,7 +29,7 @@ from base.lm.effort import (
 # Provider split by modality is config-driven: settings.lm.understand_text_model
 # (default deepseek-flash) handles literal strings / text files;
 # settings.lm.understand_media_model (default gemini-3.5-flash) handles binary
-# media. The default IDs live in the model catalog (`base/lm/catalog.py`). The media
+# media. The default IDs live in the model catalog (`base/lm/catalog/__init__.py`). The media
 # model goes through the SAME provider factory as every other LLM path
 # (`build_chat_model`); the Gemini client is the default media provider.
 
