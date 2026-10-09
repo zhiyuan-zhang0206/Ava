@@ -29,6 +29,14 @@ an authoritative completed-compact stamp — a separate execution-contract
 decision). The `/inspect/live` half remains
 window-independent — see [[gateway/cluster/docs/ops-surfaces.ava.okf.md]].
 
+The Gateway lifespan owns shared SQL work until its native executor future
+finishes, including after an HTTP waiter times out or disconnects. Identical
+in-flight requests share one load, with at most four distinct-key leaders;
+followers occupy no worker thread. Closing stops admission and drains these
+physical calls before the pool closes. Loader errors still reach active callers;
+late failures go to the event loop's error reporting boundary with the query key,
+without retries, replacement snapshots, or cancellation of unrelated service work.
+
 Shell deadlines in `/inspect/live` and the shell monitor come only from
 `agent_shell_ttls`. Row-less page and schedule sessions render no shell TTL;
 their lifecycle is managed separately. Launch time never synthesizes a deadline.
