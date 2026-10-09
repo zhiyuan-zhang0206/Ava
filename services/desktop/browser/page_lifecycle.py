@@ -27,11 +27,11 @@ mechanisms, both scoped to agent-owned pages only:
   ``now + ttl`` explicitly, at most 24h per call. This is what bounds a page
   an agent keeps USING across days — the idle sweep never fires for it.
 
-Scoping: the reapers' candidate sources are the affinity registry and the TTL
-registry — both contain only pages this stack created — so the user's tabs and
-pages this stack never created are never inspected or closed. A user tab the
-agent merely selected has no TTL slot and no renewal path; it is out of scope
-by construction. The registries live in one ``PageRegistry`` the daemon's
+Affinity records selection, including tabs the agent did not create. The
+generation-stamped TTL record also proves creation: automatic cleanup requires
+that record even when a tab has affinity. A user tab the agent merely selected
+has no current-generation TTL slot and no renewal or automatic-close path.
+The registries live in one ``PageRegistry`` the daemon's
 composition root (``mcp_daemon.run``) builds and hands to every
 ``ChromeMcpDaemon`` — they survive daemon replacement across upstream
 reconnects (the registry object is shared) — but every entry is stamped with
@@ -232,6 +232,11 @@ class PageRegistry:
         deadline = time.monotonic() + _default_page_ttl_seconds()
         self.ttl_deadlines[page_id] = (deadline, generation)
 
+    def is_created_page(self, page_id: int, generation: int) -> bool:
+        """Whether this generation created the page, even after its TTL elapsed."""
+        entry = self.ttl_deadlines.get(page_id)
+        return entry is not None and entry[1] == generation
+
     def drop_page_ttl(self, page_id: int | None) -> None:
         """Forget the page's TTL slot — the page is closed (or was never ours).
 
@@ -301,19 +306,23 @@ async def forward_legacy_call(
 
 
 async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
-    """Close the page the agent owns and drop its affinity slot.
+    """Drop affinity, closing only a page created by this connection generation.
 
     Called when the agent process exits (wire method ``release_agent_page``,
     sent by the agent's exit hook) and by the dead-page reaper. Idempotent: an
     agent with no slot (never used the browser, or already released) is a
-    no-op. Only the exact page id is closed — never the globally selected page
-    — so no other agent's or the user's tab can be affected. A slot minted by
-    a different upstream connection reads as no-page (see ``new_generation``):
+    no-op. A borrowed page is deselected without closing; the returned id is
+    the page closed, or None. A slot minted by a different upstream connection
+    reads as no-page (see ``new_generation``):
     a stale id is never closed.
     """
     async with daemon._lock:
         page_id = daemon.pages.get_agent_page(agent_id, daemon.generation)
         if page_id is None:
+            return None
+        if not daemon.pages.is_created_page(page_id, daemon.generation):
+            daemon.pages.set_agent_page(agent_id, None, daemon.generation)
+            daemon.pages.last_use.pop(agent_id, None)
             return None
         result = await daemon._call("close_page", {"pageId": page_id})
         # A close of an already-gone page errors upstream; either way the slot
@@ -332,11 +341,11 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
 
 
 async def handle_release_agent_page(daemon: _PageDaemon, req: Request, req_id: Any) -> Response:
-    """Close the agent's affinity page on a ``release_agent_page`` wire request.
+    """Release affinity, closing created pages, on a ``release_agent_page`` request.
 
     The request is a terminated agent's exit hook telling the service it is
-    done with the browser; the reply names the page that was closed (None when
-    the agent had none). A missing/aliased agent id is rejected at the protocol
+    done with the browser; the reply names the page that was closed (None for
+    a borrowed page or no affinity). A missing/aliased agent id is rejected at the protocol
     edge — same guard as the daemon's ``call_tool``, so a JSON ``true`` can
     never alias another agent's slot.
     """
@@ -416,7 +425,7 @@ async def _reap_candidates(daemon: _PageDaemon) -> list[tuple[int, int, str]]:
             if entry_generation != daemon.generation:
                 daemon.pages.affinity.pop(agent_id, None)  # minted by an earlier upstream
                 continue
-            if page_id is None:
+            if page_id is None or not daemon.pages.is_created_page(page_id, daemon.generation):
                 continue
             url = page_urls.get(page_id)
             if url is None:
@@ -452,6 +461,8 @@ async def _close_dead_pages(daemon: _PageDaemon, dead: list[tuple[int, int, str]
             return
         page_urls = parse_page_listing(_text_of(listing))
         for agent_id, page_id, url in dead:
+            if not daemon.pages.is_created_page(page_id, daemon.generation):
+                continue
             if page_urls.get(page_id) != url:
                 continue  # re-purposed to a live target (or closed) mid-pass
             result = await daemon._call("close_page", {"pageId": page_id})
@@ -473,8 +484,8 @@ async def _close_dead_pages(daemon: _PageDaemon, dead: list[tuple[int, int, str]
 async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
     """One sweep pass: close agent-owned pages whose URL is a dead local URL.
 
-    Only pages with a slot in ``PageRegistry.affinity`` are candidates — user tabs and
-    other agents' tabs are never inspected or touched. Two leak classes are
+    Candidates require current-generation affinity and creation records;
+    selecting a user's tab never makes it a candidate. Two leak classes are
     cleaned here: an agent killed without reaching its exit hook (SIGKILL /
     force-terminate / OOM — the hook can't fire, the slot stays), and a dev
     server that died under a still-alive agent (the tab is a dead link either
@@ -586,10 +597,9 @@ async def renew_agent_page(
 async def reap_idle_agent_pages(daemon: _PageDaemon) -> int:
     """Close agent-owned pages whose owner has been idle past the timeout.
 
-    The affinity registry is the only candidate source, exactly like the
-    dead-page sweep: the user's tabs and other agents' tabs are never
-    inspected. Idle means the agent's last ``touch_agent_page`` is older
-    than ``_TAB_IDLE_TIMEOUT_S`` — a terminated agent's stamp stops moving,
+    Candidates require current-generation affinity and creation records,
+    exactly like the dead-page sweep. Idle means the last ``touch_agent_page``
+    is older than ``_TAB_IDLE_TIMEOUT_S`` — a terminated agent's stamp stops moving,
     so its tab (to any URL) ages out here even when nothing localhost-dead
     is involved. A live agent that keeps using the browser is never a
     candidate. A slot without a stamp (should not happen — every affinity
@@ -612,6 +622,7 @@ async def reap_idle_agent_pages(daemon: _PageDaemon) -> int:
                 continue
             if (
                 page_id is not None
+                and daemon.pages.is_created_page(page_id, daemon.generation)
                 and now - daemon.pages.last_use.get(agent_id, now) > _TAB_IDLE_TIMEOUT_S
             ):
                 candidates.append((agent_id, page_id))
