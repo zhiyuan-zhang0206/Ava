@@ -108,7 +108,7 @@ def _nameerror_output(name: str) -> str:
 
 
 def _agent_inbound(content: str = "ping", source: str = "agent:7") -> AnyMessage:
-    return inbound_message(content=content, source=source, inbound_id=1)
+    return inbound_message(content=content, source=source, inbound_id=1, body_start=0)
 
 
 # ── the pure matcher ───────────────────────────────────────────────────────
@@ -619,7 +619,7 @@ def test_tail_has_agent_inbound_true():
 def test_tail_has_agent_inbound_user_only_false():
     msgs: list[AnyMessage] = [
         AIMessage(content="prev", id="a0"),
-        inbound_message(content="hi", source="user", inbound_id=2),
+        inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
     ]
     assert tail_has_agent_inbound(msgs) is False
 
@@ -630,7 +630,7 @@ def test_tail_has_agent_inbound_stops_at_prior_ai():
     msgs: list[AnyMessage] = [
         _agent_inbound(source="agent:3"),
         AIMessage(content="already answered", id="a1"),
-        inbound_message(content="hi", source="user", inbound_id=2),
+        inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
     ]
     assert tail_has_agent_inbound(msgs) is False
 
@@ -638,7 +638,7 @@ def test_tail_has_agent_inbound_stops_at_prior_ai():
 def test_tail_has_agent_inbound_ui_source_false():
     msgs: list[AnyMessage] = [
         AIMessage(content="prev", id="a0"),
-        inbound_message(content="x", source="user", inbound_id=3),
+        inbound_message(content="x", source="user", inbound_id=3, body_start=0),
     ]
     assert tail_has_agent_inbound(msgs) is False
 

@@ -135,7 +135,7 @@ async def test_compact_reminder_defers_to_agent_reply(
     msgs = [
         SystemMessage(content="<sys>"),
         *(HumanMessage(content="x" * 1000) for _ in range(5)),
-        inbound_message(content="ping", source="agent:5", inbound_id=1),
+        inbound_message(content="ping", source="agent:5", inbound_id=1, body_start=0),
     ]
     state = _reminder_state(state_cls, messages=msgs)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(state, _runtime_with_llm(_fake_llm()), _fake_config())
