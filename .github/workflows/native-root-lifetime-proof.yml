@@ -46,8 +46,18 @@ jobs:
           test -d /run/systemd/system
           sudo -n true
           systemctl --version
-      - name: Root lifetime and independent data sibling
-        run: uv run pytest --noconftest services/supervision/ava_root/tests/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
+      - name: Root lifetime and independent data sibling across workers
+        run: uv run pytest --noconftest services/supervision/ava_root/tests/test_ava_root_daemon.py::test_native_systemd_root_lifetime -n 3 -q --junitxml=root-lifetime.xml
+      - name: Require all native lifetime cases to execute
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          cases = ET.parse("root-lifetime.xml").findall(".//testcase")
+          assert len(cases) == 3, f"expected three native lifetime cases, got {len(cases)}"
+          for case in cases:
+              assert not list(case), f"native lifetime case did not pass: {case.attrib}"
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
