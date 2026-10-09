@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from typing import Any
 
 from ..permissions_helper import client as helper
@@ -11,8 +10,33 @@ from . import ax_act, ax_tools
 from . import ocr as ocr_mod
 from .ax_ids import AxSession
 from .errors import ComputerUseError
+from .input import (
+    ClickInput,
+    DragInput,
+    KeyInput,
+    MoveInput,
+    ScrollInput,
+    tool_schema,
+    validate_input,
+)
 from .ocr_text import _click_text_tool, _find_text_tool
-from .screen import _capture_screen, _current_scale, _to_logical
+from .screen import (
+    _capture_screen,
+    _current_scale,
+    _png_size,
+    _snapshot_path,
+    _to_logical,
+    capture_region,
+)
+from .targets import (
+    AppTarget,
+    CaptureFrame,
+    CaptureRegion,
+    CoordinateSpace,
+    ObservationFrame,
+    WindowTarget,
+    app_selector,
+)
 
 # Required arguments per tool. The MCP input schemas declare them; the daemon
 # enforces them too, so a missing argument fails with a readable message
@@ -21,7 +45,7 @@ _REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
     "click": ("x", "y"),
     "drag": ("start_x", "start_y", "end_x", "end_y"),
     "type_text": ("text",),
-    "scroll": ("dy",),
+    "move": ("x", "y"),
     "find_text": ("text",),
     "click_text": ("text",),
 }
@@ -100,6 +124,10 @@ _KEYCODES: dict[str, int] = {
     "backspace": 51,
     "delete": 51,
     "escape": 53,
+    "cmd": 55,
+    "shift": 56,
+    "alt": 58,
+    "ctrl": 59,
     "esc": 53,
     "home": 115,
     "end": 119,
@@ -145,13 +173,49 @@ def _mcp_result(result: dict[str, Any]) -> dict[str, Any]:
 def _snapshot_tool(
     args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
 ) -> dict[str, Any]:
-    path, size, scale, (pw, ph) = _capture_screen(agent_id)
-    result: dict[str, Any] = {
-        "path": str(path),
-        "screen": {"width": size["w"], "height": size["h"], "scale": scale},
-        "pixels": {"width": pw, "height": ph},
-    }
+    if "region" in args and "target" in args:
+        raise ComputerUseError("snapshot accepts region or target, not both")
+    if "region" in args or "target" in args:
+        if args.get("include_ax"):
+            raise ComputerUseError("include_ax is available only for a whole-screen snapshot")
+        if "region" in args:
+            region = CaptureRegion.parse(args["region"])
+            path, scale, (pw, ph) = capture_region(agent_id, region)
+            frame = CaptureFrame(CoordinateSpace.REGION_PIXELS, region.x, region.y, scale, pw, ph)
+            source = "region"
+        else:
+            target = WindowTarget.parse(args["target"])
+            path = _snapshot_path(agent_id)
+            captured = helper.screencapture_window(target.pid, target.window_id, str(path))
+            pw, ph = _png_size(path)
+            if (pw, ph) != (captured["width"], captured["height"]):
+                raise ComputerUseError("window image dimensions do not match the helper response")
+            frame = CaptureFrame.parse(
+                {
+                    "coordinate_space": CoordinateSpace.WINDOW_PIXELS.value,
+                    "origin": captured["origin"],
+                    "scale": captured["scale"],
+                    "pixels": {"width": pw, "height": ph},
+                    "target": {"pid": target.pid, "window_id": target.window_id},
+                }
+            )
+            source = "window"
+        result: dict[str, Any] = {
+            "path": str(path),
+            "source": source,
+            "frame": frame.as_dict(),
+            "pixels": {"width": pw, "height": ph},
+        }
+    else:
+        path, size, scale, (pw, ph) = _capture_screen(agent_id)
+        result = {
+            "path": str(path),
+            "source": "screen",
+            "screen": {"width": size["w"], "height": size["h"], "scale": scale},
+            "pixels": {"width": pw, "height": ph},
+        }
     if args.get("include_ax"):
+        scale = float(result["screen"]["scale"])
         app = helper.frontmost_app()["app"]
         if app:
             ax = helper.ax_window_info(app)
@@ -167,7 +231,7 @@ def _snapshot_tool(
         # Soft failure: snapshot stays usable without text recognition.
         try:
             result["ocr"] = ocr_mod.ocr_image(path)
-            if ocr_cache is not None:
+            if ocr_cache is not None and "frame" not in result:
                 ocr_cache["items"] = result["ocr"]
         except ocr_mod.OcrError as e:
             result["ocr"] = []
@@ -175,60 +239,58 @@ def _snapshot_tool(
     return result
 
 
-def _click_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+def _logical_point(
+    x: float, y: float, frame: ObservationFrame | None, scale: float | None
+) -> tuple[float, float]:
+    if frame is not None:
+        return CaptureFrame.parse(frame).global_point(x, y)
     scale = _current_scale(scale)
-    clicked = helper.click(
-        _to_logical(float(args["x"]), scale),
-        _to_logical(float(args["y"]), scale),
-        double=bool(args.get("double", False)),
-    )
-    return {"clicked": clicked["clicked"], "double": clicked["double"]}
+    return _to_logical(x, scale), _to_logical(y, scale)
+
+
+def _click_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+    request = validate_input(ClickInput, args)
+    lx, ly = _logical_point(request.x, request.y, request.frame, scale)
+    options = request.model_dump(exclude_unset=True, exclude={"x", "y", "frame"})
+    options.setdefault("double", False)
+    return dict(helper.click(lx, ly, **options))
 
 
 def _key_tool(args: dict[str, Any]) -> dict[str, Any]:
-    code = int(args["keycode"]) if "keycode" in args else _keycode_for(str(args.get("key") or ""))
+    request = validate_input(KeyInput, args)
+    code = request.keycode if request.keycode is not None else _keycode_for(request.key or "")
     if code is None:
-        raise ComputerUseError(
-            "key needs a key name ('return', 'space', 'a', ...) or an integer keycode"
-        )
-    # The helper echoes {"key": code, "cmd": ...}; the MCP contract keeps
-    # the "pressed" name the callers read, so map the echo through.
-    echoed = helper.key(code, cmd=bool(args.get("cmd", False)))
+        raise ComputerUseError("unknown key name; use a supported name or integer keycode")
+    options = request.model_dump(exclude_unset=True, exclude={"key", "keycode"})
+    options.setdefault("cmd", False)
+    if request.key is not None and request.key.lower() in {"shift", "ctrl", "alt", "cmd"}:
+        options.setdefault("modifiers", [])
+    echoed = helper.key(code, **options)
     return {"pressed": echoed["key"], "cmd": echoed["cmd"]}
 
 
 def _drag_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
-    coordinates: list[float] = []
-    for key in _REQUIRED_ARGS["drag"]:
-        value = args[key]
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ComputerUseError(f"drag requires finite numeric {key}")
-        try:
-            coordinate = float(value)
-        except OverflowError as exc:
-            raise ComputerUseError(f"drag requires finite numeric {key}") from exc
-        if not math.isfinite(coordinate):
-            raise ComputerUseError(f"drag requires finite numeric {key}")
-        coordinates.append(coordinate)
-    scale = _current_scale(scale)
-    return dict(helper.drag(*(_to_logical(value, scale) for value in coordinates)))
+    request = validate_input(DragInput, args)
+    start = _logical_point(request.start_x, request.start_y, request.frame, scale)
+    end = _logical_point(request.end_x, request.end_y, request.frame, scale)
+    return dict(helper.drag(*start, *end))
 
 
-def _scroll_tool(
-    args: dict[str, Any], pointer: tuple[float, float] | None, scale: float | None
-) -> dict[str, Any]:
-    dy = int(args["dy"])
-    scale = _current_scale(scale)
-    if "x" in args and "y" in args:
-        lx, ly = _to_logical(float(args["x"]), scale), _to_logical(float(args["y"]), scale)
-    elif pointer is not None:
-        lx, ly = _to_logical(pointer[0], scale), _to_logical(pointer[1], scale)
+def _move_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+    request = validate_input(MoveInput, args)
+    lx, ly = _logical_point(request.x, request.y, request.frame, scale)
+    return dict(helper.move(lx, ly, modifiers=list(request.modifiers)))
+
+
+def _scroll_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+    request = validate_input(ScrollInput, args)
+    if request.x is not None and request.y is not None:
+        lx, ly = _logical_point(request.x, request.y, request.frame, scale)
     else:
-        size = helper.screen_size()
-        # Center from the helper is already logical — never re-divide
-        # (that double conversion scrolled at a quarter of the screen).
-        lx, ly = size["w"] / 2, size["h"] / 2
-    return {"scrolled": helper.scroll(lx, ly, dy)["scrolled"]}
+        cursor = helper.cursor_position()
+        lx, ly = cursor["x"], cursor["y"]
+    options = request.model_dump(exclude_unset=True, exclude={"x", "y", "dy", "frame"})
+    return dict(helper.scroll(lx, ly, request.dy, **options))
 
 
 def _window_info_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -238,6 +300,26 @@ def _window_info_tool(args: dict[str, Any]) -> dict[str, Any]:
     if not owner:
         raise ComputerUseError("window_info needs an owner and no app is frontmost")
     return {**helper.window_info(str(owner))}
+
+
+def _application_tool(tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    if tool == "list_apps":
+        return dict(helper.list_apps())
+    if tool == "list_windows":
+        return dict(helper.list_windows(app_selector(args.get("app"))))
+    if tool == "focus_app":
+        target = AppTarget.parse(args.get("target"))
+        selector: dict[str, object] = (
+            {"pid": target.pid} if target.pid is not None else {"bundle_id": target.bundle_id}
+        )
+        return dict(helper.focus_app(selector))
+    if tool == "window_info":
+        return _window_info_tool(args)
+    if tool == "session_info":
+        return {**helper.session_info()}
+    if tool == "frontmost_app":
+        return {**helper.frontmost_app()}
+    raise ComputerUseError(f"unknown application tool {tool!r}")
 
 
 def _execute(
@@ -250,11 +332,12 @@ def _execute(
 ) -> dict[str, Any]:
     """Run one tool against the permissions helper. Raises on failure.
 
-    `pointer` is the tracked cursor position in PHYSICAL pixels (last
-    click/scroll), the scroll fallback without explicit x/y; `scale` is the
+    `pointer` is retained for callers of the existing internal interface;
+    scroll reads the live native cursor without explicit x/y. `scale` is the
     last measured physical->logical scale, falling back to the helper report.
     `ocr_cache` carries the last OCR text boxes (snapshot include_ocr /
     find_text / click_text), reused by find_text(snapshot_fresh=false)."""
+    del pointer  # Retain the internal call signature; cursor reads are now live.
     _require(tool, args)
     if tool == "snapshot":
         return _snapshot_tool(args, agent_id, ocr_cache)
@@ -271,13 +354,22 @@ def _execute(
     if tool == "key":
         return _key_tool(args)
     if tool == "scroll":
-        return _scroll_tool(args, pointer, scale)
-    if tool == "window_info":
-        return _window_info_tool(args)
-    if tool == "session_info":
-        return {**helper.session_info()}
-    if tool == "frontmost_app":
-        return {**helper.frontmost_app()}
+        return _scroll_tool(args, scale)
+    if tool == "move":
+        return _move_tool(args, scale)
+    if tool == "cursor_position":
+        position = helper.cursor_position()
+        current = _current_scale(scale)
+        return {"x": position["x"] * current, "y": position["y"] * current, "scale": current}
+    if tool in {
+        "list_apps",
+        "list_windows",
+        "focus_app",
+        "window_info",
+        "session_info",
+        "frontmost_app",
+    }:
+        return _application_tool(tool, args)
     raise ComputerUseError(f"unknown tool {tool!r}")
 
 
@@ -320,16 +412,38 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "snapshot",
         "description": (
-            "Capture the full screen via the signed permissions helper. Returns the PNG "
-            "path (physical pixels), the logical screen size, and the measured backing "
-            "scale, divide physical pixel coordinates by scale for click coordinates. "
-            "include_ax adds the focused window's geometry in physical pixels (same "
-            "space as click); include_ocr adds recognized text with physical-pixel "
-            "boxes — OCR failure degrades to ocr:[] + ocr_error, never failing it."
+            "Capture the full main display, a main-display logical region={x,y,w,h}, "
+            "or target={pid,window_id}. Full-screen PNG coordinates go directly to "
+            "click/drag/move; the daemon converts their physical pixels to logical points. "
+            "Region captures return a frame: pass it unchanged with screenshot-local "
+            "pointer coordinates. Window frames refuse global pointer input; explicitly "
+            "focus_app and capture again. include_ax is available only for whole-screen "
+            "geometry; include_ocr returns boxes in this capture's pixel space. "
+            "OCR failure returns ocr:[] and ocr_error without failing the capture."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "region": {
+                    "type": "object",
+                    "properties": {
+                        "x": {"type": "integer"},
+                        "y": {"type": "integer"},
+                        "w": {"type": "integer", "minimum": 1},
+                        "h": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["x", "y", "w", "h"],
+                    "additionalProperties": False,
+                },
+                "target": {
+                    "type": "object",
+                    "properties": {
+                        "pid": {"type": "integer", "minimum": 1},
+                        "window_id": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["pid", "window_id"],
+                    "additionalProperties": False,
+                },
                 "include_ax": {"type": "boolean", "default": False},
                 "include_ocr": {"type": "boolean", "default": False},
                 "task_id": {"type": "integer"},
@@ -364,21 +478,11 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "click",
         "description": (
-            "Click the left mouse button at physical-pixel screen coordinates "
+            "Click a mouse button at physical-pixel screen coordinates "
             "(the daemon converts with the measured scale, falling back to the "
-            "helper's live report). double=True double-clicks."
+            "helper's live report). button selects left/right/middle; click_count selects one to three presses. modifiers holds shift/ctrl/alt/cmd flags throughout; duration_ms holds each press up to 5000 ms. double=True remains supported. Pass a region snapshot frame to use screenshot-local pixel coordinates."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "x": {"type": "number"},
-                "y": {"type": "number"},
-                "double": {"type": "boolean", "default": False},
-                "task_id": {"type": "integer"},
-                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
-            },
-            "required": ["x", "y"],
-        },
+        "input_schema": tool_schema(ClickInput),
     },
     {
         "name": "drag",
@@ -388,18 +492,7 @@ _TOOLS: list[dict[str, Any]] = [
             "The daemon converts both endpoints with the measured scale. "
             "Performs one short straight-line drag and releases the button."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "start_x": {"type": "number"},
-                "start_y": {"type": "number"},
-                "end_x": {"type": "number"},
-                "end_y": {"type": "number"},
-                "task_id": {"type": "integer"},
-                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
-            },
-            "required": ["start_x", "start_y", "end_x", "end_y"],
-        },
+        "input_schema": tool_schema(DragInput),
     },
     {
         "name": "click_text",
@@ -440,42 +533,70 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "key",
         "description": (
-            "Press one key, optionally with Command held. Pass `key` as a name "
+            "Press one key with optional modifiers and duration_ms hold (0..10000 ms). Pass `key` as a name "
             "('return', 'escape', 'tab', 'space', 'up', 'down', 'left', 'right', "
             "'home', 'end', 'pageup', 'pagedown', 'backspace', 'delete', "
             "'F1'-'F12') or a single character ('a'-'z', '0'-'9'); or pass "
             "`keycode` for a raw macOS virtual keycode."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "key": {"type": "string"},
-                "keycode": {"type": "integer"},
-                "cmd": {"type": "boolean", "default": False},
-                "task_id": {"type": "integer"},
-                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
-            },
-        },
+        "input_schema": tool_schema(KeyInput),
     },
     {
         "name": "scroll",
         "description": (
-            "Scroll vertically by dy pixels (negative = toward older content). "
-            "Optional x/y move the pointer there first (physical pixels); "
-            "without them the scroll happens at the current pointer position "
-            "(the last click/scroll), or the screen center before any pointer "
-            "move."
+            "Scroll by dx/dy pixels horizontally/vertically with optional modifiers. "
+            "Optional x/y position the pointer first (physical pixels, or local pixels "
+            "with a region frame); otherwise use the actual current cursor position."
         ),
+        "input_schema": tool_schema(ScrollInput),
+    },
+    {
+        "name": "move",
+        "description": "Move the pointer without clicking; physical pixels or local region frame pixels.",
+        "input_schema": tool_schema(MoveInput),
+    },
+    {
+        "name": "cursor_position",
+        "description": "Read the actual pointer position in physical screen pixels using the current scale.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_apps",
+        "description": "List running application PID, display name and bundle ID; nullable metadata stays null.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_windows",
+        "description": "List window IDs, owning PIDs and logical geometry, including off-screen windows. Optional exact app name/bundle ID must be unique. Requires Screen Recording.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"app": {"type": "string", "minLength": 1}},
+        },
+    },
+    {
+        "name": "focus_app",
+        "description": "Explicitly activate a running app selected by PID or unique bundle ID and confirm focused PID. Capture again afterwards; this changes the foreground app.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "x": {"type": "number"},
-                "y": {"type": "number"},
-                "dy": {"type": "integer"},
-                "task_id": {"type": "integer"},
-                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
+                "target": {
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {"pid": {"type": "integer", "minimum": 1}},
+                            "required": ["pid"],
+                            "additionalProperties": False,
+                        },
+                        {
+                            "type": "object",
+                            "properties": {"bundle_id": {"type": "string", "minLength": 1}},
+                            "required": ["bundle_id"],
+                            "additionalProperties": False,
+                        },
+                    ]
+                }
             },
-            "required": ["dy"],
+            "required": ["target"],
         },
     },
     {
