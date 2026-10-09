@@ -530,6 +530,45 @@ func click(_ req: [String: Any]) throws -> [String: Any] {
     return ["clicked": ["x": x, "y": y], "double": double]
 }
 
+/// A bounded straight-line drag. Prepare every event before pressing, so allocation
+/// failures cannot leave the button down. The release remains local to this call
+/// even if the requesting socket disconnects while the synchronous action runs.
+func drag(_ req: [String: Any]) throws -> [String: Any] {
+    func coordinate(_ key: String) throws -> Double {
+        guard let number = req[key] as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite
+        else { throw OpError.bad("drag needs finite numeric \(key)") }
+        return number.doubleValue
+    }
+    let sx = try coordinate("start_x"), sy = try coordinate("start_y")
+    let ex = try coordinate("end_x"), ey = try coordinate("end_y")
+    func event(_ kind: CGEventType, _ x: Double, _ y: Double) throws -> CGEvent {
+        guard let ev = CGEvent(mouseEventSource: nil, mouseType: kind,
+                               mouseCursorPosition: CGPoint(x: x, y: y), mouseButton: .left)
+        else { throw OpError.bad("could not create drag mouse event") }
+        ev.flags = []
+        return ev
+    }
+    let move = try event(.mouseMoved, sx, sy)
+    let down = try event(.leftMouseDown, sx, sy)
+    let up = try event(.leftMouseUp, ex, ey)
+    let steps = 12
+    let movements = try (1...steps).map { step in
+        let fraction = Double(step) / Double(steps)
+        return try event(.leftMouseDragged,
+                         sx * (1 - fraction) + ex * fraction,
+                         sy * (1 - fraction) + ey * fraction)
+    }
+    move.post(tap: .cghidEventTap)
+    down.post(tap: .cghidEventTap)
+    defer { up.post(tap: .cghidEventTap) }
+    for movement in movements {
+        Thread.sleep(forTimeInterval: 0.01)
+        movement.post(tap: .cghidEventTap)
+    }
+    return ["start": ["x": sx, "y": sy], "end": ["x": ex, "y": ey]]
+}
+
 /// Post a single key down/up by virtual keycode, optionally with Command held.
 /// Flags are set explicitly (0 when no modifier) so a plain key after a Cmd+key
 /// event cannot inherit a stale Command flag. Dispatch refuses it without the
@@ -1623,7 +1662,7 @@ private let rootKeeper = RootKeeper()
 func dispatch(_ req: [String: Any]) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
-    let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
+    let axGatedMethods: Set<String> = ["click", "drag", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
     if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
         return ["id": id as Any, "ok": false, "error": axGrantError]
     }
@@ -1639,6 +1678,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "file_read": result = try fileRead(req)
         case "screencapture_region": result = try screencaptureRegion(req)
         case "click": result = try click(req)
+        case "drag": result = try drag(req)
         case "type": result = try typeText(req)
         case "key": result = try key(req)
         case "scroll": result = try scroll(req)
