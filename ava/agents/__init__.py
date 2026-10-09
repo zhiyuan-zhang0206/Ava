@@ -38,6 +38,7 @@ from base.config import settings
 
 from . import compaction as compaction
 from . import presets as presets
+from . import work as work
 
 __all_for_ava__ = [
     "AgentDirectoryPage",
@@ -70,6 +71,7 @@ __all_for_ava__ = [
     "send_message",
     "spawn",
     "terminate",
+    "work",
 ]
 
 
