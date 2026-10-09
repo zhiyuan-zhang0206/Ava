@@ -39,6 +39,7 @@ from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
+from base.agents.sdk.tally import SdkCallTally
 from base.lm.call import ProviderCallBinding
 
 # The handle types are annotations only: the exec child builds this same type from its request
@@ -123,6 +124,9 @@ class AvaContext:
     clients: ClientSet = field(default_factory=ClientSet)
     """The connections this run's process holds. Built on first use; the owner of the context
     (the exec child, a launched script, an attachment, the host) closes them."""
+
+    sdk_calls: SdkCallTally | None = None
+    """This execution's unsampled public-call tally. Never serialized into requests or state."""
 
     @property
     def sql(self) -> LazyConnection:
