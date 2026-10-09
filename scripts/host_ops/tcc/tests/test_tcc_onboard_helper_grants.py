@@ -14,7 +14,7 @@ import importlib.util
 from pathlib import Path
 
 _SCRIPT = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[4]
     / "scripts"
     / "host_ops"
     / "tcc"

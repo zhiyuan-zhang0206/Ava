@@ -11,7 +11,9 @@ tags:
 
 `pytest --test-environment=static` runs the paths owned by `STATIC_TEST_PATHS`:
 `scripts/audit/tests`, `scripts/content_lint/tests`, `scripts/lint/tests`,
-`scripts/structure/tests`, `scripts/ci/tests`, `tests/ci`, `base/paths/tests`,
+`scripts/lint/diagnostics/tests`, `scripts/lint/locks/tests`,
+`scripts/lint/plugins/tests`,
+`scripts/structure/tests`, `scripts/structure/ambient_state/tests`, `scripts/ci/tests`, `scripts/ci/pull_requests/tests`, `scripts/ci/two_section_chain_smoke/tests`, `tests/ci`, `base/paths/tests`,
 `base/sessions/pty/tests/test_pty_sessions_screen.py`, and the environment boundary
 and selection canaries.
 Directory ownership includes descendant tests and their existing local fixtures.
