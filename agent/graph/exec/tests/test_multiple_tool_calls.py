@@ -63,8 +63,6 @@ async def test_calls_execute_separately_without_rewriting_assistant(
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
-            db=Database.from_settings(),
-            bus=EventBus.from_settings(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )
@@ -105,6 +103,18 @@ def _runtime() -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            identity=AgentIdentity(agent_id=7, owns_loop=True),
+        )
+    )
+
+
+def _node_runtime() -> Runtime[AvaContext]:
+    """Inputs for graph tests that replace the entire child runner."""
+    return Runtime(
+        context=AvaContext(
+            ops_pool=make_fake_ops_pool(),
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )
@@ -153,7 +163,7 @@ async def test_plugin_reducers_commit_between_calls(
         return _ExecDone(output="ok"), {"total": 1}, 0, None, None
 
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
-    result = await _run_calls(state, _runtime(), {"configurable": {"thread_id": "7"}})
+    result = await _run_calls(state, _node_runtime(), {"configurable": {"thread_id": "7"}})
     assert snapshots == [10, 11]
     assert state.total == 10
     assert result is not None
@@ -179,7 +189,7 @@ async def test_notes_and_media_follow_all_results_and_stream_ids_match(
     monkeypatch.setattr(
         "agent.graph.exec.node.build_attach_message", MagicMock(side_effect=[media, None])
     )
-    runtime = _runtime()
+    runtime = _node_runtime()
     result = await _run_calls(
         _state("first()", "second()"), runtime, {"configurable": {"thread_id": "7"}}
     )
@@ -216,7 +226,7 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
     )
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     result = await _run_calls(
-        _state("first()", "second()"), _runtime(), {"configurable": {"thread_id": "7"}}
+        _state("first()", "second()"), _node_runtime(), {"configurable": {"thread_id": "7"}}
     )
     assert result is not None
     if outcome == "compact":
@@ -283,7 +293,7 @@ async def test_unknown_tool_does_not_consume_sibling_code(monkeypatch: pytest.Mo
     ai.tool_calls[0]["name"] = "ava.files.edit"
     run = AsyncMock(return_value=(_ExecDone(output="runs"), {}, 0, None, []))
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
-    result = await _run_calls(state, _runtime(), {"configurable": {"thread_id": "7"}})
+    result = await _run_calls(state, _node_runtime(), {"configurable": {"thread_id": "7"}})
     assert result is not None
     _, first, second = result["messages"]
     assert "unknown tool" in first.content
@@ -430,7 +440,7 @@ async def test_langgraph_owns_each_call_state_transition(monkeypatch: pytest.Mon
 
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     state = DecimalState(total=7, messages=_state("first()", "second()").messages)
-    result = await _run_calls(state, _runtime(), _config())
+    result = await _run_calls(state, _node_runtime(), _config())
     assert snapshots == [7, 71]
     assert result["total"] == 712
 
@@ -451,7 +461,7 @@ async def test_checkpoint_resume_keeps_results_and_deferred_notes(
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     graph = _graph(AgentState, checkpointer=InMemorySaver(), interrupt_after=["exec"])
     config = _config()
-    runtime = _runtime()
+    runtime = _node_runtime()
     await graph.ainvoke(dict(_state("first()", "second()")), config=config, context=runtime.context)
     checkpoint = await graph.aget_state(config)
     assert checkpoint.next == ("exec",)
