@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 
@@ -83,10 +84,12 @@ def test_spawns_only_after_all_matching_pages_are_exhausted(
     module = _load(filename)
     _directory(monkeypatch, module, [SimpleNamespace(agents=[], next_cursor=None)])
     spawn = Mock(return_value=400)
+    key = UUID("0eb49ad1-0b9b-4bde-b783-d0c3e4359c33")
+    monkeypatch.setattr(module, "uuid4", lambda: key)
     monkeypatch.setattr(module.ava.agents, "spawn", spawn)
 
     assert module.ensure_agent("missing", "work") == 400
-    spawn.assert_called_once_with(prompt="work", label="missing")
+    spawn.assert_called_once_with(prompt="work", label="missing", idempotency_key=str(key))
 
 
 @pytest.mark.parametrize(
