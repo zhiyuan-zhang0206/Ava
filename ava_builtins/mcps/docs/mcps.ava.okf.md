@@ -12,4 +12,4 @@ supporting packages. The current bundled integration is
 [[ava_builtins/mcps/docs/chrome/chrome.ava.okf.md]] for browser automation.
 
 Discovery, configuration, installation and transport contracts belong to
-[[okf/mcps/mcps.ava.okf.md]]. Installed external servers are not bundled packages.
+[[docs/mcps/mcps.ava.okf.md]]. Installed external servers are not bundled packages.

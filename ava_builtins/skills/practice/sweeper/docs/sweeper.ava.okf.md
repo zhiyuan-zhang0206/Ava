@@ -21,4 +21,4 @@ A **repo-agnostic process** for maintaining a repo's "current open debt" tracker
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — two-level combination of engine + project-local skill supply
-- [[../../../../scripts/docs/scripts.ava.okf.md|Ops scripts]] — division of labor with lint: see repo's lint-vs-sweeper (lint blocks mechanical, sweeper tracks semantic debt)
+- [[scripts/docs/scripts.ava.okf.md|Ops scripts]] — division of labor with lint: see repo's lint-vs-sweeper (lint blocks mechanical, sweeper tracks semantic debt)

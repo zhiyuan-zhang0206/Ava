@@ -57,13 +57,13 @@ resolving the open point in
 treats them as gone sources: untouched copies they used to land are removed
 and deregistered, so runtime agents' indexes lose the L4 noise. They reach
 agents only through the project-local mount — see
-[[okf/skills/project-local.ava.okf.md]].
+[[docs/skills/project-local.ava.okf.md]].
 
 The external-agent operator bridge is outside this load-directory contract. A
 prod host-global converge step projects the complete `ava-guide` package into an
 already-present Codex or Claude Code home; it neither registers that copy in
 Ava's install registry nor restores `.agents/skills/` as an Ava runtime source.
-See [[okf/skills/external-agent-operator-bridge.ava.okf.md]].
+See [[docs/skills/external-agent-operator-bridge.ava.okf.md]].
 
 General methodology and user-service skills — `ava-serious-engineering`,
 `ava-serious-research`, `ava-deep-research`, `ava-corp`, and
