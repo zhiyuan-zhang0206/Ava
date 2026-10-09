@@ -33,7 +33,10 @@ The Gateway lifespan owns shared SQL work until its native executor future
 finishes, including after an HTTP waiter times out or disconnects. Identical
 in-flight requests share one load, with at most four distinct-key leaders;
 followers occupy no worker thread. Closing stops admission and drains these
-physical calls before the pool closes. Loader errors still reach active callers;
+physical calls before the pool closes. Each completed load retires its in-flight
+claim and releases admission before notifying followers, including on failure;
+a subsequent zero-TTL request therefore starts a fresh load. Loader errors still
+reach active callers;
 late failures go to the event loop's error reporting boundary with the query key,
 without retries, replacement snapshots, or cancellation of unrelated service work.
 

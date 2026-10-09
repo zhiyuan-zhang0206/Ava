@@ -11,8 +11,8 @@ its own POSIX session. The data plane survives application-root replacement.
 It does not use `pg_ctl` to detach, discover, reload or stop the home server.
 Throwaway restore/test PostgreSQL has a separate retained-process boundary.
 
-The CLI invocation owns a plain list of its launched `Popen` handles. Only its
-PostgreSQL handlers receive that list through parser composition; parser inspection
+The CLI invocation owns a plain list of its launched `Popen` handles. Its data-plane
+and application-root handlers receive that list through parser composition; parser inspection
 without an owner cannot launch a postmaster. Direct launch callers supply their own
 list. Callers invoking `cli.main.main` repeatedly in one interpreter can explicitly
 reuse the same list across start and stop. New invocations otherwise have independent

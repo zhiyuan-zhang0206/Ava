@@ -31,8 +31,6 @@ _ROOT_READY_TIMEOUT_S = 30.0
 _ROOT_STOP_TIMEOUT_S = 90.0
 _READY_POLL_INTERVAL_S = 0.5
 _poll_sleep = time.sleep  # a named seam tests can patch (the _probe pattern)
-# Keep the child unreaped until CLI exit; a published PID cannot be recycled.
-_direct_root_child: subprocess.Popen[bytes] | None = None
 
 
 class _RootDriverError(RuntimeError):
@@ -245,13 +243,14 @@ def _spawn_direct(
     manifests: Path,
     env: dict[str, str],
     runtime: StartRuntime | None = None,
+    *,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> subprocess.Popen[bytes]:
     """Launch the root daemon detached (own session), logging under the run dir."""
-    global _direct_root_child  # noqa: PLW0603 — retain the unreaped native child through CLI exit
     stdout = (run_dir / _ROOT_STDOUT_LOG).open("ab")
     stderr = (run_dir / _ROOT_STDERR_LOG).open("ab")
     try:
-        _direct_root_child = subprocess.Popen(
+        child = subprocess.Popen(
             _root_argv(run_dir, manifests, runtime),
             cwd=repo if runtime is None else runtime.cwd,
             env=env,
@@ -261,10 +260,13 @@ def _spawn_direct(
             start_new_session=True,
             close_fds=True,
         )
+        # The CLI caller retains its direct children through its final telemetry drain.
+        # Dropping this handle would let a later Popen reap a published root PID.
+        retained_children.append(child)
     finally:
         stdout.close()
         stderr.close()
-    return _direct_root_child
+    return child
 
 
 def _await_root_status(
@@ -348,6 +350,8 @@ def _bring_up_root(
     client: Any,
     env: dict[str, str],
     runtime: StartRuntime | None = None,
+    *,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> dict[str, Any]:
     """Start through the required platform owner; never change ownership on failure."""
     if sys.platform == "win32":
@@ -364,7 +368,9 @@ def _bring_up_root(
             )
         _seed_via_helper(run_dir, repo, manifests, env, runtime)
         return _await_root_status(client, run_dir)
-    proc = _spawn_direct(run_dir, repo, manifests, env, runtime)
+    proc = _spawn_direct(
+        run_dir, repo, manifests, env, runtime, retained_children=retained_children
+    )
     print(f"  + ava-root spawned directly (pid {proc.pid})")
     return _await_root_status(client, run_dir, proc=proc)
 
@@ -512,6 +518,7 @@ def _ensure_root_service_tree(
     *,
     roles: MachineRoles,
     reconcile: bool,
+    retained_children: list[subprocess.Popen[bytes]],
     runtime: StartRuntime | None = None,
 ) -> LaunchOutcome:
     """Reuse an identical generation; changing its inputs requires prior stop."""
@@ -545,7 +552,9 @@ def _ensure_root_service_tree(
         if status is None:
             require_root_absent()
             write_manifest(manifests, manifest)
-            status = _bring_up_root(run_dir, repo, manifests, client, env, runtime)
+            status = _bring_up_root(
+                run_dir, repo, manifests, client, env, runtime, retained_children=retained_children
+            )
             _require_root_owner(status)
             _require_same_generation(manifest, status, roster, reconcile=reconcile)
         status = _reconcile_units(roster, client, status)
@@ -566,11 +575,17 @@ def _launch_service_tree(
     roles: MachineRoles,
     *,
     reconcile: bool,
+    retained_children: list[subprocess.Popen[bytes]],
     runtime: StartRuntime | None = None,
 ) -> LaunchOutcome:
     """Start the requested services through their root owner."""
     return _ensure_root_service_tree(
-        roster, repo, roles=roles, reconcile=reconcile, runtime=runtime
+        roster,
+        repo,
+        roles=roles,
+        reconcile=reconcile,
+        retained_children=retained_children,
+        runtime=runtime,
     )
 
 

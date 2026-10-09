@@ -11,6 +11,7 @@ import cli.commands._setup as _setup_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 from base.config import settings
+from cli.commands._repo import ServiceSpec
 from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _hermetic_start,
@@ -32,6 +33,25 @@ def test_cmd_start_needs_no_tty(monkeypatch: pytest.MonkeyPatch) -> None:
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert _start_commands.cmd_start(retained_children=[]) == 0
+
+
+def test_root_launch_uses_the_start_callers_child_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    children: list[subprocess.Popen[bytes]] = []
+    owner_at_launch: list[list[subprocess.Popen[bytes]]] = []
+
+    def launch(
+        roster: tuple[ServiceSpec, ...],
+        *_args: object,
+        retained_children: list[subprocess.Popen[bytes]],
+        **_kwargs: object,
+    ) -> _root_driver_commands.LaunchOutcome:
+        owner_at_launch.append(retained_children)
+        return _root_driver_commands.LaunchOutcome(roster, ())
+
+    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+    assert _start_commands.cmd_start(retained_children=children) == 0
+    assert len(owner_at_launch) == 1
+    assert owner_at_launch[0] is children
 
 
 def test_cmd_start_aborts_when_schema_mismatched(
