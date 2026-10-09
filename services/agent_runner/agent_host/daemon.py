@@ -105,6 +105,7 @@ from base.sessions.helper_chain_guard import parent_chain_intact
 
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
+from .exec_memory_guard import run_memory_guard_forever
 from .force_termination import kill_terminating_agent_shells
 from .host import AgentHost
 from .pooled_checkpoint import PooledPostgresSaver
@@ -363,26 +364,6 @@ async def _close_host_runtime(
         cleanup.push_async_callback(scheduler.aclose)
 
 
-async def _exec_memory_guard_forever() -> None:
-    """Relieve critical memory pressure by killing the largest exec domain.
-
-    Where the OS reports no pressure state (Linux), the guard does not run.
-    """
-    from base.host.memory_pressure import host_memory_source
-
-    from .exec_memory_guard import (
-        ExecMemoryGuard,
-        find_exec_domains,
-    )
-
-    source = host_memory_source()
-    if source is None:
-        _log.info("[agent-host] exec memory guard idle — this OS reports no memory pressure state")
-        return
-    host_pid = os.getpid()
-    await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()
-
-
 def _background_loops(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     db: Database,
@@ -400,7 +381,7 @@ def _background_loops(
     return {
         "plugins_watch": _watch_plugins_for_restart(),
         "stdout_log_rotate": _rotate_stdout_log_forever(),
-        "exec_memory_guard": _exec_memory_guard_forever(),
+        "exec_memory_guard": run_memory_guard_forever(_log),
         "understanding_chunks": understanding_loop_forever(
             control_pool, db, [execute_code], catalog=catalog, llm_override=settings.lm.llm_override
         ),
@@ -651,7 +632,12 @@ async def run() -> None:
         # group exits, every loop joined, before the runtime drains turns.
         try:
             await _dispatch_host(
-                host, scheduler, control_pool, db, bus, local_machine,
+                host,
+                scheduler,
+                control_pool,
+                db,
+                bus,
+                local_machine,
                 catalog=installation.require_catalog(),
             )
         finally:
