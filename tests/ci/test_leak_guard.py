@@ -30,7 +30,8 @@ import pytest
 
 import ava
 from ava.sdk_surface import agent_identity
-from base.native_process.turn_identity import bind_turn_identity
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from scripts.ci import shard_counts
 from scripts.ci.tests import leak_guard_suite
 
@@ -226,9 +227,10 @@ def test_agent_identity_holds_no_process_global_slot() -> None:
 def test_native_admission_does_not_rebind_the_sdk_identity() -> None:
     context = ava.context
     expected = agent_identity.agent_id()
-    with bind_turn_identity(43 if expected == 42 else 42):
-        assert ava.context is context
-        assert agent_identity.agent_id() == expected
+    hosted = AvaContext(identity=AgentIdentity(43 if expected == 42 else 42, True))
+    assert hosted.require_identity().agent_id != expected
+    assert ava.context is context
+    assert agent_identity.agent_id() == expected
     assert ava.context is context
     assert agent_identity.agent_id() == expected
 

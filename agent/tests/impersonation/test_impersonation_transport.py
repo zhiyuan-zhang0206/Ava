@@ -210,7 +210,6 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
 
     from base.agents import impersonation as leases
     from base.agents.observation.relay_supervision import RelaySupervision
-    from base.native_process.turn_identity import bind_turn_identity
     from tests.impersonation_support import attested_caller
 
     session, owner = recovery_lease
@@ -235,38 +234,39 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
         "provision_relay",
         Mock(side_effect=psycopg.errors.ConnectionTimeout("DB unavailable")),
     )
-    with bind_turn_identity(owner.agent_id, incarnation=owner):
-        with pytest.raises(psycopg.errors.ConnectionTimeout):
-            await impersonation.supervise_relay(
-                database, event_bus, current, owner.agent_id, relays
-            )
-        assert (
-            leases.get(database, event_bus, session["id"], attested_caller(session))["status"]
-            == "active"
+    with pytest.raises(psycopg.errors.ConnectionTimeout):
+        await impersonation.supervise_relay(
+            database, event_bus, current, owner.agent_id, relays, incarnation=owner
         )
-        monkeypatch.setattr(leases, "provision_relay", original)
-        spawn = Mock(wraps=impersonation._spawn_codex_relay)
-        monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
-        await asyncio.gather(
-            *(
-                impersonation.supervise_relay(database, event_bus, current, owner.agent_id, relays)
-                for _ in range(2)
+    assert (
+        leases.get(database, event_bus, session["id"], attested_caller(session))["status"]
+        == "active"
+    )
+    monkeypatch.setattr(leases, "provision_relay", original)
+    spawn = Mock(wraps=impersonation._spawn_codex_relay)
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    await asyncio.gather(
+        *(
+            impersonation.supervise_relay(
+                database, event_bus, current, owner.agent_id, relays, incarnation=owner
             )
+            for _ in range(2)
         )
-        assert spawn.call_count == 1
-        child = relays.children[owner.agent_id]
-        deadline = datetime.now(UTC) + timedelta(seconds=10)
-        try:
-            live = leases.get(database, event_bus, session["id"], attested_caller(session))
-            while datetime.now(UTC) < deadline and live["relay_heartbeat_at"] is None:
-                await asyncio.sleep(0.05)
-                live = leases.native_status(database, event_bus, owner.agent_id, owner)
-                assert live is not None
-            assert (live["status"], live["relay_generation"]) == ("active", 2)
-            assert live["relay_heartbeat_at"] is not None
-            assert live["relay_identity"]["pid"] == child.process.pid
-            assert live["expires_at"] == expires_at
-            with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-                leases.relay_heartbeat(database, session["id"], "old-private")
-        finally:
-            impersonation._terminate_relay(child)
+    )
+    assert spawn.call_count == 1
+    child = relays.children[owner.agent_id]
+    deadline = datetime.now(UTC) + timedelta(seconds=10)
+    try:
+        live = leases.get(database, event_bus, session["id"], attested_caller(session))
+        while datetime.now(UTC) < deadline and live["relay_heartbeat_at"] is None:
+            await asyncio.sleep(0.05)
+            live = leases.native_status(database, event_bus, owner.agent_id, owner)
+            assert live is not None
+        assert (live["status"], live["relay_generation"]) == ("active", 2)
+        assert live["relay_heartbeat_at"] is not None
+        assert live["relay_identity"]["pid"] == child.process.pid
+        assert live["expires_at"] == expires_at
+        with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
+            leases.relay_heartbeat(database, session["id"], "old-private")
+    finally:
+        impersonation._terminate_relay(child)

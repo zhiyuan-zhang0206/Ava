@@ -14,27 +14,21 @@ from base.agents.incarnation.exec_owner_protocol import OwnerClosed, OwnerContex
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
 from base.agents.incarnation.tests.test_resources import _admitted
 from base.db import Database
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.pin_agent import exec_context
 
 
 async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    from agent.graph.exec import _owned_run
     from agent.graph.exec._result import _ExecDone
     from agent.graph.exec._subprocess import _run_in_subprocess
 
     target = _admitted(db_conn)
 
-    def admitted(_agent_id: int) -> RuntimeIncarnation:
-        return target
-
-    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     result, payload = await _run_in_subprocess(
         database,
         "print('owned-runtime-proof')",
-        exec_context(target.agent_id),
+        exec_context(target.agent_id, incarnation=target),
         asyncio.Event(),
         30,
         exec_dir=tmp_path,
@@ -53,17 +47,12 @@ async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
 async def test_managed_exec_streams_output_and_keepalive_before_completion(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    from agent.graph.exec import _owned_run
     from agent.graph.exec._result import _ExecDone
     from agent.graph.exec._stream import ExecOutputChunkPublisher
     from agent.graph.exec._subprocess import _run_in_subprocess
 
     target = _admitted(db_conn)
 
-    def admitted(_agent_id: int) -> RuntimeIncarnation:
-        return target
-
-    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     output_seen = asyncio.Event()
     keepalive_seen = asyncio.Event()
     events: list[dict[str, object]] = []
@@ -80,7 +69,7 @@ async def test_managed_exec_streams_output_and_keepalive_before_completion(
         _run_in_subprocess(
             database,
             "import time; print('managed-first', flush=True); time.sleep(1.4)",
-            exec_context(target.agent_id),
+            exec_context(target.agent_id, incarnation=target),
             asyncio.Event(),
             30,
             publisher,
@@ -112,20 +101,15 @@ async def test_execution_domain_cancellation_consumes_exact_owner_receipt(
     database: Database,
 ) -> None:
     """Cancellation returns only after the attached allocation is discharged."""
-    from agent.graph.exec import _owned_run
     from agent.graph.exec._subprocess import _run_in_subprocess
 
     target = _admitted(db_conn)
 
-    def admitted(_agent_id: int) -> RuntimeIncarnation:
-        return target
-
-    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     task = asyncio.create_task(
         _run_in_subprocess(
             database,
             "import time; print('managed-started', flush=True); time.sleep(60)",
-            exec_context(target.agent_id),
+            exec_context(target.agent_id, incarnation=target),
             asyncio.Event(),
             30,
             exec_dir=tmp_path,
@@ -178,10 +162,6 @@ async def test_execution_domain_cancellation_waits_for_inflight_registration(
 
     target = _admitted(db_conn)
 
-    def admitted(_agent_id: int) -> RuntimeIncarnation:
-        return target
-
-    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     original_register = _owned_run._register_attached
     entered = threading.Event()
     release = threading.Event()
@@ -196,7 +176,7 @@ async def test_execution_domain_cancellation_waits_for_inflight_registration(
         _run_in_subprocess(
             database,
             "raise AssertionError('host cancellation must win before user code')",
-            exec_context(target.agent_id),
+            exec_context(target.agent_id, incarnation=target),
             asyncio.Event(),
             30,
             exec_dir=tmp_path,

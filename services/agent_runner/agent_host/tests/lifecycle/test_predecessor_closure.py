@@ -26,7 +26,6 @@ from base.deploy.maintenance.cohort import _applied_capture, verify_drained
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host.maintenance import record_drained
 
@@ -131,7 +130,14 @@ async def test_retired_row_is_a_recorded_loud_refusal(
     aid, receipt, before = _drained(db_conn)
     unchanged = _snapshot(db_conn, aid, receipt)
 
-    assert await _admit(aops_pool, aid, uuid4()) is None
+    assert (
+        await _admit(
+            aops_pool,
+            aid,
+            uuid4(),
+        )
+        is None
+    )
 
     after = _snapshot(db_conn, aid, receipt)
     assert after[0]["last_admission_outcome"] == "resource_fence"
@@ -148,7 +154,11 @@ async def test_closed_form_is_admitted_exactly_once(
     stored = _snapshot(db_conn, aid, receipt)
     assert decode_resources(stored[0]["incarnation_resources"]) == closed
 
-    successor = await _admit(aops_pool, aid, uuid4())
+    successor = await _admit(
+        aops_pool,
+        aid,
+        uuid4(),
+    )
     assert successor is not None
     admitted_row = _snapshot(db_conn, aid, receipt)
     admitted = decode_resources(admitted_row[0]["incarnation_resources"])
@@ -163,7 +173,11 @@ async def test_closed_form_is_admitted_exactly_once(
     # Exactly once: the successor's own set has no closure receipt for another
     # owner to consume.
     with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
-        await _admit(aops_pool, aid, uuid4())
+        await _admit(
+            aops_pool,
+            aid,
+            uuid4(),
+        )
 
 
 async def test_closed_form_without_its_receipt_is_not_admissible(
@@ -175,7 +189,11 @@ async def test_closed_form_without_its_receipt_is_not_admissible(
     db_conn.execute("UPDATE inbound_messages SET applied_at=NULL WHERE id=%s", (receipt,))
     db_conn.commit()
     with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
-        await _admit(aops_pool, aid, uuid4())
+        await _admit(
+            aops_pool,
+            aid,
+            uuid4(),
+        )
 
 
 def _resurrected(db: psycopg.Connection) -> tuple[int, int, dict[str, Any]]:
@@ -210,7 +228,11 @@ async def test_a_resurrected_row_never_readmitted_is_admitted_through_its_termin
     admission consumes the closed form through the observed terminate."""
     aid, receipt, before = _resurrected(db_conn)
     _closed_form(db_conn, aid, before)
-    successor = await _admit(aops_pool, aid, uuid4())
+    successor = await _admit(
+        aops_pool,
+        aid,
+        uuid4(),
+    )
     assert successor is not None
     admitted = decode_resources(_snapshot(db_conn, aid, receipt)[0]["incarnation_resources"])
     assert isinstance(admitted, IncarnationResources)
@@ -228,7 +250,11 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     which the host receipt, a preparation retry and certification all accept."""
     aid, _receipt, before = _drained(db_conn)
     _closed_form(db_conn, aid, before)
-    incarnation = await _admit(aops_pool, aid, uuid4())
+    incarnation = await _admit(
+        aops_pool,
+        aid,
+        uuid4(),
+    )
     assert incarnation is not None
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,payload) "
@@ -238,9 +264,14 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     db_conn.commit()
     assert row is not None
     command = row[0]
-    with bind_turn_identity(aid, incarnation=incarnation):
-        assert [item.id for item in await claim_inbound_batch(aops_pool, aid)] == [command]
-        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) == "restart"
+    assert [
+        item.id
+        for item in await claim_inbound_batch(aops_pool, aid, incarnation=incarnation, work=None)
+    ] == [command]
+    assert (
+        await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=None)
+        == "restart"
+    )
 
     recorded: list[tuple[int, int]] = []
 

@@ -158,14 +158,13 @@ def test_personal_write_uses_sdk_context_without_reading_host_turn(
     memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import base.paths
-    from base.native_process.turn_identity import bind_turn_identity
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
 
     monkeypatch.setattr(base.paths, "workspace_dir", workspace)
-    with bind_turn_identity(29):
-        entry = ava.memory.write("sdk-note", "Belongs to the initialized SDK agent 17.")
+    monkeypatch.setenv("AVA_AGENT_ID", "29")
+    entry = ava.memory.write("sdk-note", "Belongs to the initialized SDK agent 17.")
 
     assert entry == tmp_path / "17" / "memory" / "sdk-note.md"
     assert not (tmp_path / "29").exists()

@@ -183,7 +183,9 @@ async def _run_agent_code(
     (result, plugin_state_update, exec_ms, attachments, sdk_calls)."""
     config_overlay = ctx.require_agent().overlay()
     exec_started = time.monotonic()
-    async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
+    async with subscribe_interrupt(
+        ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
+    ) as cancel_event:
         outcome = await _exec_with_node_shield(
             _run_in_subprocess(
                 ctx.require_db(),

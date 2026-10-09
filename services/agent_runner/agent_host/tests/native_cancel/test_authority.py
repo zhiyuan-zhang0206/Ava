@@ -13,7 +13,7 @@ from base.agents.incarnation.native_work_models import NativeWorkUncertainError
 from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -32,6 +32,8 @@ async def test_force_observation_waits_for_actual_projection_continuation(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database: Database,
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool)
@@ -52,14 +54,15 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=database,
     )
     host._owner = incarnation.owner
 
-    async def continuation(agent: int) -> None:
+    async def continuation(agent: int, *, resources: HostedTurnResources | None) -> None:
         assert agent == target.agent_id
-        with bind_turn_identity(agent, incarnation=incarnation):
-            await settle_native_invocation(aops_pool, saver, graph, incarnation, target, config)
+        await settle_native_invocation(
+            aops_pool, saver, graph, incarnation, target, config, resources=resources
+        )
 
     monkeypatch.setattr(graph, "aupdate_state", pause)
     monkeypatch.setattr(host, "_run_turn", continuation)
@@ -79,7 +82,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         with pytest.raises(ResurrectSettlementDeferredError):
             await asyncio.to_thread(
                 resurrect_agent,
-                Database.from_settings(),
+                database,
                 EventBus.from_settings(),
                 target.agent_id,
                 resurrected_by="user",
@@ -98,7 +101,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         assert observed is not None and observed[0] is not None
         await asyncio.to_thread(
             resurrect_agent,
-            Database.from_settings(),
+            database,
             EventBus.from_settings(),
             target.agent_id,
             resurrected_by="user",
@@ -108,11 +111,11 @@ async def test_force_observation_waits_for_actual_projection_continuation(
             target.agent_id,
             "claim-test",
             uuid4(),
-            db=Database.from_settings(),
+            db=database,
             expected_from="idling",
         )
         assert successor is not None
-        assert await recover_native_cancel(aops_pool, saver, graph, successor)
+        assert await recover_native_cancel(aops_pool, saver, graph, successor, resources=None)
         assert db_conn.execute(
             "SELECT outcome FROM native_cancel_commands WHERE work_id=%s", (target.work_id,)
         ).fetchone() == ("applied",)

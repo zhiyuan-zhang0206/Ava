@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agent.messages import COMPACT_SUMMARY_HEADER
 from base.agents.history.closing_request import ClosingRequest
 
 
@@ -44,3 +45,13 @@ def closing_request_of(response: AIMessage, instruction: HumanMessage) -> Closin
         extra_tokens=round(estimate_message_tokens(instruction)),
         model=model if isinstance(model, str) and model else None,
     )
+
+
+def compose_summary_message(summary: str) -> str:
+    """The header + the summary, as the single text injected on the agent's
+    behalf when its context is replaced. Shared by every compact path so the
+    framing is identical across forced / command / spontaneous compaction.
+    The header itself (with the rationale for its wording) lives in
+    `agent/messages/__init__.py:COMPACT_SUMMARY_HEADER` — the read-side classifier
+    (base/agents/history/context_breakdown.py) keys on it too."""
+    return f"{COMPACT_SUMMARY_HEADER}\n\n{summary}"

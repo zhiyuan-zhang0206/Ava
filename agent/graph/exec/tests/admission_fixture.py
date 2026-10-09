@@ -28,10 +28,6 @@ def admitted_owner_ready(
 
     target = _admitted(db_conn)
 
-    def admitted(_agent_id: int) -> RuntimeIncarnation:
-        return target
-
-    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     original_validate = _owned_run.validate_native_ready
     ready = threading.Event()
     force_done = threading.Event()

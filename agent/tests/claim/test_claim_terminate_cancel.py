@@ -1,12 +1,14 @@
 """The claim node's terminate and cancel inbounds, the hosted turn boundary and the chat a terminate keeps or vetoes."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END
+from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
@@ -492,21 +494,19 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     leaves lifecycle application to the host after the acceptance checkpoint
     has been flushed."""
     from agent.tests.claim.test_inbound_ownership import _admit, _agent
-    from base.native_process.turn_identity import bind_turn_identity
 
     tid = _agent(db_conn)
     owner = await _admit(aops_pool, tid)
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
 
-    with bind_turn_identity(tid, incarnation=owner):
-        cmd = await claim_node(
-            AgentState(messages=[SystemMessage(content="sys")]),
-            _make_runtime(ops_pool=aops_pool),
-            _config(
-                tid,
-            ),
-        )
+    runtime = _make_runtime(ops_pool=aops_pool)
+    runtime = Runtime(context=replace(runtime.context, original_incarnation=owner))
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        runtime,
+        _config(tid),
+    )
 
     assert cmd.goto == END
     assert cmd.update["restart_requested"] is True  # type: ignore[index]

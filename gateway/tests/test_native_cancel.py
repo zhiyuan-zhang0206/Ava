@@ -1,5 +1,6 @@
 """Guarded native cancel HTTP never upgrades an unsupported observed tuple."""
 
+from dataclasses import replace
 from uuid import uuid4
 
 import psycopg
@@ -10,7 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.config import settings
-from base.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import HostedTurnResources
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.settlement import close_hosted_turn
@@ -151,10 +152,10 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
         raise RuntimeError("isolated unexpected graph failure")
 
     _graph, saver, host, context = await _blocked_host(aops_pool, unexpected)
-    with (
-        bind_turn_identity(initial.agent_id, incarnation=incarnation),
-        pytest.raises(RuntimeError, match="isolated unexpected graph failure"),
-    ):
+    context = replace(
+        context, original_incarnation=incarnation, hosted_resources=HostedTurnResources()
+    )
+    with pytest.raises(RuntimeError, match="isolated unexpected graph failure"):
         await host._invoke_until_done(initial.agent_id, context)
     await close_hosted_turn(
         aops_pool,
@@ -164,6 +165,7 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
         saver,
         incarnation,
         TurnOutcome(exited=False, crashed=True),
+        resources=context.hosted_resources,
     )
     row = db_conn.execute(
         "SELECT m.status,w.phase,w.id FROM agents_meta m "

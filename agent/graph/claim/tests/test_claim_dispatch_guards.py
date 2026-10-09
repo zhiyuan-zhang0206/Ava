@@ -14,8 +14,10 @@ from agent.tests.claim.claim_support import (
     _insert_inbound_kind,
     _make_runtime,
 )
+from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.units import spawn_agent
 
 
@@ -32,8 +34,18 @@ async def test_claim_unknown_kind_raises(
     from agent.db import ClaimedInbound
 
     tid = spawn_agent()
+    runtime = _make_runtime(ops_pool=aops_pool)
 
-    async def fake_claim(_db: object, _tid, *, lifecycle_only=False):
+    async def fake_claim(
+        _db: object,
+        _tid: int,
+        *,
+        incarnation: RuntimeIncarnation | None,
+        work: NativeWorkTarget | None,
+        lifecycle_only: bool = False,
+    ):
+        assert incarnation is runtime.context.original_incarnation
+        assert work is runtime.context.native_work
         assert not lifecycle_only
         return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
 
@@ -42,7 +54,7 @@ async def test_claim_unknown_kind_raises(
     with pytest.raises(ValueError, match="Unknown inbound kind"):
         await claim_node(
             AgentState(),
-            _make_runtime(ops_pool=aops_pool),
+            runtime,
             _config(
                 tid,
             ),
@@ -72,8 +84,18 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
         db_conn, tid, "message after the claim", source="user", bus=event_bus, database=database
     )
     await _await_inbound_visible(aops_pool, chat_id)
+    runtime = _make_runtime(ops_pool=aops_pool)
 
-    async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):
+    async def fake_claim(
+        _pool: AsyncConnectionPool,
+        _agent_id: int,
+        *,
+        incarnation: RuntimeIncarnation | None,
+        work: NativeWorkTarget | None,
+        lifecycle_only: bool = False,
+    ):
+        assert incarnation is runtime.context.original_incarnation
+        assert work is runtime.context.native_work
         assert not lifecycle_only
         # Faithful to claim_inbound_batch: the grab marks lifecycle rows 'done'
         # atomically, so the vetoed terminate is consumed and never retried.
@@ -91,7 +113,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
+        runtime,
         _config(
             tid,
         ),
@@ -137,8 +159,18 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
         db_conn, tid, "message in the batch", source="user", bus=event_bus, database=database
     )
     await _await_inbound_visible(aops_pool, chat_id)
+    runtime = _make_runtime(ops_pool=aops_pool)
 
-    async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):
+    async def fake_claim(
+        _pool: AsyncConnectionPool,
+        _agent_id: int,
+        *,
+        incarnation: RuntimeIncarnation | None,
+        work: NativeWorkTarget | None,
+        lifecycle_only: bool = False,
+    ):
+        assert incarnation is runtime.context.original_incarnation
+        assert work is runtime.context.native_work
         assert not lifecycle_only
         return [
             ClaimedInbound(
@@ -157,7 +189,7 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
+        runtime,
         _config(
             tid,
         ),

@@ -113,7 +113,9 @@ async def _claim_node_impl(
         return Command[ClaimGoto](update={"halted": False}, goto=BEFORE_LLM)
 
     agent_id = agent_id_from_config(config)
-    marker = await observe_bound_cancel(ctx.ops_pool, agent_id)
+    marker = await observe_bound_cancel(
+        ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
+    )
     if marker is not None:
         return Command[ClaimGoto](update=halt_for_native_cancel(marker), goto=END)
     control = await claim_gate(state, agent_id, ctx)
@@ -122,7 +124,9 @@ async def _claim_node_impl(
 
     # ── First SELECT: try uncontended claim before pub/sub wait ──
     try:
-        batch = await claim_inbound_batch(ctx.ops_pool, agent_id)
+        batch = await claim_inbound_batch(
+            ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
+        )
     except NativeCancelPendingError as exc:
         return Command[ClaimGoto](update=halt_for_native_cancel(exc.marker), goto=END)
     except RuntimeOwnershipLostError:
@@ -152,14 +156,21 @@ async def _claim_node_impl(
             # The host owns the idle agent and its subscription. End this
             # invocation; the dispatcher creates another task on the next wake.
             return Command[ClaimGoto](update={"turn_active": False, "turn_idle": True}, goto=END)
-        await activate_routed_work(ctx.ops_pool, state.native_work)
+        await activate_routed_work(
+            ctx.ops_pool,
+            state.native_work,
+            incarnation=ctx.original_incarnation,
+            work=ctx.native_work,
+        )
         return Command[ClaimGoto](
             update={"halted": False, "turn_active": True},
             goto=BEFORE_LLM,
         )
 
     # ── Routing: resolve winner once ──
-    await activate_routed_work(ctx.ops_pool, state.native_work)
+    await activate_routed_work(
+        ctx.ops_pool, state.native_work, incarnation=ctx.original_incarnation, work=ctx.native_work
+    )
     routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Dispatch: run every item through its handler ──

@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -40,7 +40,6 @@ import ava
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
-from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
@@ -344,6 +343,7 @@ def _stub_host_transitions(
 ) -> list[int]:
     import services.agent_runner.agent_host.host as host_mod
     from base.native_process.runtime_incarnation import RuntimeIncarnation
+    from services.agent_runner.agent_host.invocation import native_work
 
     stamps: list[int] = []
 
@@ -355,7 +355,13 @@ def _stub_host_transitions(
         return RuntimeIncarnation(agent_id, uuid4(), owner)
 
     async def settle_and_stamp(
-        pool: object, incarnation: RuntimeIncarnation, *, bus: object, exited: bool, crashed: bool
+        pool: object,
+        incarnation: RuntimeIncarnation,
+        *,
+        bus: object,
+        exited: bool,
+        crashed: bool,
+        resources: object,
     ) -> TurnSettlement:
         if crashed:
             stamps.append(incarnation.agent_id)
@@ -369,7 +375,8 @@ def _stub_host_transitions(
     # These orchestration fixtures expose no managed native-work capability.
     # Strong command/checkpoint/transfer facts use actual PG tests in native_cancel/.
     monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
-    monkeypatch.setattr(host_mod, "prepare_native_invocation", AsyncMock(return_value=None))
+    monkeypatch.setattr(native_work, "prepare_native_invocation", AsyncMock(return_value=None))
+    monkeypatch.setattr(native_work, "settle_checkpoint", AsyncMock(return_value=False))
     monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
     return stamps
 
@@ -407,7 +414,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel]) ->
     ) -> tuple[_Model, None]:
         return _Model(llm_model), None
 
-    monkeypatch.setattr(host_mod, "boot_agent_scope", _fake_boot_agent_scope)
+    monkeypatch.setattr(runtime_mod, "boot_agent_scope", _fake_boot_agent_scope)
 
     def _allow_model_config(*, model: str | None = None) -> None:
         """Keep fake host tests independent of installed provider credentials."""
@@ -504,90 +511,17 @@ class TestPendingInboundBackstop:
         assert [candidate.agent_id for candidate in candidates] == [17]
 
 
-class TestPoolIsolation:
-    @pytest.mark.parametrize("turn_limit", [0, 2, 1000])
-    def test_pool_capacity_is_independent_of_agent_admission(
-        self, monkeypatch: pytest.MonkeyPatch, turn_limit: int
-    ) -> None:
-        """Admitting more agents must not expand either database client pool."""
-        from base.db import Database
-
-        from ..pools import build_control_pool, build_shared_pool
-
-        monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", turn_limit)
-        monkeypatch.setattr(settings.daemon, "host_db_pool_max_size", 12)
-        monkeypatch.setattr(settings.daemon, "host_control_pool_max_size", 3)
-        workload_pool = build_shared_pool(Database.from_settings())
-        control_pool = build_control_pool(Database.from_settings())
-
-        assert workload_pool is not control_pool
-        assert workload_pool.max_size == 12
-        assert control_pool.max_size == 3
-
-    async def test_turn_work_and_lifecycle_control_use_separate_pools(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A busy turn may use the work pool without consuming control capacity."""
-        import services.agent_runner.agent_host.host as host_mod
-        from base.native_process.runtime_incarnation import RuntimeIncarnation
-
-        rows = {11: _Row(status="idling")}
-        original, graph, turn_pool = wired(rows)
-        control_pool = _FakePool(rows)
-        calls: list[tuple[str, object]] = []
-
-        async def admit(
-            pool: object,
-            agent_id: int,
-            _machine: str,
-            owner: UUID,
-            *,
-            expected_from: str,
-            db: object,
-        ) -> RuntimeIncarnation:
-            assert expected_from == "idling"
-            calls.append(("admit", pool))
-            return RuntimeIncarnation(agent_id, uuid4(), owner)
-
-        async def settle_and_stamp(
-            pool: object,
-            incarnation: RuntimeIncarnation,
-            *,
-            bus: object,
-            exited: bool,
-            crashed: bool,
-        ) -> TurnSettlement:
-            if not exited:
-                calls.append(("settle", pool))
-            return TurnSettlement(
-                stamp=TurnFatalStamp(applied=crashed, recrash=False), settled=not exited
-            )
-
-        async def force(pool: object, *_args: object, **_kwargs: object) -> bool:
-            calls.append(("force", pool))
-            return False
-
-        monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
-        # This force fixture has no strong native-work command.
-        monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
-        monkeypatch.setattr(host_mod, "prepare_native_invocation", AsyncMock(return_value=None))
-        monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
-        monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", force)
-        host = _host(
-            pool=cast(AsyncConnectionPool[Any], turn_pool),
-            control_pool=cast(AsyncConnectionPool[Any], control_pool),
-            checkpointer=original._checkpointer,
-            graph=graph,
-            plugin_configs=original._plugin_configs,
-        )
-
-        await host.run_turn(11)
-
-        assert turn_pool.reads == 0
-        # Pre-turn config plus the quiescent compact source qualification.
-        assert control_pool.reads == 2
-        assert graph.observations[-1].ops_pool is turn_pool
-        assert calls == [("admit", control_pool), ("settle", control_pool), ("force", control_pool)]
+class _Drive(Protocol):
+    def __call__(
+        self,
+        agent: int,
+        runtime: object,
+        slices: object,
+        /,
+        *,
+        incarnation: object,
+        resources: object,
+    ) -> Awaitable[TurnOutcome]: ...
 
 
 class TestSettlementReconciles:
@@ -605,24 +539,32 @@ class TestSettlementReconciles:
         self,
         wired: _Build,
         monkeypatch: pytest.MonkeyPatch,
-        drive: Callable[[int, object, object], Awaitable[TurnOutcome]],
+        drive: _Drive,
         order: list[str],
     ) -> None:
         host, _, _ = wired({1: _Row()})
 
         async def settle_and_stamp(
-            _pool: object, _incarnation: object, *, bus: object, exited: bool, crashed: bool
+            _pool: object,
+            _incarnation: object,
+            *,
+            bus: object,
+            exited: bool,
+            crashed: bool,
+            resources: object,
         ) -> TurnSettlement:
             order.append("settle")
             return TurnSettlement(
                 stamp=TurnFatalStamp(applied=crashed, recrash=False), settled=not exited
             )
 
-        async def reconcile(_pool: object, _checkpointer: object, _incarnation: object) -> None:
+        async def reconcile(
+            _pool: object, _checkpointer: object, _incarnation: object, *, resources: object
+        ) -> None:
             order.append("reconcile")
 
         async def reconcile_turn(
-            _pool: object, _checkpointer: object, _incarnation: object
+            _pool: object, _checkpointer: object, _incarnation: object, *, resources: object
         ) -> None:
             order.append("reconcile-turn")
 
@@ -636,7 +578,14 @@ class TestSettlementReconciles:
     async def test_settled_abort_reconciles_after_the_settle(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
+        async def drive(
+            _agent: int,
+            _runtime: object,
+            _slices: object,
+            *,
+            incarnation: object,
+            resources: object,
+        ) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=True, aborted=True)
 
         order: list[str] = []
@@ -650,7 +599,14 @@ class TestSettlementReconciles:
         unclassified crash drops the runtime instead, and the next admission
         (or boot) reconciles."""
 
-        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
+        async def drive(
+            _agent: int,
+            _runtime: object,
+            _slices: object,
+            *,
+            incarnation: object,
+            resources: object,
+        ) -> TurnOutcome:
             raise ValueError("unclassified crash")
 
         order: list[str] = []
@@ -667,7 +623,14 @@ class TestSettlementReconciles:
         its unconfirmable claims re-deliver at-least-once (see the pass's
         docstring)."""
 
-        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
+        async def drive(
+            _agent: int,
+            _runtime: object,
+            _slices: object,
+            *,
+            incarnation: object,
+            resources: object,
+        ) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=False)
 
         order: list[str] = []

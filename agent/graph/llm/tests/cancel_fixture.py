@@ -12,6 +12,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import InterruptEvent
+from base.agents.incarnation.native_work_models import NativeWorkTarget
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 @pytest.fixture
@@ -20,7 +22,11 @@ def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
 
     @asynccontextmanager
     async def fake_subscribe(
-        _pool: AsyncConnectionPool | None, _agent_id: int
+        _pool: AsyncConnectionPool | None,
+        _agent_id: int,
+        *,
+        incarnation: RuntimeIncarnation | None,
+        work: NativeWorkTarget | None,
     ) -> AsyncGenerator[InterruptEvent]:
         yield event
 

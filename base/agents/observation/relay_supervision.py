@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psutil
@@ -68,3 +69,28 @@ def relay_exited(
         return not process.live()
     except (psutil.Error, OSError, RuntimeError):
         return False
+
+
+def terminate_relay(child: RelayChild) -> None:
+    """Stop the bound relay with its existing graceful wait and kill fallback."""
+    process = child.process
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def heartbeat_fresh(heartbeat: datetime | None, *, now: datetime | None = None) -> bool:
+    """Compare the relay heartbeat with the native supervision freshness window."""
+    from base.agents.impersonation import RELAY_HEARTBEAT_STALE_SECONDS
+
+    current = now or datetime.now(UTC)
+    if heartbeat is None:
+        return False
+    if heartbeat.tzinfo is None:
+        heartbeat = heartbeat.replace(tzinfo=UTC)
+    return heartbeat >= current - timedelta(seconds=RELAY_HEARTBEAT_STALE_SECONDS)

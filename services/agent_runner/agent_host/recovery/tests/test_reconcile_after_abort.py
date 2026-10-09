@@ -42,7 +42,6 @@ from base.agents.history.inbound_sideload import (
     committed_ids_for_reconcile,
     sideload_committed_ids,
 )
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import settlement as settlement_mod
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
 
@@ -132,7 +131,9 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
     stale = _insert_claimed(db_conn, agent, "stale", age=timedelta(days=2))
     saver = await _seed_checkpoint(aops_pool, agent, committed)
 
-    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, saver, incarnation)
+    await settlement_mod.reconcile_inbounds_after_abort(
+        aops_pool, saver, incarnation, resources=None
+    )
 
     assert _statuses(db_conn, [committed, orphan, stale]) == {
         committed: "done",
@@ -158,13 +159,13 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
     orphan = _insert_claimed(db_conn, agent, "orphan")
     saver = await _seed_checkpoint(aops_pool, agent, committed)
 
-    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, saver, incarnation)
+    await settlement_mod.reconcile_inbounds_after_abort(
+        aops_pool, saver, incarnation, resources=None
+    )
     settled = {committed: "done", orphan: "pending"}
     assert _statuses(db_conn, [committed, orphan]) == settled
     logged = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert _statuses(db_conn, [committed, orphan]) == settled
     assert [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"] == logged
@@ -187,11 +188,10 @@ async def test_replaced_incarnation_writes_nothing(
     )
     db_conn.commit()
 
-    with (
-        bind_turn_identity(agent, incarnation=incarnation),
-        pytest.raises(RuntimeOwnershipLostError),
-    ):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    with pytest.raises(RuntimeOwnershipLostError):
+        await reconcile_claimed_inbounds_at_startup(
+            aops_pool, saver, agent, incarnation=incarnation
+        )
 
     assert _statuses(db_conn, [committed, orphan]) == {
         committed: "claimed",
@@ -217,7 +217,9 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
     db_conn.commit()
 
     # must not raise: the settlement is not failed by a fenced-out reconcile
-    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, saver, incarnation)
+    await settlement_mod.reconcile_inbounds_after_abort(
+        aops_pool, saver, incarnation, resources=None
+    )
 
     assert _statuses(db_conn, [committed]) == {committed: "claimed"}
     skips = [r for r in loguru_records if r["extra"].get("event") == "host_abort_reconcile_skipped"]
@@ -236,9 +238,10 @@ async def test_next_claim_does_not_re_deliver_the_committed_row(
     orphan = _insert_claimed(db_conn, agent, "orphan")
     saver = await _seed_checkpoint(aops_pool, agent, committed)
 
-    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, saver, incarnation)
-    with bind_turn_identity(agent, incarnation=incarnation):
-        claimed = await claim_inbound_batch(aops_pool, agent)
+    await settlement_mod.reconcile_inbounds_after_abort(
+        aops_pool, saver, incarnation, resources=None
+    )
+    claimed = await claim_inbound_batch(aops_pool, agent, incarnation=incarnation, work=None)
 
     assert [c.id for c in claimed] == [orphan]
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -347,9 +350,7 @@ async def test_no_claimed_rows_never_reads_the_checkpoint(
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
     saver = _CountingSaver(aops_pool)
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 0
     assert not [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
@@ -364,9 +365,7 @@ async def test_only_stale_claims_skip_the_read_and_dead_letter(
     agent = incarnation.agent_id
     stale = _insert_claimed(db_conn, agent, "stale", age=timedelta(days=2))
     saver = _CountingSaver(aops_pool)
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [stale]) == {stale: "done"}
@@ -385,9 +384,7 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
     saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed)
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 1
     assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
@@ -405,9 +402,7 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed, remove_after=True)
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -437,9 +432,7 @@ async def test_pending_write_without_successor_is_reset(
         ],
         str(uuid4()),
     )
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert _statuses(db_conn, [claimed]) == {claimed: "pending"}
 
@@ -468,9 +461,7 @@ async def test_pending_write_with_unrelated_successor_is_reset(
         str(uuid4()),
     )
     await graph.aupdate_state(config, {"halted": True}, as_node="work")
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert _statuses(db_conn, [claimed]) == {claimed: "pending"}
 
@@ -492,9 +483,7 @@ async def test_unresolved_window_falls_back_to_the_full_read(
         return None
 
     monkeypatch.setattr(sideload_mod, "sideload_committed_ids", _unresolved)
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 1
     assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
@@ -510,9 +499,7 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
     saver = await _seed_counting_checkpoint(aops_pool, agent, committed)
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 1
     assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
@@ -534,9 +521,7 @@ async def test_materialized_thread_with_only_pending_write_falls_back(
         [("messages", [HumanMessage(content="pending")])],
         str(uuid4()),
     )
-
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 1
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -703,8 +688,7 @@ async def test_checkpoint_clock_skew_scans_settled_history(
     )
     db_conn.commit()
 
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -730,8 +714,7 @@ async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
         {"configurable": {"thread_id": str(agent)}}, {"halted": True}, as_node="work"
     )
 
-    with bind_turn_identity(agent, incarnation=incarnation):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -754,10 +737,9 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
         raise RuntimeError("history unavailable")
 
     monkeypatch.setattr(sideload_mod, "committed_ids_for_reconcile", _failed_scan)
-    with (
-        bind_turn_identity(agent, incarnation=incarnation),
-        pytest.raises(RuntimeError, match="history unavailable"),
-    ):
-        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+    with pytest.raises(RuntimeError, match="history unavailable"):
+        await reconcile_claimed_inbounds_at_startup(
+            aops_pool, saver, agent, incarnation=incarnation
+        )
 
     assert _statuses(db_conn, [claimed]) == {claimed: "claimed"}

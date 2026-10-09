@@ -50,6 +50,7 @@ def test_child_plugin_binding_failure_keeps_original_boot_error(
         context=exec_context(None).describe(),
         timeout_s=10,
         state=None,
+        incarnation=None,
     )
     env = os.environ | {
         "AVA_HOME": str(home),

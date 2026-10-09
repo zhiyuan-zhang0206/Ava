@@ -11,7 +11,6 @@ from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.db import Database, insert_inbound_message
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import bind_turn_identity
 
 
 def test_request_cannot_prepopulate_reserved_result(
@@ -52,10 +51,9 @@ async def test_acceptance_survives_caller_loss_without_ack_or_retarget(
     owner = await _admit(aops_pool, agent_id)
     first = _command(db_conn, agent_id, "restart")
     second = _command(db_conn, agent_id, "terminate")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        async with async_write_transaction(aops_pool) as conn:
-            intent = await accept_lifecycle_intent(conn, agent_id)
-            assert intent is not None and intent.id == first
+    async with async_write_transaction(aops_pool) as conn:
+        intent = await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
+        assert intent is not None and intent.id == first
     accepted = db_conn.execute(
         "SELECT status,claimed_at,target_generation,target_owner,applied_at,observed_at "
         "FROM inbound_messages WHERE id=%s",
@@ -64,10 +62,9 @@ async def test_acceptance_survives_caller_loss_without_ack_or_retarget(
     assert accepted is not None
     assert accepted[0] == "claimed" and accepted[1] is not None
     assert accepted[2:] == (owner.generation, owner.owner, None, None)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        async with async_write_transaction(aops_pool) as conn:
-            intent = await accept_lifecycle_intent(conn, agent_id)
-            assert intent is not None and intent.id == first
+    async with async_write_transaction(aops_pool) as conn:
+        intent = await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
+        assert intent is not None and intent.id == first
     assert (
         db_conn.execute(
             "SELECT status,claimed_at,target_generation,target_owner,applied_at,observed_at "
@@ -87,12 +84,9 @@ async def test_acceptance_rollback_leaves_no_pointer_or_claim(
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     inbound = _command(db_conn, agent_id, "terminate")
-    with (
-        bind_turn_identity(agent_id, incarnation=owner),
-        pytest.raises(RuntimeError, match="crash"),
-    ):
+    with pytest.raises(RuntimeError, match="crash"):
         async with async_write_transaction(aops_pool) as conn:
-            await accept_lifecycle_intent(conn, agent_id)
+            await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
             raise RuntimeError("crash before acceptance commit")
     assert db_conn.execute(
         "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
@@ -109,9 +103,8 @@ async def test_old_unconditional_writer_still_requires_upgrade_barrier(
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     inbound = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        async with async_write_transaction(aops_pool) as conn:
-            await accept_lifecycle_intent(conn, agent_id)
+    async with async_write_transaction(aops_pool) as conn:
+        await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (inbound,))
         assert db_conn.execute(
@@ -125,9 +118,8 @@ async def test_pending_pointer_blocks_retention_and_foreign_agent_reference(
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     inbound = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        async with async_write_transaction(aops_pool) as conn:
-            await accept_lifecycle_intent(conn, agent_id)
+    async with async_write_transaction(aops_pool) as conn:
+        await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
     with pytest.raises(psycopg.errors.ForeignKeyViolation), db_conn.transaction():
         db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (inbound,))
     other = _agent(db_conn)
@@ -143,11 +135,10 @@ async def test_replacement_does_not_inherit_accepted_target(
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     inbound = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        async with async_write_transaction(aops_pool) as conn:
-            intent = await accept_lifecycle_intent(conn, agent_id)
-            assert intent is not None
-            assert not await settle_superseded_intent(conn, intent)
+    async with async_write_transaction(aops_pool) as conn:
+        intent = await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
+        assert intent is not None
+        assert not await settle_superseded_intent(conn, intent)
     replacement = uuid4()
     db_conn.execute(
         "UPDATE agents_meta SET runtime_generation=%s WHERE id=%s", (replacement, agent_id)

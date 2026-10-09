@@ -57,7 +57,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
     result, _ = await _run_in_subprocess(
         database,
         f"from pathlib import Path; Path({str(marker)!r}).touch()",
-        exec_context(target.agent_id),
+        exec_context(target.agent_id, incarnation=target),
         asyncio.Event(),
         30,
         exec_dir=tmp_path,

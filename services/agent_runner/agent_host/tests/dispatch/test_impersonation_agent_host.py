@@ -39,6 +39,7 @@ def _session(status: str = "active", **values: Any) -> dict[str, Any]:
 async def test_held_host_wake_returns_before_runtime_or_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from base.native_process.turn_identity import HostedTurnResources
     from services.agent_runner.agent_host.host import AgentHost
     from services.agent_runner.agent_host.runtime import _StoredConfig
 
@@ -78,7 +79,7 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     monkeypatch.setattr("services.agent_runner.agent_host.host.admit_hosted_runtime", admission)
     monkeypatch.setattr("services.agent_runner.agent_host.host.settle_hosted_runtime", settlement)
     # No admission slot or graph exists: touching either is a test failure.
-    await host._run_turn(42)
+    await host._run_turn(42, resources=HostedTurnResources())
     host._runtime_for.assert_not_awaited()
     admission.assert_awaited_once()
     settlement.assert_awaited_once()
@@ -112,7 +113,7 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
     monkeypatch.setattr("services.agent_runner.agent_host.host.apply_hosted_lifecycle", apply)
     monkeypatch.setattr("services.agent_runner.agent_host.host.settle_hosted_runtime", AsyncMock())
     with pytest.raises(RuntimeError, match="held control claim returned an unaccepted command"):
-        await host._run_held_controls(42, "idling")
+        await host._run_held_controls(42, "idling", resources=None)
     apply.assert_not_awaited()
 
 
@@ -147,8 +148,10 @@ async def test_held_controls_supervise_the_active_lease_relay(
         "services.agent_runner.agent_host.host.apply_hosted_lifecycle", AsyncMock(return_value=None)
     )
     monkeypatch.setattr("services.agent_runner.agent_host.host.settle_hosted_runtime", AsyncMock())
-    await host._run_held_controls(42, "idling")
-    supervise.assert_awaited_once_with(host._db, host._bus, session, 42, host.relays)
+    await host._run_held_controls(42, "idling", resources=None)
+    supervise.assert_awaited_once_with(
+        host._db, host._bus, session, 42, host.relays, incarnation=owner
+    )
 
 
 def _relay_session(

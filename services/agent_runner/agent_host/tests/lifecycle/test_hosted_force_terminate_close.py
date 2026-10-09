@@ -14,6 +14,10 @@ receipt); an observed, foreign-target, or detached command — or any other
 exception — still raises (fail-closed, unchanged).
 """
 
+import asyncio
+import time
+from dataclasses import replace
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -21,6 +25,8 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.exec._subprocess import _run_in_subprocess
+from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
@@ -28,9 +34,9 @@ from base.agents.incarnation.hosted_force import install_hosted_force
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.settlement import close_hosted_turn
+from tests.fixtures.pin_agent import exec_context as ctx_of
 
 _FORCE_ERROR = "Native runtime no longer owns this agent"
 
@@ -86,7 +92,10 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
 ) -> None:
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     publisher = Mock()
     commands: list[int] = []
 
@@ -101,9 +110,9 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     graph.ainvoke = AsyncMock(side_effect=graph_return)
     host = _host(graph, aops_pool)
     host._runtimes[agent_id] = Mock()
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        outcome = await host._invoke_until_done(
-            agent_id,
+    outcome = await host._invoke_until_done(
+        agent_id,
+        replace(
             AvaContext(
                 ops_pool=aops_pool,
                 event_publisher=publisher,
@@ -111,7 +120,11 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
             ),
-        )
+            original_incarnation=incarnation,
+            hosted_resources=None,
+            native_work=None,
+        ),
+    )
 
     assert outcome.truncated and not outcome.crashed and not outcome.exited
     assert graph.ainvoke.await_count == 1  # the force landed mid-invocation
@@ -121,7 +134,14 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     # The classify does NOT consume the command: the pump's own boundary
     # observes it, and the settle boundary leaves the row as the force left it.
     await close_hosted_turn(
-        aops_pool, aops_pool, Database.from_settings(), event_bus, Mock(), incarnation, outcome
+        aops_pool,
+        aops_pool,
+        Database.from_settings(),
+        event_bus,
+        Mock(),
+        incarnation,
+        outcome,
+        resources=None,
     )
     assert db_conn.execute(
         "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)
@@ -144,20 +164,27 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
     the race rather than claiming the ordering is routine.
     """
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     _apply_force(db_conn, agent_id)
     _resurrect_shape(db_conn, agent_id)
     host = _host(_raising_graph(), aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        outcome = await host._invoke_until_done(
-            agent_id,
+    outcome = await host._invoke_until_done(
+        agent_id,
+        replace(
             AvaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
             ),
-        )
+            original_incarnation=incarnation,
+            hosted_resources=None,
+            native_work=None,
+        ),
+    )
     assert outcome.truncated and not outcome.crashed
 
 
@@ -166,20 +193,27 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
 ) -> None:
     """Site host.py:683 — the turn starts already under the applied force."""
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     _apply_force(db_conn, agent_id)
     graph = _raising_graph()
     host = _host(graph, aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        outcome = await host._invoke_until_done(
-            agent_id,
+    outcome = await host._invoke_until_done(
+        agent_id,
+        replace(
             AvaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
             ),
-        )
+            original_incarnation=incarnation,
+            hosted_resources=None,
+            native_work=None,
+        ),
+    )
     assert outcome.truncated and not outcome.crashed
     assert graph.ainvoke.await_count == 0  # the settle probe refused first
 
@@ -189,19 +223,26 @@ async def test_a_cli_style_user_force_closes_quietly_too(
 ) -> None:
     """No source whitelist: the durable shape, not the caller, classifies."""
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     _apply_force(db_conn, agent_id, source="user")
     host = _host(_raising_graph(), aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        outcome = await host._invoke_until_done(
-            agent_id,
+    outcome = await host._invoke_until_done(
+        agent_id,
+        replace(
             AvaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
             ),
-        )
+            original_incarnation=incarnation,
+            hosted_resources=None,
+            native_work=None,
+        ),
+    )
     assert outcome.truncated and not outcome.crashed
 
 
@@ -212,21 +253,27 @@ async def test_the_held_wake_force_guard_stops_quietly(
 ) -> None:
     """Site host.py:371 (held-controls probe) — the wake must not crash."""
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     _apply_force(db_conn, agent_id)
     monkeypatch.setattr(
         "services.agent_runner.agent_host.host.admit_hosted_runtime",
         AsyncMock(return_value=incarnation),
     )
     host = _host(_raising_graph(), aops_pool)
-    await host._run_held_controls(agent_id, "running")  # must not raise
+    await host._run_held_controls(agent_id, "running", resources=None)  # must not raise
 
 
 async def test_an_observed_force_still_crashes(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     command = _apply_force(db_conn, agent_id)
     db_conn.execute(
         "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' WHERE id=%s",
@@ -235,14 +282,19 @@ async def test_an_observed_force_still_crashes(
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
     host = _host(_raising_graph(), aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+    with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
-            AvaContext(
-                ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
-                db=Database.from_settings(),
-                bus=EventBus.from_settings(),
+            replace(
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
+                original_incarnation=incarnation,
+                hosted_resources=None,
+                native_work=None,
             ),
         )
 
@@ -251,19 +303,27 @@ async def test_a_foreign_incarnation_force_still_crashes(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     command = _apply_force(db_conn, agent_id)
     db_conn.execute("UPDATE inbound_messages SET target_owner=%s WHERE id=%s", (uuid4(), command))
     db_conn.commit()
     host = _host(_raising_graph(), aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+    with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
-            AvaContext(
-                ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
-                db=Database.from_settings(),
-                bus=EventBus.from_settings(),
+            replace(
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
+                original_incarnation=incarnation,
+                hosted_resources=None,
+                native_work=None,
             ),
         )
 
@@ -272,20 +332,28 @@ async def test_a_detached_pointer_still_crashes(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     command = _apply_force(db_conn, agent_id)
     assert command
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
     host = _host(_raising_graph(), aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+    with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
-            AvaContext(
-                ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
-                db=Database.from_settings(),
-                bus=EventBus.from_settings(),
+            replace(
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
+                original_incarnation=incarnation,
+                hosted_resources=None,
+                native_work=None,
             ),
         )
 
@@ -294,7 +362,10 @@ async def test_a_non_impersonation_exception_still_crashes(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
 
     async def graph_return(*args: object, **kwargs: object) -> dict[str, object]:
         _apply_force(db_conn, agent_id)
@@ -303,14 +374,19 @@ async def test_a_non_impersonation_exception_still_crashes(
     graph = Mock()
     graph.ainvoke = AsyncMock(side_effect=graph_return)
     host = _host(graph, aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError):
         await host._invoke_until_done(
             agent_id,
-            AvaContext(
-                ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
-                db=Database.from_settings(),
-                bus=EventBus.from_settings(),
+            replace(
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
+                original_incarnation=incarnation,
+                hosted_resources=None,
+                native_work=None,
             ),
         )
 
@@ -326,7 +402,10 @@ async def test_a_superseded_older_force_cannot_classify(
     shape.
     """
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     _apply_force(db_conn, agent_id)  # applied + unobserved, pointer -> this force
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
@@ -339,14 +418,19 @@ async def test_a_superseded_older_force_cannot_classify(
     )
     db_conn.commit()
     host = _host(_raising_graph(), aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+    with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
-            AvaContext(
-                ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
-                db=Database.from_settings(),
-                bus=EventBus.from_settings(),
+            replace(
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
+                original_incarnation=incarnation,
+                hosted_resources=None,
+                native_work=None,
             ),
         )
 
@@ -356,20 +440,81 @@ async def test_a_lapsed_lease_still_crashes(
 ) -> None:
     """Renewal is the host beat's job; a truly expired lease stays fail-closed."""
     agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    incarnation = await _admit(
+        aops_pool,
+        agent_id,
+    )
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at = now() - interval '5 minutes' WHERE id=%s",
         (agent_id,),
     )
     db_conn.commit()
     host = _host(_raising_graph(), aops_pool)
-    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+    with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
-            AvaContext(
-                ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
-                db=Database.from_settings(),
-                bus=EventBus.from_settings(),
+            replace(
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
+                original_incarnation=incarnation,
+                hosted_resources=None,
+                native_work=None,
             ),
         )
+
+
+async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    from agent.graph.exec._result import _ExecCrashed
+    from base.native_process.exec_domain import ExecProcessDomain
+    from base.native_process.turn_identity import HostedTurnResources
+
+    agent_id = _agent(db_conn)
+    incarnation = await _admit(aops_pool, agent_id)
+    original_close = ExecProcessDomain.close_confirmed
+
+    def failed_close(domain: ExecProcessDomain, deadline: float) -> None:
+        original_close(domain, deadline)
+        raise PermissionError("injected unverifiable domain closure")
+
+    monkeypatch.setattr(ExecProcessDomain, "close_confirmed", failed_close)
+    scope = HostedTurnResources()
+    ctx = replace(ctx_of(agent_id), original_incarnation=incarnation, hosted_resources=scope)
+    outcome, _ = await _run_in_subprocess(
+        database,
+        "print('resource-proof')",
+        ctx,
+        asyncio.Event(),
+        10,
+        exec_dir=tmp_path,
+        accumulation_max_chars=1_000_000,
+    )
+    assert isinstance(outcome, _ExecCrashed)
+    assert "teardown failure" in outcome.output
+    assert len(scope.unresolved) == 1
+    path, domain = next(iter(scope.unresolved.items()))
+    assert path.exists() and isinstance(domain, ExecProcessDomain)
+    assert not scope.complete(path, object())
+    assert scope.unresolved[path] is domain
+    assert domain.proc.returncode is None  # unresolved closure must not reap
+    # A formatted tool failure cannot become a positive lifecycle barrier.
+    assert (
+        await hosted.apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=scope)
+        is None
+    )
+    assert not await hosted.settle_hosted_runtime(
+        aops_pool, incarnation, bus=event_bus, resources=scope
+    )
+    assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
+    original_close(domain, time.monotonic() + 5)
+    domain.proc.wait(timeout=5)

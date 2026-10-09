@@ -1,5 +1,6 @@
 """A completed idle invocation settles before a newly queued chat is claimed."""
 
+from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -13,7 +14,6 @@ from base.agents.context import AvaContext
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.invocation import PendingWorkResult
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
@@ -94,8 +94,10 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
     monkeypatch.setattr(host_module, "run_invocation_with_stall_guard", counted_invoke)
     monkeypatch.setattr(host_module, "flush_checkpoint", flushing)
     monkeypatch.setattr(host_module, "settle_checkpoint", settling)
-    with bind_turn_identity(agent, incarnation=incarnation):
-        outcome = await host._invoke_until_done(agent, ctx)
+    outcome = await host._invoke_until_done(
+        agent,
+        replace(ctx, original_incarnation=incarnation, hosted_resources=None, native_work=None),
+    )
     assert not outcome.crashed
     assert queued is not None
     assert invocations == 1
@@ -137,8 +139,11 @@ async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
         checkpoint_flushed=True,
         trace_attached=True,
     )
-    with bind_turn_identity(agent, incarnation=incarnation):
-        outcome = await host._finish_completed_invocation(agent, ctx, pending)
+    outcome = await host._finish_completed_invocation(
+        agent,
+        replace(ctx, original_incarnation=incarnation, hosted_resources=None, native_work=None),
+        pending,
+    )
     assert outcome is not None and not outcome.exited
     assert agent not in host._runtimes
     assert pending.lifecycle_command_id is None

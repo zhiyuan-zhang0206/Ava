@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 import redis.asyncio as aredis
@@ -14,6 +15,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from base.agents.context import AvaContext
 from base.events.live.publisher import AgentEventPublisher
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 from ..invocation import driver
 from ..runtime import TurnOutcome
@@ -74,10 +76,6 @@ async def _drive(
     publisher: AgentEventPublisher,
     invoke: Callable[[int, AvaContext], Awaitable[TurnOutcome]],
 ) -> TurnOutcome:
-    def incarnation(_agent: int) -> MagicMock:
-        return MagicMock()
-
-    monkeypatch.setattr(driver, "current_incarnation", incarnation)
     monkeypatch.setattr(driver, "run_compact", AsyncMock(return_value=True))
     monkeypatch.setattr(driver, "settle_original_restart", AsyncMock(return_value=False))
     return await driver.drive_context(
@@ -85,7 +83,11 @@ async def _drive(
         MagicMock(),
         MagicMock(),
         42,
-        AvaContext(event_publisher=publisher, bus=MagicMock()),
+        AvaContext(
+            event_publisher=publisher,
+            bus=MagicMock(),
+            original_incarnation=RuntimeIncarnation(42, uuid4(), uuid4()),
+        ),
         MagicMock(),
         asyncio.Lock(),
         invoke,

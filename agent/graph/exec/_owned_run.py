@@ -41,8 +41,7 @@ from base.agents.incarnation.resources import (
 from base.db import Database
 from base.native_process.exec_domain import KILL_GRACE_S
 from base.native_process.exec_kill_notice import read_notice
-from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from base.native_process.turn_identity import current_hosted_resources
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import exec_run_dir
 
 from ._result import _ExecCrashed, _ExecResult
@@ -50,10 +49,12 @@ from ._stream import ExecOutputChunkPublisher, StreamingTextIO
 from .protocol import ResultPayload, write_request
 
 
-def managed_target(db: Database, agent_id: int | None) -> RuntimeIncarnation | None:
+def managed_target(
+    db: Database, agent_id: int | None, *, incarnation: RuntimeIncarnation | None
+) -> RuntimeIncarnation | None:
     if agent_id is None:
         return None
-    target = current_incarnation(agent_id)
+    target = None if incarnation is None else incarnation.require_agent(agent_id)
     if target is None:
         return None
     with db.write_transaction() as conn:
@@ -138,7 +139,12 @@ class _OwnedRun:
         self.context_path = directory / "owner.json"
         deadline = datetime.now(UTC) + timedelta(seconds=timeout)
         write_request(
-            self.request, code=code, context=context.describe(), timeout_s=timeout, state=state
+            self.request,
+            code=code,
+            context=context.describe(),
+            timeout_s=timeout,
+            state=state,
+            incarnation=context.original_incarnation,
         )
         self.allocation = ExecAllocation(
             request=self.request_id,
@@ -155,7 +161,7 @@ class _OwnedRun:
             allocation=self.allocation,
         )
         publish_owner_message(self.context_path, self.context)
-        self.scope = current_hosted_resources()
+        self.scope = context.hosted_resources
         if self.scope is not None:
             self.scope.unresolved[self.request] = None
         self.stream = StreamingTextIO(max_chars=accumulation_max_chars)

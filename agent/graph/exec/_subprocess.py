@@ -34,7 +34,7 @@ from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_
 from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
-from base.native_process.turn_identity import current_hosted_resources
+from base.native_process.turn_identity import HostedTurnResources
 from base.paths import exec_run_dir
 
 from . import _process
@@ -302,6 +302,7 @@ async def _finish_failed_run(
     reader: threading.Thread | None,
     *,
     request_paths: tuple[Path, Path] | None = None,
+    resources: HostedTurnResources | None,
 ) -> bool:
     """Settle an interrupted run without replacing its primary failure."""
     if root_exit_task is None or reap_task is None or domain_close is None:
@@ -314,7 +315,9 @@ async def _finish_failed_run(
         )
     _process.annotate_original_failure(original, failures)
     if failures and request_paths is not None:
-        _retain_late_reader_completion(_process.ExecTeardownError(failures), *request_paths, reader)
+        _retain_late_reader_completion(
+            _process.ExecTeardownError(failures), *request_paths, reader, resources=resources
+        )
     return not failures
 
 
@@ -322,7 +325,14 @@ def _write_request_failure(
     path: Path, code: str, context: AvaContext, timeout: float, state: dict[str, Any] | None
 ) -> _ExecCrashed | None:
     try:
-        write_request(path, code=code, context=context.describe(), timeout_s=timeout, state=state)
+        write_request(
+            path,
+            code=code,
+            context=context.describe(),
+            timeout_s=timeout,
+            state=state,
+            incarnation=context.original_incarnation,
+        )
     except BaseException as exc:
         return _ExecCrashed(output=f"exec subprocess request could not be written: {exc}", exc=exc)
     return None
@@ -334,8 +344,9 @@ def _finish_request_evidence(
     expected: object | None,
     *,
     settled: bool,
+    resources: HostedTurnResources | None,
 ) -> None:
-    scope = current_hosted_resources()
+    scope = resources
     if scope is not None:
         if not settled:
             return
@@ -351,6 +362,8 @@ def _retain_late_reader_completion(
     request: Path,
     result: Path,
     reader: threading.Thread | None,
+    *,
+    resources: HostedTurnResources | None,
 ) -> None:
     """A failed bounded join may later finish; other failed stages stay unknown.
 
@@ -358,7 +371,7 @@ def _retain_late_reader_completion(
     completed. A reader-only failure therefore positively proves close/root/reap.
     This callback waits for that same reader, never retries a released POSIX pgid.
     """
-    scope = current_hosted_resources()
+    scope = resources
     if scope is None or reader is None or not failure.failures:
         return
     if any(item.stage != "reader_join" for item in failure.failures):
@@ -407,7 +420,12 @@ async def _run_in_subprocess(
         return guard_failure, None
     from ._owned_run import managed_target, run_owned
 
-    target = await asyncio.to_thread(managed_target, db, context.require_identity().agent_id)
+    target = await asyncio.to_thread(
+        managed_target,
+        db,
+        context.require_identity().agent_id,
+        incarnation=context.original_incarnation,
+    )
     if target is not None:
         return await run_owned(
             db,
@@ -478,7 +496,7 @@ async def _run_legacy_subprocess(
     reap_task: asyncio.Task[int] | None = None
     domain_close: _process.DomainCloseOwner | None = None
     reader_join_task: asyncio.Task[None] | None = None
-    resource_scope = current_hosted_resources()
+    resource_scope = context.hosted_resources
     if resource_scope is not None:
         # Register before user code can start, not after the first await.
         resource_scope.unresolved[request_path] = None
@@ -562,10 +580,13 @@ async def _run_legacy_subprocess(
             reader_join_task,
             reader,
             request_paths=(request_path, result_path),
+            resources=resource_scope,
         )
         raise
     except _process.ExecTeardownError as exc:
-        _retain_late_reader_completion(exc, request_path, result_path, reader)
+        _retain_late_reader_completion(
+            exc, request_path, result_path, reader, resources=resource_scope
+        )
         # Cleanup failure is an exec outcome, not an agent-process failure.
         return (
             _ExecCrashed(
@@ -588,10 +609,13 @@ async def _run_legacy_subprocess(
             reader_join_task,
             reader,
             request_paths=(request_path, result_path),
+            resources=resource_scope,
         )
         raise
     finally:
-        _finish_request_evidence(request_path, result_path, domain, settled=resources_settled)
+        _finish_request_evidence(
+            request_path, result_path, domain, settled=resources_settled, resources=resource_scope
+        )
 
 
 def _read_result_envelope(

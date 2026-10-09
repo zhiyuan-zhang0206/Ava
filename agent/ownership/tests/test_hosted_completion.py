@@ -17,7 +17,6 @@ from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import bind_turn_identity
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
@@ -30,25 +29,24 @@ async def test_completion_requires_original_applied_and_observed_receipt(
     agent = _agent(db_conn)
     original = await _admit(aops_pool, agent)
     command = _command(db_conn, agent, kind)
-    with bind_turn_identity(agent, incarnation=original):
-        async with async_write_transaction(aops_pool) as conn:
-            await accept_lifecycle_intent(conn, agent)
-        assert await pending_hosted_lifecycle_id(aops_pool, original) == command
-        # A graph's exit flag or mutable status does not certify this receipt.
-        assert await completed_hosted_lifecycle_kind(aops_pool, original, command) is None
-        assert (
-            await apply_hosted_lifecycle(
-                aops_pool, original, bus=event_bus, expected_command_id=command + 1
-            )
-            is None
+    async with async_write_transaction(aops_pool) as conn:
+        await accept_lifecycle_intent(conn, agent, incarnation=original)
+    assert await pending_hosted_lifecycle_id(aops_pool, original) == command
+    # A graph's exit flag or mutable status does not certify this receipt.
+    assert await completed_hosted_lifecycle_kind(aops_pool, original, command) is None
+    assert (
+        await apply_hosted_lifecycle(
+            aops_pool, original, bus=event_bus, expected_command_id=command + 1, resources=None
         )
-        assert await pending_hosted_lifecycle_id(aops_pool, original) == command
-        assert (
-            await apply_hosted_lifecycle(
-                aops_pool, original, bus=event_bus, expected_command_id=command
-            )
-            == kind
+        is None
+    )
+    assert await pending_hosted_lifecycle_id(aops_pool, original) == command
+    assert (
+        await apply_hosted_lifecycle(
+            aops_pool, original, bus=event_bus, expected_command_id=command, resources=None
         )
+        == kind
+    )
     assert await completed_hosted_lifecycle_kind(aops_pool, original, command) == kind
     if kind == "restart":
         replacement = await _admit(aops_pool, agent)
@@ -72,16 +70,13 @@ async def test_completion_requires_original_applied_and_observed_receipt(
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 async def test_receipt_does_not_infer_completion_from_replacement_status(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    kind: str,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, kind: str
 ) -> None:
     agent = _agent(db_conn)
     original = await _admit(aops_pool, agent)
     command = _command(db_conn, agent, kind)
-    with bind_turn_identity(agent, incarnation=original):
-        async with async_write_transaction(aops_pool) as conn:
-            await accept_lifecycle_intent(conn, agent)
+    async with async_write_transaction(aops_pool) as conn:
+        await accept_lifecycle_intent(conn, agent, incarnation=original)
     db_conn.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user',"
         "runtime_generation=%s,runtime_owner=%s WHERE id=%s",

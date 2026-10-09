@@ -93,7 +93,9 @@ async def _live_member(
         aops_pool, agent, machine_name(), owner, expected_from="idling", db=Database.from_settings()
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=EventBus.from_settings())
+    assert await settle_hosted_runtime(
+        aops_pool, incarnation, bus=EventBus.from_settings(), resources=None
+    )
     return agent
 
 

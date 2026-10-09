@@ -1,6 +1,7 @@
 """Claim-node test support shared by the topic files: agent status writes and waits, the hosted-owner fixture, the committed-publish filter and the compact-tail reader."""
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -9,6 +10,7 @@ import pytest
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
+import ava
 from base.db import Database
 from tests.fixtures.units import spawn_agent
 
@@ -81,15 +83,19 @@ async def running_agent(aops_pool: AsyncConnectionPool, database: Database):
 
     from agent.ownership.hosted import admit_hosted_runtime
     from base.cluster.machine import machine_name
-    from base.native_process.turn_identity import bind_turn_identity
 
     agent_id = spawn_agent()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling", db=database
+        aops_pool,
+        agent_id,
+        machine_name(),
+        uuid4(),
+        expected_from="idling",
+        db=database,
     )
     assert incarnation is not None
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        yield lambda: agent_id
+    ava.context = replace(ava.context, original_incarnation=incarnation)
+    yield lambda: agent_id
 
 
 def _compact_tail(update):

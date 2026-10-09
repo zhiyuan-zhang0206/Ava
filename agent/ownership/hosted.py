@@ -39,6 +39,7 @@ from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from base.paths import ava_home
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
@@ -96,6 +97,7 @@ async def apply_hosted_lifecycle(
     bus: EventBus,
     kill_shell_sessions: Callable[[int], None] | None = None,
     expected_command_id: int | None = None,
+    resources: HostedTurnResources | None,
 ) -> str | None:
     """Apply after the existing single-flight continuation has safely ended.
 
@@ -113,7 +115,7 @@ async def apply_hosted_lifecycle(
     """
     from base.native_process.turn_identity import hosted_resources_settled
 
-    if not hosted_resources_settled():
+    if not hosted_resources_settled(resources):
         return None
     async with async_write_transaction(pool) as conn:
         from base.agents.incarnation.resource_admission import require_resources_closed_async
@@ -580,6 +582,7 @@ async def settle_hosted_runtime(
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
+    resources: HostedTurnResources | None,
 ) -> bool:
     """Settle an ordinary turn; only durable lifecycle apply releases ownership.
 
@@ -598,7 +601,7 @@ async def settle_hosted_runtime(
     """
     from base.native_process.turn_identity import hosted_resources_settled
 
-    if not hosted_resources_settled():
+    if not hosted_resources_settled(resources):
         return False
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
@@ -735,6 +738,7 @@ async def settle_and_stamp_turn(
     bus: EventBus,
     exited: bool,
     crashed: bool,
+    resources: HostedTurnResources | None,
 ) -> TurnSettlement:
     """Close one hosted turn: stamp the corpse marker first, then settle.
 
@@ -760,7 +764,7 @@ async def settle_and_stamp_turn(
             )
     settled = False
     if not exited:
-        settled = await settle_hosted_runtime(pool, incarnation, bus=bus)
+        settled = await settle_hosted_runtime(pool, incarnation, bus=bus, resources=resources)
     return TurnSettlement(stamp=stamp, settled=settled)
 
 

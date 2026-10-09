@@ -37,12 +37,12 @@ from agent.graph.interrupt import ModelInterruptedError, interruptible_model, su
 from agent.graph.prompt.compaction import compact_contract
 from agent.hooks import Hook
 from agent.hooks.compact_anchor import SummaryText, closing_of, closing_request_of
+from agent.hooks.compact_anchor import compose_summary_message as compose_summary_message
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.hooks.understanding_chunks import await_snapshot, enqueue_closing_chunk
 from agent.llm.cache import ainvoke_with_cache_retry
 from agent.messages import (
-    COMPACT_SUMMARY_HEADER,
     NoteTag,
     system_note_message,
     tail_has_agent_inbound,
@@ -77,16 +77,6 @@ section filled, "(none)" only when one genuinely has nothing. Refer to others as
 "the user" or "agent N". If a summary already appears above, rewrite it in place
 — one flat, updated summary, never a summary nested inside a summary.
 """
-
-
-def compose_summary_message(summary: str) -> str:
-    """The header + the summary, as the single text injected on the agent's
-    behalf when its context is replaced. Shared by every compact path so the
-    framing is identical across forced / command / spontaneous compaction.
-    The header itself (with the rationale for its wording) lives in
-    `agent/messages/__init__.py:COMPACT_SUMMARY_HEADER` — the read-side classifier
-    (base/agents/history/context_breakdown.py) keys on it too."""
-    return f"{COMPACT_SUMMARY_HEADER}\n\n{summary}"
 
 
 # Compaction summary monitoring + retry knobs.
@@ -565,7 +555,12 @@ async def auto_compact_for_llm(
     compact_run_id = emit_compact_started(publisher, agent_id, mode=CompactionMode.AUTO)
 
     try:
-        async with subscribe_interrupt(runtime.context.ops_pool, agent_id) as interrupted:
+        async with subscribe_interrupt(
+            runtime.context.ops_pool,
+            agent_id,
+            incarnation=runtime.context.original_incarnation,
+            work=runtime.context.native_work,
+        ) as interrupted:
             summary = await interruptible_model(
                 _auto_compact_summary(
                     list(state.messages),

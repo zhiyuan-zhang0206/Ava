@@ -1,13 +1,16 @@
 """The claim node after an ops resurrect: the settled prior terminate does not swallow the chat the successor must process. Integration: it drives ops.agents.wake.resurrect_agent and the agent's hosted claim, which are peers."""
 
 from collections.abc import Callable
+from dataclasses import replace
 
 import psycopg
 import pytest
 from langchain_core.messages import SystemMessage
 from langgraph.graph import END
+from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+import ava
 from agent.graph import claim_node
 from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
@@ -23,15 +26,19 @@ async def running_agent(aops_pool: AsyncConnectionPool, database: Database):
 
     from agent.ownership.hosted import admit_hosted_runtime
     from base.cluster.machine import machine_name
-    from base.native_process.turn_identity import bind_turn_identity
 
     agent_id = spawn_agent()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling", db=database
+        aops_pool,
+        agent_id,
+        machine_name(),
+        uuid4(),
+        expected_from="idling",
+        db=database,
     )
     assert incarnation is not None
-    with bind_turn_identity(agent_id, incarnation=incarnation):
-        yield lambda: agent_id
+    ava.context = replace(ava.context, original_incarnation=incarnation)
+    yield lambda: agent_id
 
 
 async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
@@ -48,8 +55,6 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
 
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
     from base.cluster.machine import machine_name
-    from base.native_process.runtime_incarnation import current_incarnation
-    from base.native_process.turn_identity import bind_turn_identity
     from ops.agents.wake import resurrect_agent
 
     tid = running_agent()
@@ -64,11 +69,11 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         )
     ).goto == END
 
-    old = current_incarnation(
-        tid,
-    )
+    old = ava.context.original_incarnation
     assert old is not None
-    assert await apply_hosted_lifecycle(aops_pool, old, bus=event_bus) == "terminate"
+    assert (
+        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None) == "terminate"
+    )
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (stop,)
     ).fetchone() == ("done", True)
@@ -85,18 +90,24 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     assert launch is not None
     db_conn.commit()
     successor = await admit_hosted_runtime(
-        aops_pool, tid, machine_name(), uuid4(), expected_from="idling", db=database
+        aops_pool,
+        tid,
+        machine_name(),
+        uuid4(),
+        expected_from="idling",
+        db=database,
     )
     assert successor is not None
 
-    with bind_turn_identity(tid, incarnation=successor):
-        cmd = await claim_node(
-            AgentState(messages=[SystemMessage(content="sys")]),
-            _make_runtime(ops_pool=aops_pool),
-            _config(
-                tid,
-            ),
-        )
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        Runtime(
+            context=replace(
+                _make_runtime(ops_pool=aops_pool).context, original_incarnation=successor
+            )
+        ),
+        _config(tid),
+    )
 
     assert cmd.goto == "before_llm"
     assert cmd.update["halted"] is False  # type: ignore[index]

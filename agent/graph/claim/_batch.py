@@ -6,10 +6,15 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.inbound import lock_inbound_owner
 from base.db.transaction import async_write_transaction
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 async def _defer_chats_to_pending(
-    pool: AsyncConnectionPool | None, agent_id: int, chat_ids: list[int]
+    pool: AsyncConnectionPool | None,
+    agent_id: int,
+    chat_ids: list[int],
+    *,
+    incarnation: RuntimeIncarnation | None,
 ) -> None:
     """Revert co-batched chat inbounds to 'pending' so a compaction is a clean wipe.
 
@@ -26,7 +31,7 @@ async def _defer_chats_to_pending(
     if pool is None or not chat_ids:
         return
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await lock_inbound_owner(conn, agent_id)
+        await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
         await cur.execute(
             "UPDATE inbound_messages SET status = 'pending', claimed_at = NULL "
             "WHERE id = ANY(%s) AND agent_id = %s AND kind = 'chat' AND status = 'claimed'",

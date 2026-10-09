@@ -36,10 +36,13 @@ from typing import TYPE_CHECKING, Any, Self
 
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
+from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.tally import SdkCallTally
 from base.lm.call import ProviderCallBinding
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 
 # The handle types are annotations only: the exec child builds this same type from its request
 # envelope, and its start must not import psycopg / redis / langchain for handles it never holds.
@@ -120,6 +123,21 @@ class AvaContext:
     """Who this run acts as. The host sets it for a turn it serves; the exec child and a launched
     script get theirs from a description, an external controller's carries its lease."""
 
+    original_incarnation: RuntimeIncarnation | None = None
+    """The exact admission this run received; never refreshed from a replacement row."""
+
+    native_work: NativeWorkTarget | None = None
+    """The original invocation target, retained across database recovery."""
+
+    hosted_resources: HostedTurnResources | None = None
+    """The actual turn's domains and late completions, shared by copied contexts."""
+
+    def require_original_incarnation(self, agent_id: int) -> RuntimeIncarnation:
+        """Require an explicit original admission for an owned native operation."""
+        if self.original_incarnation is None:
+            raise RuntimeError("this AvaContext carries no original RuntimeIncarnation")
+        return self.original_incarnation.require_agent(agent_id)
+
     clients: ClientSet = field(default_factory=ClientSet)
     """The connections this run's process holds. Built on first use; the owner of the context
     (the exec child, a launched script, an attachment, the host) closes them."""
@@ -156,10 +174,17 @@ class AvaContext:
         }
 
     @classmethod
-    def from_description(cls, description: dict[str, Any], *, clients: ClientSet) -> Self:
-        """Rebuild identity with clients explicitly supplied by the child's composition root."""
+    def from_description(
+        cls,
+        description: dict[str, Any],
+        *,
+        clients: ClientSet,
+        original_incarnation: RuntimeIncarnation | None = None,
+    ) -> Self:
+        """Rebuild identity with clients and original admission supplied by the child's root."""
         return cls(
             identity=AgentIdentity.from_description(description["identity"]),
+            original_incarnation=original_incarnation,
             clients=clients,
         )
 
