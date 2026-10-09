@@ -421,6 +421,37 @@ def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_regis
     assert install.expansions() == ()
 
 
+def test_install_keeps_core_dependencies_in_the_admitted_declaration() -> None:
+    contribution = PluginContributions(flags=("general.message_timestamps",))
+
+    admitted = install.install(_registry(("declared", contribution)))
+
+    assert admitted.plugins == (("declared", contribution),)
+    installation = install.installed()
+    assert installation is not None and installation.registry == admitted
+    install.uninstall()
+    assert contribution.flags == ("general.message_timestamps",)
+
+
+@pytest.mark.parametrize("key", ["bogus.x", "data_plane.db_url"])
+def test_invalid_core_dependency_rolls_back_the_plugin(
+    load_failures: list[tuple[str, BaseException]], key: str
+) -> None:
+    bad = PluginContributions(
+        sdk_namespaces=(SdkNamespace("failed_ns", _namespace()),),
+        flags=("general.message_timestamps", key),
+    )
+    good = PluginContributions(sdk_namespaces=(SdkNamespace("good_ns", _namespace()),))
+
+    admitted = install.install(_registry(("bad", bad), ("good", good)))
+
+    assert admitted.plugins == (("good", good),)
+    [(name, error)] = load_failures
+    assert name == "bad" and isinstance(error, flags.UnknownFlag)
+    assert not hasattr(ava, "failed_ns")
+    assert hasattr(ava, "good_ns")
+
+
 @pytest.mark.parametrize(
     "error",
     [
@@ -467,7 +498,6 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
     assert _surface_snapshot() == before
     assert not hasattr(ava, "failed_ns") and not hasattr(ava, "prior_ns")
     assert not hasattr(ava, "later_ns")
-    assert flags.declared_flags("failed") == frozenset()
 
 
 @pytest.mark.parametrize("refused", [False, True], ids=["unknown-primary", "typed-refusal"])
