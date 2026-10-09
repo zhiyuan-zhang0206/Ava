@@ -171,3 +171,51 @@ def test_compatibility_wrapper_dispatches_after_commit_and_wakes_only_first_inse
                 publish_wake=wake,
             )
     assert observed == ["audit", "wake"]
+
+
+@pytest.mark.parametrize("step", ["audit", "wake"])
+def test_postcommit_failure_carries_receipt_without_repeating_audit(
+    db_conn: psycopg.Connection, database: Database, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    from base.agents.messages.chat_delivery import ChatInboundCommittedError
+
+    agent_id, sender = create_agent(db_conn), create_agent(db_conn)
+    bug = AttributeError("postcommit bug")
+
+    def emit(_event: telemetry.Event) -> None:
+        if step == "audit":
+            raise bug
+
+    def wake(_target: int, _payload: str) -> bool:
+        if step == "wake":
+            raise bug
+        return True
+
+    monkeypatch.setattr(telemetry, "emit_prepared", emit)
+    with database.pool(min_size=1, max_size=1) as pool, pool.connection() as conn:
+        with pytest.raises(ChatInboundCommittedError) as failed:
+            insert_chat_inbound_once(
+                conn,
+                agent_id=agent_id,
+                content="original",
+                source=f"agent:{sender}",
+                payload=None,
+                client_message_id="caller-owned-chat",
+                publish_wake=wake,
+            )
+        assert failed.value.__cause__ is bug
+        assert failed.value.client_message_id == "caller-owned-chat"
+        assert failed.value.receipt.inserted
+        assert counts(db_conn, agent_id) == (1, 1)
+        recovered = insert_chat_inbound_once(
+            conn,
+            agent_id=agent_id,
+            content="original",
+            source=f"agent:{sender}",
+            payload=None,
+            client_message_id="caller-owned-chat",
+            publish_wake=wake,
+        )
+    assert recovered.inbound_id == failed.value.receipt.inbound_id
+    assert not recovered.inserted
+    assert counts(db_conn, agent_id) == (1, 1)
