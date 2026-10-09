@@ -8,17 +8,16 @@ the memory graph.
 
 ## How it talks to the backend
 
-- **SSE, not polling**: two persistent EventSource connections to the
-  FastAPI gateway — `/api/system` (global low-frequency broadcast) and
-  `/api/system/all` (throttled, batched, every agent's events). The R4 fold
-  owner (`src/lib/fold/`) is the single writer folding events into the
-  TanStack Query caches; hooks only read their keys.
+- SSE keeps Query read models live for visible pages, with a global stream,
+  selected-agent subscriptions and a separate alerts stream. HTTPS can share
+  transports across pages; authoritative snapshots repair lifecycle state.
+  See [frontend data flow](src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md).
 - No Next rewrites proxy for `/api` — the frontend connects to the gateway
   directly (`API_BASE` resolution in `src/lib/api.ts`); same-origin reverse
   proxy in prod.
 - State rules live in `src/docs/frontend-state/frontend-state.ava.okf.md` and
-  `src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md`; the R4 concept model is in
-  `okf/design/r4-frontend-projection.ava.okf.md` (repo root).
+  `src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md`; layout and component
+  contracts live in `src/docs/frontend-components/frontend-components.ava.okf.md`.
 
 ## Development
 
