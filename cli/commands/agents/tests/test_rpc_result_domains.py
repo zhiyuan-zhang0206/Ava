@@ -16,25 +16,20 @@ def _response(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -> No
     monkeypatch.setattr(http_dial, "post", post)
 
 
-@pytest.mark.parametrize("status", ["enqueued", "already_terminated"])
-def test_cancel_keeps_supported_result_display(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    status: str,
+@pytest.mark.parametrize("payload", [{"status": "enqueued"}, {"status": None}, {}])
+def test_cancel_missing_native_acceptance_never_prints_success(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], payload: dict[str, object]
 ) -> None:
-    _response(monkeypatch, {"status": status})
-    assert control.cmd_agents_cancel(7) == 0
-    assert f"cancel: {status}" in capsys.readouterr().out
+    from cli.commands.agents.tests.test_agents_cmd import _TARGET
 
+    target = {**_TARGET, "agent_id": 7}
 
-@pytest.mark.parametrize("payload", [{"status": "later"}, {"status": None}, {}])
-def test_cancel_unknown_or_missing_result_never_prints_success(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    payload: dict[str, object],
-) -> None:
+    def observe(*_args: object, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, json=target, request=httpx.Request("GET", "http://gateway"))
+
+    monkeypatch.setattr(http_dial, "get", observe)
     _response(monkeypatch, payload)
-    with pytest.raises((ValueError, KeyError)):
+    with pytest.raises(ValueError):
         control.cmd_agents_cancel(7)
     assert capsys.readouterr().out == ""
 

@@ -13,6 +13,10 @@ tags:
 
 `base/lm/pricing/__init__.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `pricing_catalog.json` remains an empty placeholder that runtime never loads; `load_archive` reads `pricing_catalog_archive.json`.
 
+`billing.py` owns provider-call billing spans beside their price selection. Its
+contracts and cache-write/catalog tests live in `pricing/tests/`; usage accounting
+and syntax repair import this owner directly.
+
 ## Selection
 
 - The reviewed archive is the reconciliation ledger: every model has official-source provenance (`source_url` + `source_checked_at`) plus gapless effective periods, input-token tiers, and optional recurring UTC rate windows. It is the input for bot synchronization and retains catalog-only services.

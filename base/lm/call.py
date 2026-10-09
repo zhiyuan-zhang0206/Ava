@@ -120,10 +120,10 @@ def invoke_response(
     an agent-shaped request through a tool-bound runnable, where a tool-call
     response is a legal intermediate state (task #4674), not an empty answer.
 
-    `retry_attempts` bounds retries of TRANSIENT/UNKNOWN provider failures
-    (rate limit, 5xx, connection/timeout — the same classes the agent's LLM
-    node retries itself in `agent/graph/llm/_retry.py`). PERMANENT failures (400/401/
-    402/403/404/422) are deterministic and never retried. A timeout on the
+    `retry_attempts` bounds retries of trusted TRANSIENT provider failures
+    (rate limit, 5xx and typed connection/timeout). UNKNOWN errors propagate
+    once unchanged; PERMANENT rejections are never retried. Raw HTTP transport
+    is normalized only around the model invocation. A timeout on the
     wall-clock budget is the caller's concern (ava.understand / ava.web.fetch
     bound the whole call at the batch layer); this function retries the
     provider error classes that a retry can actually flip.
@@ -143,10 +143,16 @@ def invoke_response(
 
     A successful invoke logs its
     `llm_usage` row (with `usage_source` as the discriminator) before
-    returning; a failed one raises `error_type` with the reason. Empty-response
+    returning; an exhausted or permanent provider failure raises `error_type`
+    with the reason. Unknown errors retain their original type and traceback. Empty-response
     rejection stays with the callers — they differ on what empty means.
     """
-    from base.lm.errors import ErrorClass, emit_provider_error
+    from base.lm.errors import (
+        ErrorClass,
+        emit_provider_error,
+        is_retryable_provider_error,
+        normalize_provider_transport_error,
+    )
 
     retry_attempts = max(0, retry_attempts)  # a negative budget must not empty the loop
     retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
@@ -161,8 +167,11 @@ def invoke_response(
         except Exception as e:
             resolved_model = model or getattr(runnable, "model_name", None)
             event_model = resolved_model if isinstance(resolved_model, str) else "unknown"
-            classification = emit_provider_error(e, model=event_model, fatal=False)
-            retryable = classification.error_class in (ErrorClass.TRANSIENT, ErrorClass.UNKNOWN)
+            provider_error = normalize_provider_transport_error(e)
+            classification = emit_provider_error(provider_error, model=event_model, fatal=False)
+            if classification.error_class is ErrorClass.UNKNOWN:
+                raise
+            retryable = is_retryable_provider_error(provider_error)
             if attempt < retry_attempts and retryable:
                 delay = min(retry_delay_seconds * (2**attempt), retry_max_delay_seconds)
                 retry_after = extract_retry_after(e)

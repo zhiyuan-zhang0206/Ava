@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { axisTicks, zoomView, type AxisMap, type Viewport } from "./timeline-model";
+import { axisTicks, zoomView, type AxisMap, type Viewport } from "../model/timeline-model";
 
 const BUTTON_ZOOM = 0.5;
 

@@ -555,7 +555,7 @@ def ensure_init_resolved() -> None:
 
 def is_initialized() -> bool:
     """Whether span recording is armed in this process. Callers outside this
-    package (`base.lm.billing`) await a pending init with ensure_init_resolved()
+    package (`base.lm.pricing.billing`) await a pending init with ensure_init_resolved()
     first and record nothing while this is False."""
     return bool(_state["initialized"])
 

@@ -49,13 +49,15 @@ field. Saving and resolving a preset do not prove task quality.
 
 ## Usage
 ```python
+from uuid import uuid4
+
 # The preset is a key INSIDE the config overlay (task #2694):
-ava.agents.spawn(prompt="...", config_overlay={"preset": "fast-worker"})
+ava.agents.spawn(prompt="...", config_overlay={"preset": "fast-worker"}, idempotency_key=str(uuid4()))
 # ...optionally with explicit overrides that win per key:
 ava.agents.spawn(
     prompt="...",
     config_overlay={"preset": "fast-worker", "llm_model": "deepseek-flash"},
-)
+ idempotency_key=str(uuid4()))
 ```
 `preset` is the base, the explicit overlay fields are the precise override
 (per key). The former top-level `spawn(preset=...)` argument is retired

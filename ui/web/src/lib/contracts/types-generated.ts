@@ -316,32 +316,12 @@ export interface paths {
         put?: never;
         /**
          * Post Guarded Agents
-         * @description Create a plain agent through a versioned, principal-bound keyed entry.
+         * @description Create or fork an agent through principal-bound keyed admission.
          *
          *     Older routing cannot execute this path. Callers must keep it fixed for an
          *     intent and never fall back to the legacy path after an uncertain response.
          */
         post: operations["post_guarded_agents_api_keyed_v1_agents_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/retry-launch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retry Agent Launch
-         * @description Retry dispatch for one committed identity without adding an inbound.
-         */
-        post: operations["retry_agent_launch_api_agents__agent_id__retry_launch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -415,71 +395,6 @@ export interface paths {
          * @description End the caller's observed takeover without terminating the native agent.
          */
         post: operations["post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/compact": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Compact
-         * @description Trigger compact — INSERT kind='compact_request' inbound; the claim
-         *     Node takes over, runs the backend Compaction LLM to generate a summary
-         *     that replaces messages, and publishes a `compact_done` event to notify
-         *     UI.
-         *
-         *     The new design uniformly uses backend LLM summary generation (see
-         *     docs/decisions/agents/graph/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
-         *     parameter old frontends sent is ignored (still accepted — extra query
-         *     parameters never fail the call). Agent-initiated compact still goes through
-         *     ava.self.compact() -> kind='compact_summary'; this is a separate signal
-         *     from UI-triggered compact_request.
-         *
-         *     A compact targeting a terminated agent auto-resurrects it (shared with the
-         *     chat path): otherwise the compact_request row would sit pending with no live
-         *     process to claim it. The co-batched resurrect wins the claim node's recency
-         *     routing, so the agent wakes and the requested compaction still runs.
-         */
-        post: operations["post_compact_api_agents__agent_id__compact_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cancel
-         * @description Pause/stop the agent — INSERT a durable kind='cancel' inbound.
-         *
-         *     Durable, not fire-and-forget: a running llm/exec node interrupts on the
-         *     row immediately (it watches the inbound Redis pub/sub path); if the agent
-         *     is between actions when the cancel lands, the row stays pending and the
-         *     next claim pass halts it to idle. Either way the agent stops and stays
-         *     alive (resumable by the next message). Enqueue-and-return like `/messages`;
-         *     the kernel emits a `cancelled` SSE event when it actually stops.
-         *
-         *     No cross-machine forwarding: the cancel is a durable row in the shared DB
-         *     (plus a Redis wake), delivered regardless of which host runs the agent.
-         */
-        post: operations["post_cancel_api_cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -954,10 +869,9 @@ export interface paths {
          *     owner, while plain update / reminder notices must not (user ruling
          *     2026-08-27 — notification messages never resurrect a terminated owner).
          *
-         *     An optional Idempotency-Key names one logical note, including its
+         *     A required Idempotency-Key names one logical note, including its
          *     resurrection policy. Replays return the original inbound id and repair
-         *     its wake tail; changed requests conflict (409). Keyless legacy requests
-         *     create a fresh note. The inbound remains kind='system_note'.
+         *     its wake tail; changed requests conflict (409). The inbound remains kind='system_note'.
          *
          *     404: agent_id does not exist. 413: content exceeds the 1 MiB transport
          *     limit. 422: note_tag is not a NoteTag value, or source is not a legal
@@ -3853,7 +3767,7 @@ export interface paths {
          *     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
          *     reassigned, completed, cancelled, or otherwise edited.
          *
-         *     An optional Idempotency-Key commits an immutable response with the write.
+         *     A required Idempotency-Key commits an immutable response with the write.
          *     Reusing that key with different fields returns 409; replay returns the original
          *     task snapshot without another update or wake, even if the task later changes.
          *
@@ -5207,34 +5121,6 @@ export interface components {
             rebuild_id: number | null;
         };
         /**
-         * CancelRequest
-         * @description POST /api/cancel request body — pause/stop the agent, addressed by id.
-         */
-        CancelRequest: {
-            /** Agent Id */
-            agent_id: number;
-        };
-        /**
-         * CancelRequested
-         * @description POST /api/cancel response.
-         *
-         *     `enqueued`: a durable kind='cancel' inbound was INSERTed. The in-flight
-         *         llm/exec node interrupts on it if one is running; otherwise the next
-         *         claim pass halts the agent to idle. The process stays alive.
-         *     `already_terminated`: agent is dead — nothing to pause.
-         */
-        CancelRequested: {
-            status: components["schemas"]["CancelResult"];
-            /** Inbound Id */
-            inbound_id?: number | null;
-        };
-        /**
-         * CancelResult
-         * @description Acceptance of a durable cancel request; separate from process termination.
-         * @enum {string}
-         */
-        CancelResult: "enqueued" | "already_terminated";
-        /**
          * ClusterPanel
          * @description GET /api/status cluster sub-section — multi-machine view.
          *
@@ -5343,22 +5229,6 @@ export interface components {
              */
             command_id: string;
             target: components["schemas"]["CompactTarget"];
-        };
-        /**
-         * CompactEnqueued
-         * @description POST /api/agents/{id}/compact response — returns immediately after
-         *     pending insert, does not wait for the kernel loop to finish.
-         */
-        CompactEnqueued: {
-            /** Agent Id */
-            agent_id: number;
-            /**
-             * Status
-             * @constant
-             */
-            status: "enqueued";
-            /** Inbound Id */
-            inbound_id?: number | null;
         };
         /**
          * CompactOutcome
@@ -9920,37 +9790,6 @@ export interface operations {
             };
         };
     };
-    retry_agent_launch_api_agents__agent_id__retry_launch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpawnedAgent"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_agent_born_chain_api_agents__agent_id__born_chain_get: {
         parameters: {
             query?: never;
@@ -10039,70 +9878,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ForceExpireImpersonationResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_compact_api_agents__agent_id__compact_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompactEnqueued"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cancel_api_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CancelRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CancelRequested"];
                 };
             };
             /** @description Validation Error */
@@ -10657,8 +10432,8 @@ export interface operations {
     post_agent_system_note_api_agents__agent_id__system_note_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -11659,8 +11434,8 @@ export interface operations {
     post_notice_resolve_api_agents__agent_id__notices__notice_id__resolve_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -11697,8 +11472,8 @@ export interface operations {
     post_notice_create_api_agents__agent_id__notices_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -14367,7 +14142,9 @@ export interface operations {
     patch_task_api_tasks__task_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 task_id: number;
             };

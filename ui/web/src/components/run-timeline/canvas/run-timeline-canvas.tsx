@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 
-import { buildHitIndex, hitTest, type RowLayout } from "./timeline-canvas-model";
+import { buildHitIndex, hitTest, type RowLayout } from "../model/timeline-canvas-model";
 import type { PaintCtx, Resolve } from "./run-timeline-paint";
 
 let probe: HTMLElement | null = null;

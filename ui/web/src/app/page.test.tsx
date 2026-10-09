@@ -171,6 +171,7 @@ vi.mock("@/lib/transport/api", () => ({
   },
   api: {
     sendMessage: vi.fn().mockResolvedValue(undefined),
+    observeWork: vi.fn().mockResolvedValue({ agent_id: 5, work_id: "original" }),
     cancel: vi.fn().mockResolvedValue(undefined),
     uploadFiles: vi.fn().mockResolvedValue(undefined),
     submitUploadedFiles: vi.fn().mockResolvedValue(undefined),
@@ -679,7 +680,7 @@ describe("composerMode derivation", () => {
   });
 
   it("status='running' + turnActive=false → busy (Stop available between actions)", () => {
-    // The durable cancel is caught at claim even between actions, so Stop is
+    // The observed work API refuses stale or inactive work, so Stop is
     // offered for the whole running state, not only mid-turn (turnActive).
     hooksState.activeId = 5;
     hooksState.agents = [

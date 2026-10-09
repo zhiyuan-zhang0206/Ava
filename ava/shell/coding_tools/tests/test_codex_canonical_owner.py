@@ -13,6 +13,7 @@ from functools import partial
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -550,7 +551,10 @@ def test_canonical_notifications_never_resurrect_owner(
 ) -> None:
     notes: list[tuple[int, str, str, bool]] = []
 
-    def _note(agent_id: int, content: str, *, tag: str, resurrect: bool) -> int:
+    def _note(
+        agent_id: int, content: str, *, tag: str, resurrect: bool, idempotency_key: str
+    ) -> int:
+        assert str(UUID(idempotency_key)) == idempotency_key
         notes.append((agent_id, content, tag, resurrect))
         return 1
 
@@ -560,7 +564,7 @@ def test_canonical_notifications_never_resurrect_owner(
     monkeypatch.setattr(watch_work.ava.agents, "send_system_note", _note)
     monkeypatch.setattr(watch_work.ava.agents, "send_message", _message)
 
-    watch_work._notify(41, "terminal", canonical=True)
+    assert watch_work._notify(41, "terminal", canonical=True)
 
     assert notes == [(41, "terminal", "task", False)]
 

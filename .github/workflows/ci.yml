@@ -16,7 +16,8 @@
 #
 # CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
 # diff through base/deploy/git/repo_change.py, and suites skip when their side is untouched:
-# docs-only skips everything, frontend-only skips the backend suite,
+# docs-only skips both test suites; structure still checks all change classes.
+# Frontend-only skips the backend suite,
 # backend-only skips the frontend suite. e2e runs whenever EITHER side changed
 # (it is the integration net). Draft PRs skip CI entirely until
 # ready_for_review. Skipped required checks satisfy branch protection and the
@@ -479,7 +480,8 @@ jobs:
       - name: Apply migrations to fresh DB + trigger smoke
         run: uv run python scripts/ci/migration_smoke.py
       - name: Run pyright
-        run: uv run pyright --stats
+        # Pyright rejects --stats with --threads; time retains elapsed/CPU cost.
+        run: time uv run pyright --threads 2
 
       - name: Run static pytest contracts
         id: pytest-static
@@ -565,20 +567,21 @@ jobs:
           fi
 
   backend-structure:
-    # Same required check, two segments: A always runs structure lint via
+    # One structure job, two segments: A always runs structure lint via
     # pre-commit --all-files; B installs Node/npm and explicitly runs the four
     # freshness hooks only when the PR diff matches their configured files:
     # regexes. Pushes and selector errors run B; a no-match PR logs STEP SKIPPED.
     # Other CI jobs own ruff/pyright/migrations/clock, frontend gates and core
     # manifests. Pre-push-only pyright/tsc/eslint/vitest remain redundant SKIP entries.
-    # Runs when EITHER side changed: frontend-only edits can break generated
-    # contracts too. Main pushes run all four hooks as a safety net; the merge
+    # Runs for every eligible change class, including documentation: directory
+    # structure is independent of test-suite classification. Main pushes run
+    # all four hooks as a safety net; the merge
     # queue re-evaluates the same selector on the combined tree before landing.
     name: backend structure (pre-commit lint + codegen freshness)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: [classify]
-    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    if: ${{ needs.classify.result == 'success' }}
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -1487,7 +1490,9 @@ jobs:
 
   backend:
     # The aggregator carrying the branch-protection check name. Skipped
-    # (= satisfied) when the diff has no backend side; otherwise green iff the
+    # (= satisfied) when the diff has no backend side and structure succeeded;
+    # non-backend structure failures propagate without installing test tooling.
+    # With a backend side, green iff the
     # static and native smoke jobs are green and the enforced pytest path is
     # green — the selected subset when mode==enforce and the selector returned
     # SELECTED (shards skipped), the 16-shard fan-out in every other case.
@@ -1495,7 +1500,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: [classify, test-select, backend-static, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
-    if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
+    if: ${{ always() && needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success') }}
     env:
       # Every coverage-data file the combine expects: all backend-shard matrix
       # groups plus the serial and static buckets. tests/scripts/test_ci_artifact_policy.py
@@ -1514,8 +1519,13 @@ jobs:
           ok=true
           fail() { echo "::error::$1"; ok=false; }
           check() { if [ "$2" != "success" ]; then fail "$1: $2"; fi; }
-          check backend-static "${{ needs.backend-static.result }}"
           check backend-structure "${{ needs.backend-structure.result }}"
+          if [ "${{ needs.classify.outputs.backend }}" != "true" ]; then
+            if [ "$ok" = "false" ]; then exit 1; fi
+            echo "structure verified; no backend suite requested"
+            exit 0
+          fi
+          check backend-static "${{ needs.backend-static.result }}"
           check backend-serial "${{ needs.backend-serial.result }}"
           check backend-pgvector-smoke "${{ needs.backend-pgvector-smoke.result }}"
           check helper-signing-smoke "${{ needs.helper-signing-smoke.result }}"

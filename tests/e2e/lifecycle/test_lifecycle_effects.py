@@ -14,6 +14,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import psycopg
@@ -108,6 +109,7 @@ def test_sdk_message_reaches_the_other_agents_model(spawned_agent: int, clean_re
 # -- SDK spawn -----------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("authenticated_gateway")
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_spawn")
 def test_sdk_spawn_starts_a_child_that_runs_the_prompt(
     spawned_agent: int, clean_record: None
@@ -199,16 +201,26 @@ def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
 ) -> None:
     agent = spawned_agent
     _start_long_exec(agent)
-    httpx.post(
-        f"{GATEWAY_URL}/api/cancel", json={"agent_id": agent}, timeout=10.0
-    ).raise_for_status()
+    from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
+    from base.db import Database, pool, publish_inbound_wake
+    from base.events.live.bus import EventBus
+
+    # This stack disables HTTP auth; drive the canonical native admission owner
+    # as a trusted test producer. HTTP credential admission has gateway tests.
+    with pool(max_size=2) as command_pool:
+        target = observe_native_work(command_pool, agent)
+        assert target is not None
+        accepted = accept_native_cancel(command_pool, str(uuid4()), agent, target)
+    publish_inbound_wake(
+        Database.from_settings(), EventBus.from_settings(), agent, str(accepted.command_id)
+    )
 
     def settled() -> tuple[bool, object]:
-        inbound = _inbound(agent)
-        return (
-            all(status in ("done", "dead") for kind, _, status in inbound if kind == "cancel")
-            and any(k == "cancel" for k, _, _ in inbound)
-        ), inbound
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            row = conn.execute(
+                "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
+            ).fetchone()
+        return row is not None and row[0] == "applied", row
 
     poll_until(settled, timeout=30.0, interval=0.5, what="cancel finalized")
     wait_for_status(agent, "idling", timeout=30.0)

@@ -1,6 +1,5 @@
 {
   "ambient_state": {
     "base/host/env/dotenv_boot.py::global-rebind:_db_authority_refusal": 2
-  },
-  "patch_targets": {}
+  }
 }

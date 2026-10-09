@@ -132,3 +132,21 @@ def test_create_receipt_survives_expiration(
         replay = client.post(path, json=body, headers={"Idempotency-Key": "expires"})
     assert first.status_code == replay.status_code == 201
     assert first.json() == replay.json()
+
+
+@pytest.mark.parametrize("resolve", [False, True])
+def test_missing_key_cannot_mutate_notice(db_conn: psycopg.Connection, resolve: bool) -> None:
+    agent = _seed_agent(db_conn)
+    notice = _insert_notice(db_conn, agent, "original", require_response=True)
+    path = f"/api/agents/{agent}/notices"
+    body = {"title": "replacement"}
+    if resolve:
+        path += f"/{notice}/resolve"
+        body = {"action": "answer", "reply": "yes"}
+    with TestClient(app) as client:
+        assert client.post(path, json=body).status_code == 422
+    assert db_conn.execute(
+        "SELECT title, resolved_at FROM agent_notices WHERE agent_id=%s", (agent,)
+    ).fetchall() == [("original", None)]
+    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)
+    assert db_conn.execute("SELECT count(*) FROM notice_operation_receipts").fetchone() == (0,)

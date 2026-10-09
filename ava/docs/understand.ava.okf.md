@@ -26,16 +26,18 @@ There is no single-call form — one question is a one-element list:
 [answer] = ava.understand([{"prompt": "summarize this", "paths": ["notes.md"]}])
 ```
 
-Targets run with a default ceiling of 12; pass a positive `max_concurrent=N` to choose another in-flight limit. The shared DeepSeek cap queues excess provider calls, and terminal failures surface as `UnderstandError`. Same batch shape as [[web.ava.okf.md]]'s `search` / `fetch`.
+Targets run with a default ceiling of 12; pass a positive `max_concurrent=N` to choose another in-flight limit. The shared DeepSeek cap queues excess provider calls, and terminal typed provider failures surface as `UnderstandError`. Same batch shape as [[web.ava.okf.md]]'s `search` / `fetch`.
 
 ## Constraints & Errors
 - `TypeError` — `targets` is not a list, or an element is not a dict.
 - `ValueError` — a target is missing `prompt`, does not carry exactly one of `text` / `paths`, or `paths` is an empty list.
 - `TypeError` — `targets[i]['paths']` is not a list, or an element is not a path string.
 - `FileNotFoundError` — a target's `paths` entry does not point to an existing file.
-- `UnderstandError` — model call failed, or a file in `paths` is binary, cannot be read as UTF-8, and its extension is not in supported media suffixes.
+- `UnderstandError` — a typed provider call failed permanently or exhausted its retries, or a file in `paths` is binary, cannot be read as UTF-8, and its extension is not in supported media suffixes.
 
 Validation runs over every target before any model call, so a malformed batch fails before spending tokens. The first error from a running batch propagates.
+Unknown model-invocation errors retain their original exception and traceback
+after one attempt; error wording alone never grants provider retry authority.
 
 ## Key Dependencies
 - [[files.ava.okf.md]] — `paths` uses the same path resolution (workspace-relative)

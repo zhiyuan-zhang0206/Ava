@@ -239,10 +239,7 @@ def test_required_job_identity_and_unconditional_lint() -> None:
     assert JOB["name"] == "backend structure (pre-commit lint + codegen freshness)"
     assert JOB["timeout-minutes"] == 25
     assert JOB["needs"] == ["classify"]
-    assert JOB["if"] == (
-        "${{ needs.classify.outputs.frontend == 'true' || "
-        "needs.classify.outputs.backend == 'true' }}"
-    )
+    assert JOB["if"] == "${{ needs.classify.result == 'success' }}"
     assert "if" not in LINT
     assert "continue-on-error" not in JOB
     assert "continue-on-error" not in LINT
@@ -569,7 +566,7 @@ def test_selector_import_failure_defaults_to_run() -> None:
     assert "::warning::Codegen selector failed (ImportError)" in log
 
 
-def test_prepush_migration_keeps_direct_ci_owners() -> None:
+def test_prepush_migration_keeps_direct_ci_owners(tmp_path: Path) -> None:
     assert {
         hook_id for hook_id, hook in HOOKS.items() if hook.get("stages") == ["pre-push"]
     } == PREPUSH | PREPUSH_LOCAL_ONLY
@@ -577,7 +574,19 @@ def test_prepush_migration_keeps_direct_ci_owners() -> None:
         assert HOOKS[hook_id]["always_run"] is True
     backend = WORKFLOW["jobs"]["backend-static"]["steps"]
     frontend = WORKFLOW["jobs"]["frontend"]["steps"]
-    assert any(step.get("run") == "uv run pyright --stats" for step in backend)
+    command = next(step["run"] for step in backend if step.get("name") == "Run pyright")
+    assert command == "time uv run pyright --threads 2"
+    uv = tmp_path / "uv"
+    uv.write_text("#!/bin/sh\nexit 19\n")
+    uv.chmod(0o755)
+    failed = subprocess.run(  # noqa: S603 - exact asserted CI command with a fixture executable
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", command],
+        env=os.environ | {"PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert failed.returncode == 19
     assert any(step.get("run") == "npx tsc --noEmit" for step in frontend)
     assert any(step.get("run") == "npm run lint" for step in frontend)
     assert any(

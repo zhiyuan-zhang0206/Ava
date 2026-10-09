@@ -1,45 +1,26 @@
-"""Cross-provider classification of LLM provider-SDK exceptions.
+"""Trusted provider-error classification shared by streaming and synchronous calls.
 
-Sibling to `base/lm/stop.py`: where that normalizes a *successful* response's
-terminal reason, this normalizes a *failed* call's exception into one
-provider-agnostic `ErrorClass`, so streaming and synchronous call paths decide
-retry vs fail-fast without scattering `isinstance` / `status_code` checks. Its
-shared emitter carries a structured `(error_class, provider, status)` triple
-instead of a scraped message string.
-
-LangChain surfaces each provider SDK's own exception unchanged: `anthropic.*` for
-DeepSeek + Claude (both on the anthropic client), `openai.*` for GPT, with
-`httpx.*` transport errors underneath any of them. anthropic and openai share one
-shape — an `APIStatusError` carrying an int `status_code`, and
-`APIConnectionError` / `APITimeoutError` (no status) for transport failure — so a
-`status_code` + `isinstance` check covers both without a per-provider branch.
-
-Three classes, fail-fast:
-
-- `TRANSIENT`  — retry in-turn: 429 rate limit, 5xx server, 408/409/425, and
-  transport (connection / timeout) errors. The llm node's tuned retry loop
-  (`agent/graph/llm/_retry.py`) already retries these; classification only labels
-  them so the postmortem can tell an expected retry from a surprise.
-- `PERMANENT`  — retrying the identical request cannot flip it: 400 (bad request
-  / context length / malformed / schema), 401 auth, 402 billing, 403 forbidden,
-  404 unknown model, 422 schema. The LLM node raises `FatalProviderError` (which
-  the retry loop excludes) so the agent idles — stays alive — instead of
-  burning the full backoff budget and dying.
-- `UNKNOWN`    — an exception (or status) we do not recognize. Never guessed into
-  either bucket: it propagates through the node's normal path (retried like a
-  transient by the retry loop, then surfaced if it persists) and is logged as
-  `unknown` so a postmortem can spot a gap to close here.
-
-Crossing all three, `ErrorClassification.billing` answers a different question —
-"is this the key running out of money?" — because that is the one failure no
-retry policy can clear, and it is what the billing/quota alert fires on.
+Official LangChain ModelError types own retryability. Raw provider SDK errors
+retain their explicit status/transport contracts. Unknown application errors
+propagate once; matching attributes or an arbitrary cause do not grant retry
+or permanent-provider recovery authority.
 """
 
 from __future__ import annotations
 
 import enum
-from collections.abc import Iterator
 from typing import Any, NamedTuple, cast
+
+from langchain_core.exceptions import (
+    ContextOverflowError,
+    ModelAuthenticationError,
+    ModelConnectionError,
+    ModelError,
+    ModelInvalidRequestError,
+    ModelNotFoundError,
+    ModelPermissionDeniedError,
+    ModelTimeoutError,
+)
 
 from base.log import logger
 
@@ -47,7 +28,7 @@ from base.log import logger
 class ErrorClass(enum.Enum):
     TRANSIENT = "transient"  # retryable in-turn -> falls through to the retry loop
     PERMANENT = "permanent"  # deterministic within the turn -> FatalProviderError, idle
-    UNKNOWN = "unknown"  # unrecognized -> propagate (retried, then surfaced); do not guess
+    UNKNOWN = "unknown"  # unrecognized -> propagate once, preserving the original error
 
 
 # HTTP statuses where retrying the identical request is futile within the turn.
@@ -178,9 +159,8 @@ _BILLING_ERROR_VOCABULARY: frozenset[str] = frozenset(
 # API share the status name, so the message phrase — gated on 429 in the
 # `billing` predicate — is the discriminator, never the status name alone.
 # Unlike the exact-match code vocabulary above, message prose is matched as a
-# case-folded SUBSTRING. langchain-google-genai re-wraps the error in a
-# message-only exception, but the original (`.code` / `.details`) survives as
-# its `__cause__`, which the field readers walk (see `_cause_chain`).
+# case-folded SUBSTRING. Official LangChain ModelError wrappers retain their
+# typed SDK error as a direct cause; only that contract supplies missing fields.
 _BILLING_MESSAGE_VOCABULARY: frozenset[str] = frozenset(
     entry.lower()
     for entry in (
@@ -189,24 +169,23 @@ _BILLING_MESSAGE_VOCABULARY: frozenset[str] = frozenset(
 )
 
 
-def _is_transport_error(exc: BaseException) -> bool:
-    """True for transport-layer failures (no HTTP status).
-
-    Duck-typed by module + class name for the provider SDKs: classifying an
-    error must not import openai/anthropic (~11-15MB each) just to run an
-    isinstance. In both SDKs `APIConnectionError` covers the `APITimeoutError`
-    subclass (same name check). httpx and the builtins are isinstance-checked —
-    httpx is already part of the process base.
-    """
+def normalize_provider_transport_error(exc: Exception) -> Exception:
+    """Normalize raw HTTP transport only at a model invoke/iteration boundary."""
     import httpx
 
-    if isinstance(exc, (httpx.TransportError, ConnectionError, TimeoutError)):
-        return True
-    if type(exc).__module__.split(".", 1)[0] in ("openai", "anthropic"):
-        # MRO class names, not just type(exc).__name__: both SDKs' APITimeoutError
-        # subclasses APIConnectionError, and isinstance semantics must be kept.
-        return "APIConnectionError" in {c.__name__ for c in type(exc).__mro__}
-    return False
+    if isinstance(exc, httpx.TimeoutException):
+        return ModelTimeoutError(str(exc))
+    if isinstance(exc, (httpx.NetworkError, httpx.RemoteProtocolError)):
+        return ModelConnectionError(str(exc))
+    return exc
+
+
+def _is_transport_error(exc: BaseException) -> bool:
+    # SDK imports stay on the failure path rather than loading every provider at boot.
+    from anthropic import APIConnectionError as AnthropicConnectionError
+    from openai import APIConnectionError as OpenAIConnectionError
+
+    return isinstance(exc, (AnthropicConnectionError, OpenAIConnectionError))
 
 
 class ErrorClassification(NamedTuple):
@@ -218,6 +197,8 @@ class ErrorClassification(NamedTuple):
     error_message: str | None = (
         None  # provider body `error.message` — read by `context_overflow` and the billing message vocabulary
     )
+
+    model_context_overflow: bool = False
 
     @property
     def billing(self) -> bool:
@@ -277,6 +258,8 @@ class ErrorClassification(NamedTuple):
         agent into a compaction, which is harmless; a missed match just means
         the breaker opens with the generic `bad_request` reason and the
         heartbeat stops re-firing — never a wrong destructive action)."""
+        if self.model_context_overflow:
+            return True
         if self.status != _CONTEXT_OVERFLOW_STATUS and self.error_type != "context_length_exceeded":
             return False
         haystack = " ".join(
@@ -291,112 +274,81 @@ def _provider_of(exc: BaseException) -> str:
     return type(exc).__module__.split(".", 1)[0]
 
 
-def _cause_chain(exc: BaseException) -> Iterator[BaseException]:
-    """`exc` followed by its explicit `raise ... from ...` causes.
-
-    langchain-google-genai re-wraps google.genai client errors in a
-    message-only `ChatGoogleGenerativeAIError` — attributes gone — but chains
-    the original SDK error (`.code` HTTP status, `.details` body) as
-    `__cause__`. Walking the chain lets the duck-typed field readers below
-    classify what actually failed through a message-only wrapper. Only
-    `__cause__` is walked, never `__context__` (an unrelated error raised
-    while handling another); the walk is cycle-guarded. Falls back to `exc`
-    alone when nothing is chained — no worse than before.
-    """
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        yield current
-        current = current.__cause__
+def _model_error_class(exc: ModelError) -> ErrorClass:
+    if exc.is_retryable:
+        return ErrorClass.TRANSIENT
+    if isinstance(
+        exc,
+        (
+            ModelAuthenticationError,
+            ModelPermissionDeniedError,
+            ModelInvalidRequestError,
+            ModelNotFoundError,
+            ContextOverflowError,
+        ),
+    ):
+        return ErrorClass.PERMANENT
+    return ErrorClass.UNKNOWN
 
 
-def _status_of(exc: BaseException) -> int | None:
-    """The provider SDK's int HTTP `status_code`, or None.
+def _sdk_fields(exc: BaseException) -> tuple[int | None, object]:
+    """Read SDK metadata, including one typed cause of an official ModelError."""
+    from anthropic import APIError as AnthropicError
+    from google.genai.errors import APIError as GoogleError
+    from openai import APIError as OpenAIError
 
-    Duck-typed (not an `isinstance` on `APIStatusError`) so a wrapper that
-    re-exposes `status_code` still classifies, and one that hides it falls
-    through to transport / UNKNOWN — no worse than before. Walked along
-    `_cause_chain` so a message-only wrapper (langchain-google-genai) still
-    yields the status of the SDK error it re-raises from.
-
-    The google.genai family carries the HTTP status as an int `.code` rather
-    than `.status_code`, always beside its `.details` response body and/or its
-    gRPC-style `.status` name (raw SDK errors under the `google` module, plus
-    the langchain-google-genai wrappers that subclass them) — so `.code` is
-    read only in that shape, never for an unrelated int `.code` on some other
-    exception.
-    """
-    for candidate in _cause_chain(exc):
+    sdk_types = (AnthropicError, OpenAIError, GoogleError)
+    candidate: BaseException | None = exc
+    if not isinstance(candidate, sdk_types):
+        if not isinstance(exc, ModelError) or _model_error_class(exc) is ErrorClass.UNKNOWN:
+            return None, None
+        candidate = exc.__cause__
+    if isinstance(candidate, GoogleError):
+        return candidate.code, getattr(candidate, "details", None)
+    if isinstance(candidate, (AnthropicError, OpenAIError)):
         status = getattr(candidate, "status_code", None)
-        if isinstance(status, int):
-            return status
-        code = getattr(candidate, "code", None)
-        if isinstance(code, int) and (
-            hasattr(candidate, "details") or hasattr(candidate, "status")
-        ):
-            return code
-    return None
+        return status if isinstance(status, int) else None, candidate.body
+    return None, None
 
 
-def _error_field_of(exc: BaseException, key: str) -> str | None:
-    """One string field of the provider response body's `error` object, or None.
-
-    Both SDKs shape errors as ``{"error": {"type": ..., "code": ..., "message":
-    ...}}`` on `.body` — `type` the broad class, `code` (when the vendor sends
-    one) the specific reason. Returns None when `body` is absent / not a dict,
-    `error` is missing / not a dict, or the field is missing / not a non-empty
-    string.
-
-    Two fallbacks, both walked along `_cause_chain` (a message-only wrapper
-    hides the SDK error it re-raises from, so the chain supplies the body):
-    the body attribute is `.body` on the openai/anthropic families and
-    `.details` on the google.genai family (same ``{"error": ...}`` shape,
-    different attribute name — google.genai's `details` is the response JSON).
-    """
-    for candidate in _cause_chain(exc):
-        for attr in ("body", "details"):
-            body = getattr(candidate, attr, None)
-            if not isinstance(body, dict):
-                continue
-            error = cast("dict[str, Any]", body).get("error")
-            if not isinstance(error, dict):
-                continue
-            value = cast("dict[str, Any]", error).get(key)
-            if isinstance(value, str) and value:
-                return value
-    return None
+def _error_field(body: object, key: str) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    fields = cast(dict[str, Any], body)
+    nested = fields.get("error")
+    if isinstance(nested, dict):
+        fields = cast(dict[str, Any], nested)
+    value = fields.get(key)
+    return value if isinstance(value, str) and value else None
 
 
 def classify_error(exc: BaseException) -> ErrorClassification:
-    """Map a provider-SDK / transport exception to its `ErrorClassification`.
-
-    Status-first (both SDKs carry `status_code` on API errors), then transport
-    (no status), then UNKNOWN. Never raises — an unrecognized exception is
-    UNKNOWN, not a guess.
-    """
-    provider = _provider_of(exc)
-    error_type = _error_field_of(exc, "type")
-    error_code = _error_field_of(exc, "code")
-    error_message = _error_field_of(exc, "message")
-    status = _status_of(exc)
-    if status is not None:
+    """Classify trusted outer errors; unrecognized wrappers remain UNKNOWN."""
+    status, body = _sdk_fields(exc)
+    error_class = ErrorClass.UNKNOWN
+    if isinstance(exc, ModelError):
+        error_class = _model_error_class(exc)
+    elif status is not None:
         if status in _PERMANENT_STATUSES:
             error_class = ErrorClass.PERMANENT
         elif status in _TRANSIENT_STATUSES or status >= 500:
             error_class = ErrorClass.TRANSIENT
-        else:
-            error_class = ErrorClass.UNKNOWN
-        return ErrorClassification(
-            error_class, provider, status, error_type, error_code, error_message
-        )
-    if _is_transport_error(exc):
-        return ErrorClassification(
-            ErrorClass.TRANSIENT, provider, None, error_type, error_code, error_message
-        )
+    elif _is_transport_error(exc):
+        error_class = ErrorClass.TRANSIENT
     return ErrorClassification(
-        ErrorClass.UNKNOWN, provider, None, error_type, error_code, error_message
+        error_class,
+        _provider_of(exc),
+        status,
+        _error_field(body, "type"),
+        _error_field(body, "code"),
+        _error_field(body, "message"),
+        model_context_overflow=isinstance(exc, ContextOverflowError),
     )
+
+
+def is_retryable_provider_error(exc: BaseException) -> bool:
+    """Only a trusted transient provider failure permits another invocation."""
+    return classify_error(exc).error_class is ErrorClass.TRANSIENT
 
 
 def emit_provider_error(

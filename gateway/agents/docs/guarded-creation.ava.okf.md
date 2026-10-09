@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Guarded Agent Creation
-description: Principal-bound creation admission with immutable birth receipts and fixed retry identity.
+description: Principal-bound immutable agent and fork acceptance with original-attempt recovery.
 tags:
 - gateway
 - agents
@@ -9,11 +9,11 @@ tags:
 
 # Guarded Agent Creation
 
-`POST /api/keyed/v1/agents` accepts plain creation through the existing birth
+`POST /api/keyed/v1/agents` accepts creation and forks through the existing birth
 transaction and launch owner. Every request requires a valid `Idempotency-Key`
 (1–128 characters), the exact `Idempotency-Scope: principal-v1` header, and a
 verified authenticated principal. Missing or invalid admission, an unverified
-principal, and `fork_from` are rejected before birth or launch effects. Existing
+principal are rejected before birth or launch effects. Existing
 authentication still applies to replay; revoked credentials cannot retrieve a
 receipt.
 
@@ -49,13 +49,18 @@ namespaces, and an older gateway may ignore a key on the legacy path. A cached
 capability GET or observed generation cannot prove the backend serving a later
 write supports keyed admission.
 
-The SDK can explicitly opt in with `require_idempotency=True` and a caller key;
-see the SDK owner at `ava/agents/docs/strong-creation.ava.okf.md`. It keeps the
-same guarded path, scope and key for every attempt without capability discovery
-or fallback. The default SDK helper still uses its existing route; removing
-that compatibility branch is tracked in #4473. Gateway MCP creation now has only
-`spawn_agent_guarded_v1`; the former `spawn_agent` tool is removed. Old installed
-consumers are not an adoption gate. Automatic ambiguous retries remain disabled.
+The SDK requires a caller key for every creation or fork and always uses this
+path. The former `require_idempotency` mode flag has been removed. Forks use the
+existing birth owner: source checkpoint resolution occurs for first acceptance,
+then checkpoint copying, the fork marker, first prompt, immutable receipt and
+audit commit together. Same-key replay reads the retained child first and does
+not resolve or copy a later source checkpoint. See the SDK owner at
+`ava/agents/docs/strong-creation.ava.okf.md`.
+
+Direct HTTP producers still using `POST /api/agents` have a distinct operation
+namespace. They must migrate as one intent rather than changing paths during a
+retry. Existing historical acceptance is not synthesized from mutable metadata.
+This repository change does not authorize deployment.
 
 A previous gateway that already exposes this versioned path can still use its
 older mutable launch projection. The path proves keyed admission support, not a

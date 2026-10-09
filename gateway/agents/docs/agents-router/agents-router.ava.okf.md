@@ -14,7 +14,7 @@ tags:
 `history/` groups conversation, timeline and context read models with their tests.
 Mutation routes remain in `gateway/agents/`.
 
-`/api/agents/*` covers spawn, terminate, resurrect, restart, compact,
+`/api/agents/*` covers spawn, terminate, resurrect, restart,
 send_message, list, and patch — all in the `gateway/agents/` package. CRUD
 and spawn live in `router.py`; lifecycle actions live in `lifecycle.py`; message
 and state reads live in `state.py`; `forward.py` provides the cross-machine
@@ -28,11 +28,13 @@ plus run-level `BillingRecoveryMode` (`dry_run` / `execute`) and
 lifecycle dispatch translates home verdicts into batch outcomes. Raw RPC values
 are validated by the response models, and JSON wire strings stay unchanged.
 
-`/api/cancel` pauses work using `CancelResult` (`base/agents/contract.py`),
-separate from termination. [[control-acceptance.ava.okf.md]] owns keyed cancel
-and compact acceptance; acceptance is not native application. The CLI validates
-cancel and billing results before reporting success. `/api/models` lists models,
-their declared `fast_of` relationships and the effective cluster default using
+Versioned `/api/keyed/v1/agents/{id}/cancel-work` and `compact-history` accept
+observed native work and closed history targets with required principal-scoped
+keys. [[control-acceptance.ava.okf.md]] owns their consumer contract; acceptance
+is not native application. The former `/api/cancel` and unversioned compact
+routes are removed. The CLI validates these results and billing outcomes before
+reporting acceptance. `/api/models` lists models, their declared `fast_of`
+relationships and the effective cluster default using
 `base/agents/birth_config.py:resolve_default_model`, also used by the default-model
 endpoint, birth stamp and spawn preflight.
 `/api/agents/{id}/exited` finalizes agent exit.

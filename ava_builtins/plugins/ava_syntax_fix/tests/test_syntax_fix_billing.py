@@ -31,7 +31,7 @@ async def test_successful_syntax_repair_call_emits_chat_billing(
     def _emit(message: AIMessage, **kwargs: Any) -> None:
         emitted.append((message, kwargs))
 
-    monkeypatch.setattr("base.lm.billing.emit_billing_from_message", _emit)
+    monkeypatch.setattr("base.lm.pricing.billing.emit_billing_from_message", _emit)
 
     assert await _repair_once(_LLM(), []) == "fixed = True"
     assert len(emitted) == 1
