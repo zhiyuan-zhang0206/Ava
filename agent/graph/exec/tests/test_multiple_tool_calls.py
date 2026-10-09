@@ -15,6 +15,7 @@ from agent.graph.interrupt import InterruptEvent
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
+from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.db import Database
@@ -103,6 +104,7 @@ def _runtime() -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            clients=process_clients(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )

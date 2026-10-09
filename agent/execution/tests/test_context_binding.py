@@ -18,12 +18,13 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 
 
 def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[str], Path]:
-    context = AvaContext(identity=AgentIdentity(agent_id, True))
+    context = AvaContext(identity=AgentIdentity(agent_id, True), clients=process_clients())
     request = make_request_path(tmp_path / "exec", agent_id=agent_id)
     result = make_result_path(tmp_path / "exec", agent_id=agent_id)
     write_request(
