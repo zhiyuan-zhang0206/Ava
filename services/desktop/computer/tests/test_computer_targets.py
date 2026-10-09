@@ -8,6 +8,7 @@ import pytest
 
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.targets import (
+    AppTarget,
     CaptureFrame,
     CaptureRegion,
     CoordinateSpace,
@@ -124,3 +125,26 @@ def test_frame_refuses_numeric_overflow_before_native_input() -> None:
     tiny_scale = CaptureFrame(CoordinateSpace.REGION_PIXELS, 0, 0, 5e-324, 400, 200)
     with pytest.raises(ComputerUseError, match="mapped x"):
         tiny_scale.global_point(1, 1)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        {},
+        {"app": "Mail"},
+        {"pid": 123, "bundle_id": "com.apple.mail"},
+        {"pid": False},
+        {"pid": "123"},
+        {"pid": 2**31},
+        {"bundle_id": " "},
+    ],
+)
+def test_foreground_app_target_requires_one_exact_native_selector(value: Any) -> None:
+    with pytest.raises(ComputerUseError):
+        AppTarget.parse(value)
+
+
+def test_foreground_app_target_preserves_pid_or_bundle_id() -> None:
+    assert AppTarget.parse({"pid": 123}) == AppTarget(pid=123)
+    assert AppTarget.parse({"bundle_id": "com.apple.mail"}) == AppTarget(bundle_id="com.apple.mail")

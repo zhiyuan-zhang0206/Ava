@@ -65,6 +65,31 @@ class WindowTarget:
         return cls(pid, window_id)
 
 
+@dataclass(frozen=True)
+class AppTarget:
+    """One running app selected for an explicit foreground activation."""
+
+    pid: int | None = None
+    bundle_id: str | None = None
+
+    @classmethod
+    def parse(cls, value: Any) -> AppTarget:
+        if not isinstance(value, dict):
+            raise ComputerUseError("app target must be an object")
+        value = cast(dict[str, Any], value)
+        if set(value) == {"pid"}:
+            pid = _integer(value["pid"], "app target.pid", positive=True)
+            if pid > 2**31 - 1:
+                raise ComputerUseError("app target.pid exceeds the native range")
+            return cls(pid=pid)
+        if set(value) == {"bundle_id"}:
+            bundle_id = value["bundle_id"]
+            if not isinstance(bundle_id, str) or not bundle_id.strip():
+                raise ComputerUseError("app target.bundle_id must be a nonempty string")
+            return cls(bundle_id=bundle_id)
+        raise ComputerUseError("app target must contain exactly pid or bundle_id")
+
+
 def app_selector(value: Any) -> str | None:
     """Validate an optional exact display-name or bundle-ID selector."""
     if value is None:
