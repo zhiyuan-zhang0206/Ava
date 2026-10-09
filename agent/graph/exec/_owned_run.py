@@ -18,9 +18,6 @@ from uuid import uuid4
 
 import psutil
 
-from agent.graph.exec._result import _ExecCrashed, _ExecResult
-from agent.graph.exec._stream import ExecOutputChunkPublisher, StreamingTextIO
-from agent.graph.exec.protocol import ResultPayload, write_request
 from base.agents.context import AvaContext
 from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
@@ -47,6 +44,10 @@ from base.native_process.exec_kill_notice import read_notice
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from base.native_process.turn_identity import current_hosted_resources
 from base.paths import exec_run_dir
+
+from ._result import _ExecCrashed, _ExecResult
+from ._stream import ExecOutputChunkPublisher, StreamingTextIO
+from .protocol import ResultPayload, write_request
 
 
 def managed_target(db: Database, agent_id: int | None) -> RuntimeIncarnation | None:
@@ -119,6 +120,7 @@ class _OwnedRun:
         timeout: float,
         chunk_publisher: ExecOutputChunkPublisher | None,
         *,
+        accumulation_max_chars: int,
         state: dict[str, Any] | None,
         exec_dir: Path | None,
     ) -> None:
@@ -156,7 +158,7 @@ class _OwnedRun:
         self.scope = current_hosted_resources()
         if self.scope is not None:
             self.scope.unresolved[self.request] = None
-        self.stream = StreamingTextIO()
+        self.stream = StreamingTextIO(max_chars=accumulation_max_chars)
         self.proc: subprocess.Popen[bytes] | None = None
         self.ready: OwnerReady | None = None
         self.reader: threading.Thread | None = None
@@ -236,7 +238,7 @@ class _OwnedRun:
         self, config_overlay: dict[str, object] | None, birth_config: dict[str, object] | None
     ) -> tuple[subprocess.Popen[bytes], ResourceProcess]:
         """Spawn the isolated owner; returns it with its launcher identity."""
-        from agent.graph.exec._subprocess import _build_child_env
+        from ._subprocess import _build_child_env
 
         env = _build_child_env(
             self.agent_id,
@@ -302,7 +304,7 @@ class _OwnedRun:
         self, proc: subprocess.Popen[bytes]
     ) -> tuple[_ExecResult, ResultPayload | None]:
         """The exact close receipt and the result envelope of an owner that exited."""
-        from agent.graph.exec._subprocess import _read_result_envelope, _result_from_payload
+        from ._subprocess import _read_result_envelope, _result_from_payload
 
         reader = self.reader
         if self.ready is None or proc.returncode != 0 or reader is None:
@@ -435,13 +437,14 @@ async def run_owned(
     timeout: float,
     chunk_publisher: ExecOutputChunkPublisher | None,
     *,
+    accumulation_max_chars: int,
     state: dict[str, Any] | None,
     exec_dir: Path | None,
     config_overlay: dict[str, object] | None,
     birth_config: dict[str, object] | None,
 ) -> tuple[_ExecResult, ResultPayload | None]:
     """Run one managed exec; this function alone spawns the owner's reader thread and tasks."""
-    from agent.graph.exec._subprocess import _drain_output
+    from ._subprocess import _drain_output
 
     owned = _OwnedRun(
         db,
@@ -451,6 +454,7 @@ async def run_owned(
         cancel_event,
         timeout,
         chunk_publisher,
+        accumulation_max_chars=accumulation_max_chars,
         state=state,
         exec_dir=exec_dir,
     )

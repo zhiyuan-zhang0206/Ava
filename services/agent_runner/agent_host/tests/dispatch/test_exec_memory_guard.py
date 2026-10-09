@@ -195,6 +195,7 @@ async def _run(tmp_path: Path, code: str) -> Any:
         60.0,
         None,
         exec_dir=tmp_path / "exec",
+        accumulation_max_chars=1_000_000,
     )
     return result
 
