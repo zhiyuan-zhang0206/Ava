@@ -30,11 +30,22 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 ## Notes
 The permissions helper is the macOS root ancestor and remains outside `build_services()`. Root diagnostics observes its protocol without repair authority; Linux has no helper ancestor.
 
-The hosted runner renews database ownership and then beats local liveness before
-publishing its 60-second Redis turn-progress snapshot. That best-effort `SET`
+The hosted runner beats local liveness, renews database ownership, then publishes
+its 60-second Redis turn-progress snapshot. That best-effort `SET`
 has a three-second operation deadline: a stalled response is cancelled and logged
 at WARNING so subsequent ownership renewals continue. The shared Redis client's
 long-lived pub/sub reads remain unbounded; shutdown cancellation still propagates.
+
+A service-entered `TaskGroup` owns the ownership heartbeat from before boot
+settlement until after scheduler drain. Its completion retains an unknown error
+without cancelling boot or dispatch; the existing stop/join boundary raises the
+original error before ownership release and pool close. Every cleanup stage is
+attempted even if joining the heartbeat fails. Boot failures also close the
+heartbeat group, pools and pidfile. Postgres operational/pool/deadline failures
+and Redis transport/deadline/auth failures retain their existing next-beat
+recovery. Command, input and programming errors end the heartbeat and become
+visible at join. This changes neither the scheduler's drain budget nor the
+process's finite shutdown path.
 
 The durable host scan separates backlog age from active-turn progress. Old pending
 messages alone cannot cancel a newly resumed turn: its monotonic progress clock
