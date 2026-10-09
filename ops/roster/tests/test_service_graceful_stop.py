@@ -24,12 +24,12 @@ from pathlib import Path
 import psutil
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.sessions import posixproc
 from base.sessions.backend import PosixProcSessionBackend
 from base.sessions.env_forwarding import exec_into
 
-pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
+pytestmark = pytest.mark.skipif(is_windows(), reason="posixproc is the POSIX supervisor")
 
 # A daemon shaped like the real ones: SIGTERM unwinds through `finally`, so the
 # marker file proves cleanup ran rather than the process merely dying. `started`

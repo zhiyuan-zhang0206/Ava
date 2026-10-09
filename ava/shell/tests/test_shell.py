@@ -23,10 +23,10 @@ import pytest
 import ava
 import ava.sdk_surface.agent_identity
 from ava import shell
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 
 pytestmark = [
-    pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions are POSIX-only"),
+    pytest.mark.skipif(is_windows(), reason="PTY sessions are POSIX-only"),
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); only the
     # pty-backed session tests want it. `pty_service` must come first: the
     # isolation fixture's own kill_all/list calls hit the session backend.
