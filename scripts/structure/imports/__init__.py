@@ -1,0 +1,134 @@
+"""Static import facts shared by structure, dependency and test-placement checks.
+
+The checkout path supplies Python's package anchor, including namespace test
+directories loaded by pytest's importlib mode. A clause binds names and names
+direct dependencies; it does not execute imports or follow re-exported values.
+Dynamic imports and patch expressions remain evidence owned by their collectors.
+"""
+
+from __future__ import annotations
+
+import ast
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Protocol
+
+
+class ModuleLookup(Protocol):
+    """The current checkout's module resolver, independent of import syntax."""
+
+    def kind(self, dotted: str) -> str | None: ...
+
+    def resolve_prefix(self, dotted: str, tops: Sequence[str]) -> str | None: ...
+
+
+class InvalidRelativeImportError(ImportError):
+    """An explicit relative import has no legal package anchor."""
+
+
+def package_of(rel_path: str) -> list[str]:
+    """Package parts of a module file; an initializer owns its containing package."""
+    return rel_path.removesuffix(".py").split("/")[:-1]
+
+
+def import_base(node: ast.ImportFrom, rel_path: str) -> str | None:
+    """Absolute import base, or None when the relative import escapes its package."""
+    if node.level == 0:
+        return node.module or ""
+    package = package_of(rel_path)
+    if node.level > len(package):
+        return None
+    anchor = package[: len(package) - (node.level - 1)]
+    return ".".join([*anchor, *([node.module] if node.module else [])])
+
+
+@dataclass(frozen=True)
+class Binding:
+    """A local name, the imported target and the dotted origin that name binds."""
+
+    name: str
+    target: str
+    origin: str
+
+
+@dataclass(frozen=True)
+class Clause:
+    """One normalized import statement, retaining aliases and its source line."""
+
+    line: int
+    base: str | None
+    bindings: tuple[Binding, ...]
+    statement: str
+
+    @property
+    def candidates(self) -> list[str]:
+        """Raw targets, including members, for private-name reach-in checks."""
+        return ([self.base] if self.base else []) + [b.target for b in self.bindings]
+
+    @property
+    def origins(self) -> dict[str, str]:
+        """Names bound by the statement; star imports cannot bind a known name."""
+        return {b.name: b.origin for b in self.bindings if b.name != "*"}
+
+    def module_aliases(self, is_module: Callable[[str], bool]) -> dict[str, str]:
+        """Only bindings that name modules, rather than functions or classes."""
+        return {
+            b.name: b.origin
+            for b in self.bindings
+            if b.name != "*" and (self.base is None or is_module(b.target))
+        }
+
+
+@dataclass(frozen=True)
+class Dependency:
+    """One direct module dependency in a clause, with all its bound local names."""
+
+    module: str
+    names: tuple[str, ...]
+
+
+def normalize(node: ast.Import | ast.ImportFrom, rel_path: str) -> Clause:
+    """Normalize syntax without importing modules or interpreting their values."""
+    if isinstance(node, ast.Import):
+        bindings = tuple(
+            Binding(
+                alias.asname or alias.name.split(".")[0],
+                alias.name,
+                alias.name if alias.asname else alias.name.split(".")[0],
+            )
+            for alias in node.names
+        )
+        return Clause(node.lineno, None, bindings, ast.unparse(node))
+    base = import_base(node, rel_path)
+    if base is None:
+        raise InvalidRelativeImportError(
+            f"{rel_path}:{node.lineno}: relative import has no legal parent package: "
+            f"{ast.unparse(node)}"
+        )
+    bindings = tuple(
+        Binding(alias.asname or alias.name, target, target)
+        for alias in node.names
+        for target in [base if alias.name == "*" else f"{base}.{alias.name}"]
+    )
+    statement = ast.unparse(ast.ImportFrom(module=base, names=node.names, level=0))
+    return Clause(node.lineno, base, bindings, statement)
+
+
+def dependencies(clause: Clause, index: ModuleLookup, tops: Sequence[str]) -> list[Dependency]:
+    """Resolve direct module edges once per clause against the current checkout.
+
+    `from pkg import module` names the submodule when it exists; other imported
+    members depend on pkg itself, even when pkg re-exports another module's value.
+    Repeated members of that same module produce one edge, retaining all aliases.
+    """
+    found: dict[str, list[str]] = {}
+    for binding in clause.bindings:
+        target = binding.target
+        if clause.base is not None and not index.kind(target):
+            target = clause.base
+        module = index.resolve_prefix(target, tops)
+        if module is not None:
+            names = found.setdefault(module, [])
+            if binding.name not in names:
+                names.append(binding.name)
+    return [Dependency(module, tuple(names)) for module, names in found.items()]
