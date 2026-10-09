@@ -13,8 +13,8 @@ from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
 from base.config import settings
 from gateway.agents import router as agent_router
-from gateway.agents.tests.test_guarded_creation import HEADERS, SECRET
-from gateway.agents.tests.test_sdk_strong_creation import _response, _sdk
+from gateway.agents.tests.creation.test_guarded_creation import HEADERS, SECRET
+from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
 from gateway.app import app
 from ops.lifecycle.launch import _validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent

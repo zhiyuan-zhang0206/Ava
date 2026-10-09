@@ -12,8 +12,8 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from gateway.agents import router as agent_router
-from gateway.agents.tests.test_guarded_creation import HEADERS, PATH
-from gateway.agents.tests.test_guarded_creation import client as client
+from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
+from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from ops.agents.creation_identity import creation_request_hash, find_creation
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
