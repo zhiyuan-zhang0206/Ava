@@ -25,7 +25,6 @@ from base.cluster.machine import machine_name
 from base.config.agent_pins import resolve_agent_config_pins
 from base.log import logger
 from base.native_process.ownership import process_metadata
-from base.native_process.turn_identity import current_turn_agent_id
 from base.packages.plugins.config_view import PluginConfigView, resolve_agent_plugin_pins
 
 from .state import (
@@ -75,13 +74,13 @@ def _deliver_telemetry_before_detach() -> None:
 def _refuse_unless_attachable() -> AvaContext | None:
     """The process's own context, when nothing forbids attaching to it: no attachment yet, and
     no native agent runtime."""
+    if ava.is_host_process():
+        raise RuntimeError("a native agent runtime cannot attach an external controller")
     bound = getattr(ava, "context", None)
     identity = None if bound is None else bound.identity
     if identity is not None and identity.lease is not None:
         raise RuntimeError("this process already has an external attachment")
-    if current_turn_agent_id() is not None or (
-        identity is not None and identity.agent_id is not None and identity.owns_loop
-    ):
+    if identity is not None and identity.agent_id is not None and identity.owns_loop:
         raise RuntimeError("a native agent runtime cannot attach an external controller")
     return bound
 

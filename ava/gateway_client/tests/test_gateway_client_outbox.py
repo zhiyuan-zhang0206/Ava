@@ -101,6 +101,9 @@ def _records(journal: Path) -> list[outbox.OutboxEntry]:
 @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
 def test_failed_send_records_with_the_key_it_used(mock_client: MagicMock, journal: Path) -> None:
     from ava.gateway_client import send_message
+    from tests.fixtures.pin_agent import pin_agent
+
+    pin_agent(7, owns_loop=False)
 
     mock_client.post.side_effect = httpx.ConnectError("refused")
     with pytest.raises(GatewayUnavailable):
@@ -111,6 +114,7 @@ def test_failed_send_records_with_the_key_it_used(mock_client: MagicMock, journa
     assert len(records) == 1
     entry = records[0]
     assert entry.agent_id == 42 and entry.source == "watcher:7"
+    assert entry.origin_agent_id == 7
     assert entry.content == "hello" and entry.client_message_id == keys.pop()
     assert entry.state == "pending" and entry.attempts == 1
 

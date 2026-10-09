@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 import ava
 from ava.sdk_surface import agent_identity
-from base.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
+from base.host.proc import run_bounded
+from base.native_process.turn_identity import bind_turn_identity
 from tests.fixtures.pin_agent import exec_context, pin_agent, pin_no_identity
 
 
@@ -40,17 +41,81 @@ def test_host_identity_requires_the_callers_explicit_context() -> None:
     assert getattr(ava, "context", None) is None
 
 
-def test_native_turn_cannot_bootstrap_env_identity_or_attach(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ava.external import attach
+def test_host_startup_refuses_env_context_and_attachment() -> None:
+    code = """
+import os
+os.environ.pop("AVA_AGENT_ID", None)
+import ava
+import runpy
+from base import config
+class BootStoppedError(RuntimeError):
+    pass
+def stop_boot():
+    raise BootStoppedError("after SDK posture")
+config.ensure_eager = stop_boot
+try:
+    runpy.run_module("services.agent_runner.agent_host.daemon", run_name="__main__")
+except BootStoppedError:
+    pass
+else:
+    raise AssertionError("boot did not stop")
+from ava.sdk_surface import agent_identity, process_context
+os.environ["AVA_AGENT_ID"] = "5"
+ava.bind_host_process()
+assert ava.is_host_process()
+assert agent_identity.is_launched_child() is False
+assert getattr(ava, "context", None) is None
+try:
+    ava.external.attach("must-not-be-read")
+except RuntimeError as exc:
+    assert "native agent runtime" in str(exc)
+else:
+    raise AssertionError("host attached")
+try:
+    ava.bind_context(process_context.launched_context())
+except RuntimeError as exc:
+    assert "shared agent host" in str(exc)
+else:
+    raise AssertionError("host rebound")
+try:
+    ava.unbind_context()
+except RuntimeError as exc:
+    assert "startup posture" in str(exc)
+else:
+    raise AssertionError("host posture was released")
+"""
+    result = run_bounded(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr
 
-    monkeypatch.setenv("AVA_AGENT_ID", "5")
-    with bind_turn_identity(5):
-        assert agent_identity.is_launched_child() is False
-        assert getattr(ava, "context", None) is None
-        with pytest.raises(RuntimeError, match="native agent runtime"):
-            attach("must-not-be-read")
+
+def test_executable_host_rejects_inherited_child_identity_before_sdk_import() -> None:
+    code = """
+import os
+import sys
+import runpy
+os.environ["AVA_AGENT_ID"] = "5"
+try:
+    runpy.run_module("services.agent_runner.agent_host.daemon", run_name="__main__")
+except RuntimeError as exc:
+    assert "cannot inherit a launched-agent identity" in str(exc)
+else:
+    raise AssertionError("host accepted inherited child identity")
+assert "ava" not in sys.modules
+"""
+    result = run_bounded(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_established_child_context_cannot_become_shared_host() -> None:
+    pin_agent(5, owns_loop=False)
+    with pytest.raises(RuntimeError, match="established SDK process context"):
+        ava.bind_host_process()
+    assert agent_identity.require_agent_id() == 5
+    assert ava.is_host_process() is False
 
 
 def test_turn_metadata_cannot_grant_a_launched_script_loop_ownership(
@@ -81,15 +146,3 @@ def test_sdk_threads_use_one_local_binding_without_patching_thread_start() -> No
     pin_no_identity()
     assert threading.Thread.start is start
     assert threading.Thread.start.__module__ == "threading"
-
-
-def test_native_metadata_still_propagates_to_host_async_tasks() -> None:
-    async def scenario() -> tuple[int | None, int | None]:
-        async def read_turn() -> int | None:
-            return current_turn_agent_id()
-
-        with bind_turn_identity(77):
-            task = asyncio.create_task(read_turn())
-        return await task, current_turn_agent_id()
-
-    assert asyncio.run(scenario()) == (77, None)

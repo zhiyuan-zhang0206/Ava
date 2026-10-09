@@ -481,3 +481,12 @@ class TestExtractRetryAfter:
     def test_no_headers(self) -> None:
         assert extract_retry_after(ValueError("x")) is None
         assert extract_retry_after(_http_error(429)) is None  # hdrs=None
+
+
+def test_transport_phase_uses_process_not_env_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    expected = 10.0 * (os.getpid() % 1000) / 1000.0
+    for agent_id in (7, 42):
+        monkeypatch.setenv("AVA_AGENT_ID", str(agent_id))
+        assert jittered(0.0, span=10.0, mode="phase") == expected
