@@ -95,9 +95,16 @@ binaries and vendored runtime
 as the paired runners, preserving environment-dependent collection. Group checks must match
 their planned node IDs and declared closure before any test body executes.
 
-Planning arms a 60-second repeating thread dump before importing pytest, writing
-to a separate stack file so pytest capture cannot hide a stalled import or
-collection. Collection logs contain per-file counts (`-qq`); the plan artifact
+Planning owns a 60-second repeating Python diagnostic thread through
+`scripts.ci.collection_tracebacks.periodic_tracebacks` before importing pytest.
+Both required CI and this proof use that owner, which stops and joins the thread
+before closing its separate stack file. Direct `faulthandler.dump_traceback`
+calls hold the GIL while reading interpreter frames; the native
+`dump_traceback_later` watchdog can race frame changes on supported CPython 3.12.
+These best-effort dumps can be delayed by native code holding the GIL; the
+external command timeout still terminates a stalled collection. Diagnostic
+exceptions propagate as failures after joining the thread. Pytest capture cannot
+hide this stack file. Collection logs contain per-file counts (`-qq`); the plan artifact
 still records every eligible node and fixture closure. The collection command
 has a four-minute timeout and a 15-second kill grace within its five-minute step
 and ten-minute job limits. Logs are

@@ -33,11 +33,10 @@ jobs:
           set -euo pipefail
           mkdir -p tmp
           timeout --kill-after=15s 4m uv run python -u - <<'PY' 2>&1 | tee tmp/file-plan-collection.log
-          import faulthandler
+          from scripts.ci.collection_tracebacks import periodic_tracebacks
 
           with open("tmp/file-plan-stacks.log", "w") as stacks:
-              faulthandler.dump_traceback_later(60, repeat=True, file=stacks)
-              try:
+              with periodic_tracebacks(stacks):
                   import pytest
 
                   raise SystemExit(pytest.main([
@@ -47,8 +46,6 @@ jobs:
                       "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=16",
                       "--file-shard-plan=tmp/file-plan.json",
                   ]))
-              finally:
-                  faulthandler.cancel_dump_traceback_later()
           PY
       - name: Publish planning diagnostics, including failed collection
         if: ${{ !cancelled() }}
