@@ -141,7 +141,7 @@ def test_default_scan_skips_tests_and_conftest() -> None:
 
 
 def test_cli_exit_codes(tmp_path: Path) -> None:
-    repo = Path(__file__).resolve().parents[4]
+    repo = Path(__file__).resolve().parents[5]
     bad = tmp_path / "bad.py"
     bad.write_text("try:\n    f()\nexcept Exception:\n    pass\n")
     good = tmp_path / "good.py"
