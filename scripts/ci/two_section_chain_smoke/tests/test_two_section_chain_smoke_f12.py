@@ -11,7 +11,7 @@ import datetime
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.ci import two_section_chain_smoke as smoke  # noqa: E402 - checkout path guard above

@@ -1,0 +1,3 @@
+"tests.path_scoped.ava_tests" = [
+    "test_lazy_connection.py",
+]

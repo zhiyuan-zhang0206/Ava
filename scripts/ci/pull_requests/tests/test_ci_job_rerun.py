@@ -26,7 +26,7 @@ import pytest
 # pyright: reportUnknownArgumentType = warning
 
 _MOD_PATH = (
-    Path(__file__).resolve().parents[3] / "scripts" / "ci" / "pull_requests" / "job_rerun.py"
+    Path(__file__).resolve().parents[4] / "scripts" / "ci" / "pull_requests" / "job_rerun.py"
 )
 _MOD_NAME = "ci_job_rerun_under_test"
 _spec = importlib.util.spec_from_file_location(_MOD_NAME, _MOD_PATH)

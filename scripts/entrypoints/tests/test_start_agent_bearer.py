@@ -14,7 +14,7 @@ import pytest
 
 
 def _load_start_agent():
-    path = Path(__file__).resolve().parents[2] / "scripts" / "entrypoints" / "agent.py"
+    path = Path(__file__).resolve().parents[3] / "scripts" / "entrypoints" / "agent.py"
     spec = importlib.util.spec_from_file_location("start_agent_under_test", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
