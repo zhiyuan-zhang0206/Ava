@@ -174,6 +174,11 @@ class ClickResult(TypedDict):
     double: bool
 
 
+class DragResult(TypedDict):
+    start: ClickPoint
+    end: ClickPoint
+
+
 class TypeResult(TypedDict):
     typed: int  # characters sent
 
@@ -420,6 +425,20 @@ def click(
 ) -> ClickResult:
     """Click the left mouse button at the global screen point (x, y)."""
     return _call("click", x=x, y=y, double=double, sock_path=sock_path)
+
+
+def drag(
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    *,
+    sock_path: str | Path | None = None,
+) -> DragResult:
+    """Drag the left mouse button between global screen points (logical coordinates)."""
+    return _call(
+        "drag", start_x=start_x, start_y=start_y, end_x=end_x, end_y=end_y, sock_path=sock_path
+    )
 
 
 def type_text(text: str, *, sock_path: str | Path | None = None) -> TypeResult:
