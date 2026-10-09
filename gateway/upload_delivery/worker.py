@@ -19,7 +19,7 @@ from base.agents.upload_delivery.models import (
     ReceiveRequest,
     UploadDeliveryConflictError,
 )
-from base.agents.uploads import agent_upload_dir
+from base.agents.upload_delivery.paths import agent_upload_dir
 from base.db import Database, publish_inbound_wake
 from base.deploy.maintenance.admission import business_paused, quiesced
 from base.events.live.bus import EventBus

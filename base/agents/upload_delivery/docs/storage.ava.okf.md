@@ -13,7 +13,9 @@ as an actual integer; omission, bool, float and unknown values fail before effec
 Unit identity reuses `base.cluster.authority.unit.UnitIdentity`; native machine and
 resolved `AVA_HOME` identify the receiver, not the physical uploads quota owner.
 
-`agent_upload_dir` lives under `Path.home()/Downloads`, independent of `AVA_HOME`.
+`paths` owns the shared upload URL, path, image MIME, limits and safe-serving
+helpers used by gateway, Ops and inbound image consumers. `agent_upload_dir`
+lives under `Path.home()/Downloads`, independent of `AVA_HOME`.
 `storage` uses the shared agent xact gate and counts flat files, legal nested final
 objects and receiving reservations for actual machine/resolved directory. Source
 and copy manifests sharing a physical root count each batch path once. Existing
