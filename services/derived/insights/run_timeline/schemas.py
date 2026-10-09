@@ -120,35 +120,29 @@ class RunTimelineEvent(BaseModel):
     label: str | None
 
 
-class RunTimelineRequest(BaseModel):
-    """One LLM request of the agent: an AIMessage carrying `usage_metadata`.
+class RunTimelineMessageBar(BaseModel):
+    """One message the Messages row shows, weighed for the two context rows (one bar per message).
 
-    `idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent
-    (the read time of the message before it, the start of the turn's thinking block);
-    `session` the zero-based compaction segment it was sent in; `input_tokens` the provider's
-    total input tokens of that request, the size of its context, and `output_tokens` what it
-    generated (both the provider's own numbers, never estimated).
-
-    `added_tokens` is what newly entered the context for this request: the token sum of the
-    messages first read by it, i.e. those from the previous request's AIMessage (its output is
-    re-sent) up to the message before this one; for a session's first request, from the session's
-    first message. The segment head (system prompt) is not counted. `added_estimated` is True when
-    any of those counts is a share rather than the provider's own number. `added_from` / `added_to`
-    are that message range as indices into the stitched history, half-open (`added_to` is the
-    request's own `idx`); the two are equal when the request read nothing new.
+    `start` / `end` are the extent of the block(s) that show the message, so its bars sit exactly
+    under them. `context_tokens` is what the message itself occupies in the context and `estimated`
+    whether that is a share rather than the provider's own number; `context_total` is the context
+    through this message: its session's head and every message up to it, at the weight each was
+    read with (before an AIMessage, the `input_tokens` of the request that produced it). `session`
+    is the zero-based compaction segment (the total starts over in each). `request` is the usage of
+    the LLM request this AIMessage was (input, output, cache, cost), None for any other message.
+    Only messages a request has read are served.
     """
 
     model_config = ConfigDict(frozen=True)
 
     idx: int
-    ts: datetime
+    start: datetime
+    end: datetime
     session: int
-    input_tokens: int
-    output_tokens: int
-    added_tokens: int
-    added_estimated: bool
-    added_from: int
-    added_to: int
+    context_tokens: int
+    estimated: bool
+    context_total: int
+    request: RunTimelineUsage | None
 
 
 class RunTimelineResponse(BaseModel):
@@ -158,8 +152,8 @@ class RunTimelineResponse(BaseModel):
     messages and understanding nodes — and the default window; None when it has
     neither. `nodes` are the tree's nodes intersecting the window, every level;
     `units` are layer 0 intersecting it. `events` are optional lifecycle markers
-    in the window; they play no part in the extent. `requests` are the agent's LLM requests
-    sent in the window (the context-size row).
+    in the window; they play no part in the extent. `messages` are the weighed messages whose
+    blocks intersect the window (the two context rows).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -170,7 +164,7 @@ class RunTimelineResponse(BaseModel):
     nodes: list[RunTimelineNode]
     units: list[RunTimelineUnit]
     events: list[RunTimelineEvent]
-    requests: list[RunTimelineRequest]
+    messages: list[RunTimelineMessageBar]
 
 
 RunTimelinePartKind = Literal[

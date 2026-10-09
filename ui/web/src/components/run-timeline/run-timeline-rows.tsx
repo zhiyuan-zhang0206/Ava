@@ -1,11 +1,11 @@
 "use client";
 
-// The run timeline's rows on one shared axis (plain time by default, or hybrid: block width follows
-// tokens, the space between blocks follows log idle time): lifecycle markers on top,
-// then one row per understanding-tree level (topmost first), then layer 0 — the
-// message units — at the bottom. All rows share one viewport on the loaded data:
-// the wheel / pinch zooms around the cursor, a drag or a horizontal scroll pans,
-// and nothing refetches. A click selects a block; the arrow keys move the selection.
+// The agent view's rows: any number of agents on one shared axis (plain time). Each agent is a group
+// of rows: lifecycle markers on top, then one row per understanding-tree level (topmost first), then
+// layer 0 — the message units — and the context bars at the bottom. All rows of all agents share one
+// viewport on the loaded data: the wheel / pinch zooms around the cursor, a drag or a horizontal
+// scroll pans, and nothing refetches. A click selects a block; the arrow keys move the selection,
+// down from an agent's last row into the next agent's first.
 
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -13,22 +13,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import {
   blockClass,
   hoverLit,
   axisBox,
-  buildAxisMap,
+  timeAxis,
   inboundSources,
   levelsTopFirst,
   panView,
   zoomView,
-  type AxisMode,
   type BlockClass,
   type Highlight,
-  type Hover,
-  type Selection,
   type Viewport,
 } from "./timeline-model";
 import {
@@ -36,12 +33,15 @@ import {
   INPUT_ROW,
   UNITS_ROW,
   levelRowId,
-  navigate,
-  SELECTION_MIN_PX,
+  navRowIds,
+  SELECTION_LINE_BELOW_PX,
   selectionRoles,
   revealView,
   type NavKey,
+  type RowOptions,
 } from "./timeline-nav";
+import { navigateAcross, type AgentSelection, type ViewAgent } from "./agent-view-nav";
+import { AgentGroupHeader, AgentPending } from "./agent-view-group";
 import { barTop, frameOf, layoutsFor, type RowLayout } from "./timeline-canvas-model";
 import { RunTimelineAxis } from "./run-timeline-axis";
 import { TrackCanvas } from "./run-timeline-canvas";
@@ -59,9 +59,16 @@ const PINCH_ZOOM_RATE = 0.01;
 const LEVEL_ROW_PX = 32;
 const UNIT_ROW_PX = 24;
 const CONTEXT_ROW_PX = 40;
+const EMPTY_DATA = { nodes: [], units: [], messages: [] };
+
+/** One agent of the view: its data once read, else what is shown in its place. */
+export type AgentEntry =
+  | { id: number; status: "loaded"; data: RunTimelineResponse }
+  | { id: number; status: "loading" }
+  | { id: number; status: "failed" };
 
 export function RunTimelineRows({
-  data,
+  entries,
   base,
   view,
   onView,
@@ -69,35 +76,47 @@ export function RunTimelineRows({
   onSelect,
   highlight,
   onHighlight,
+  options,
+  onRemove,
+  onRetry,
 }: {
-  data: RunTimelineResponse;
-  /** The whole loaded extent: the viewport never leaves it. */
+  /** The agents, top to bottom; at least one is loaded. */
+  entries: readonly AgentEntry[];
+  /** The whole loaded extent of every agent: the viewport never leaves it. */
   base: Viewport;
   view: Viewport;
   onView: (view: Viewport) => void;
-  selection: Selection | null;
-  onSelect: (selection: Selection) => void;
+  selection: AgentSelection | null;
+  onSelect: (selection: AgentSelection) => void;
   /** The legend's highlight: every block of one class (or one source) stays lit, the rest fades. */
   highlight: Highlight | null;
   onHighlight: (highlight: Highlight | null) => void;
+  options: RowOptions;
+  /** Removes an agent from the view; null while it is the only one. */
+  onRemove: ((agent: number) => void) | null;
+  onRetry: (agent: number) => void;
 }) {
   const t = useTranslations("runTimeline");
-  const [hover, setHover] = useState<Hover | null>(null);
-  const lit = hoverLit(hover, data.nodes, data.units, data.requests);
-  const levels = levelsTopFirst(data.nodes);
-  const [mode, setMode] = useState<AxisMode>("time");
-  // The row the selection was made in: a request's bar and its message block select the same thing.
+  const [hover, setHover] = useState<AgentSelection | null>(null);
+  // The row the selection was made in: a message's two bars select the same thing.
   const [navRow, setNavRow] = useState<string | null>(null);
-  const choose = (row: string, target: Selection) => {
+  const choose = (agent: number, row: string, target: AgentSelection["selection"]) => {
     setNavRow(row);
-    onSelect(target);
+    onSelect({ agent, selection: target });
   };
+  const loaded = useMemo(
+    () =>
+      entries.flatMap((entry) => (entry.status === "loaded" ? [{ id: entry.id, data: entry.data }] : [])),
+    [entries],
+  );
   const baseFrom = base.from;
   const baseTo = base.to;
-  const axis = useMemo(
-    () => buildAxisMap(data.units, { from: baseFrom, to: baseTo }, mode),
-    [data.units, baseFrom, baseTo, mode],
+  const axis = useMemo(() => timeAxis({ from: baseFrom, to: baseTo }), [baseFrom, baseTo]);
+  const agents: ViewAgent[] = useMemo(
+    () => loaded.map(({ id, data }) => ({ id, data, rows: navRowIds(data, options) })),
+    [loaded, options],
   );
+  const byId = new Map(agents.map((agent) => [agent.id, agent]));
   const viewU = axis.viewU(view);
   const chartRef = useRef<HTMLDivElement>(null);
   const live = useRef({ base, view, onView, axis });
@@ -115,26 +134,32 @@ export function RunTimelineRows({
   });
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
   // Where the selected items are, per row: drawn as an outlined box in each row and a line through all of them.
-  const layouts = layoutsFor(data, axis, viewU, trackPx);
-  const roles = selectionRoles(selection === null ? null : { row: navRow, selection }, data);
+  const layouts = new Map(agents.map((agent) => [agent.id, layoutsFor(agent.data, axis, viewU, trackPx, agent.rows)]));
+  const selected = selection === null ? undefined : byId.get(selection.agent);
+  const roles = selectionRoles(
+    selection === null || selected === undefined ? null : { row: navRow, selection: selection.selection },
+    selected?.data ?? EMPTY_DATA,
+    selected?.rows,
+  );
   // The primary item (the cursor's) gets one strong frame; what is linked to it one light frame per row around the whole batch.
-  // A frame hugs the drawn item (bars exactly, the rest at least 6 px wide); a primary item narrower than 6 px also gets a hairline.
-  const boxesOf = (row: string, keys: Iterable<string>) => {
-    const boxes = layouts.get(row)?.boxes;
+  // A frame hugs the drawn item; a primary item narrower than 6 px also gets a hairline.
+  const boxesOf = (agent: number, row: string, keys: Iterable<string>) => {
+    const boxes = layouts.get(agent)?.get(row)?.boxes;
     return [...keys].flatMap((key) => boxes?.get(key) ?? []);
   };
-  const primaryBoxes = roles.primary === null ? [] : boxesOf(roles.primary.row, [roles.primary.key]);
-  const primaryRaw = frameOf(primaryBoxes, 0, trackPx);
-  const lineX = primaryRaw !== null && primaryRaw.width < SELECTION_MIN_PX ? primaryRaw.left + primaryRaw.width / 2 : null;
-  const decoFor = (row: string): RowDeco => {
-    const minPx = row === INPUT_ROW || row === ADDED_ROW ? 0 : SELECTION_MIN_PX;
-    const primaryHere = roles.primary?.row === row ? roles.primary.key : null;
-    const linkedKeys = roles.linked.get(row) ?? new Set<string>();
+  const primaryBoxes =
+    roles.primary === null || selection === null ? [] : boxesOf(selection.agent, roles.primary.row, [roles.primary.key]);
+  const primaryRaw = frameOf(primaryBoxes, trackPx);
+  const lineX = primaryRaw !== null && primaryRaw.width < SELECTION_LINE_BELOW_PX ? primaryRaw.left + primaryRaw.width / 2 : null;
+  const decoFor = (agent: number, row: string): RowDeco => {
+    const mine = selection?.agent === agent;
+    const primaryHere = mine && roles.primary?.row === row ? roles.primary.key : null;
+    const linkedKeys = mine ? (roles.linked.get(row) ?? new Set<string>()) : new Set<string>();
     return {
       primaryKey: primaryHere,
       linkedKeys,
-      primary: primaryHere === null ? null : frameOf(boxesOf(row, [primaryHere]), minPx, trackPx),
-      linked: frameOf(boxesOf(row, linkedKeys), minPx, trackPx),
+      primary: primaryHere === null ? null : frameOf(boxesOf(agent, row, [primaryHere]), trackPx),
+      linked: frameOf(boxesOf(agent, row, linkedKeys), trackPx),
       lineX,
     };
   };
@@ -152,11 +177,11 @@ export function RunTimelineRows({
     observer.observe(track);
     return () => observer.disconnect();
   }, []);
-  const nav = useRef({ data, view, base, axis, selection, navRow, onSelect, onView });
+  const nav = useRef({ agents, view, base, axis, selection, navRow, onSelect, onView });
   useEffect(() => {
-    nav.current = { data, view, base, axis, selection, navRow, onSelect, onView };
+    nav.current = { agents, view, base, axis, selection, navRow, onSelect, onView };
   });
-  // Arrow keys move the selection (see `navigate`) and pan the view to it; editable and resizing controls keep their own arrows.
+  // Arrow keys move the selection (see `navigateAcross`) and pan the view to it; editable and resizing controls keep their own arrows.
   useEffect(() => {
     const keys: Partial<Record<string, NavKey>> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
     const onKey = (event: KeyboardEvent) => {
@@ -165,14 +190,20 @@ export function RunTimelineRows({
       const el = event.target instanceof Element ? event.target : null;
       if (el?.closest("input, textarea, select, [contenteditable], [role=textbox], [role=separator], [role=slider], [role=combobox]")) return;
       const s = nav.current;
-      const next = navigate(key, s.selection === null ? null : { row: s.navRow, selection: s.selection }, s.data, s.axis, s.view);
+      const next = navigateAcross(
+        key,
+        s.selection === null ? null : { ...s.selection, row: s.navRow },
+        s.agents,
+        s.axis,
+        s.view,
+      );
       event.preventDefault();
       // The clicked block keeps keyboard focus (its focus ring and hover echo) while the selection moves on.
       if (el !== null && chartRef.current?.contains(el) && el instanceof HTMLElement) el.blur();
       setHover(null);
       if (next === null) return;
       setNavRow(next.row);
-      s.onSelect(next.item.selection);
+      s.onSelect({ agent: next.agent, selection: next.item.selection });
       const shown = revealView(s.axis, s.view, s.base, next.item.start, next.item.end);
       if (shown !== s.view) s.onView(shown);
     };
@@ -246,19 +277,35 @@ export function RunTimelineRows({
   const unitLabel = (unit: Pick<RunTimelineUnit, "kind" | "source">) => classLabel[blockClass(unit)];
   const sourceLabel = (source: string) =>
     source.startsWith("agent:") ? t("sourceFromAgent", { id: source.slice("agent:".length) }) : source;
-  const sources = highlight !== null && (highlight.cls === "human" || highlight.cls === "agent")
-    ? inboundSources(data.units, highlight.cls)
-    : [];
-  const readout = readoutText(hover, {
-    data,
-    t,
-    unitLabel,
-    sourceLabel,
-  });
+  const sources =
+    highlight !== null && (highlight.cls === "human" || highlight.cls === "agent")
+      ? [...new Set(agents.flatMap((agent) => inboundSources(agent.data.units, highlight.cls as "human" | "agent")))].sort()
+      : [];
+  // The line saying what is hovered (or selected) names its agent when the view holds several.
+  const describe = (target: AgentSelection | null) => {
+    const owner = target === null ? undefined : byId.get(target.agent);
+    if (target === null || owner === undefined) return null;
+    const line = readoutText(target.selection, { data: owner.data, t, unitLabel, sourceLabel });
+    return line !== null && agents.length > 1 ? t("readoutAgent", { id: target.agent, line }) : line;
+  };
+  const readout = describe(hover);
   // The layout of every row (where each item is drawn) is cached per view: hovering and selecting only repaint.
-  const paintState: PaintState = { selection, hover, lit, highlight };
-  const canvasFor = (row: string, height: number, paint: (p: Parameters<React.ComponentProps<typeof TrackCanvas>["paint"]>[0], layout: RowLayout) => void) => {
-    const layout = layouts.get(row);
+  const paintStateOf = (agent: ViewAgent): PaintState => {
+    const mine = hover?.agent === agent.id ? hover.selection : null;
+    return {
+      selection: selection?.agent === agent.id ? selection.selection : null,
+      hover: mine,
+      lit: hoverLit(mine, agent.data.nodes, agent.data.units),
+      highlight,
+    };
+  };
+  const canvasFor = (
+    agent: ViewAgent,
+    row: string,
+    height: number,
+    paint: (p: Parameters<React.ComponentProps<typeof TrackCanvas>["paint"]>[0], layout: RowLayout) => void,
+  ) => {
+    const layout = layouts.get(agent.id)?.get(row);
     if (layout === undefined) return null;
     return (
       <TrackCanvas
@@ -267,16 +314,88 @@ export function RunTimelineRows({
         layout={layout}
         paint={(p) => paint(p, layout)}
         testId={`run-timeline-canvas-${row}`}
-        onHit={(key) => setHover(key === null ? null : (layout.items.get(key)?.selection ?? null))}
+        onHit={(key) => {
+          const item = key === null ? undefined : layout.items.get(key);
+          setHover(item === undefined ? null : { agent: agent.id, selection: item.selection });
+        }}
         onChoose={(key) => {
           const item = layout.items.get(key);
-          if (item !== undefined) choose(row, item.selection);
+          if (item !== undefined) choose(agent.id, row, item.selection);
         }}
       />
     );
   };
   // The selection read aloud: the canvas is decorative, the arrow keys move through every item.
-  const spoken = readoutText(selection, { data, t, unitLabel, sourceLabel });
+  const spoken = describe(selection);
+  const empty = loaded.every(({ data }) => data.nodes.length === 0 && data.units.length === 0);
+
+  const renderAgent = (agent: ViewAgent) => {
+    const { data } = agent;
+    const paintState = paintStateOf(agent);
+    const levels = levelsTopFirst(data.nodes).filter((level) => agent.rows.includes(levelRowId(level)));
+    return (
+      <section
+        key={agent.id}
+        aria-label={t("agentGroupAria", { id: agent.id })}
+        data-testid={`agent-view-agent-${agent.id}`}
+        className="space-y-1.5"
+      >
+        <AgentGroupHeader agentId={agent.id} onRemove={onRemove} />
+        {data.events.length > 0 ? (
+          <RowShell label={t("lifecycleRow")} height="h-5" testId="run-timeline-row-lifecycle">
+            {data.events.map((event) => {
+              const box = axisBox(axis, event.ts, event.ts, viewU);
+              if (box === null) return null;
+              const when = formatShort(event.ts);
+              return (
+                <span
+                  key={`${event.kind}-${event.ts}`}
+                  role="img"
+                  aria-label={t("eventAria", { kind: event.kind, time: when })}
+                  title={`${event.kind} · ${when}${event.label ? ` · ${event.label}` : ""}`}
+                  data-testid="run-timeline-event"
+                  className="absolute top-1 h-3 w-1.5 rounded-sm bg-foreground/60"
+                  style={{ left: `${box.left}%` }}
+                />
+              );
+            })}
+          </RowShell>
+        ) : null}
+
+        {levels.map((level) => (
+          <RowShell
+            key={level}
+            label={t("levelRow", { level })}
+            height="h-8"
+            testId={`run-timeline-row-level-${level}`}
+          >
+            {canvasFor(agent, levelRowId(level), LEVEL_ROW_PX, (p, layout) =>
+              paintNodes(p, layout, paintState, decoFor(agent.id, levelRowId(level))),
+            )}
+          </RowShell>
+        ))}
+
+        <RowShell label={t("messagesRow")} height="h-6" testId="run-timeline-row-units">
+          {canvasFor(agent, UNITS_ROW, UNIT_ROW_PX, (p, layout) => paintUnits(p, layout, paintState, decoFor(agent.id, UNITS_ROW)))}
+        </RowShell>
+
+        {([INPUT_ROW, ADDED_ROW] as const)
+          .filter((row) => agent.rows.includes(row))
+          .map((row) => (
+            <RowShell
+              key={row}
+              label={t(row === ADDED_ROW ? "addedContextRow" : "contextRow")}
+              height="h-10"
+              testId={row === ADDED_ROW ? "run-timeline-row-added" : "run-timeline-row-context"}
+            >
+              {canvasFor(agent, row, CONTEXT_ROW_PX, (p, layout) =>
+                paintBars(p, layout, barTop(row, data), row === ADDED_ROW, paintState, decoFor(agent.id, row)),
+              )}
+            </RowShell>
+          ))}
+      </section>
+    );
+  };
 
   return (
     <div
@@ -294,7 +413,7 @@ export function RunTimelineRows({
           event.preventDefault();
         }
       }}
-      className="relative select-none space-y-1.5 rounded-[10px] border border-border bg-card p-3"
+      className="relative select-none space-y-3 rounded-[10px] border border-border bg-card p-3"
     >
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
         {spoken ?? ""}
@@ -307,84 +426,17 @@ export function RunTimelineRows({
         >
           {readout ?? t("readoutIdle")}
         </p>
-        <div
-          role="group"
-          aria-label={t("axisModeTitle")}
-          title={t("axisModeTitle")}
-          data-testid="run-timeline-axis-mode"
-          data-mode={mode}
-          className={cn(FLEX, OVERFLOW_HIDDEN, "shrink-0 rounded border border-border font-mono text-[10px]")}
-        >
-          {(["time", "hybrid"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              data-testid={`run-timeline-axis-${option}`}
-              aria-pressed={mode === option}
-              onClick={() => setMode(option)}
-              className={cn(
-                "px-1.5",
-                mode === option ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {option === "time" ? t("axisTime") : t("axisHybrid")}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {data.events.length > 0 ? (
-        <RowShell label={t("lifecycleRow")} height="h-5" testId="run-timeline-row-lifecycle">
-          {data.events.map((event) => {
-            const box = axisBox(axis, event.ts, event.ts, viewU);
-            if (box === null) return null;
-            const when = formatShort(event.ts);
-            return (
-              <span
-                key={`${event.kind}-${event.ts}`}
-                role="img"
-                aria-label={t("eventAria", { kind: event.kind, time: when })}
-                title={`${event.kind} · ${when}${event.label ? ` · ${event.label}` : ""}`}
-                data-testid="run-timeline-event"
-                className="absolute top-1 h-3 w-1.5 rounded-sm bg-foreground/60"
-                style={{ left: `${box.left}%` }}
-              />
-            );
-          })}
-        </RowShell>
-      ) : null}
+      {entries.map((entry) => {
+        if (entry.status !== "loaded") {
+          return <AgentPending key={entry.id} agentId={entry.id} failed={entry.status === "failed"} onRetry={onRetry} onRemove={onRemove} />;
+        }
+        const agent = byId.get(entry.id);
+        return agent === undefined ? null : renderAgent(agent);
+      })}
 
-      {levels.map((level) => (
-        <RowShell
-          key={level}
-          label={t("levelRow", { level })}
-          height="h-8"
-          testId={`run-timeline-row-level-${level}`}
-        >
-          {canvasFor(levelRowId(level), LEVEL_ROW_PX, (p, layout) => paintNodes(p, layout, paintState, decoFor(levelRowId(level))))}
-        </RowShell>
-      ))}
-
-      <RowShell label={t("messagesRow")} height="h-6" testId="run-timeline-row-units">
-        {canvasFor(UNITS_ROW, UNIT_ROW_PX, (p, layout) => paintUnits(p, layout, paintState, decoFor(UNITS_ROW)))}
-      </RowShell>
-
-      {data.requests.length > 0
-        ? ([INPUT_ROW, ADDED_ROW] as const).map((row) => (
-            <RowShell
-              key={row}
-              label={t(row === ADDED_ROW ? "addedContextRow" : "contextRow")}
-              height="h-10"
-              testId={row === ADDED_ROW ? "run-timeline-row-added" : "run-timeline-row-context"}
-            >
-              {canvasFor(row, CONTEXT_ROW_PX, (p, layout) =>
-                paintBars(p, layout, barTop(row, data), row === ADDED_ROW, paintState, decoFor(row)),
-              )}
-            </RowShell>
-          ))
-        : null}
-
-      <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} trackPx={trackPx} />
+      <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} />
 
       <RunTimelineLegend
         highlight={highlight}
@@ -394,9 +446,7 @@ export function RunTimelineRows({
         sourceLabel={sourceLabel}
       />
 
-      {data.nodes.length === 0 && data.units.length === 0 ? (
-        <p className="pt-1 text-xs text-muted-foreground">{t("empty")}</p>
-      ) : null}
+      {empty ? <p className="pt-1 text-xs text-muted-foreground">{t("empty")}</p> : null}
     </div>
   );
 }

@@ -23,7 +23,7 @@ function readout(u: RunTimelineUnit): string | null {
   return readoutText(
     { kind: "unit", i0: u.i0, i1: u.i1, unitKind: u.kind } as never,
     {
-      data: { units: [u], nodes: [], requests: [], events: [] } as unknown as RunTimelineResponse,
+      data: { units: [u], nodes: [], messages: [], events: [] } as unknown as RunTimelineResponse,
       t,
       unitLabel: () => "Output",
       sourceLabel: (s) => s,
@@ -31,30 +31,40 @@ function readout(u: RunTimelineUnit): string | null {
   );
 }
 
-describe("run-timeline request readout", () => {
-  const request = (added_estimated: boolean) => ({
+describe("run-timeline message readout", () => {
+  const message = (estimated: boolean) => ({
     idx: 5,
-    ts: "2026-10-04T12:00:00Z",
-    session: 0,
-    input_tokens: 5000,
-    output_tokens: 10,
-    added_tokens: 1234,
-    added_estimated,
+    start: "2026-10-04T12:00:00Z",
+    end: "2026-10-04T12:00:00Z",
+    session: 1,
+    context_tokens: 1234,
+    estimated,
+    context_total: 5000,
+    request: null,
   });
-  const read = (r: ReturnType<typeof request>) =>
-    readoutText({ kind: "request", idx: 5 }, {
-      data: { units: [], nodes: [], requests: [r], events: [] } as unknown as RunTimelineResponse,
+  const read = (m: ReturnType<typeof message>) =>
+    readoutText({ kind: "message", idx: 5 }, {
+      data: { units: [], nodes: [], messages: [m], events: [] } as unknown as RunTimelineResponse,
       t,
       unitLabel: () => "",
       sourceLabel: (s) => s,
     });
 
-  it("shows the absolute input and what the request added", () => {
-    expect(read(request(false))).toMatch(/\|5\.0k\|1\.2k$/);
+  it("shows the message's own weight and the context through it", () => {
+    expect(read(message(false))).toMatch(/^readoutMessage 5\|2\|.*\|readoutUnitTokens 1\.2k\|5\.0k$/);
   });
 
-  it("marks an estimated addition", () => {
-    expect(read(request(true))).toMatch(/\|5\.0k\|1\.2k \(estimated\)$/);
+  it("marks an estimated weight", () => {
+    expect(read(message(true))).toMatch(/\|readoutUnitTokens 1\.2k \(estimated\)\|5\.0k$/);
+  });
+
+  it("says nothing of a message that is not in the data", () => {
+    expect(readoutText({ kind: "message", idx: 9 }, {
+      data: { units: [], nodes: [], messages: [], events: [] } as unknown as RunTimelineResponse,
+      t,
+      unitLabel: () => "",
+      sourceLabel: (s) => s,
+    })).toBeNull();
   });
 });
 
