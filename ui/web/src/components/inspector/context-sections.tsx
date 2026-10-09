@@ -6,7 +6,7 @@ import { ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { formatTokens } from "@/lib/format/format-number";
+import { approx, formatTokens } from "@/lib/format/format-number";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import type { ContextSection } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
@@ -54,8 +54,8 @@ function SectionRow({ node, depth }: { node: ContextSection; depth: number }) {
         ) : null}
         <span className={cn("truncate text-muted-foreground", MIN_W_0, FLEX_1)}>{node.name}</span>
         <span className="ml-1 shrink-0 tabular-nums text-muted-foreground">
+          {approx(node.estimated)}
           {formatTokens(node.tokens)}
-          {node.estimated ? ` ${t("estimatedSuffix")}` : ""}
         </span>
       </div>
       {open && hasChildren ? <SectionRows nodes={children} depth={depth + 1} /> : null}
