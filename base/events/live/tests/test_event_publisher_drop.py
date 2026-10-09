@@ -11,18 +11,19 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from base.events.live.publisher import AgentEventPublisher
+from ..publisher import AgentEventPublisher
 
 
 def _publisher(maxsize: int = 2) -> AgentEventPublisher:
-    # redis client unused on the emit path; start() is never called here.
+    redis = MagicMock()
+    redis.connection_pool.disconnect = AsyncMock()
     return AgentEventPublisher(
-        MagicMock(), "ava:events", agent_id=42, maxsize=maxsize, publish_timeout=0.1
+        redis, "ava:events", agent_id=42, maxsize=maxsize, publish_timeout=0.1
     )
 
 
@@ -84,30 +85,31 @@ def test_publish_error_emit_reports_sse_drop_event(monkeypatch: pytest.MonkeyPat
 async def test_publish_error_detail_carries_the_class_and_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A transport failure's detail keeps the class AND the message: redis-py
-    8.1's repr reads "network:ConnectionError" — the message that names the
-    real fault is gone (task #4964). The report stays INFO: transport-side,
-    not local backpressure (2026-10-03 triage #4)."""
-    reports = _capture(monkeypatch)
+    async with asyncio.TaskGroup() as tasks:
+        """A transport failure's detail keeps the class AND the message: redis-py
+        8.1's repr reads "network:ConnectionError" — the message that names the
+        real fault is gone (task #4964). The report stays INFO: transport-side,
+        not local backpressure (2026-10-03 triage #4)."""
+        reports = _capture(monkeypatch)
 
-    def _boom(_batch: list[str]) -> None:
-        raise RedisConnectionError("no route to host")
+        def _boom(_batch: list[str]) -> None:
+            raise RedisConnectionError("no route to host")
 
-    pub = _publisher()
-    monkeypatch.setattr(pub, "_publish_batch", _boom)
-    await pub.start()
-    pub.emit("one")
-    for _ in range(200):
-        if reports:
-            break
-        await asyncio.sleep(0.01)
-    await pub.aclose()
+        pub = _publisher()
+        monkeypatch.setattr(pub, "_publish_batch", _boom)
+        await pub.start(tasks)
+        pub.emit("one")
+        for _ in range(200):
+            if reports:
+                break
+            await asyncio.sleep(0.01)
+        await pub.aclose()
 
-    assert len(reports) == 1  # pyright: ignore[reportUnknownArgumentType]
-    level, kw = reports[0]
-    assert level == "INFO"
-    assert kw["kind"] == "publish_error"
-    assert kw["detail"] == "ConnectionError: no route to host"
+        assert len(reports) == 1  # pyright: ignore[reportUnknownArgumentType]
+        level, kw = reports[0]
+        assert level == "INFO"
+        assert kw["kind"] == "publish_error"
+        assert kw["detail"] == "ConnectionError: no route to host"
 
 
 async def test_batch_command_failure_detail_carries_the_class_and_message(
