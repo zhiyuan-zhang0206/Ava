@@ -93,7 +93,9 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
     monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)
     passes = 0
 
-    async def execute_pass(target_pool: ConnectionPool, _progress: LoopProgress, run: Any) -> None:
+    async def execute_pass(
+        target_pool: ConnectionPool, _progress: LoopProgress, run: Any, **_kw: object
+    ) -> None:
         nonlocal passes
         run(target_pool)
         passes += 1
@@ -105,8 +107,11 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
     monkeypatch.setattr(daemon, "_maintenance_with_liveness", execute_pass)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", stop_after_two)
     for expected_scans in (1, 2):
-        with pytest.raises(asyncio.CancelledError):
-            await daemon._resolution_loop(pool, LoopProgress("test", timeout_s=5), config)
+        async with asyncio.TaskGroup() as tasks:
+            with pytest.raises(asyncio.CancelledError):
+                await daemon._resolution_loop(
+                    pool, LoopProgress("test", timeout_s=5), config, tasks=tasks
+                )
         assert connection.scans == expected_scans
     assert passes == 4
     assert db_conn.execute("SELECT count(*) FROM event_dismissals").fetchone() == (1,)
