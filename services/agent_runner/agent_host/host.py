@@ -8,12 +8,11 @@ identity and ordinary log attribution. Configuration travels as its `AgentSlices
 on the graph context, and managed exec children receive the same pins through their
 existing environment projection.
 
-The daemon shares a workload pool, a separate control pool, one checkpointer
-(keyed by thread_id), and one compiled graph. Graph construction loads process-
-global plugin definitions, so compiling a graph per agent would corrupt concurrent
-turns. Chat models and startup reconciliation are cached per agent and invalidated
-by the stored birth/overlay configuration fingerprint. The llm node retries itself on
-its agent's own schedule (`agent/graph/llm/_retry.py`).
+The daemon shares workload/control pools, one thread-keyed checkpointer and one compiled graph.
+Graph construction loads process-global plugin definitions; per-agent compilation would corrupt
+concurrent turns. Chat models and startup reconciliation invalidate their per-agent caches on
+birth/overlay fingerprint changes. LLM retry follows each agent's own schedule
+(`agent/graph/llm/_retry.py`).
 
 Cold admission repairs claimed inbound/checkpoint disagreements and dangling tool
 pairs, and establishes the workspace. A watcher (`ava.watcher.at/cron/launch`) is
@@ -168,12 +167,13 @@ class AgentHost:
         machine: str | None = None,
         bus: EventBus,
         db: Database,
+        clients: ClientSet | None = None,
         extensions: ExtensionRegistry = EMPTY,
     ) -> None:
         self._bus = bus
         self._db = db
         # Shared clients are passed through each turn's explicit `AvaContext`.
-        self._clients = ClientSet(database=lambda: db)
+        self._clients = clients if clients is not None else ClientSet(database=lambda: db)
         self._extensions = extensions
         self._pool = pool
         self._control_pool = control_pool if control_pool is not None else pool

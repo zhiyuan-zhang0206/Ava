@@ -13,6 +13,7 @@ from agent.graph.exec.node import _exec_node_impl
 from agent.graph.interrupt import InterruptEvent
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
+from ava.sdk_surface.process_context import process_clients
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
@@ -61,6 +62,7 @@ def _runtime() -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            clients=process_clients(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )
