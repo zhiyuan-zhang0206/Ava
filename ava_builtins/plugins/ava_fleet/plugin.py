@@ -319,8 +319,7 @@ def _spawn_with_label(
     config_overlay: dict[str, object] | None = None,
     label: str | None = None,
     *,
-    idempotency_key: str | None = None,
-    require_idempotency: bool = False,
+    idempotency_key: str,
 ) -> int:
     """Start a new agent; does not block.
 
@@ -332,10 +331,8 @@ def _spawn_with_label(
         config_overlay: per-agent settings overlay, e.g. {"llm_model": ...};
             a preset is named inside it as {"preset": "name"}.
         label: initial role name; omitted = auto-named.
-        idempotency_key: explicit operation key for retrying the same creation.
-        require_idempotency: True requires a key and plain creation; reuse the
-            same inputs and caller identity to recover the original agent.
-            Default mode cannot guarantee key recovery on older servers.
+        idempotency_key: required operation identity for creation or fork; reuse
+            the same key, inputs and caller identity to recover the original agent.
     """
     return ava.agents.spawn_impl(
         prompt=prompt,
@@ -344,7 +341,6 @@ def _spawn_with_label(
         config=config_overlay,
         label=label,
         idempotency_key=idempotency_key,
-        require_idempotency=require_idempotency,
     )
 
 

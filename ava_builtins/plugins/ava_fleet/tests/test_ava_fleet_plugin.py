@@ -671,7 +671,7 @@ def test_fleet_spawn_preserves_caller_creation_key(
     assert "idempotency_key" in inspect.signature(ava.agents.spawn).parameters
 
 
-def test_fleet_spawn_forwards_strong_mode_and_rejects_fork(
+def test_fleet_spawn_forwards_keyed_fork_without_mode_flag(
     _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: list[dict[str, Any]] = []
@@ -681,9 +681,11 @@ def test_fleet_spawn_forwards_strong_mode_and_rejects_fork(
         return 42
 
     monkeypatch.setattr(ava.gateway_client, "spawn", capture)
-    assert ava.agents.spawn(prompt="goal", idempotency_key="intent", require_idempotency=True) == 42
-    assert captured[0]["require_idempotency"] is True
-    assert "require_idempotency" in inspect.signature(ava.agents.spawn).parameters
-    with pytest.raises(ValueError, match="does not support fork_from"):
-        ava.agents.spawn(fork_from=1, idempotency_key="intent", require_idempotency=True)
+    assert ava.agents.spawn(fork_from=1, idempotency_key="fork-intent") == 42
+    assert captured[0]["fork_from"] == 1
+    assert captured[0]["idempotency_key"] == "fork-intent"
+    assert "require_idempotency" not in inspect.signature(ava.agents.spawn).parameters
+    obsolete: dict[str, Any] = {"idempotency_key": "intent", "require_idempotency": True}
+    with pytest.raises(TypeError, match="require_idempotency"):
+        ava.agents.spawn(**obsolete)
     assert len(captured) == 1
