@@ -35,8 +35,9 @@ Usage:
    wakes on the floor.
 
 The daemon holds no agent identity. `init_gateway_process` leaves the log sink's
-process agent unset, so every line is attributed by the turn contextvar the host
-binds — one process, correct per-agent log files.
+process agent unset. Ordinary logs belong to the process; agent-owned events
+carry explicit attribution. The SDK process entry records shared-host startup
+posture before boot work so inherited child identity cannot bind here.
 """
 
 from __future__ import annotations
@@ -51,6 +52,17 @@ import sys
 from collections.abc import Collection, Coroutine, Iterable
 from pathlib import Path
 from typing import cast
+
+# The executable entry fixes SDK posture before agent/plugin modules can inspect
+# inherited environment identity. Importing the module as a library does not boot it.
+if __name__ == "__main__":
+    from base.native_process.child_env import inherited_process_env
+
+    if "AVA_AGENT_ID" in inherited_process_env():
+        raise RuntimeError("a shared agent host cannot inherit a launched-agent identity")
+    import ava
+
+    ava.bind_host_process()
 
 import psycopg
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -649,7 +661,10 @@ def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 —
 
 
 def main() -> None:
-    """Entry point: schema gate, logging, graceful shutdown, then the loop."""
+    """Entry point: SDK posture, schema gate, logging, graceful shutdown, then the loop."""
+    import ava
+
+    ava.bind_host_process()
     from base.config import ensure_eager
     from base.deploy.schema.migrations import assert_schema_current
 

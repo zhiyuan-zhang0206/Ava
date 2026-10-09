@@ -22,15 +22,25 @@ import os
 def load_env() -> None:
     os.environ["DEMO_HEALTH_PORT"] = "8123"
 """,
-    # The identity holder (the real one is the bound context of `ava.sdk_surface.process_context`).
+    # The identity holder (the real one is the explicit `ava.context` process slot).
     "leakdemo/identity.py": """
-from contextvars import ContextVar
+class _Clients:
+    def close(self) -> None:
+        pass
 
-_id: ContextVar[int | None] = ContextVar("leakdemo_id", default=None)
+
+class _Context:
+    def __init__(self, agent_id: int | None) -> None:
+        self.agent_id = agent_id
+        self.clients = _Clients()
+
+
+context = _Context(None)
 
 
 def agent_id() -> int | None:
-    return _id.get()
+    bound = globals().get("context")
+    return None if bound is None else bound.agent_id
 """,
     # A plugin namespace module (stand-in for `ava_builtins.plugins.ava_code._code_namespace`).
     "leakdemo/nsmod.py": '"""A namespace module."""\n',
@@ -88,8 +98,8 @@ import pytest
 import leakdemo.identity  # the stand-in slot must be loaded before the first test, whatever file runs
 from tests.fixtures import identity_restore, leak_guard
 
-# The suite's own context variable stands in for the bound context.
-identity_restore.IDENTITY_CONTEXTVARS = (("leakdemo.identity", "_id"),)
+# Exercise the real restore fixture against the suite's explicit context slot.
+identity_restore.ava = leakdemo.identity
 
 
 class _Boom(list):
@@ -149,7 +159,7 @@ def test_leaker_setattr_getattr_served_name(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_victim_identity_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    identity._id.set(99)  # what pin_agent(99) does
+    identity.context = identity._Context(99)  # what pin_agent(99) does
     assert selfmod.AGENT_ID == 99  # a stored AGENT_ID=1 would win over __getattr__
 
 
@@ -198,19 +208,20 @@ def test_clean_preregistered_module_attr(monkeypatch: pytest.MonkeyPatch) -> Non
 
 # ---- class 4: the identity bound bare, the pattern 300+ test sites use (undone by identity_restore)
 def test_leaker_bare_identity_assignment() -> None:
-    identity._id.set(7)
+    identity.context = identity._Context(7)
 
 
 def test_victim_stale_identity() -> None:
-    assert identity._id.get() is None  # the session's identity, not the 7 the test before it left
+    assert identity.agent_id() is None  # the session's identity, not the 7 the test before it left
 
 
-def test_clean_identity_token_reset() -> None:
-    token = identity._id.set(9)
+def test_clean_identity_slot_restore() -> None:
+    held = identity.context
+    identity.context = identity._Context(9)
     try:
-        assert identity._id.get() == 9
+        assert identity.agent_id() == 9
     finally:
-        identity._id.reset(token)
+        identity.context = held
 '''
 
 OTHER_STATE = '''

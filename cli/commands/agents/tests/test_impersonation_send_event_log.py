@@ -95,6 +95,7 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     ]
     assert len(entries) == 1
     entry = entries[0]
+    assert entry.origin_agent_id == owner.agent_id
 
     pool = _SingleConnectionPool(db_conn)
     assert (
@@ -105,6 +106,7 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     # only recover the committed receipt, not insert a second message or log row.
     outbox.record_failed_send(
         agent_id=target_id,
+        origin_agent_id=None,
         source=f"agent:{owner.agent_id}",
         content="CLI event-log delivery",
         client_message_id=entry.client_message_id,

@@ -476,10 +476,10 @@ def test_send_requires_session_agent_target_and_content() -> None:
 def test_send_delivers_as_the_borrowed_agent(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    seen: list[tuple[int, str, str]] = []
+    seen: list[tuple[int, str, str, int | None]] = []
 
-    def deliver(agent_id: int, content: str, *, source: str) -> str:
-        seen.append((agent_id, content, source))
+    def deliver(agent_id: int, content: str, *, source: str, origin_agent_id: int | None) -> str:
+        seen.append((agent_id, content, source, origin_agent_id))
         return "enqueued"
 
     def require_active(_db: object, lease: str, caller: dict[str, Any]) -> dict[str, Any]:
@@ -492,7 +492,7 @@ def test_send_delivers_as_the_borrowed_agent(
     monkeypatch.setattr("cli.commands.agents.control.send_agent_message", deliver)
     args = _args("send", "0", "--agent", "405", "--to", "42", "--content", "hi")
     assert args.func(args) == 0
-    assert seen == [(42, "hi", "agent:405")]
+    assert seen == [(42, "hi", "agent:405", 405)]
     assert json.loads(capsys.readouterr().out) == {
         "status": "enqueued",
         "to": 42,

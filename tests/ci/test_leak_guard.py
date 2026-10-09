@@ -28,9 +28,11 @@ from pathlib import Path
 
 import pytest
 
+import ava
+from ava.sdk_surface import agent_identity
+from base.native_process.turn_identity import bind_turn_identity
 from scripts.ci import shard_counts
 from scripts.ci.tests import leak_guard_suite
-from tests.fixtures import identity_restore
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD = "tests.fixtures.leak_guard"
@@ -221,11 +223,14 @@ def test_agent_identity_holds_no_process_global_slot() -> None:
     assert importlib.import_module("ava.sdk_surface.agent_identity").__annotations__ == {}
 
 
-@pytest.mark.parametrize(("module", "name"), identity_restore.IDENTITY_CONTEXTVARS)
-def test_every_restored_context_variable_still_exists(module: str, name: str) -> None:
-    loaded = importlib.import_module(module)
-    assert name in vars(loaded)
-    getattr(loaded, name).get()  # the restore reads it exactly like this
+def test_native_admission_does_not_rebind_the_sdk_identity() -> None:
+    context = ava.context
+    expected = agent_identity.agent_id()
+    with bind_turn_identity(43 if expected == 42 else 42):
+        assert ava.context is context
+        assert agent_identity.agent_id() == expected
+    assert ava.context is context
+    assert agent_identity.agent_id() == expected
 
 
 # -- what it names -------------------------------------------------------------------------------
