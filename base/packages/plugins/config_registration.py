@@ -3,14 +3,8 @@
 Symmetric with whole-class state declaration (`agent/state.py`): a plugin writes a Pydantic BaseModel
 and declares it (`PluginContributions.config`, from the `contribute()` of its `default_config.py` config
 face, `base/packages/plugins/config_face.py`); the framework
-handles namespace isolation + disk persistence. Differences:
-
-- State is runtime mutable, written via LangGraph reducer; Config is a boot
-  snapshot, frozen, immutable after instantiation.
-- State field names ∈ BaseAgentState are shared with base; Config has an
-  independent namespace per plugin.
-- State persists to LangGraph checkpoint; Config persists to
-  `~/.ava/configs/<plugin>/config.json` (full image, not partial overlay).
+handles namespace isolation and persists each full image at
+`~/.ava/configs/<plugin>/config.json`; the bound config is an immutable boot snapshot.
 
 `ava.sdk_surface.install` binds each declared class through `bind_plugin_config(plugin, cls)`, which
 reads `~/.ava/configs/<plugin>/config.json`, validates it against the class schema, instantiates it and
@@ -40,6 +34,7 @@ Declaration (`ava_builtins/plugins/<name>/default_config.py`):
 import json
 import math
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 
@@ -117,11 +112,16 @@ def bind_plugin_config(plugin: str, cls: type[BaseModel]) -> Callable[[], None]:
 
 def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
     """Read disk image (auto-write default if missing), validate schema, return instance."""
+    from base.packages.plugin_config_images import PluginConfigChangedError
+    from base.packages.plugins.config_view import with_cluster_policy
+
     config_path = disk_image_path(plugin)
-    instance = read_plugin_config(plugin, cls, config_path)
+    read_plugin_config(plugin, cls, config_path)
     if not config_path.exists():
-        write_default_disk_image(plugin, cls)
-    return instance
+        # Another boot may create the authority; bind its validated image below.
+        with suppress(PluginConfigChangedError):
+            write_default_disk_image(plugin, cls)
+    return with_cluster_policy(plugin, config_from_image(cls, config_path.read_text(), config_path))
 
 
 def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
