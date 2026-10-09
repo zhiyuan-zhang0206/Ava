@@ -151,7 +151,19 @@ Write `$AVA_HOME/self_evolution/reports/<window>.md`:
 4. **No-signal changes** — changes with no related regression, so the next
    batch or Monday summary knows they were checked.
 
-Then notify the user with `ava.ui.notify(title="Self-evolution: <N> changes, <M> suspected regressions", content="<report path>")`.
+Create and retain one notice key before sending the report; same-intent retries
+reuse the key and content:
+
+```python
+from uuid import uuid4
+
+notice_key = str(uuid4())
+ava.ui.notify(
+    title="Self-evolution: <N> changes, <M> suspected regressions",
+    content="<report path>",
+    idempotency_key=notice_key,
+)
+```
 
 For a high-confidence skill fix, open a PR to `main` following the
 `ava-self-development` skill's workflow (PR title `[Ava-<your-id>]`, commit

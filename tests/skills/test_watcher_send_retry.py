@@ -84,6 +84,7 @@ class _FakeAva:
         self.calls = 0
         self.send_failures = send_failures
         self.sent: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.note_keys: list[str] = []
         fake = self
 
         class _Agents:
@@ -92,9 +93,13 @@ class _FakeAva:
                 fake._attempt("send_message", (agent_id, content), {})
 
             @staticmethod
-            def send_system_note(agent_id: int, content: str, *, tag: str, resurrect: bool) -> None:
+            def send_system_note(
+                agent_id: int, content: str, *, tag: str, resurrect: bool, idempotency_key: str
+            ) -> None:
                 fake._attempt(
-                    "send_system_note", (agent_id, content), {"tag": tag, "resurrect": resurrect}
+                    "send_system_note",
+                    (agent_id, content),
+                    {"tag": tag, "resurrect": resurrect, "idempotency_key": idempotency_key},
                 )
 
         class _Self:
@@ -104,6 +109,8 @@ class _FakeAva:
         self.self = _Self()
 
     def _attempt(self, channel: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        if channel == "send_system_note":
+            self.note_keys.append(kwargs["idempotency_key"])
         self.calls += 1
         if self.calls <= self.send_failures:
             raise RuntimeError("gateway refused the connection")
@@ -247,13 +254,17 @@ def test_watch_work_notify_routes_canonical_through_system_note(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Canonical supervision speaks through the system-note channel."""
-    fake = _wire(monkeypatch, watch_work)
+    fake = _wire(monkeypatch, watch_work, send_failures=2)
     assert watch_work._notify(41, "cleanup done", canonical=True) is True
 
+    assert fake.calls == 3
+    assert len(set(fake.note_keys)) == 1
     channel, args, kwargs = fake.sent[0]
     assert channel == "send_system_note"
     assert args == (41, "cleanup done")
-    assert kwargs == {"tag": "task", "resurrect": False}
+    assert kwargs["tag"] == "task"
+    assert kwargs["resurrect"] is False
+    assert isinstance(kwargs["idempotency_key"], str)
 
 
 def test_watch_work_exhausted_delivery_reports_false(

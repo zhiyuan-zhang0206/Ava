@@ -1,5 +1,7 @@
 """Task effects and queued notification intents survive producer/tail crashes."""
 
+from uuid import uuid4
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +32,9 @@ def test_sdk_commit_survives_producer_loss(
 
     monkeypatch.setattr(telemetry, "emit_prepared", lost_after_commit)
     with pytest.raises(RuntimeError):
-        task_registry.create("survives", "work", parent=root_task_id, owner=owner)
+        task_registry.create(
+            "survives", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
+        )
     with db_conn.cursor() as cur:
         cur.execute("SELECT id FROM agent_tasks WHERE title='survives'")
         task_id = int(fetch_one(cur, "accepted task")[0])
@@ -56,7 +60,9 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
     old_owner = _seed_agent(db_conn)
     new_owner = _seed_agent(db_conn)
     pin_agent(actor)
-    task = task_registry.create("atomic", "work", parent=root_task_id, owner=old_owner)
+    task = task_registry.create(
+        "atomic", "work", parent=root_task_id, owner=old_owner, operation_key=str(uuid4())
+    )
     real = tasks.enqueue_task_notifications
 
     def unavailable(*args: object) -> None:
@@ -64,14 +70,28 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
 
     with TestClient(app, raise_server_exceptions=False) as client:
         monkeypatch.setattr(tasks, "enqueue_task_notifications", unavailable)
-        assert client.patch(f"/api/tasks/{task.id}", json={"owner": new_owner}).status_code == 500
+        assert (
+            client.patch(
+                f"/api/tasks/{task.id}",
+                json={"owner": new_owner},
+                headers={"Idempotency-Key": str(uuid4())},
+            ).status_code
+            == 500
+        )
         with db_conn.cursor() as cur:
             cur.execute("SELECT owner FROM agent_tasks WHERE id=%s", (task.id,))
             assert cur.fetchone() == (old_owner,)
             cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (new_owner,))
             assert cur.fetchone() == (0,)
         monkeypatch.setattr(tasks, "enqueue_task_notifications", real)
-        assert client.patch(f"/api/tasks/{task.id}", json={"owner": new_owner}).status_code == 200
+        assert (
+            client.patch(
+                f"/api/tasks/{task.id}",
+                json={"owner": new_owner},
+                headers={"Idempotency-Key": str(uuid4())},
+            ).status_code
+            == 200
+        )
 
 
 def test_aba_assignment_supersedes_old_directions(
@@ -82,9 +102,11 @@ def test_aba_assignment_supersedes_old_directions(
     owner_a = _seed_agent(db_conn, status="terminated")
     owner_b = _seed_agent(db_conn, status="terminated")
     pin_agent(actor)
-    task = task_registry.create("aba", "work", parent=root_task_id, owner=owner_a)
-    task_registry.update(task.id, owner=owner_b)
-    task_registry.update(task.id, owner=owner_a)
+    task = task_registry.create(
+        "aba", "work", parent=root_task_id, owner=owner_a, operation_key=str(uuid4())
+    )
+    task_registry.update(task.id, owner=owner_b, operation_key=str(uuid4()))
+    task_registry.update(task.id, owner=owner_a, operation_key=str(uuid4()))
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT id, agent_id, status, payload FROM inbound_messages "

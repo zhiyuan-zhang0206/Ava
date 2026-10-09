@@ -308,7 +308,7 @@ def send_system_note(
     source: str,
     task_id: int | None,
     resurrect: bool,
-    idempotency_key: str | None = None,
+    idempotency_key: str,
 ) -> int:
     """POST /api/agents/{id}/system-note — deliver a framework system note.
 
@@ -317,6 +317,10 @@ def send_system_note(
     is set (same 120 s per-call timeout as send_message).
     """
     import httpx
+
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    idempotency_key = validate_idempotency_key(idempotency_key)
 
     body: dict[str, str | bool | int] = {
         "content": content,

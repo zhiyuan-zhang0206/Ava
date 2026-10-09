@@ -19,7 +19,7 @@ subagents, hooks, slash commands, and MCP servers.
 | Subagents (`.claude/agents/*.md` with tools/model/permissionMode/maxTurns frontmatter) | Peer agents — `ava.agents.spawn`, role-card skills (`be-a-<role>`), presets (`ava presets`) | Ava agents are full peers with their own workspace, memory and tools, not scoped subprocesses. Boundaries are set in the spawn prompt and recorded as `type/role` memory — there is no per-agent tool allowlist. |
 | Hooks (`settings.json` → PreToolUse, PostToolUse, Stop, SessionStart, …) | No hook system. Policy rules → AGENTS.md + memory notes; conditions/notifications → `ava.watcher`; format/lint/test on change → repo CI | A hook that enforced policy (e.g. blocking `rm -rf`) must become a written rule, not an executable hook. |
 | Slash commands (`.claude/commands/`, built-ins `/init`, `/compact`, `/review`) | Skills (same idea: a named instruction pack the agent reads) + the `ava` CLI for operations | No interactive slash-command bar. |
-| Permission prompts & modes (default / acceptEdits / plan / `--dangerously-skip-permissions`) | No per-tool approval UI. Agents decide what to run; the user's standing gates are recorded in memory at onboarding, and irreversible / outward-facing actions raise `ava.ui.notify(require_response=True)` | The biggest behavioral difference — see pitfalls. |
+| Permission prompts & modes (default / acceptEdits / plan / `--dangerously-skip-permissions`) | No per-tool approval UI. Agents decide what to run; the user's standing gates are recorded in memory at onboarding, and irreversible / outward-facing actions raise `ava.ui.notify(require_response=True, idempotency_key=notice_key)` | The biggest behavioral difference — see pitfalls. |
 | MCP (`claude mcp add`, settings.json) | Same MCP standard; `ava mcp` add/list/remove/enable/disable | Per machine: a server is registered on the machine whose tools it wraps. |
 | Plugins | `ava plugins install <git-url>` — accepts Ava-native skills and Claude Code plugin packages (their `agents/` become an orchestrator skill, bundled `.mcp.json` is carried over) | |
 | `/compact` | `ava.self.compact` — agent-initiated, plus automatic compaction | |
@@ -85,3 +85,6 @@ Official Claude Code docs, accessed 2026-08-12:
 - https://code.claude.com/docs/en/skills — SKILL.md format, locations, frontmatter
 - https://code.claude.com/docs/en/sub-agents — subagent format and frontmatter
 - https://code.claude.com/docs/en/hooks — hook events and configuration
+
+A new notice intent requires its own retained `notice_key`; retries reuse that
+key and the original payload. See `ava.ui.notify` for the full parameters.
