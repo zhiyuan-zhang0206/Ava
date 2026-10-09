@@ -1,4 +1,4 @@
-"""An external CLI attachment's tail sdk_call reaches the OTLP receiver exactly once before the process exits."""
+"""An attachment's tail public SDK entries reach OTLP once each before exit."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -142,17 +143,19 @@ def _mirror_events(home: Path) -> list[dict[str, Any]]:
 def _assert_external_sdk_call(
     delivered: list[dict[str, Any]], mirror: list[dict[str, Any]]
 ) -> None:
-    """Check one exported SDK event preserves its mirror identity and borrower."""
-    assert len(delivered) == 1, f"receiver saw: {delivered!r}"
-    event = delivered[0]
-    assert event["agent_id"] == 424242
-    assert event["source"] == "agent:424242"
-    assert event["attributes"]["fn"] == "files.read"
+    """Check every public entry preserves its borrower and exact mirror identity."""
+    # ava_code's files.read wrapper enters the public cwd.get helper as well.
+    expected = Counter({"files.read": 1, "cwd.get": 1})
+    assert Counter(event["attributes"]["fn"] for event in delivered) == expected, delivered
     mirrored = [row for row in mirror if row["event_name"] == "sdk_call"]
-    assert len(mirrored) == 1
-    event_for_id: dict[str, Any] = dict(event)
-    event_for_id["ts"] = datetime.fromisoformat(event["ts"])
-    assert mirrored[0]["id"] == event_row(Event(**event_for_id))["id"]
+    assert Counter(event["attributes"]["fn"] for event in mirrored) == expected, mirrored
+    mirror_ids = {row["attributes"]["fn"]: row["id"] for row in mirrored}
+    for event in delivered:
+        assert event["agent_id"] == 424242
+        assert event["source"] == "agent:424242"
+        event_for_id: dict[str, Any] = dict(event)
+        event_for_id["ts"] = datetime.fromisoformat(event["ts"])
+        assert mirror_ids[event["attributes"]["fn"]] == event_row(Event(**event_for_id))["id"]
 
 
 def test_external_cli_tail_sdk_call_reaches_receiver_once_before_exit(
