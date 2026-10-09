@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { RunTimelineMessageBar, RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import { navigateAcross, type ViewAgent } from "./agent-view-nav";
-import { timeAxis } from "./timeline-model";
-import { ADDED_ROW, INPUT_ROW, UNITS_ROW, levelRowId, navRowIds } from "./timeline-nav";
+import { timeAxis } from "../model/timeline-model";
+import { ADDED_ROW, INPUT_ROW, UNITS_ROW, levelRowId, navRowIds } from "../model/timeline-nav";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
 const at = (ms: number) => new Date(T0 + ms).toISOString();
