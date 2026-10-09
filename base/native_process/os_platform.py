@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import platform as _osplat
 import re
 import signal
 import subprocess
@@ -19,7 +18,11 @@ from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
-IS_LINUX = sys.platform.startswith("linux")
+
+
+def is_linux() -> bool:
+    """Whether this process runs on Linux, queried directly from Python."""
+    return sys.platform.startswith("linux")
 
 
 def launchd_job_label() -> str | None:
@@ -114,20 +117,6 @@ def _parent_pid(pid: int) -> int | None:
         return int(value)
     except ValueError:
         return None
-
-
-# WSL is a Linux kernel whose uname release string carries "microsoft" / "WSL".
-# Some host probes (e.g. disk usage) want the Windows host's view, so detect it
-# once here rather than re-deriving it from uname at each call site.
-def _detect_wsl(uname_release: str) -> bool:
-    """True if a Linux uname release string is a WSL kernel (the 'microsoft' /
-    'WSL' marker). Factored out so the marker logic is unit-testable without
-    monkeypatching uname."""
-    release = uname_release.lower()
-    return "microsoft" in release or "wsl" in release
-
-
-IS_WSL = _detect_wsl(_osplat.uname().release)
 
 
 # --- Kill signals -----------------------------------------------------------

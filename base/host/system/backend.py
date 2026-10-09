@@ -18,7 +18,7 @@ from __future__ import annotations
 import abc
 from pathlib import Path
 
-from base.native_process.os_platform import IS_LINUX, IS_MACOS
+from base.native_process.os_platform import IS_MACOS, is_linux
 
 # ---------------------------------------------------------------------------
 # Abstract interface
@@ -474,6 +474,6 @@ class LinuxPlatformBackend(PlatformBackend):
 
 def get_backend() -> PlatformBackend:
     """Return the platform-appropriate ``PlatformBackend`` (stateless: built per call)."""
-    if not (IS_MACOS or IS_LINUX):
+    if not (IS_MACOS or is_linux()):
         raise RuntimeError("unsupported host platform for OS jobs")
     return MacPlatformBackend() if IS_MACOS else LinuxPlatformBackend()

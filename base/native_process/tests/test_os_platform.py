@@ -1,8 +1,7 @@
 """Unit tests for base.native_process.os_platform — host detection + the disk-path probe.
 
-The WSL-marker and primary-disk-path logic used to live in the retired
-base.resource_monitor (as `_is_wsl` / `_disk_usage_path`); it now lives here as the canonical
-`_detect_wsl` / `primary_disk_path`, so these tests followed it.
+The primary-disk-path probe samples the macOS data volume or the POSIX root,
+including a WSL process's own root filesystem.
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ import pytest
 
 import base.native_process.os_platform as plat
 from base.native_process.os_platform import (
-    _detect_wsl,
     descends_from_launchd_job,
     ensure_line_buffered_stdio,
     launchd_job_loaded,
@@ -26,21 +24,28 @@ from base.native_process.os_platform import (
 )
 
 
-class TestDetectWsl:
-    @pytest.mark.parametrize(
-        "release",
+def test_cold_import_does_not_probe_uname() -> None:
+    result = subprocess.run(
         [
-            "6.18.33.1-microsoft-standard-WSL2",  # WSL2
-            "4.4.0-19041-Microsoft",  # WSL1
-            "5.15.0-custom-WSL",
-        ],
-    )
-    def test_wsl_kernels_detected(self, release: str) -> None:
-        assert _detect_wsl(release) is True
+            ".venv/bin/python",
+            "-I",
+            "-c",
+            """
+import platform
 
-    @pytest.mark.parametrize("release", ["5.15.0-91-generic", "23.2.0", "6.1.0-amd64"])
-    def test_non_wsl_not_detected(self, release: str) -> None:
-        assert _detect_wsl(release) is False
+def refuse_probe():
+    raise AssertionError("platform import must not probe uname")
+
+platform.uname = refuse_probe
+import base.native_process.os_platform
+""",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 class TestPrimaryDiskPath:
@@ -48,16 +53,8 @@ class TestPrimaryDiskPath:
         monkeypatch.setattr(plat, "IS_MACOS", True)
         assert primary_disk_path() == "/System/Volumes/Data"
 
-    def test_wsl_uses_ext4_rootfs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # WSL samples its own ext4 rootfs, not the auto-mounted Windows /mnt/c
-        # (whose near-full C: drive has nothing to do with this Linux machine).
-        monkeypatch.setattr(plat, "IS_MACOS", False)
-        monkeypatch.setattr(plat, "IS_WSL", True)
-        assert primary_disk_path() == "/"
-
     def test_plain_posix_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(plat, "IS_MACOS", False)
-        monkeypatch.setattr(plat, "IS_WSL", False)
         assert primary_disk_path() == "/"
 
 
