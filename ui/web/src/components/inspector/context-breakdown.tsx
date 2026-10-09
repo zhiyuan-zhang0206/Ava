@@ -10,7 +10,7 @@ import { api } from "@/lib/transport/api";
 import { categoryColor } from "@/lib/context-colors";
 import { errMsg } from "@/lib/contracts/errors";
 import { formatShort } from "@/lib/format/time";
-import { formatTokens } from "@/lib/format/format-number";
+import { approx, formatTokens } from "@/lib/format/format-number";
 import type { ContextBreakdownResponse } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
@@ -326,7 +326,6 @@ function BreakdownContent({
   // The anchor the percentages are relative to: the real/anchored input total
   // (0 while no LLM request has run).
   const total = data.total_input_tokens;
-  const estimatedSuffix = (estimated: boolean) => (estimated ? ` ${t("estimatedSuffix")}` : "");
   const categoryName = (kind: string) => {
     const messageKey = CATEGORY_MESSAGE_KEY[kind];
     return messageKey ? t(messageKey as Parameters<typeof t>[0]) : kind;
@@ -375,10 +374,10 @@ function BreakdownContent({
       {/* Occupancy summary */}
       <p className="text-muted-foreground text-xs tabular-nums" data-testid="context-breakdown-total">
         <span className="block">
+          {approx(data.estimated)}
           {formatTokens(total)}
           {data.max_input_tokens > 0 ? ` / ${formatTokens(data.max_input_tokens)}` : ""}{" "}
           {t("tokensUnit")}
-          {estimatedSuffix(data.estimated)}
         </span>
         {hasThresholds ? (
           <span className="block">
@@ -401,8 +400,8 @@ function BreakdownContent({
               />
               <span className={cn("truncate", FLEX_1, "text-left")}>{categoryName(c.key)}</span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
+                {approx(c.estimated)}
                 {formatTokens(c.tokens)}
-                {estimatedSuffix(c.estimated)}
                 {total > 0 ? ` · ${((c.tokens / total) * 100).toFixed(2)}%` : ""}
               </span>
             </>
