@@ -1,13 +1,13 @@
 // Keyboard navigation and the selection overlay of the run timeline: pure functions over the rows'
 // items on the shared x axis. No React, no I/O.
 
-import type { RunTimelineMessageBar, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
   chainIds,
   isSelected,
   levelsTopFirst,
-  unitHasMessage,
+  contextUnits,
   type AxisMap,
   type Selection,
   type Viewport,
@@ -17,13 +17,12 @@ import {
 export interface NavData {
   nodes: readonly RunTimelineNode[];
   units: readonly RunTimelineUnit[];
-  messages: readonly RunTimelineMessageBar[];
 }
 
 export type NavKey = "left" | "right" | "up" | "down";
 
 /**
- * One selectable thing of a row: a node, a block, or a message (its bar). Every row is a list of
+ * One selectable thing of a row: a node or a block (in the Messages row and, as a bar, in the Context size row). Every row is a list of
  * these, each with its extent on the shared x axis (`u0`..`u1`, axis coordinates) and in time.
  */
 export interface NavItem {
@@ -36,35 +35,28 @@ export interface NavItem {
   end: number;
   node?: RunTimelineNode;
   unit?: RunTimelineUnit;
-  message?: RunTimelineMessageBar;
 }
 
 export const UNITS_ROW = "units";
 export const INPUT_ROW = "input";
-export const ADDED_ROW = "added";
 export const levelRowId = (level: number) => `level-${level}`;
-
-/** Which context bars the page draws: none, the absolute size, the added size or both. */
-export type ContextBars = "off" | "absolute" | "added" | "both";
 
 /** What the page's settings keep of an agent's rows. */
 export interface RowOptions {
   /** How many understanding-tree levels are drawn, counted from the topmost; null draws them all. */
   levels: number | null;
-  context: ContextBars;
+  /** Whether the Context size row is drawn. */
+  contextSize: boolean;
 }
 
-export const ALL_ROWS: RowOptions = { levels: null, context: "both" };
+export const ALL_ROWS: RowOptions = { levels: null, contextSize: true };
 
 /** The rows top to bottom, as the page draws them. */
 export function navRowIds(data: NavData, options: RowOptions = ALL_ROWS): string[] {
   const levels = levelsTopFirst(data.nodes);
   const rows = (options.levels === null ? levels : levels.slice(0, options.levels)).map(levelRowId);
   rows.push(UNITS_ROW);
-  if (data.messages.length > 0) {
-    if (options.context === "absolute" || options.context === "both") rows.push(INPUT_ROW);
-    if (options.context === "added" || options.context === "both") rows.push(ADDED_ROW);
-  }
+  if (options.contextSize && contextUnits(data.units).length > 0) rows.push(INPUT_ROW);
   return rows;
 }
 
@@ -101,14 +93,14 @@ function buildItems(row: string, data: NavData, axis: Pick<AxisMap, "toU" | "uni
       start: Date.parse(unit.start),
       end: Date.parse(unit.end),
     }));
-  } else if (row === INPUT_ROW || row === ADDED_ROW) {
-    items = data.messages.map((message) => ({
+  } else if (row === INPUT_ROW) {
+    items = contextUnits(data.units).map((unit) => ({
       row,
-      message,
-      selection: { kind: "message", idx: message.idx },
-      ...axis.unitSpan(message),
-      start: Date.parse(message.start),
-      end: Date.parse(message.end),
+      unit,
+      selection: { kind: "unit", i0: unit.i0, i1: unit.i1, unitKind: unit.kind },
+      ...axis.unitSpan(unit),
+      start: Date.parse(unit.start),
+      end: Date.parse(unit.end),
     }));
   } else {
     items = data.nodes
@@ -129,11 +121,10 @@ function indexOfSelection(items: readonly NavItem[], selection: Selection): numb
   return items.findIndex((item) => isSelected(selection, item.selection));
 }
 
-/** Whether `parent` is the direct container of `child`: a node over its child nodes and blocks, a block over the messages it shows, a message over itself in the other context row. */
+/** Whether `parent` is the direct container of `child`: a node over its child nodes and blocks, the Messages row's block over its own bar in the Context size row. */
 function isParentOf(parent: NavItem, child: NavItem): boolean {
   if (parent.node !== undefined) return child.node?.parent === parent.node.id || child.unit?.parent === parent.node.id;
-  if (parent.unit !== undefined) return child.message !== undefined && unitHasMessage(parent.unit, child.message.idx);
-  return parent.message !== undefined && parent.message.idx === child.message?.idx;
+  return parent.row === UNITS_ROW && child.row === INPUT_ROW && parent.unit === child.unit;
 }
 
 /** How far `target` overlaps `here` on the x axis; apart, minus the gap between them (so the nearest scores highest). */
@@ -158,20 +149,19 @@ export function verticalTarget(here: NavItem, targets: readonly NavItem[], relat
 /** The row a selection lives in when no row is remembered for it. */
 function rowOfSelection(selection: Selection, data: NavData): string | null {
   if (selection.kind === "unit") return UNITS_ROW;
-  if (selection.kind === "message") return INPUT_ROW;
   const node = data.nodes.find((candidate) => candidate.id === selection.id);
   return node === undefined ? null : levelRowId(node.level);
 }
 
 /**
- * The next selection of an arrow key. Every row (Level N..1, Messages, Context size, Added context)
+ * The next selection of an arrow key. Every row (Level N..1, Messages, Context size)
  * is a list of items with an x extent on the axis; `row` is the row the current selection was made in
- * (the two context rows select the same message, so the row cannot be read off it).
+ * (a block sits in the Messages row and in the Context size row, so the row cannot be read off it).
  *
  * left / right: the previous / next item of the row (none past either end).
  * up / down: the adjacent row's item that is the current one's parent or child (a node's parent or
- *   first child, a block's level-1 node, the messages a block shows, a message's blocks, the same
- *   message in the other context row); with no such relation, the item overlapping the current one
+ *   first child, a block's level-1 node, a block's bar in the Context size row and back); with no
+ *   such relation, the item overlapping the current one
  *   most on the x axis, else the nearest.
  * No current selection: the leftmost item in the viewport (Messages first), else the row's first.
  * Returns null when there is nowhere to go.
@@ -226,10 +216,7 @@ export function locate(
   let items = row === null ? [] : navItems(row, data, axis);
   let at = row === null ? -1 : indexOfSelection(items, current.selection);
   if (at < 0) {
-    row =
-      current.selection.kind === "message"
-        ? ([INPUT_ROW, ADDED_ROW].find((candidate) => rows.includes(candidate)) ?? null)
-        : rowOfSelection(current.selection, data);
+    row = rowOfSelection(current.selection, data);
     items = row === null || !rows.includes(row) ? [] : navItems(row, data, axis);
     at = indexOfSelection(items, current.selection);
   }
@@ -242,7 +229,6 @@ export const SELECTION_LINE_BELOW_PX = 6;
 /** The identity of an item across redraws. */
 export function selectionKey(selection: Selection): string {
   if (selection.kind === "node") return `n${selection.id}`;
-  if (selection.kind === "message") return `m${selection.idx}`;
   return `u${selection.unitKind}-${selection.i0}-${selection.i1}`;
 }
 
@@ -254,10 +240,9 @@ export interface SelectionRoles {
 
 /**
  * The primary item is the selection in the row it was made in. Its links go one hop: a node links to
- * its ancestors; a block to its ancestors and the messages it shows (both context rows); a message
- * to the blocks that show it, the ancestors of those blocks and the same message in the other
- * context row. Nothing links back down from a linked node: a message's ancestors never light the
- * other messages they cover.
+ * its ancestors; a block to its ancestors and its own bar in the other row (Messages or Context
+ * size). Nothing links back down from a linked node: a node's ancestors never light the other
+ * blocks they cover.
  */
 export function selectionRoles(
   current: { row: string | null; selection: Selection } | null,
@@ -267,10 +252,10 @@ export function selectionRoles(
   const linked = new Map<string, Set<string>>();
   if (current === null) return { primary: null, linked };
   const { selection } = current;
-  // Only a message can sit in either of two rows; a node or a block is in the row of its level or the Messages row.
+  // Only a block can sit in either of two rows (Messages, Context size); a node is in the row of its level.
   const row =
-    selection.kind === "message" && (current.row === INPUT_ROW || current.row === ADDED_ROW) && rows.includes(current.row)
-      ? current.row
+    selection.kind === "unit" && current.row === INPUT_ROW && rows.includes(INPUT_ROW)
+      ? INPUT_ROW
       : rowOfSelection(selection, data);
   const add = (target: string, key: string) => {
     let keys = linked.get(target);
@@ -288,17 +273,10 @@ export function selectionRoles(
   };
   const primaryKey = selectionKey(selection);
   addAncestors(chainIds(selection, data.nodes, data.units));
-  if (selection.kind === "message") {
-    for (const unit of data.units) {
-      if (unitHasMessage(unit, selection.idx)) add(UNITS_ROW, selectionKey({ kind: "unit", i0: unit.i0, i1: unit.i1, unitKind: unit.kind }));
-    }
-    add(row === ADDED_ROW ? INPUT_ROW : ADDED_ROW, primaryKey);
-  } else if (selection.kind === "unit") {
-    for (const bar of data.messages) {
-      if (!unitHasMessage({ kind: selection.unitKind, i0: selection.i0, i1: selection.i1 }, bar.idx)) continue;
-      add(INPUT_ROW, `m${bar.idx}`);
-      add(ADDED_ROW, `m${bar.idx}`);
-    }
+  if (selection.kind === "unit") {
+    // The block and its bar are one thing in two rows: whichever the cursor is in, the other is linked.
+    const drawn = data.units.some((unit) => unit.context_total !== null && selectionKey({ kind: "unit", i0: unit.i0, i1: unit.i1, unitKind: unit.kind }) === primaryKey);
+    if (drawn) add(row === INPUT_ROW ? UNITS_ROW : INPUT_ROW, primaryKey);
   }
   if (row === null) return { primary: null, linked };
   const own = linked.get(row);
