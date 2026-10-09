@@ -30,7 +30,7 @@ from base.host.proc import (
     timeout_stderr_tail as proc_timeout_stderr_tail,
 )
 from base.native_process import ownership, pid_starttime_ticks
-from base.native_process.os_platform import IS_WINDOWS, is_linux
+from base.native_process.os_platform import is_linux, is_windows
 from base.native_process.ownership import OwnedProcess
 from base.paths import run_dir
 from base.sessions.record import SessionRecord
@@ -115,7 +115,7 @@ def _predicate_in_new_session(*argv_tail: str) -> str:
     return result.stdout.strip()
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="the membership route is POSIX-only (getsid)")
+@pytest.mark.skipif(is_windows(), reason="the membership route is POSIX-only (getsid)")
 @pytest.mark.parametrize("entry", ["agent.execution.child", "agent.execution.owner_child"])
 def test_hosting_exec_domain_names_the_entry_of_its_session_leader(entry: str) -> None:
     """Both exec spawn shapes make their root the session leader; the entry
@@ -123,14 +123,14 @@ def test_hosting_exec_domain_names_the_entry_of_its_session_leader(entry: str) -
     assert _predicate_in_new_session(entry) == repr(entry)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="the membership route is POSIX-only (getsid)")
+@pytest.mark.skipif(is_windows(), reason="the membership route is POSIX-only (getsid)")
 def test_hosting_exec_domain_none_when_the_leader_is_not_an_exec_entry() -> None:
     """A session whose leader is anything else — the per-session PTY host shape
     behind `ava.shell.run_background` (a login shell) — is not an exec domain."""
     assert _predicate_in_new_session() == "None"
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="the membership route is POSIX-only (getsid)")
+@pytest.mark.skipif(is_windows(), reason="the membership route is POSIX-only (getsid)")
 def test_hosting_exec_domain_follows_the_session_through_a_broken_parent_chain(
     tmp_path: Path,
 ) -> None:
@@ -389,7 +389,7 @@ def test_kill_process_tree_skips_changed_identity(
     assert delivered == ([] if changed_before == "terminate" else [signal.SIGTERM])
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX signal escalation")
+@pytest.mark.skipif(is_windows(), reason="POSIX signal escalation")
 def test_tree_escalation_survives_birth_wall_clock_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -543,7 +543,7 @@ def test_child_state_missing_for_a_reaped_pid() -> None:
     assert child_state(proc.pid, os.getpid()) == "missing"
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="Windows has no zombie state")
+@pytest.mark.skipif(is_windows(), reason="Windows has no zombie state")
 def test_child_state_missing_for_a_zombie() -> None:
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     proc.kill()
