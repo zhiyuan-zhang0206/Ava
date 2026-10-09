@@ -12,7 +12,7 @@ import pytest
 
 from ops.private_files import verify
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _RELATIVE_PATH = Path("ops/private/example.txt")
 _CONTENT = b"private production source\n"
 

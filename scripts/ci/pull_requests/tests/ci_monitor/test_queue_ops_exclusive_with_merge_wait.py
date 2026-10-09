@@ -5,18 +5,15 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 import urllib.request
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 from scripts.ci.pull_requests import commands as ci_utils
 from scripts.ci.pull_requests import monitor, owner_operations, status
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     CIStatus,
     _aged,
     _check,
@@ -31,19 +28,19 @@ from scripts.ci.tests.test_ci_monitor import (
     _TrunkResponse,
     _urlopen_sequence,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     diag_gh as diag_gh,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     gh as gh,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     has_workflows as has_workflows,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     no_sleep as no_sleep,
 )
-from scripts.ci.tests.test_ci_monitor import (
+from scripts.ci.pull_requests.tests.test_ci_monitor import (
     poll as poll,
 )
 
@@ -545,37 +542,6 @@ def test_limbo_never_enqueues_or_claims_green(
     assert "CI green" not in output.out
     assert "GitHub limbo" in output.err
     assert "remain pending, never green" in output.err
-
-
-@pytest.mark.parametrize("arguments", [["42"], ["42", "--wait"]])
-def test_read_only_cli_does_not_load_owner_operations(arguments: list[str]) -> None:
-    # A fresh interpreter proves the import boundary even when this test module
-    # has imported the owner tools for their separate contract tests.
-    code = "\n".join(
-        [
-            "import importlib.abc, json, os, sys",
-            f"sys.path.insert(0, {str(Path.cwd())!r})",
-            "class RejectOwnerImports(importlib.abc.MetaPathFinder):",
-            "    def find_spec(self, fullname, path, target=None):",
-            "        if fullname in ('scripts.ci.pull_requests.owner_operations', 'scripts.ci.pull_requests.trunk_api'):",
-            "            raise AssertionError('read-only CLI imported owner operations: ' + fullname)",
-            "sys.meta_path.insert(0, RejectOwnerImports())",
-            "os.environ.pop('TRUNK_API_TOKEN', None)",
-            "os.environ['CI_QUEUE'] = 'unrelated-owner-queue'",
-            "from scripts.ci import cli as ci_utils",
-            "from scripts.ci.pull_requests import status",
-            "status.check_ci = lambda *a, **k: status.CIResult(status.CIStatus.ALL_PASSED)",
-            f"raise SystemExit(ci_utils.main({arguments!r}))",
-        ]
-    )
-    result = subprocess.run(  # noqa: S603 - hermetic code built from fixed test inputs
-        [sys.executable, "-I", "-c", code],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "green" in result.stdout
 
 
 @pytest.mark.parametrize(

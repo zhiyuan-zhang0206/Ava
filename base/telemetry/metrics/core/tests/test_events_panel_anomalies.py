@@ -8,7 +8,7 @@ from pathlib import Path
 from base.telemetry.metrics.core import catalog
 
 _DASHBOARD = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[5]
     / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
 )
 
