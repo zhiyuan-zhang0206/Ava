@@ -16,7 +16,7 @@ from agent.db import ClaimedInbound
 from agent.messages import inbound_message
 from ava.security import SecurityFindingEntry, scan_inbound_content
 from ava.skills.composer_commands import expand_command
-from base.agents.messages.envelope import wrap_inbound
+from base.agents.messages.envelope import inbound_head
 from base.agents.upload_delivery.paths import fetch_upload_b64, parse_upload_url
 from base.log import logger
 
@@ -44,7 +44,7 @@ def build_chat_inbound(item: ClaimedInbound) -> tuple[HumanMessage, SecurityFind
     # Inbound chat is untrusted (a user message, or a peer agent that may itself
     # be injected), so its text is scanned before entering the conversation. The
     # scan runs on the *raw* content before envelope wrapping — the envelope
-    # framing is trusted text (e.g. `[system]` prefix added by wrap_inbound for
+    # framing is trusted text (e.g. `[system]` prefix added by inbound_head for
     # system-sourced messages) and must not trip the scan itself; image blocks
     # are binary and not scanned.
     scan_src = f"inbound.chat:{item.source}"
@@ -52,11 +52,12 @@ def build_chat_inbound(item: ClaimedInbound) -> tuple[HumanMessage, SecurityFind
     if not isinstance(raw_blocks, list):
         raw = expand_command(item.content)
         finding = scan_inbound_content(raw, source=scan_src)
-        wrapped = wrap_inbound(raw, item.source, created_at=item.created_at)
+        head = inbound_head(item.source, created_at=item.created_at)
         message = inbound_message(
-            content=wrapped,
+            content=head + raw,
             source=item.source,
             inbound_id=item.id,
+            body_start=len(head),
             created_at=item.created_at,
         )
         return message, finding
@@ -65,8 +66,8 @@ def build_chat_inbound(item: ClaimedInbound) -> tuple[HumanMessage, SecurityFind
     text = "\n".join(b["text"] for b in blocks if b.get("type") == "text")
     raw_text = expand_command(text)
     finding = scan_inbound_content(raw_text, source=scan_src)
-    wrapped_text = wrap_inbound(raw_text, item.source, created_at=item.created_at)
-    content: list[dict[str, Any]] = [{"type": "text", "text": wrapped_text}]
+    head = inbound_head(item.source, created_at=item.created_at)
+    content: list[dict[str, Any]] = [{"type": "text", "text": head + raw_text}]
     image_urls: list[str] = []
     for b in blocks:
         if b.get("type") != "image_url":
@@ -97,6 +98,7 @@ def build_chat_inbound(item: ClaimedInbound) -> tuple[HumanMessage, SecurityFind
         content=content,
         source=item.source,
         inbound_id=item.id,
+        body_start=len(head),
         created_at=item.created_at,
         image_urls=image_urls,
     )
