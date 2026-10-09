@@ -9,11 +9,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.birth_config import resolve_birth_config
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation.manifest import record_central_event
+from base.agents.incarnation.resources import ResourceBirth
 from base.agents.labels import spawn_prompt_with_label
 from base.db import fetch_one, insert_spawn_prompt_in_transaction
 from base.lm.registry import normalize_overlay_llm_model
@@ -260,8 +262,9 @@ def insert_agent_birth(
     cur.execute(
         "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
         "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name, "
-        "last_launch_attempt_id, last_resurrect_inbound_id, creation_key, creation_request_hash) "
-        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s, 0, %s, %s)",
+        "last_launch_attempt_id, last_resurrect_inbound_id, creation_key, creation_request_hash, "
+        "incarnation_resources) "
+        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s, 0, %s, %s, %s)",
         (
             new_id,
             lineage_spawner,
@@ -275,6 +278,7 @@ def insert_agent_birth(
             launch_attempt_id,
             creation_key,
             creation_request_hash,
+            Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")),
         ),
     )
     _insert_fork_history(cur, new_id, fork_from, fork_checkpoint, fork_tail_skills)

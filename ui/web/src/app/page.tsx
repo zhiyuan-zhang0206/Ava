@@ -381,7 +381,9 @@ function HomeContent({
   const handleStop = useCallback(async () => {
     if (activeId == null) return;
     try {
-      await api.cancel(activeId);
+      const operationKey = newOperationKey();
+      const target = await api.observeWork(activeId);
+      await api.cancel(target, operationKey);
     } catch (e: unknown) {
       showError(`Cancel failed: ${errMsg(e)}`);
     }

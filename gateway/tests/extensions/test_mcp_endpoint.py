@@ -331,7 +331,7 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
     assert response["result"]["isError"] is True
     message = _tool_result(response)
     assert "agent_id=" in message
-    assert "retry_launch_path=/api/agents/" in message
+    assert "retry_launch_path=/api/keyed/v1/agents/" in message
     assert "launch_unreachable" in message
 
 

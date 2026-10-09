@@ -13,7 +13,7 @@ import pytest
 from playwright.sync_api import Request
 
 from base.agents import AgentStatus
-from tests.e2e._db import wait_for_status
+from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fakes.scenarios.compact_transition import (
@@ -94,9 +94,7 @@ def _send(env: E2EEnv, message: str, reply: str) -> None:
 
 
 def _compact(env: E2EEnv, narration: str) -> None:
-    response = httpx.post(f"{env.gateway_url}/api/agents/{env.agent_id}/compact", timeout=30.0)
-    response.raise_for_status()
-    assert response.json()["status"] == "enqueued"
+    enqueue_compact_history_fixture(env.agent_id)
     env.page.get_by_text(narration, exact=False).wait_for(timeout=45_000)
     wait_for_status(env.agent_id, AgentStatus.IDLING.value)
 
