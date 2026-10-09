@@ -12,7 +12,6 @@ from pathlib import Path
 from subprocess import CompletedProcess
 
 import pytest
-
 from pytest import MonkeyPatch
 
 from base.host.brew_pin import UV_VERSION
