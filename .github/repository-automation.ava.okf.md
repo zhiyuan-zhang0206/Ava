@@ -64,6 +64,12 @@ uses its configured transport; only the audit's advisory request selects
 `https://registry.npmjs.org`. A registry/tool error is an incomplete failed run,
 never a clean report or permission to close the tracked issue.
 
+The canonical uv pin is `base/host/brew_pin.py`; provisioning and every
+`setup-uv` input mirror its version. The weekly report derives its isolated
+`uvx` audit runner from that same pin, including when an operator invokes the
+report with an older installed toolchain. PR-time CI uses the installed pinned
+`uv audit` directly. The audit job does not populate the project wheel cache.
+
 ## `workflows/audit-branch-protection.yml`
 
 A weekly schedule (plus manual dispatch) runs

@@ -170,7 +170,7 @@ Only index selection is bridged from machine configuration files; non-index
 uv.toml settings (including TLS/transport settings) are not translated. Existing
 transport/cache/TLS environment variables remain inherited. A configured
 `UV_CONFIG_FILE` is read for index discovery, then removed from child environments:
-uv 0.10.2 reads that explicit file even alongside `--no-config`. Hosts requiring
+explicit machine resolver settings must not enter lock validation. Hosts requiring
 custom certificates must provide supported uv environment settings; the helper
 does not silently claim compatibility with every machine uv.toml option.
 Build isolation remains enabled by default. Runtime lock hashes do not introduce
