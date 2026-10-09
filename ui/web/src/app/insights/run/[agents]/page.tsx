@@ -20,13 +20,12 @@ import {
   levelsTopFirst,
   nodeAncestors,
   nodeChildren,
-  messageSelection,
   viewportOf,
   type Highlight,
-  type Selection,
   type Viewport,
 } from "@/components/run-timeline/model/timeline-model";
-import type { ContextBars, RowOptions } from "@/components/run-timeline/model/timeline-nav";
+import type { UnitHeights } from "@/components/run-timeline/canvas/run-timeline-paint";
+import type { RowOptions } from "@/components/run-timeline/model/timeline-nav";
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
@@ -67,8 +66,9 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   // null = the whole loaded extent.
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [levels, setLevels] = useState<number | null>(null);
-  const [context, setContext] = useState<ContextBars>("added");
-  const options: RowOptions = useMemo(() => ({ levels, context }), [levels, context]);
+  const [contextSize, setContextSize] = useState(true);
+  const [unitHeights, setUnitHeights] = useState<UnitHeights>("tokens");
+  const options: RowOptions = useMemo(() => ({ levels, contextSize }), [levels, contextSize]);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,22 +149,15 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const mine = selection !== null && selection.agent === focus ? selection.selection : null;
   const selectedNode =
     mine?.kind === "node" ? focusData?.nodes.find((node) => node.id === mine.id) : undefined;
-  // A selected message shows the details of the block that shows it.
-  const unitTarget: Selection | null =
-    mine?.kind === "message" ? messageSelection(mine.idx, focusData?.units ?? []) : mine;
   const selectedUnit =
-    unitTarget?.kind === "unit"
+    mine?.kind === "unit"
       ? focusData?.units.find(
-          (unit) =>
-            unit.i0 === unitTarget.i0 && unit.i1 === unitTarget.i1 && unit.kind === unitTarget.unitKind,
+          (unit) => unit.i0 === mine.i0 && unit.i1 === mine.i1 && unit.kind === mine.unitKind,
         )
       : undefined;
 
-  // The AIMessage behind the details: the selected message, or the message a selected turn block is a part of.
-  const turnBlock = selectedUnit?.kind === "thinking" || selectedUnit?.kind === "text" || selectedUnit?.kind === "call";
-  const detailMessage = turnBlock ? focusData?.messages.find((bar) => bar.idx === selectedUnit.i0) : undefined;
   // The context card follows the selected block, else the last LLM request in view.
-  const contextAt = focusData && view ? contextPoint(mine, focusData.nodes, focusData.messages, view) : undefined;
+  const contextAt = focusData && view ? contextPoint(mine, focusData.nodes, focusData.units, view) : undefined;
   const categoryHighlight: CategoryHighlight = {
     active: highlight === null ? null : classCategory(highlight.cls),
     has: (category) => categoryClass(category) !== null,
@@ -185,8 +178,10 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
         levels={levels}
         maxLevels={maxLevels}
         onLevels={setLevels}
-        context={context}
-        onContext={setContext}
+        contextSize={contextSize}
+        onContextSize={setContextSize}
+        unitHeights={unitHeights}
+        onUnitHeights={setUnitHeights}
       />
       {base && view ? (
         <>
@@ -208,6 +203,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
             highlight={highlight}
             onHighlight={setHighlight}
             options={options}
+            unitHeights={unitHeights}
             onRemove={ids.length > 1 ? removeAgent : null}
             onRetry={retry}
           />
@@ -247,7 +243,6 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
       agentId={focus ?? 0}
       unit={selectedUnit}
       parent={focusData?.nodes.find((node) => node.id === selectedUnit.parent) ?? null}
-      message={detailMessage}
       onSelectNode={focus === undefined ? () => undefined : select(focus)}
     />
   ) : (
