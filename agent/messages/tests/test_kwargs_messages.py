@@ -4,10 +4,12 @@ A `StrEnum` member would send the checkpoint serializer down its Enum custom-typ
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.messages import exec_output_message, inbound_message, system_note_message
-from base.agents.messages.kwargs import AvaMsgType, NoteTag
+from base.agents.messages.kwargs import AvaMsgType, ExecStatus, NoteTag, read_ava_kwargs
 
 
 def test_stored_discriminator_is_plain_str() -> None:
@@ -15,7 +17,9 @@ def test_stored_discriminator_is_plain_str() -> None:
     the StrEnum member — the serialization-safety invariant."""
     inbound = inbound_message(content="hi", source="user", inbound_id=1)
     note = system_note_message(content="n", tag=NoteTag.MEMORY)
-    exec_out = exec_output_message(content="ok", tool_call_id="t1")
+    exec_out = exec_output_message(
+        content="ok", tool_call_id="t1", status=ExecStatus.COMPLETED, body_start=0
+    )
 
     assert type(inbound.additional_kwargs["ava_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert inbound.additional_kwargs["ava_msg_type"] == AvaMsgType.INBOUND  # pyright: ignore[reportUnknownMemberType]
@@ -43,13 +47,19 @@ def test_exec_output_sdk_calls_present_empty_and_omitted() -> None:
         content="ok",
         tool_call_id="t1",
         sdk_calls=[{"method": "files.read", "count": 3}],
+        status=ExecStatus.COMPLETED,
+        body_start=0,
     )
     assert sized.additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]  # pyright: ignore[reportUnknownMemberType]
 
-    empty = exec_output_message(content="ok", tool_call_id="t2", sdk_calls=[])
+    empty = exec_output_message(
+        content="ok", tool_call_id="t2", sdk_calls=[], status=ExecStatus.COMPLETED, body_start=0
+    )
     assert empty.additional_kwargs["sdk_calls"] == []  # pyright: ignore[reportUnknownMemberType]
 
-    unknown = exec_output_message(content="ok", tool_call_id="t3")
+    unknown = exec_output_message(
+        content="ok", tool_call_id="t3", status=ExecStatus.COMPLETED, body_start=0
+    )
     assert "sdk_calls" not in unknown.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -60,14 +70,25 @@ def test_exec_output_sdk_calls_survive_checkpoint_roundtrip() -> None:
         content="ok",
         tool_call_id="t1",
         sdk_calls=[{"method": "files.read", "count": 3}],
+        status=ExecStatus.COMPLETED,
+        body_start=0,
     )
     restored = serde.loads_typed(serde.dumps_typed(msg))
     assert restored.additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_exec_output_carries_no_outcome_status() -> None:
-    """Outcome (ok / error / timeout / cancelled) lives in the content text only."""
+def test_exec_output_records_status_start_and_body_offset() -> None:
+    started = datetime(2026, 10, 4, 10, 56, 22, tzinfo=UTC)
     msg = exec_output_message(
-        content="Code execution output [timeout after 60s]:\n\nx", tool_call_id="t1"
+        content="Code execution output after running for 1min 53s:\n\nhi\n",
+        tool_call_id="t",
+        status=ExecStatus.TIMED_OUT,
+        body_start=len("Code execution output after running for 1min 53s:\n\n"),
+        started_at=started,
+        exec_ms=113_000,
     )
-    assert set(msg.additional_kwargs) == {"ava_msg_type", "ava_exec_ms"}  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    kwargs = read_ava_kwargs(msg)
+    assert kwargs.get("ava_exec_status") == "timed_out"
+    assert kwargs.get("ava_exec_started_at") == started.isoformat()
+    assert kwargs.get("ava_exec_ms") == 113_000
+    assert msg.text[kwargs.get("ava_exec_body_start", -1) :] == "hi\n"
