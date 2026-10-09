@@ -13,12 +13,17 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.context_breakdown import RequestBreakdown
 from base.agents.history.context_response import ContextBreakdownResponse, ContextCategory
-from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
+from base.agents.history.hierarchy.units import (
+    DisplayBlock,
+    display_blocks,
+    divide_units,
+    read_times,
+)
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
 from services.derived.insights.run_timeline import context
 from services.derived.insights.run_timeline.history import HistoryView
-from services.derived.insights.run_timeline.tokens import MessageBar, message_bars
+from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts, block_tokens
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -103,37 +108,55 @@ def three_requests_then_a_session() -> HistoryView:
     return HistoryView.of(history, units, MessageUsage(messages), read)
 
 
-def bars_by_idx(view: HistoryView) -> dict[int, MessageBar]:
-    return {bar.idx: bar for bar in message_bars(view)}
+def contexts(view: HistoryView) -> list[tuple[DisplayBlock, BlockContext]]:
+    book = BlockContexts(view)
+    return [(block, book.of(block)) for block in view.units]
 
 
 def test_the_context_before_a_reply_is_the_input_of_the_request_that_made_it() -> None:
     view = three_requests_then_a_session()
-    bars = bars_by_idx(view)
     inputs = {2: 100, 5: 160, 7: 190, 9: 40}
+    by_reply: dict[int, list[tuple[DisplayBlock, BlockContext]]] = {}
+    for block, ctx in contexts(view):
+        if block.kind in ("thinking", "text", "call"):
+            by_reply.setdefault(block.i0, []).append((block, ctx))
     for idx, input_tokens in inputs.items():
-        # The total through the message before the reply is what that request sent.
-        assert bars[idx - 1].context_total == input_tokens
-        request = bars[idx].request
-        assert request is not None and request.input == input_tokens
-    # A message adds its own weight, and the reply's output is re-sent after it.
-    assert bars[5].context_total == 160 + 7
-    assert bars[2].context_total == 100 + 5
-    assert bars[3].context_total == bars[2].context_total + (view.tokens[3].context_tokens or 0)
+        first, last = by_reply[idx][0], by_reply[idx][-1]
+        tokens = block_tokens(view, first[0]).context_tokens or 0
+        # The first block of a reply adds its own share to what the request sent.
+        assert first[1].context_total == input_tokens + tokens
+        # The last block ends at the ctx through the whole reply.
+        assert last[1].context_total == input_tokens + (view.tokens[idx].context_tokens or 0)
+        assert all(
+            c.request is not None and c.request.input == input_tokens for _, c in by_reply[idx]
+        )
+
+
+def test_a_message_block_is_the_context_through_its_last_message() -> None:
+    view = three_requests_then_a_session()
+    totals = {
+        block.i0: ctx.context_total for block, ctx in contexts(view) if block.kind == "inbound"
+    }
+    # ask one (1) follows the head; asks two and three (3, 4) are blocks of their own.
+    assert totals[3] == 100 + 5 + (view.tokens[3].context_tokens or 0)
+    assert totals[4] == (totals[3] or 0) + (view.tokens[4].context_tokens or 0)
 
 
 def test_the_context_total_starts_over_after_a_compaction() -> None:
-    bars = bars_by_idx(three_requests_then_a_session())
-    assert (bars[8].session, bars[9].session) == (1, 1)
+    by_idx = {
+        block.i0: ctx
+        for block, ctx in contexts(three_requests_then_a_session())
+        if block.kind == "inbound"
+    }
+    assert by_idx[8].session == 1
     # Session 1 holds its own head and first message only: the previous session's replies are gone.
-    assert bars[9].context_total < bars[7].context_total
-    assert bars[8].context_total == 40
+    assert by_idx[8].context_total == 40
+    assert (by_idx[1].session, (by_idx[1].context_total or 0) > 0) == (0, True)
 
 
-def test_a_message_that_is_not_a_reply_carries_no_request() -> None:
-    bars = bars_by_idx(three_requests_then_a_session())
-    assert bars[1].request is None and bars[3].request is None
-    assert bars[2].request is not None and bars[2].request.output == 5
+def test_only_a_replys_blocks_carry_its_request() -> None:
+    for block, ctx in contexts(three_requests_then_a_session()):
+        assert (ctx.request is not None) == (block.kind in ("thinking", "text", "call"))
 
 
 def test_a_point_resolves_to_the_next_request_else_the_last() -> None:

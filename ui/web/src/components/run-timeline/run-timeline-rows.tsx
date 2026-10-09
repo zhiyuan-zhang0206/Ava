@@ -29,7 +29,6 @@ import {
   type Viewport,
 } from "./model/timeline-model";
 import {
-  ADDED_ROW,
   INPUT_ROW,
   UNITS_ROW,
   levelRowId,
@@ -45,7 +44,7 @@ import { AgentGroupHeader, AgentPending } from "./agent-view/agent-view-group";
 import { barTop, frameOf, layoutsFor, type RowLayout } from "./model/timeline-canvas-model";
 import { RunTimelineAxis } from "./canvas/run-timeline-axis";
 import { TrackCanvas } from "./canvas/run-timeline-canvas";
-import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco } from "./canvas/run-timeline-paint";
+import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco, type UnitHeights } from "./canvas/run-timeline-paint";
 import { RunTimelineLegend } from "./run-timeline-legend";
 import { RowShell } from "./run-timeline-row-shell";
 import { readoutText } from "./model/run-timeline-readout";
@@ -57,9 +56,9 @@ const DRAG_THRESHOLD_PX = 4;
 const WHEEL_ZOOM_RATE = 0.0015;
 const PINCH_ZOOM_RATE = 0.01;
 const LEVEL_ROW_PX = 32;
-const UNIT_ROW_PX = 24;
+const UNIT_ROW_PX = 40;
 const CONTEXT_ROW_PX = 40;
-const EMPTY_DATA = { nodes: [], units: [], messages: [] };
+const EMPTY_DATA = { nodes: [], units: [] };
 
 /** One agent of the view: its data once read, else what is shown in its place. */
 export type AgentEntry =
@@ -77,6 +76,7 @@ export function RunTimelineRows({
   highlight,
   onHighlight,
   options,
+  unitHeights,
   onRemove,
   onRetry,
 }: {
@@ -92,13 +92,15 @@ export function RunTimelineRows({
   highlight: Highlight | null;
   onHighlight: (highlight: Highlight | null) => void;
   options: RowOptions;
+  /** How the Messages row draws a block's height. */
+  unitHeights: UnitHeights;
   /** Removes an agent from the view; null while it is the only one. */
   onRemove: ((agent: number) => void) | null;
   onRetry: (agent: number) => void;
 }) {
   const t = useTranslations("runTimeline");
   const [hover, setHover] = useState<AgentSelection | null>(null);
-  // The row the selection was made in: a message's two bars select the same thing.
+  // The row the selection was made in: a block and its bar in the Context size row select the same thing.
   const [navRow, setNavRow] = useState<string | null>(null);
   const choose = (agent: number, row: string, target: AgentSelection["selection"]) => {
     setNavRow(row);
@@ -375,24 +377,19 @@ export function RunTimelineRows({
           </RowShell>
         ))}
 
-        <RowShell label={t("messagesRow")} height="h-6" testId="run-timeline-row-units">
-          {canvasFor(agent, UNITS_ROW, UNIT_ROW_PX, (p, layout) => paintUnits(p, layout, paintState, decoFor(agent.id, UNITS_ROW)))}
+        <RowShell label={t("messagesRow")} height="h-10" testId="run-timeline-row-units">
+          {canvasFor(agent, UNITS_ROW, UNIT_ROW_PX, (p, layout) =>
+            paintUnits(p, layout, paintState, decoFor(agent.id, UNITS_ROW), unitHeights, barTop(UNITS_ROW, data)),
+          )}
         </RowShell>
 
-        {([INPUT_ROW, ADDED_ROW] as const)
-          .filter((row) => agent.rows.includes(row))
-          .map((row) => (
-            <RowShell
-              key={row}
-              label={t(row === ADDED_ROW ? "addedContextRow" : "contextRow")}
-              height="h-10"
-              testId={row === ADDED_ROW ? "run-timeline-row-added" : "run-timeline-row-context"}
-            >
-              {canvasFor(agent, row, CONTEXT_ROW_PX, (p, layout) =>
-                paintBars(p, layout, barTop(row, data), row === ADDED_ROW, paintState, decoFor(agent.id, row)),
-              )}
-            </RowShell>
-          ))}
+        {agent.rows.includes(INPUT_ROW) ? (
+          <RowShell label={t("contextRow")} height="h-10" testId="run-timeline-row-context">
+            {canvasFor(agent, INPUT_ROW, CONTEXT_ROW_PX, (p, layout) =>
+              paintBars(p, layout, barTop(INPUT_ROW, data), paintState, decoFor(agent.id, INPUT_ROW)),
+            )}
+          </RowShell>
+        ) : null}
       </section>
     );
   };
