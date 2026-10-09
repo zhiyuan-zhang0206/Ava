@@ -282,7 +282,6 @@ describe("the default window", () => {
       "run-timeline-row-level-2",
       "run-timeline-row-level-1",
       "run-timeline-row-units",
-      "run-timeline-row-context",
       "run-timeline-row-added",
     ]);
     // The rows are canvases: one per row, no element per node or block.
@@ -582,7 +581,6 @@ describe("failure and loading", () => {
       "run-timeline-canvas-level-2",
       "run-timeline-canvas-level-1",
       "run-timeline-canvas-units",
-      "run-timeline-canvas-input",
       "run-timeline-canvas-added",
     ]);
     const legend = screen.getByTestId("run-timeline-legend");
@@ -817,6 +815,7 @@ describe("context size row", () => {
   it("draws one bar per request, scaled to the largest input, and reads its value on hover", async () => {
     render();
     await screen.findByTestId("run-timeline-chart");
+    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "both" } });
     await paintFrame();
     const bars = drawn("input").filter((d) => d.op === "fill");
     expect(bars).toHaveLength(2);

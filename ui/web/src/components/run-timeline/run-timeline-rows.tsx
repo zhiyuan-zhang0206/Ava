@@ -1,7 +1,6 @@
 "use client";
 
-// The agent view's rows: any number of agents on one shared axis (plain time by default, or hybrid:
-// block width follows tokens, the space between blocks follows log idle time). Each agent is a group
+// The agent view's rows: any number of agents on one shared axis (plain time). Each agent is a group
 // of rows: lifecycle markers on top, then one row per understanding-tree level (topmost first), then
 // layer 0 — the message units — and the context bars at the bottom. All rows of all agents share one
 // viewport on the loaded data: the wheel / pinch zooms around the cursor, a drag or a horizontal
@@ -14,18 +13,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import {
   blockClass,
   hoverLit,
   axisBox,
-  buildSharedAxisMap,
+  timeAxis,
   inboundSources,
   levelsTopFirst,
   panView,
   zoomView,
-  type AxisMode,
   type BlockClass,
   type Highlight,
   type Viewport,
@@ -42,7 +40,7 @@ import {
   type NavKey,
   type RowOptions,
 } from "./timeline-nav";
-import { navigateAcross, placerFor, type AgentSelection, type ViewAgent } from "./agent-view-nav";
+import { navigateAcross, type AgentSelection, type ViewAgent } from "./agent-view-nav";
 import { AgentGroupHeader, AgentPending } from "./agent-view-group";
 import { barTop, frameOf, layoutsFor, type RowLayout } from "./timeline-canvas-model";
 import { RunTimelineAxis } from "./run-timeline-axis";
@@ -100,7 +98,6 @@ export function RunTimelineRows({
 }) {
   const t = useTranslations("runTimeline");
   const [hover, setHover] = useState<AgentSelection | null>(null);
-  const [mode, setMode] = useState<AxisMode>("time");
   // The row the selection was made in: a request's bar and its message block select the same thing.
   const [navRow, setNavRow] = useState<string | null>(null);
   const choose = (agent: number, row: string, target: AgentSelection["selection"]) => {
@@ -114,24 +111,10 @@ export function RunTimelineRows({
   );
   const baseFrom = base.from;
   const baseTo = base.to;
-  const axis = useMemo(
-    () =>
-      buildSharedAxisMap(
-        loaded.map(({ id, data }) => ({ owner: id, units: data.units })),
-        { from: baseFrom, to: baseTo },
-        mode,
-      ),
-    [loaded, baseFrom, baseTo, mode],
-  );
+  const axis = useMemo(() => timeAxis({ from: baseFrom, to: baseTo }), [baseFrom, baseTo]);
   const agents: ViewAgent[] = useMemo(
-    () =>
-      loaded.map(({ id, data }) => ({
-        id,
-        data,
-        rows: navRowIds(data, options),
-        place: placerFor(axis, id),
-      })),
-    [loaded, axis, options],
+    () => loaded.map(({ id, data }) => ({ id, data, rows: navRowIds(data, options) })),
+    [loaded, options],
   );
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
   const viewU = axis.viewU(view);
@@ -151,7 +134,7 @@ export function RunTimelineRows({
   });
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
   // Where the selected items are, per row: drawn as an outlined box in each row and a line through all of them.
-  const layouts = new Map(agents.map((agent) => [agent.id, layoutsFor(agent.data, agent.place, viewU, trackPx, agent.rows)]));
+  const layouts = new Map(agents.map((agent) => [agent.id, layoutsFor(agent.data, axis, viewU, trackPx, agent.rows)]));
   const selected = selection === null ? undefined : byId.get(selection.agent);
   const roles = selectionRoles(
     selection === null || selected === undefined ? null : { row: navRow, selection: selection.selection },
@@ -212,6 +195,7 @@ export function RunTimelineRows({
         key,
         s.selection === null ? null : { ...s.selection, row: s.navRow },
         s.agents,
+        s.axis,
         s.view,
       );
       event.preventDefault();
@@ -443,30 +427,6 @@ export function RunTimelineRows({
         >
           {readout ?? t("readoutIdle")}
         </p>
-        <div
-          role="group"
-          aria-label={t("axisModeTitle")}
-          title={t("axisModeTitle")}
-          data-testid="run-timeline-axis-mode"
-          data-mode={mode}
-          className={cn(FLEX, OVERFLOW_HIDDEN, "shrink-0 rounded border border-border font-mono text-[10px]")}
-        >
-          {(["time", "hybrid"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              data-testid={`run-timeline-axis-${option}`}
-              aria-pressed={mode === option}
-              onClick={() => setMode(option)}
-              className={cn(
-                "px-1.5",
-                mode === option ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {option === "time" ? t("axisTime") : t("axisHybrid")}
-            </button>
-          ))}
-        </div>
       </div>
 
       {entries.map((entry) => {
@@ -477,7 +437,7 @@ export function RunTimelineRows({
         return agent === undefined ? null : renderAgent(agent);
       })}
 
-      <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} trackPx={trackPx} />
+      <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} />
 
       <RunTimelineLegend
         highlight={highlight}

@@ -322,8 +322,8 @@ export function selectionRoles(
 
 /** The viewport that shows [startMs, endMs] when `view` does not: the same width, centred on it, inside the base extent; `view` itself when it already shows some of it. */
 export function revealView(axis: AxisMap, view: Viewport, base: Viewport, startMs: number, endMs: number): Viewport {
-  const u0 = axis.toU(startMs, "lo");
-  const u1 = axis.toU(endMs, "hi");
+  const u0 = axis.toU(startMs);
+  const u1 = axis.toU(endMs);
   const shown = axis.viewU(view);
   if (u1 >= shown.from && u0 <= shown.to) return view;
   const width = shown.to - shown.from;

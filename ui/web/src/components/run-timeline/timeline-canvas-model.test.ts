@@ -13,7 +13,7 @@ import {
   snap,
   type Place,
 } from "./timeline-canvas-model";
-import { buildAxisMap } from "./timeline-model";
+import { timeAxis } from "./timeline-model";
 import { INPUT_ROW, UNITS_ROW } from "./timeline-nav";
 
 const place = (key: string, x0: number, x1: number, weight = 0): Place => ({ key, x0, x1, weight });
@@ -101,7 +101,7 @@ describe("row layouts", () => {
   });
   const data = { nodes: [node("a", 0, 100)], units: [unit(0, 0, 50), unit(1, 50, 100)], requests: [request(1, 10, 0), request(2, 30, 1)] };
   const whole = { from: T, to: T + 100_000 };
-  const axis = buildAxisMap(data.units, whole, "time");
+  const axis = timeAxis(whole);
 
   it("keys items by what they select, and looks them up from the layout", () => {
     const layout = blockLayout(UNITS_ROW, data, axis, axis.viewU(whole), 1000);
