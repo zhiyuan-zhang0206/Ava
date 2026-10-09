@@ -214,3 +214,5 @@ Rulings that fix the boundary of the rule:
 - The throttle and dedupe entries (14) stay frozen as deliberate residue.
 
 - Forward: `decisions/2026-10-04-ava-state-and-context.md` makes one ContextVar a sanctioned exception to ruling 1: the exec child has no LangGraph runtime to carry the per-run context, so the process's `AvaContext` is read through a single ContextVar (`ava.sdk_surface.process_context`), the way `get_runtime()` does it.
+
+- Forward: [explicit runtime ownership boundaries](2026-10-09-explicit-runtime-ownership-boundaries.md) selects process/system attribution for ordinary unannotated logs, counts each public SDK entry, exposes postcommit realtime notification errors in the request, and preserves heartbeat error exposure at owner join while retiring ambient sites.
