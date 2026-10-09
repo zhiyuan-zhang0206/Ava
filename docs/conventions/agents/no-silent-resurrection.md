@@ -40,7 +40,11 @@ Implementation: `scripts/ci/no_silent_resurrection.py` (stdlib + git only).
    runs.
 3. **Alive** candidate lines - still present anywhere in the base tree
    (skipped paths excluded) - are not dead: a move does not hide a
-   resurrection, and a line that still exists is not resurrected.
+   resurrection, and a line that still exists is not resurrected. Git streams
+   the base tree's non-binary text lines with an empty fixed grep pattern;
+   normalized whole-line set membership finds the candidates. This avoids
+   searching each blob for thousands of candidate substrings. Byte-pattern
+   eligibility is retained for replacement-decoded malformed UTF-8 lines.
 4. `main` history is scanned once, streaming (`git log --since=<N>days
    --no-merges -p -U0 <base>`). A commit **deletes** a candidate line when its
    diff removes it from a non-skipped path and the commit does not re-add the

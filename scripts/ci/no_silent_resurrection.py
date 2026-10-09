@@ -51,7 +51,6 @@ import argparse
 import re
 import subprocess
 import sys
-import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -273,44 +272,53 @@ def _alive_candidates(candidates: set[str], base: str, cwd: Path) -> set[str]:
     """Candidate texts still present anywhere in the base tree (skipped paths excluded)."""
     if not candidates:
         return set()
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", suffix=".patterns", delete=False
-    ) as handle:
-        handle.write("\n".join(sorted(candidates)) + "\n")
-        pattern_path = handle.name
-    try:
-        completed = subprocess.run(  # noqa: S603
-            [
-                "git",
-                "-c",
-                "color.ui=false",
-                "-c",
-                "core.quotepath=false",
-                "grep",
-                "-h",
-                "-I",
-                "-F",
-                "-f",
-                pattern_path,
-                base,
-                "--",
-                ".",
-                *[f":(exclude){path}" for path in sorted(SKIPPED_FILES)],
-                *[f":(exclude){directory}" for directory in SKIPPED_DIRS],
-            ],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    finally:
-        Path(pattern_path).unlink(missing_ok=True)
-    if completed.returncode > 1:
-        detail = (completed.stderr or completed.stdout).strip().splitlines()
+    # Git owns binary detection and path exclusions. An empty fixed pattern
+    # streams all text lines without thousands of substring searches per blob;
+    # the final comparison has always been normalized whole-line membership.
+    stream = subprocess.Popen(  # noqa: S603
+        [
+            "git",
+            "-c",
+            "color.ui=false",
+            "-c",
+            "core.quotepath=false",
+            "grep",
+            "-h",
+            "-I",
+            "-F",
+            "-e",
+            "",
+            base,
+            "--",
+            ".",
+            *[f":(exclude){path}" for path in sorted(SKIPPED_FILES)],
+            *[f":(exclude){directory}" for directory in SKIPPED_DIRS],
+        ],
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout = stream.stdout
+    if stdout is None:
+        raise GitError("git grep produced no output stream")
+    alive: set[str] = set()
+    encoded_candidates = tuple(text.encode("utf-8") for text in candidates)
+    for raw in stdout:
+        for line in raw.decode("utf-8", errors="replace").splitlines():
+            text = line.strip()
+            if text not in candidates:
+                continue
+            # The former pattern query matched bytes before replacement decoding.
+            # A malformed UTF-8 line only reached that decoder if some candidate
+            # matched its physical Git line; preserve that rare-path condition.
+            if "\ufffd" in text and not any(pattern in raw for pattern in encoded_candidates):
+                continue
+            alive.add(text)
+    _, stderr = stream.communicate()
+    if stream.returncode > 1:
+        detail = stderr.decode("utf-8", errors="replace").strip().splitlines()
         raise GitError(f"`git grep` over {base} failed: {detail[0] if detail else 'exit'}")
-    return {line.strip() for line in completed.stdout.splitlines()} & candidates
+    return alive
 
 
 class _LogScan:
