@@ -1,9 +1,9 @@
 """send_message × deferred-delivery outbox (task #3757) — record + key reuse.
 
-A final send failure must leave a durable record and raise exactly as before;
+A known transient send failure leaves a durable record and raises;
 a retry chain must share one idempotency key while undelivered so the record
 and the eventual delivery dedup against each other; a permanent (4xx) failure
-must not be journaled; a broken outbox must never change a send's outcome.
+must not be journaled; unknown failures are exposed without automatic replay.
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ def test_permanent_wire_failure_is_not_recorded(mock_client: MagicMock, journal:
 
 
 @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
-def test_broken_outbox_never_changes_the_send_outcome(
+def test_unknown_key_error_stops_before_sending(
     mock_client: MagicMock, journal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from ava.gateway_client import send_message
@@ -173,9 +173,154 @@ def test_broken_outbox_never_changes_the_send_outcome(
 
     monkeypatch.setattr(outbox, "logical_key", _boom)
     mock_client.post.side_effect = httpx.ConnectError("refused")
-    with pytest.raises(GatewayUnavailable):  # not the outbox's error
+    with pytest.raises(RuntimeError, match="outbox on fire"):
         send_message(42, content="hello", source="watcher:7")
+    mock_client.post.assert_not_called()
     assert _records(journal) == []
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (500, {"detail": "bug"}),
+        (500, {"retryable": False, "committed": True, "inbound_id": 73}),
+        (503, {"retryable": False, "detail": "bug"}),
+        (503, {"committed": True, "inbound_id": 73}),
+    ],
+)
+def test_unknown_or_committed_response_is_exposed_once_without_outbox(
+    journal: Path, status: int, body: dict[str, object]
+) -> None:
+    from ava.gateway_client import send_message
+    from ava.gateway_client.transport import use_client
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            status, json={**body, "idempotency_key": request.headers["Idempotency-Key"]}
+        )
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        use_client(client),
+        pytest.raises(httpx.HTTPStatusError) as raised,
+    ):
+        send_message(42, content="hello", source="watcher:7")
+    assert len(requests) == 1
+    assert raised.value.response.json() == {
+        **body,
+        "idempotency_key": requests[0].headers["Idempotency-Key"],
+    }
+    assert _records(journal) == []
+
+
+@pytest.mark.parametrize("status", [429, 502, 503, 504])
+def test_known_transient_response_retries_with_one_key(journal: Path, status: int) -> None:
+    from ava.gateway_client import send_message
+    from ava.gateway_client.transport import use_client
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status if len(requests) == 1 else 201)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        use_client(client),
+    ):
+        send_message(42, content="hello", source="watcher:7")
+    assert len(requests) == 2
+    assert len({request.headers["Idempotency-Key"] for request in requests}) == 1
+    assert _records(journal) == []
+
+
+@pytest.mark.parametrize(
+    "error_type", [httpx.LocalProtocolError, httpx.UnsupportedProtocol, httpx.DecodingError]
+)
+def test_unknown_transport_error_is_exposed_once_without_journal(
+    journal: Path, error_type: type[httpx.TransportError]
+) -> None:
+    from ava.gateway_client import send_message
+    from ava.gateway_client.transport import use_client
+
+    attempts: list[httpx.Request] = []
+    error = error_type("transport implementation bug")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        raise error
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        use_client(client),
+        pytest.raises(error_type) as raised,
+    ):
+        send_message(42, content="hello", source="watcher:7")
+    assert raised.value is error
+    assert len(attempts) == 1
+    assert _records(journal) == []
+
+
+@pytest.mark.parametrize("field", ["committed", "retryable"])
+def test_invalid_retry_control_is_exposed_once(journal: Path, field: str) -> None:
+    from ava.gateway_client import send_message
+    from ava.gateway_client.transport import use_client
+
+    attempts: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        return httpx.Response(503, json={field: "false"})
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        use_client(client),
+        pytest.raises(ValueError, match=f"{field} must be a boolean"),
+    ):
+        send_message(42, content="hello", source="watcher:7")
+    assert len(attempts) == 1
+    assert _records(journal) == []
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_terminal_response_stops_existing_outbox_but_keeps_explicit_retry_key(
+    journal: Path, committed: bool
+) -> None:
+    from ava.gateway_client import send_message
+    from ava.gateway_client.transport import use_client
+
+    requests: list[httpx.Request] = []
+    stage = "network_failure"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if stage == "network_failure":
+            raise httpx.ConnectError("refused", request=request)
+        if stage == "terminal_response":
+            return httpx.Response(
+                500, json={"committed": committed, "retryable": False, "inbound_id": 73}
+            )
+        return httpx.Response(201)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        use_client(client),
+    ):
+        with pytest.raises(GatewayUnavailable):
+            send_message(42, content="hello", source="watcher:7")
+        assert len(_records(journal)) == 1
+        key = requests[0].headers["Idempotency-Key"]
+        stage = "terminal_response"
+        with pytest.raises(httpx.HTTPStatusError) as raised:
+            send_message(42, content="hello", source="watcher:7")
+        assert raised.value.response.json()["committed"] is committed
+        assert _records(journal) == []
+        stage = "explicit_retry"
+        send_message(42, content="hello", source="watcher:7")
+    assert {request.headers["Idempotency-Key"] for request in requests} == {key}
 
 
 @patch("ava.gateway_client.transport._http", new_callable=_client_mock)

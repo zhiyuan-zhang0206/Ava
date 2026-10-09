@@ -13,7 +13,7 @@ executes. The final `sdk_call` emission uses that same snapshot: a refresh durin
 the call cannot replace its policy or mask the SDK's return, exception or cancellation.
 Nested public SDK fan-out gets its own policy snapshot, event and tally entry.
 Plugin wrap layers share one final installed recorder for the same public function.
-A direct `emit()` validates policy before entering event-sink error handling.
+A direct `emit()` validates policy and propagates errors from its emitter call.
 
 ## Refresh and failures
 
@@ -33,9 +33,8 @@ provides a new valid snapshot. Failed reads can still trigger a refresh when due
 a later network outage cannot clear an already-recorded configuration error.
 
 Refresh diagnostics use the existing no-emitter logger path; they do not start
-an event pipeline to report policy failures. Event-sink failures remain a separate
-side-channel contract. The fixed lazy import of local capture admission must
-succeed before the SDK body: import, configuration and code errors propagate to
+an event pipeline to report policy failures. The fixed lazy import of local capture
+admission must succeed before the SDK body: import, configuration and code errors propagate to
 the caller instead of permitting an uncaptured operation. An absent participant
 is a normal no-op decided by the manifest gate itself; its receipt/admission
 lifecycle remains unchanged.
@@ -57,3 +56,18 @@ still receive explicit semantic details.
 
 See the accepted public-entry counting decision in
 `docs/decisions/engineering/design/simplification/2026-10-09-explicit-runtime-ownership-boundaries.md`.
+
+## Emission failure ownership
+
+The SDK emitter call owns no network retry or generic sink fallback. An error after
+an admitted body succeeds propagates to the caller without executing that body again.
+When the body already raised, its exact exception and original cause remain primary;
+an emission or receipt-failure recording error is attached as an exception note.
+Both outcomes still count the body that executed in the unsampled execution tally.
+
+The original call admission reports capture failure against its own gate, even if
+an attachment has closed or another receipt has become bound. Failure is recorded
+before admission releases and attempts to seal the drained receipt. A lost event
+cannot become an empty complete receipt; a persistence outage retains the existing
+pending-failure fence. Lower emitter pipeline and manifest writer recovery retain
+their existing owners; this SDK boundary does not retry their work.

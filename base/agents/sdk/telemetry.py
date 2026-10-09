@@ -38,8 +38,7 @@ def emit(
     identity: Mapping[str, Any],
     sampling_policy: SamplingPolicy | None = None,
 ) -> None:
-    """Write one ``sdk_call`` event. Pure side channel — a broken log sink never raises
-    into the SDK call path; its first failure (and its recovery) is logged once.
+    """Write one ``sdk_call`` event; invalid input and emitter errors propagate.
     ``detail`` is omitted from the payload when empty, so a plain call stays ``{fn}``;
     ``duration`` (seconds, measured by ``run_metered``) rides as a top-level payload
     key — the registry declares it (``contract.SdkCall``), so a reader may reference
@@ -54,28 +53,23 @@ def emit(
 
         if random.randrange(every) != 0:  # noqa: S311 — telemetry sampling, not security
             return
-    try:
-        extra: dict[str, Any] = {"fn": fn, "sample_rate": every}
-        if detail:
-            extra["detail"] = dict(detail)
-        if duration is not None:
-            extra["duration"] = duration
-        from base import telemetry
+    extra: dict[str, Any] = {"fn": fn, "sample_rate": every}
+    if detail:
+        extra["detail"] = dict(detail)
+    if duration is not None:
+        extra["duration"] = duration
+    from base import telemetry
 
-        telemetry.emit("telemetry", SDK_CALL_EVENT, attributes=extra, **identity)
-    except Exception as exc:
-        from base.telemetry import report_sink_failure
-
-        report_sink_failure("SDK call event emit (sdk_call events are dropped)", exc)
+    telemetry.emit("telemetry", SDK_CALL_EVENT, attributes=extra, **identity)
 
 
 @contextlib.contextmanager
-def _event_capture_admission() -> Generator[None, None, None]:
+def _event_capture_admission() -> Generator[Callable[[], None] | None, None, None]:
     """Use the optional gate; invalid capture code rejects the SDK call before its body."""
     from base.agents.impersonation.manifest import admitted_local_sdk_call
 
-    with admitted_local_sdk_call():
-        yield
+    with admitted_local_sdk_call() as admission:
+        yield None if admission is None else admission.capture_failed
 
 
 @contextlib.contextmanager
@@ -88,19 +82,37 @@ def _measure(
     caller_identity = dict(identity)
     # Retain this call's original gate until its event is captured. Attachment
     # close can reject new entries but cannot seal this receipt before drain.
-    with _event_capture_admission():
+    with _event_capture_admission() as capture_failed:
         t0 = time.monotonic()
+        primary: BaseException | None = None
         try:
             yield
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
             if tally is not None:
                 tally.add(fn)
-            emit(
-                fn,
-                duration=time.monotonic() - t0,
-                identity=caller_identity,
-                sampling_policy=snapshot,
-            )
+            try:
+                emit(
+                    fn,
+                    duration=time.monotonic() - t0,
+                    identity=caller_identity,
+                    sampling_policy=snapshot,
+                )
+            except BaseException as secondary:
+                if capture_failed is not None:
+                    try:
+                        capture_failed()
+                    except BaseException as capture_error:
+                        secondary.add_note(
+                            f"Receipt failure recording also failed: {capture_error!r}"
+                        )
+                if primary is None:
+                    raise
+                primary.add_note(f"SDK call {fn!r} event emission also failed: {secondary!r}")
+                for note in getattr(secondary, "__notes__", ()):
+                    primary.add_note(note)
 
 
 def run_metered(

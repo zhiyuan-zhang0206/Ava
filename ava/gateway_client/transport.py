@@ -13,9 +13,7 @@ import httpx
 import ava
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.agents.context import AvaContext
-from base.agents.messages.delivery_outbox import (
-    TRANSIENT_HTTP_STATUSES as _TRANSIENT_HTTP_STATUSES,
-)
+from base.agents.messages.delivery_retry import NETWORK_ERRORS, retryable_response
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER, validate_idempotency_key
@@ -58,10 +56,9 @@ def _base_retry_delay_s() -> float:
 
 
 # ── Transient-failure retry policy ──
-# The status set (429/500/502/503/504) lives with the deferred-delivery outbox
-# — `base.agents.messages.delivery_outbox.TRANSIENT_HTTP_STATUSES` — so this transport's
-# retry policy and the outbox interception on both send paths (SDK
-# `send_message` + the `ava agents send` CLI) classify failures identically.
+# The gateway response policy lives in base.agents.messages.delivery_retry.
+# Transport retry and SDK/CLI outbox interception share its known statuses
+# (429/502/503/504) and respect committed/retryable wire controls.
 
 # Bounded exponential backoff: attempt i sleeps the base delay multiplied by
 # the backoff factor raised to i, capped at `_RETRY_MAX_DELAY_S`, plus a
@@ -226,16 +223,19 @@ def _request_with_retry(
     import httpx
 
     pre_send_errors = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+    gateway_classifier = http_classifier.with_(permanent={500})
 
     def classify(exc: Exception) -> bool:
         if not retryable:
             # A non-idempotent POST can only be repeated when nothing was sent.
             return isinstance(exc, pre_send_errors)
-        return http_classifier(exc)
+        if isinstance(exc, httpx.TransportError) and not isinstance(exc, NETWORK_ERRORS):
+            return False
+        return gateway_classifier(exc)
 
     def once() -> httpx.Response:
         resp = request()
-        if retryable and resp.status_code in _TRANSIENT_HTTP_STATUSES:
+        if retryable and retryable_response(resp):
             raise _TransientResponseError(resp)
         return resp
 
@@ -256,7 +256,7 @@ def _request_with_retry(
     except _TransientResponseError as exc:
         # The caller still owns raise_from_response and its wire-reason mapping.
         return exc.response
-    except httpx.TransportError as exc:
+    except NETWORK_ERRORS as exc:
         if not retryable and not isinstance(exc, pre_send_errors):
             raise GatewayUnavailable(
                 f"Gateway transport error at {_http(context).base_url} "
@@ -288,7 +288,7 @@ def post(
 ) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
-    Retries transport failures and HTTP 429/5xx responses only when the route
+    Retries known network failures and HTTP 429/502/503/504 responses only when the route
     is idempotent or promises server-side deduplication. For non-idempotent
     routes, only ConnectError, ConnectTimeout, and PoolTimeout are retried:
     these happen before the request can be sent. Other transport failures

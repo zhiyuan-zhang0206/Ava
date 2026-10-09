@@ -151,33 +151,19 @@ def test_emit_omits_detail_when_empty(captured: list[dict[str, Any]]) -> None:
     assert "detail" not in captured[0]
 
 
-def test_emit_swallows_sink_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("sink down")
+def test_emit_does_not_classify_transport_errors_or_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = httpx.TimeoutException("not a transport owned by the SDK emitter")
+    attempts: list[str] = []
+
+    def fail(*_args: Any, **_kwargs: Any) -> None:
+        attempts.append("emit")
+        raise failure
 
     monkeypatch.setattr(telemetry, "emit", fail)
-    sdk_usage_telemetry.emit("ns.fn", {"k": 1}, identity={})
-
-
-def test_emit_sink_failure_is_reported_with_its_exception(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A broken sink never raises into the SDK call, and is never silent either."""
-    reports: list[tuple[str, BaseException]] = []
-
-    def fail(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("sink down")
-
-    monkeypatch.setattr(telemetry, "emit", fail)
-
-    def record(sink: str, exc: BaseException) -> None:
-        reports.append((sink, exc))
-
-    monkeypatch.setattr(telemetry, "report_sink_failure", record)
-    sdk_usage_telemetry.emit("ns.fn", identity={})
-    assert len(reports) == 1
-    assert "sdk_call" in reports[0][0]
-    assert isinstance(reports[0][1], RuntimeError)
+    with pytest.raises(httpx.TimeoutException) as raised:
+        sdk_usage_telemetry.emit("ns.fn", identity={})
+    assert raised.value is failure
+    assert attempts == ["emit"]
 
 
 # ── explicit execution tally, independent of event sampling ───────────────────
@@ -524,3 +510,85 @@ assert executed == []
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_simple_emit_unknown_error_is_not_recovered(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = RuntimeError("emitter programming error")
+
+    def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise failure
+
+    monkeypatch.setattr(telemetry, "emit", broken)
+    with pytest.raises(RuntimeError) as raised:
+        sdk_usage_telemetry.emit("files.write", identity={})
+    assert raised.value is failure
+
+
+@pytest.mark.parametrize("async_call", [False, True])
+async def test_successful_body_exposes_unknown_emit_failure_without_retry(
+    monkeypatch: pytest.MonkeyPatch, async_call: bool
+) -> None:
+    failure = RuntimeError("emitter programming error")
+    effects: list[str] = []
+    tally = SdkCallTally()
+
+    def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise failure
+
+    def body() -> str:
+        effects.append("committed")
+        return "done"
+
+    async def async_body() -> str:
+        return body()
+
+    monkeypatch.setattr(telemetry, "emit", broken)
+    with pytest.raises(RuntimeError) as raised:
+        if async_call:
+            await sdk_usage_telemetry.run_metered_async(
+                "files.write", async_body, (), {}, identity={}, tally=tally
+            )
+        else:
+            sdk_usage_telemetry.run_metered("files.write", body, (), {}, identity={}, tally=tally)
+    assert raised.value is failure
+    assert effects == ["committed"]
+    assert tally.snapshot() == {"files.write": 1}
+
+
+@pytest.mark.parametrize("async_call", [False, True])
+@pytest.mark.parametrize("primary_type", [ValueError, asyncio.CancelledError, KeyboardInterrupt])
+async def test_emit_secondary_failure_keeps_body_identity_cause_and_tally(
+    monkeypatch: pytest.MonkeyPatch, async_call: bool, primary_type: type[BaseException]
+) -> None:
+    primary = primary_type("body outcome")
+    cause = LookupError("original cause")
+    secondary = RuntimeError("emitter programming error")
+    effects: list[str] = []
+    tally = SdkCallTally()
+
+    def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise secondary
+
+    def body() -> None:
+        effects.append("committed")
+        raise primary from cause
+
+    async def async_body() -> None:
+        body()
+
+    # Reach the cleanup seam independently of emit()'s own former blanket catch.
+    monkeypatch.setattr(sdk_usage_telemetry, "emit", broken)
+    with pytest.raises(primary_type) as raised:
+        if async_call:
+            await sdk_usage_telemetry.run_metered_async(
+                "files.write", async_body, (), {}, identity={}, tally=tally
+            )
+        else:
+            sdk_usage_telemetry.run_metered("files.write", body, (), {}, identity={}, tally=tally)
+    assert raised.value is primary
+    assert primary.__cause__ is cause
+    assert any(
+        "RuntimeError" in note and "emitter programming error" in note for note in primary.__notes__
+    )
+    assert effects == ["committed"]
+    assert tally.snapshot() == {"files.write": 1}

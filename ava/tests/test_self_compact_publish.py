@@ -19,9 +19,11 @@ from tests.fixtures.units import spawn_agent
 class _BoomSyncClient:
     def __init__(self, exc: BaseException) -> None:
         self._exc = exc
+        self.publish_calls = 0
 
     def publish(self, _channel: str, _payload: str, *, auth_retry: bool) -> int:
         assert auth_retry is False
+        self.publish_calls += 1
         raise self._exc
 
     def close(self) -> None:
@@ -38,10 +40,12 @@ def test_compact_survives_publish_failure(
     # Only the CompactRequest publish (EventBus.publish_best_effort_sync → sync_redis) is
     # broken; the self-inbound wake uses ava.REDIS directly and is already
     # never-raise, so leave the session redis real for it.
-    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(RedisConnectionError("down")))
+    client = _BoomSyncClient(RedisConnectionError("down"))
+    patch_sync_redis(monkeypatch, lambda: client)
 
     with pytest.raises(SystemHalt):
         ava.self.compact("Requests: (none)\nProgress: done\n")
+    assert client.publish_calls == 1
 
     with db_conn.cursor() as cur:
         cur.execute(

@@ -1,11 +1,10 @@
 """Deferred-delivery outbox: never silently drop a message the wire refused.
 
-A chat send that exhausts its retry budget (the SDK's 3 attempts, a caller's
-own bounded retry chain) reaches the end of its attempts with the message still
-in nobody's hands: no inbound row was ever committed, no server-side record
-exists, and the failure is visible only in the caller's log (the 2026-09-17
-black-window evidence, task #3757: "fire != delivered"). This module closes
-that window on the sending machine:
+A chat send that exhausts a known transient failure's retry budget may have
+an uncertain commit outcome. This module records that message under the same
+logical key, so recovery observes any existing inbound instead of repeating
+its body effects. Unknown failures and explicit committed receipts are exposed
+to the caller without enrolling a new automatic retry:
 
 - **Record (dead-hand coverage).** When a delivery POST finally fails, the SDK
   (or the `ava agents send` CLI) calls `record_failed_send`. The message is written durably to
@@ -15,7 +14,7 @@ that window on the sending machine:
 - **Redeliver (bounded, delayed).** The machine's ops daemon runs the flush loop
   (`flush`), which re-commits each due entry through the canonical
   `insert_chat_inbound_once` path — the same durable INSERT + wake the HTTP
-  route uses — so every downstream mechanism (delivery watchdog dispatch,
+  route uses — so downstream mechanisms (delivery watchdog dispatch,
   claim recheck, terminated-owner resurrect retry) completes the delivery.
   Retries follow a configurable backoff ladder; the first failed attempt at
   or after the configurable budget abandons the entry, so an attempt is never
@@ -39,11 +38,6 @@ between attempts; two identical messages inside the window while both
 undelivered; a delivery that landed while its record write raced) is a repeated
 chat message, never a lost one — the same failure mode caller-level retries
 already carry, now bounded by the dedup window instead of unbounded.
-
-Boundary: this module is the *server-side* half of the delivery contract. The
-caller-side retry budgets (#3525 / #3694 template contracts) keep doing what
-they do; the outbox only starts once those have run out. Template code and the
-notices/`system-note` surfaces are untouched (see the PR design section).
 
 Kill switch: `delivery_outbox_enabled` is read live by the flusher (a flip
 stops redelivery within one tick); a sender process picks it up at its next
@@ -73,6 +67,7 @@ from base.agents.messages.delivery_outbox_types import FlushReport
 from base.agents.messages.delivery_outbox_types import (
     PermanentDeliveryError as PermanentDeliveryError,
 )
+from base.agents.messages.delivery_retry import retryable_database_error
 from base.daemon.schedules import completion_notices
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
@@ -83,17 +78,6 @@ _ENTRY_SUFFIX = ".json"
 
 # Content type the SDK accepts: a plain string or OpenAI-shaped blocks.
 Content = str | list[dict[str, object]]
-
-# HTTP statuses that mean "the gateway or one of its backends hiccuped" — a
-# delivery attempt worth replaying once the backend returns. 500 = unhandled
-# server error (the 2026-08-07 memory-indexer 500 class), 502/503 = a backend
-# (indexer / cross-machine runner) is down, 504 = gateway-side timeout,
-# 429 = rate-limited. 4xx are NOT here: the wire `reason` is authoritative
-# application semantics (AgentNotFound etc.); replaying cannot change the
-# result. One definition, shared by the SDK transport's retry policy
-# (`ava/gateway_client/transport.py`) and the outbox interception on both send paths
-# (SDK `send_message` and the `ava agents send` CLI).
-TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 
 @dataclass(frozen=True)
@@ -387,7 +371,7 @@ def logical_key(
     """The idempotency key for this logical message.
 
     While the same fingerprint retries within the dedup window (and until any
-    attempt reports success through `note_send_succeeded`), every attempt
+    attempt reports success through `retire_send`), every attempt
     reuses one key: the server's `client_message_id` receipt then makes the
     whole chain exactly-once, and the outbox entry shares the key. After a
     successful send, an identical later message is a NEW logical message and
@@ -412,25 +396,30 @@ def logical_key(
         return key
 
 
-def note_send_succeeded(
+def retire_send(
     *,
     agent_id: int,
     source: str,
     content: Content,
     key: str,
     completion_notice: bool = False,
+    completed: bool = True,
 ) -> None:
-    """One logical message landed: retire its key and any pending record.
+    """Retire this send's automatic recovery record.
 
-    Best-effort and never raises — it runs on the send path's success case and
-    must not turn a delivered message into a failed call.
+    Completed sends also retire their logical key. A terminal wire failure
+    stops recovery while preserving that key for the caller's explicit retry.
+
+    Best-effort and never raises: cleanup must preserve the original send
+    outcome, including a terminal error's durable receipt.
     """
     try:
         message_fingerprint = fingerprint(
             agent_id, source, content, completion_notice=completion_notice
         )
-        with _registry_lock:
-            _registry.pop(message_fingerprint, None)
+        if completed:
+            with _registry_lock:
+                _registry.pop(message_fingerprint, None)
         for path in _matching_paths(agent_id, message_fingerprint):
             entry = _read(path)
             if (
@@ -443,7 +432,7 @@ def note_send_succeeded(
                 return
     except Exception:
         logger.opt(exception=True).warning(
-            "[delivery-outbox] failed to retire the record for a delivered message"
+            "[delivery-outbox] failed to retire the automatic recovery record"
         )
 
 
@@ -686,6 +675,8 @@ def _flush_path(
     moment: datetime,
 ) -> str | None:
     """One entry's flush outcome (a `FlushReport` counter name); None for a non-record."""
+    from psycopg import OperationalError
+
     if path.suffix != _ENTRY_SUFFIX or not path.is_file():
         return None
     entry = _read(path)
@@ -711,7 +702,9 @@ def _flush_path(
     except PermanentDeliveryError as exc:
         _abandon(path, entry, exc.reason, moment, detail=exc.detail)
         return "abandoned"
-    except Exception as exc:
+    except OperationalError as exc:
+        if not retryable_database_error(exc):
+            raise
         logger.opt(exception=True).warning(
             "[delivery-outbox] flush attempt for agent {} failed; record kept: {}",
             entry.agent_id,

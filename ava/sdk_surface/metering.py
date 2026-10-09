@@ -18,9 +18,11 @@ Transparency contract — the recorder MUST NOT perturb the SDK surface:
     (``ava.understand.UnderstandError``) survive via the ``__dict__`` copy.
   - A valid sampling policy is captured before each call executes. Invalid
     configuration or caller identity prevents execution; transient fetch failures
-    may use its last valid snapshot. Once admitted, event-sink failures are logged without changing
-    the call's return or exceptions, including lifecycle exceptions
-    (``AgentTermination`` / ``AgentRestart``).
+    may use its last valid snapshot. An emitter error after a successful body
+    propagates without retrying the body.
+    If the body already failed, its original exception and cause remain primary;
+    the emitter failure is attached as an exception note, including cancellation
+    and lifecycle exceptions.
 
 Every public call is metered, including bare Python, CLI and external attachments.
 Nested public entries count independently. The process-local execution context
