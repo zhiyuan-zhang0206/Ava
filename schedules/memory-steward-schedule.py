@@ -61,7 +61,7 @@ def ensure_agent(label, prompt):
     return ava.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 
-def fire_memory_maintenance(message: str) -> None:
+def fire_memory_maintenance(_slot: datetime, message: str) -> None:
     print(f"[schedule] Firing: {message}")
     try:
         full_prompt = f"memory-arbiter: {message}"

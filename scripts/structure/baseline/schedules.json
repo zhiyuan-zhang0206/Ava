@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "schedules/catchup.py::contextvar:_claimed_slot": 1
-  }
-}
