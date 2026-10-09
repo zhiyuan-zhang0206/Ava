@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
-import subprocess
 import sys
 from functools import partial
 from pathlib import Path
@@ -13,7 +12,6 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.config import settings
 from base.db import Database
 from base.deploy.lifecycle import home_lifecycle_locks
 from base.deploy.maintenance import pause_owner
@@ -140,9 +138,9 @@ def test_launcher_delivery_cannot_be_transplanted(
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_versioned_edit_preserves_fields_and_defers_session_work(
-    enabled: bool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    enabled: bool, db_conn: psycopg.Connection, database: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with Database.from_settings().pool() as pool:
+    with database.pool() as pool:
         row = router._create_blocking(
             pool,
             router.ScheduleCreate(
@@ -186,8 +184,10 @@ def test_versioned_edit_preserves_fields_and_defers_session_work(
     ).fetchone() == (1, 0)
 
 
-def test_stale_hash_and_syntax_errors_do_not_write(db_conn: psycopg.Connection) -> None:
-    with Database.from_settings().pool() as pool:
+def test_stale_hash_and_syntax_errors_do_not_write(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
+    with database.pool() as pool:
         row = router._create_blocking(pool, router.ScheduleCreate(name="stale", script="pass\n"))
         with pytest.raises(RuntimeError, match="expected old script"):
             repair.replace_script(pool, row[0], "print(2)\n", "0" * 64)
@@ -221,7 +221,12 @@ def test_utf8_digest_preserves_newlines() -> None:
 
 
 def test_external_file_uses_installed_runtime_and_real_writer(
-    db_conn: psycopg.Connection, tmp_path: Path
+    db_conn: psycopg.Connection,
+    database: Database,
+    db_url: str,
+    tmp_path: Path,
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Set AVA_TEST_INSTALLED_SOURCE to repeat this contract on an old checkout."""
     source = Path(os.environ.get("AVA_TEST_INSTALLED_SOURCE", Path(sys.prefix).parent)).resolve()
@@ -234,10 +239,10 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     journal = pause_owner.state_path().read_bytes()
     (home / "run" / "deploy-pause-owner.json").write_bytes(journal)
     (home / ".env").write_text(
-        f"AVA_DB_URL={settings.data_plane.db_url}\nAVA_SERVE_GATEWAY=true\n"
+        f"AVA_DB_URL={db_url}\nAVA_SERVE_GATEWAY=true\n"
         "AVA_SERVE_AGENT_RUNNER=false\nAVA_MACHINE_NAME=external-script-test\n"
     )
-    with Database.from_settings().pool() as pool:
+    with database.pool() as pool:
         row = router._create_blocking(
             pool, router.ScheduleCreate(name="external", script="pass\n", enabled=True)
         )
@@ -245,10 +250,13 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     external.write_bytes(Path(repair.__file__).read_bytes())
     script_file = tmp_path / "prepared.py"
     script_file.write_bytes(b"raise AssertionError('the body must never run')\r\n")
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env["AVA_HOME"] = str(home)
-    result = subprocess.run(  # noqa: S603 - explicit isolated interpreter and fixture-owned file.
-        [
+    with monkeypatch.context() as child_environment:
+        for key in list(os.environ):
+            if key.startswith("AVA_"):
+                child_environment.delenv(key)
+        child_environment.setenv("AVA_HOME", str(home))
+        child_environment.chdir(tmp_path)
+        result = pytester.run(
             str(source / ".venv" / "bin" / "python"),
             str(external),
             str(row[0]),
@@ -260,16 +268,10 @@ def test_external_file_uses_installed_runtime_and_real_writer(
             str(script_file),
             "--expected-sha256",
             repair.script_sha256(row[9]),
-        ],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "updated script_sha256=" in result.stdout
+            timeout=30,
+        )
+    assert result.ret == 0, result.stderr.str()
+    assert "updated script_sha256=" in result.stdout.str()
     assert (home / "run" / "deploy-pause-owner.json").read_bytes() == journal
     assert db_conn.execute(
         "SELECT enabled,status,script FROM schedules WHERE id=%s", (row[0],)
@@ -280,3 +282,29 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
         (row[0],)
     ]
+
+
+def test_main_preserves_unknown_failure_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script_file = tmp_path / "prepared.py"
+    script_file.write_text("pass\n")
+
+    def fail(**_arguments: object) -> str:
+        raise RuntimeError("unexpected writer failure")
+
+    monkeypatch.setattr(repair, "repair_script", fail)
+    with pytest.raises(RuntimeError, match="unexpected writer failure"):
+        repair.main(
+            [
+                "1",
+                "--home",
+                str(tmp_path),
+                "--source",
+                str(tmp_path),
+                "--script-file",
+                str(script_file),
+                "--expected-sha256",
+                "0" * 64,
+            ]
+        )

@@ -126,24 +126,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--script-file", required=True)
     parser.add_argument("--expected-sha256", required=True, type=old_script_digest)
     args = parser.parse_args(argv)
-    try:
-        raw = (
-            sys.stdin.buffer.read()
-            if args.script_file == "-"
-            else Path(args.script_file).read_bytes()
-        )
-        script = raw.decode("utf-8")
-        compile(script, "<schedule>", "exec")
-        result = repair_script(
-            home=args.home.expanduser().resolve(),
-            source=args.source.expanduser().resolve(),
-            schedule_id=args.schedule_id,
-            script=script,
-            expected_sha256=args.expected_sha256,
-        )
-    except Exception as exc:
-        print(f"script repair failed: {type(exc).__name__}: {exc}", file=sys.stderr)
-        return 1
+    raw = (
+        sys.stdin.buffer.read() if args.script_file == "-" else Path(args.script_file).read_bytes()
+    )
+    script = raw.decode("utf-8")
+    compile(script, "<schedule>", "exec")
+    result = repair_script(
+        home=args.home.expanduser().resolve(),
+        source=args.source.expanduser().resolve(),
+        schedule_id=args.schedule_id,
+        script=script,
+        expected_sha256=args.expected_sha256,
+    )
     print(f"schedule {args.schedule_id}: {result} script_sha256={script_sha256(script)}")
     return 0
 
