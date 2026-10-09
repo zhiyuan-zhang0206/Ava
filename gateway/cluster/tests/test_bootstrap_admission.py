@@ -17,7 +17,9 @@ from fastapi.testclient import TestClient
 from base import config
 from base.cluster.auth import bearer_header
 from base.cluster.authority.api import AcceptanceCache
-from base.host.env import bootstrap, runtime_config
+from base.config.service_read import ConfigAuthority
+from base.host.env import bootstrap
+from base.lm.catalog import ModelCatalog
 from gateway.cluster.bootstrap import router
 
 _SECRET = "bootstrap-admission-test"  # noqa: S105 — isolated test credential
@@ -25,11 +27,18 @@ _TURN_LIMIT = "AVA_HOST_MAX_CONCURRENT_TURNS"
 
 
 @pytest.fixture
-def gateway_snapshot(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
-    aliases = runtime_config.read_env_aliases()
+def gateway_snapshot(
+    monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
+) -> dict[str, str]:
+    aliases = {"AVA_DB_URL": str(config.settings.data_plane.db_url)}
     for alias in (_TURN_LIMIT, "AVA_HOST_DB_POOL_MAX_SIZE", "AVA_HOST_CONTROL_POOL_MAX_SIZE"):
         aliases.pop(alias, None)
-    monkeypatch.setattr(runtime_config, "read_env_aliases", lambda: aliases)
+
+    def read_aliases(owner: ConfigAuthority) -> dict[str, str]:
+        assert owner is config_authority
+        return aliases
+
+    monkeypatch.setattr(ConfigAuthority, "read_env_aliases", read_aliases)
     monkeypatch.setattr(config.settings.daemon, "host_max_concurrent_turns", 0)
     monkeypatch.setattr(config.settings.daemon, "host_db_pool_max_size", 64)
     monkeypatch.setattr(config.settings.daemon, "host_control_pool_max_size", 8)
@@ -52,11 +61,15 @@ def runner_token(
 
 
 @pytest.fixture
-def gateway_client() -> Iterator[TestClient]:
+def gateway_client(
+    config_authority: ConfigAuthority, model_catalog: ModelCatalog
+) -> Iterator[TestClient]:
     """Own the isolated router's admission cache without a full Gateway lifespan."""
     app = FastAPI()
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
+    app.state.config_authority = config_authority
+    app.state.catalog = model_catalog
     app.include_router(router)
     with TestClient(app) as client:
         yield client

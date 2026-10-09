@@ -21,6 +21,7 @@ from psycopg import sql
 from base.agents.history.checkpoint import CheckpointReadError, FullHistory
 from base.agents.history.hierarchy import build as build_domain
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 from gateway.agents.history import understanding as module
 from gateway.app import app
 
@@ -95,8 +96,17 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     )
     # Keep real catalog/tier pricing while isolating its recurring UTC price windows.
     monkeypatch.setattr(build_domain, "quote", partial(build_domain.quote, at=_T0))
-    monkeypatch.setattr(module, "build_model", lambda *_a: _MODEL)
-    monkeypatch.setattr(module, "chunk_size", lambda *_a: 1000)
+
+    def build_model(_db: object, _agent: int, *, catalog: ModelCatalog) -> str:
+        assert catalog is app.state.catalog
+        return _MODEL
+
+    def chunk_size(_db: object, _agent: int, *, catalog: ModelCatalog) -> int:
+        assert catalog is app.state.catalog
+        return 1000
+
+    monkeypatch.setattr(module, "build_model", build_model)
+    monkeypatch.setattr(module, "chunk_size", chunk_size)
     return state
 
 

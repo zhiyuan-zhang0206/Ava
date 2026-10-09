@@ -14,6 +14,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import machine_name
 from base.host.private_storage import ensure_private_dir
 from gateway.routers.upload import batches as upload_batches
 from gateway.routers.upload.batches import UploadItem
@@ -23,8 +24,12 @@ _CHILD = """
 import json, os, sys
 from pathlib import Path
 from psycopg_pool import ConnectionPool
-from gateway.routers.upload import batches as owner
 config = json.load(sys.stdin)
+os.environ["AVA_HOME"] = config["home"]
+os.environ["AVA_CONFIG_FETCH"] = "skip"
+from base.cluster.machine import set_identity
+set_identity(name=config["machine"], role=["gateway", "agent-runner"])
+from gateway.routers.upload import batches as owner
 directory = Path(config["directory"])
 original_publish = owner.publish_files
 original_link = os.link
@@ -67,6 +72,7 @@ def batch_target(db_conn: psycopg.Connection, tmp_path: Path) -> Path:
     db_conn.execute("INSERT INTO agents (id) VALUES (123)")
     db_conn.execute("INSERT INTO agents_meta (id, status) VALUES (123, 'idling')")
     db_conn.commit()
+    ensure_private_dir(tmp_path / "writer-home")
     return ensure_private_dir(tmp_path / "Downloads" / "AvaAgent-123")
 
 
@@ -76,7 +82,15 @@ def test_hard_death_recovers_fixed_objects(
 ) -> None:
     child = subprocess.run(  # noqa: S603 -- fixed Python program against isolated test DB
         [sys.executable, "-c", _CHILD],
-        input=json.dumps({"dsn": db_conn.info.dsn, "directory": str(batch_target), "phase": phase}),
+        input=json.dumps(
+            {
+                "dsn": db_conn.info.dsn,
+                "directory": str(batch_target),
+                "phase": phase,
+                "home": str(batch_target.parent.parent / "writer-home"),
+                "machine": machine_name(),
+            }
+        ),
         text=True,
         capture_output=True,
         timeout=30,
@@ -163,6 +177,8 @@ def test_independent_processes_share_quota(db_conn: psycopg.Connection, batch_ta
                         "directory": str(batch_target),
                         "phase": "ready",
                         "key": key,
+                        "home": str(batch_target.parent.parent / "writer-home"),
+                        "machine": machine_name(),
                     }
                 )
             )

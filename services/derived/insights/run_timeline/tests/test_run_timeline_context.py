@@ -21,6 +21,7 @@ from base.agents.history.hierarchy.units import (
 )
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from services.derived.insights.run_timeline import context
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts, block_tokens
@@ -173,9 +174,12 @@ class Views:
         return self.view
 
 
-def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch):
+def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch, catalog: ModelCatalog):
 
-    def breakdown(_pool: object, _agent: int, found: RequestBreakdown) -> ContextBreakdownResponse:
+    def breakdown(
+        _pool: object, _agent: int, found: RequestBreakdown, *, catalog: ModelCatalog
+    ) -> ContextBreakdownResponse:
+        assert catalog is app_state.catalog
         # The window and thresholds come from the model registry; the bucketing is the real one.
         return ContextBreakdownResponse(
             total_input_tokens=found.total.tokens,
@@ -195,7 +199,10 @@ def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(context, "context_breakdown_response", breakdown)
     app_state = SimpleNamespace(
-        db=cast(Database, object()), db_pool=object(), run_timeline_views=Views(view)
+        db=cast(Database, object()),
+        db_pool=object(),
+        run_timeline_views=Views(view),
+        catalog=catalog,
     )
     request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=app_state)))
     return context.get_run_timeline_context(request, 7, at)
@@ -203,8 +210,9 @@ def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch):
 
 def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ) -> None:
-    result = call(two_sessions(), 3, monkeypatch)
+    result = call(two_sessions(), 3, monkeypatch, model_catalog)
     assert (result.request, result.session, result.sessions) == (4, 1, 2)
     assert result.ts == T0 + timedelta(minutes=10)
     assert result.total_input_tokens == 40
@@ -212,14 +220,16 @@ def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
     kinds = {c.kind: c.tokens for c in result.categories}
     assert set(kinds) == {"system_prompt", "user_input"}
     assert sum(kinds.values()) == 40
-    first = call(two_sessions(), 0, monkeypatch)
+    first = call(two_sessions(), 0, monkeypatch, model_catalog)
     assert (first.session, first.total_input_tokens) == (0, 100)
 
 
-def test_an_agent_with_no_request_has_no_context(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_agent_with_no_request_has_no_context(
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+) -> None:
     messages: list[BaseMessage] = [human("hello", 0)]
     read = read_times(messages)
     view = HistoryView.of(FullHistory(messages, (None,), (0,)), [], MessageUsage(messages), read)
     with pytest.raises(HTTPException) as caught:
-        call(view, 0, monkeypatch)
+        call(view, 0, monkeypatch, model_catalog)
     assert caught.value.status_code == 404

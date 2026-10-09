@@ -197,6 +197,7 @@ def test_api_agents_accepts_bearer() -> None:
     assert resp.status_code == 200
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_api_bootstrap_accepts_bearer() -> None:
     with TestClient(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
