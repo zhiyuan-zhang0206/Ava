@@ -84,3 +84,18 @@ def chat_and_wait(agent_id: int, text: str, *, timeout: float = 90.0) -> None:
         return inbound == ["done"] and status == "idling", {"inbound": inbound, "agent": status}
 
     poll_until(finished, timeout=timeout, interval=0.3, what=f"agent {agent_id} finishes {text!r}")
+
+
+def enqueue_compact_history_fixture(agent_id: int) -> int:
+    """Produce the native compact envelope used by history-rendering scenarios.
+
+    This is a test fixture for the existing graph/history contract, not public
+    manual-compaction admission. Product callers use observed compact-history.
+    """
+    from base.db import Database, insert_compact_request_inbound
+    from base.events.live.bus import EventBus
+
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        return insert_compact_request_inbound(
+            conn, agent_id, database=Database.from_settings(), bus=EventBus.from_settings()
+        )

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from base.config.admin.candidate import EnvPatchValidation
 from base.host.env import runtime_config
 from gateway.app import app
-from gateway.routers import config as config_router
+from gateway.routers.configuration import runtime as config_router
 
 
 @pytest.fixture

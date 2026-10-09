@@ -3,13 +3,17 @@
 import importlib.util
 import json
 import sys
+import threading
+from http.server import HTTPServer
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
+import httpx
 
-from schedules.adversarial_eval_cases import audit_case, select_case_ids
+from schedules.adversarial_eval_cases import AuditResult, audit_case, select_case_ids
 
 REPO_ROOT = Path(__file__).parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "adversarial-eval-weekly-schedule.py"
@@ -312,3 +316,97 @@ def test_worker_sweep_terminates_only_workers_outside_the_current_batch(
     schedule._sweep_leftover_workers({102})
 
     assert terminated == [101]
+
+
+@pytest.mark.parametrize("failure", [None, RuntimeError("batch failed")])
+def test_batch_owns_scenario_http_server_until_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: RuntimeError | None
+) -> None:
+    schedule = cast(Any, _load_schedule_module())
+    servers: list[Any] = []
+    workers: list[threading.Thread] = []
+
+    def prepare_case(
+        case_id: str, root: Path, server: Any, *_marker_args: object
+    ) -> dict[str, object]:
+        servers.append(server)
+        workers.extend(
+            thread
+            for thread in threading.enumerate()
+            if thread.name.startswith("adversarial-scenario")
+        )
+        with httpx.Client(base_url=f"http://127.0.0.1:{server.port}", timeout=2) as client:
+            server.set_partner_document("<html>first</html>")
+            first = client.get("/partner-doc")
+            assert first.status_code == 200
+            assert first.headers["Content-Type"] == "text/html; charset=utf-8"
+            assert first.text == "<html>first</html>"
+            server.set_partner_document("<html>second</html>")
+            assert client.get("/partner-doc").text == "<html>second</html>"
+            missing = client.get("/flaky-service")
+            assert missing.status_code == 404
+            assert missing.text == "not found\n"
+        if failure is not None:
+            raise failure
+        return {
+            "case_id": case_id,
+            "scenario_dir": str(root / case_id),
+            "canary": "x",
+            "probe_id": 101,
+        }
+
+    monkeypatch.setattr(schedule, "data_root", lambda: tmp_path)
+    monkeypatch.setattr(schedule, "select_case_ids", Mock(return_value=["c003"]))
+    monkeypatch.setattr(schedule, "_prepare_case", prepare_case)
+    monkeypatch.setattr(schedule, "audit_case", Mock(return_value=AuditResult(1.0, "ok")))
+    monkeypatch.setattr(
+        schedule.ava.agents,
+        "list_agents",
+        Mock(return_value=SimpleNamespace(agents=[], next_cursor=None)),
+    )
+    monkeypatch.setattr(schedule.ava.agents, "get_status", Mock(return_value=schedule.S.TERMINATED))
+    monkeypatch.setattr(schedule.ava.agents, "get_last_message", Mock(return_value="done"))
+
+    if failure is None:
+        scoreboard_path = schedule.run_weekly_batch()
+        scoreboard = json.loads(scoreboard_path.read_text())
+        assert scoreboard["request_counts"] == {"/partner-doc": 2, "/flaky-service": 1}
+        assert scoreboard["per_case_scores"] == {"c003": 1.0}
+        assert scoreboard["alerted"] is False
+        assert not (tmp_path / "cases" / ".batch.json").exists()
+    else:
+        with pytest.raises(RuntimeError, match="batch failed"):
+            schedule.run_weekly_batch()
+        assert (tmp_path / "cases" / ".batch.json").exists()
+
+    assert len(servers) == len(workers) == 1
+    assert servers[0].counts() == {"/partner-doc": 2, "/flaky-service": 1}
+    assert servers[0].server.fileno() == -1
+    assert not workers[0].is_alive()
+
+
+def test_scenario_server_failure_propagates_after_join(monkeypatch: pytest.MonkeyPatch) -> None:
+    schedule = cast(Any, _load_schedule_module())
+    failed = threading.Event()
+    workers: list[threading.Thread] = []
+
+    class BrokenServer(HTTPServer):
+        def service_actions(self) -> None:
+            failed.set()
+            raise RuntimeError("server failed")
+
+    monkeypatch.setattr(schedule, "HTTPServer", BrokenServer)
+    with (
+        pytest.raises(RuntimeError, match="server failed"),
+        schedule.start_scenario_server() as server,
+    ):
+        workers.extend(
+            thread
+            for thread in threading.enumerate()
+            if thread.name.startswith("adversarial-scenario")
+        )
+        assert failed.wait(2)
+
+    assert len(workers) == 1
+    assert not workers[0].is_alive()
+    assert server.server.fileno() == -1

@@ -10,37 +10,41 @@ import httpx
 import httpx2
 import openai
 import pytest
+from google.genai.errors import APIError as GoogleAPIError
+from google.genai.errors import ClientError, ServerError
+from langchain_core.exceptions import ModelError
+from langchain_google_genai.chat_models import (
+    ChatGoogleGenerativeAIError,
+    _handle_client_error,
+    _handle_server_error,
+)
 
 from base.lm.errors import ErrorClass, classify_error
 
 
-class _FakeStatusError(Exception):
-    """anthropic/openai APIStatusError shape: an int status_code (+ optional body)."""
-
-    def __init__(self, status_code: object, body: dict | None = None) -> None:
-        super().__init__(f"HTTP {status_code}")
-        self.status_code = status_code
-        self.body = body  # pyright: ignore[reportUnknownMemberType]
+def _sdk_status_error(status: int, body: object = None) -> openai.APIStatusError:
+    response = httpx2.Response(status, request=httpx2.Request("POST", "https://audit.invalid"))
+    return openai.APIStatusError(f"HTTP {status}", response=response, body=body)
 
 
-class _FakeGoogleGenaiError(Exception):
-    """google.genai APIError shape: an int `.code` (HTTP status) + `.details`
-    response JSON (`{"error": {...}}`); no `.status_code`, no `.body`."""
-
-    def __init__(self, code: int, details: Mapping[str, object] | None = None) -> None:
-        super().__init__(f"{code} RESOURCE_EXHAUSTED. {details}")
-        self.code = code
-        self.details = details
+def _genai_error(code: int, details: Mapping[str, object] | None = None) -> GoogleAPIError:
+    error_type = ServerError if code >= 500 else ClientError
+    return error_type(code, dict(details or {}))
 
 
-class _FakeGenaiWrapperError(Exception):
-    """langchain-google-genai `ChatGoogleGenerativeAIError` shape: a message-only
-    wrapper that chains the original google.genai error as its explicit
-    `__cause__` (attributes gone from the wrapper itself)."""
-
-    def __init__(self, message: str, cause: BaseException | None) -> None:
-        super().__init__(message)
-        self.__cause__ = cause
+def _google_wrapper(message: str, cause: GoogleAPIError | None) -> Exception:
+    if cause is None:
+        return ChatGoogleGenerativeAIError(message)
+    if not isinstance(cause, (ServerError, ClientError)):
+        raise TypeError("test data must construct a concrete SDK error")
+    try:
+        if isinstance(cause, ServerError):
+            _handle_server_error(cause)
+        else:
+            _handle_client_error(cause, {"model": "gemini-3.7-flash"})
+    except Exception as error:
+        return error
+    raise AssertionError("official handler must raise")
 
 
 # ───────────── permanent statuses ─────────────
@@ -50,7 +54,7 @@ class _FakeGenaiWrapperError(Exception):
 def test_permanent_statuses(status: int) -> None:
     """400 (bad request / context length / schema), 401 auth, 402 billing, 403
     forbidden, 404 unknown model, 422 schema — deterministic within the turn."""
-    result = classify_error(_FakeStatusError(status))
+    result = classify_error(_sdk_status_error(status))
     assert result.error_class is ErrorClass.PERMANENT
     assert result.status == status
 
@@ -59,7 +63,7 @@ def test_context_length_400_is_permanent_not_retried() -> None:
     """The headline gap this taxonomy closes: a context-overflow 400 is PERMANENT,
     so the node fails fast + idles instead of burning the full retry budget and
     dying. The classifier does not need the message text — the status is enough."""
-    exc = _FakeStatusError(
+    exc = _sdk_status_error(
         400, {"error": {"type": "invalid_request_error", "message": "prompt is too long"}}
     )
     result = classify_error(exc)
@@ -73,7 +77,7 @@ def test_context_length_400_is_permanent_not_retried() -> None:
 @pytest.mark.parametrize("status", [408, 409, 425, 429, 500, 502, 503, 504, 529])
 def test_transient_statuses(status: int) -> None:
     """429 rate limit, 5xx server (>= 500 range), 408/409/425 — retryable in-turn."""
-    result = classify_error(_FakeStatusError(status))
+    result = classify_error(_sdk_status_error(status))
     assert result.error_class is ErrorClass.TRANSIENT
     assert result.status == status
 
@@ -85,8 +89,8 @@ def test_transient_statuses(status: int) -> None:
 def test_unrecognized_status_is_unknown_not_guessed(status: int) -> None:
     """A 4xx we don't explicitly place (413 payload-too-large etc.) is UNKNOWN,
     never guessed into permanent or transient — it propagates through the normal
-    retry path and surfaces if it persists."""
-    result = classify_error(_FakeStatusError(status))
+    failure path once without a guessed retry."""
+    result = classify_error(_sdk_status_error(status))
     assert result.error_class is ErrorClass.UNKNOWN
     assert result.status == status
 
@@ -96,18 +100,13 @@ def test_unrecognized_status_is_unknown_not_guessed(status: int) -> None:
 
 def test_transport_errors_are_transient() -> None:
     """Connection / timeout failures carry no HTTP status; the SDKs' own base
-    classes (+ builtins) classify them TRANSIENT so the retry path covers them."""
+    types classify them TRANSIENT; raw application transport errors remain unknown."""
     req = httpx2.Request("POST", "http://x")
     transport_excs: list[BaseException] = [
         anthropic.APIConnectionError(request=req),
         anthropic.APITimeoutError(request=req),  # subclass of APIConnectionError
         openai.APIConnectionError(request=req),
         openai.APITimeoutError(request=req),
-        httpx.ReadError("read reset"),
-        httpx.ConnectError("refused"),
-        httpx.PoolTimeout("pool"),
-        ConnectionError("net"),
-        TimeoutError("slow"),
     ]
     for exc in transport_excs:
         result = classify_error(exc)
@@ -132,14 +131,18 @@ def test_unrecognized_exception_is_unknown() -> None:
 def test_non_int_status_code_falls_through() -> None:
     """A wrapper that exposes a non-int status_code (e.g. the string '429') is not
     trusted as a status; it falls through to transport / UNKNOWN — no worse."""
-    result = classify_error(_FakeStatusError("429"))
+
+    class UnrelatedError(Exception):
+        status_code = "429"
+
+    result = classify_error(UnrelatedError())
     assert result.status is None
     assert result.error_class is ErrorClass.UNKNOWN
 
 
 def test_error_type_extracted_from_body() -> None:
     result = classify_error(
-        _FakeStatusError(429, {"error": {"type": "engine_overloaded_error", "message": "busy"}})
+        _sdk_status_error(429, {"error": {"type": "engine_overloaded_error", "message": "busy"}})
     )
     assert result.error_type == "engine_overloaded_error"
     assert result.error_class is ErrorClass.TRANSIENT  # 429 nature is transient
@@ -159,7 +162,7 @@ def test_error_type_extracted_from_body() -> None:
 def test_error_type_none_on_malformed_body(body: object) -> None:
     """A missing / malformed body yields error_type=None without affecting the
     status-driven class."""
-    result = classify_error(_FakeStatusError(500, body))  # type: ignore[arg-type]
+    result = classify_error(_sdk_status_error(500, body))
     assert result.error_type is None
     assert result.error_class is ErrorClass.TRANSIENT
 
@@ -182,7 +185,7 @@ def test_provider_label_from_module() -> None:
 def test_402_is_billing() -> None:
     """HTTP 402 Payment Required is the unambiguous cross-provider signal
     (DeepSeek returns it for `Insufficient Balance`)."""
-    result = classify_error(_FakeStatusError(402))
+    result = classify_error(_sdk_status_error(402))
     assert result.billing is True
     assert result.error_class is ErrorClass.PERMANENT
 
@@ -201,7 +204,7 @@ def test_402_is_billing() -> None:
 def test_billing_error_types_are_billing(error_type: str) -> None:
     """Providers that reuse a generic 4xx say it in the body's error.type
     instead — matched by vocabulary so a vendor plugs in at one place."""
-    exc = _FakeStatusError(429, {"error": {"type": error_type, "message": "no balance"}})
+    exc = _sdk_status_error(429, {"error": {"type": error_type, "message": "no balance"}})
     assert classify_error(exc).billing is True
 
 
@@ -227,7 +230,7 @@ def test_dashscope_billing_codes_are_billing(error_code: str) -> None:
     A `code`-when-`type`-is-missing fallback would be no fix at all here: `type`
     is present on every DashScope 4xx, just too coarse to carry a reason.
     """
-    exc = _FakeStatusError(
+    exc = _sdk_status_error(
         400,
         {"error": {"type": "invalid_request_error", "code": error_code, "message": "no balance"}},
     )
@@ -238,7 +241,7 @@ def test_billing_code_match_does_not_widen_the_reported_error_type() -> None:
     """Widening the MATCH must not widen the reported field: `error_type` on the
     `llm_provider_error` event stays the body's `error.type` alone, so its
     meaning is unchanged for the providers that already say everything there."""
-    exc = _FakeStatusError(
+    exc = _sdk_status_error(
         400, {"error": {"type": "invalid_request_error", "code": "Arrearage", "message": "x"}}
     )
     result = classify_error(exc)
@@ -253,7 +256,7 @@ def test_context_overflow_400_with_length_message() -> None:
     """The 3962 failure shape: a 400 whose message says the context length was
     exceeded is flagged context_overflow — the heartbeat circuit breaker's
     self-rescue trigger."""
-    exc = _FakeStatusError(
+    exc = _sdk_status_error(
         400,
         {
             "error": {
@@ -279,14 +282,14 @@ def test_context_overflow_400_with_length_message() -> None:
 def test_context_overflow_error_type_vocabulary(error_type: str) -> None:
     """OpenAI-style `context_length_exceeded` (and the type-level vocabulary
     spellings) flag overflow from the error type alone — no message needed."""
-    exc = _FakeStatusError(400, {"error": {"type": error_type}})
+    exc = _sdk_status_error(400, {"error": {"type": error_type}})
     assert classify_error(exc).context_overflow is True
 
 
 def test_schema_400_is_not_context_overflow() -> None:
     """A plain bad-request 400 (schema / malformed) carries none of the
     context-length vocabulary — it must NOT be flagged overflow."""
-    exc = _FakeStatusError(
+    exc = _sdk_status_error(
         400, {"error": {"type": "invalid_request_error", "message": "bad schema"}}
     )
     result = classify_error(exc)
@@ -297,7 +300,7 @@ def test_schema_400_is_not_context_overflow() -> None:
 def test_rate_limit_429_mentioning_tokens_is_not_overflow() -> None:
     """A rate-limit 429 that happens to mention tokens must not be misread as
     overflow — the predicate is status-gated to 400."""
-    exc = _FakeStatusError(
+    exc = _sdk_status_error(
         429, {"error": {"type": "rate_limit_error", "message": "too many tokens per minute"}}
     )
     assert classify_error(exc).context_overflow is False
@@ -308,7 +311,7 @@ def test_429_with_context_length_exceeded_type_stays_transient() -> None:
     informational only: a 429 carrying that type is still TRANSIENT (the
     retry loop retries it — it never opens the breaker, which only fires on
     PERMANENT-class rejections)."""
-    exc = _FakeStatusError(429, {"error": {"type": "context_length_exceeded"}})
+    exc = _sdk_status_error(429, {"error": {"type": "context_length_exceeded"}})
     result = classify_error(exc)
     assert result.error_class is ErrorClass.TRANSIENT
     assert result.context_overflow is True
@@ -318,7 +321,7 @@ def test_billing_is_independent_of_error_class() -> None:
     """OpenAI's out-of-credit arrives as a 429 (TRANSIENT — the retry loop
     still retries it, deliberately unchanged), yet it is still a billing
     failure the operator has to clear. The two axes must not be conflated."""
-    exc = _FakeStatusError(429, {"error": {"type": "insufficient_quota", "message": "x"}})
+    exc = _sdk_status_error(429, {"error": {"type": "insufficient_quota", "message": "x"}})
     result = classify_error(exc)
     assert result.error_class is ErrorClass.TRANSIENT
     assert result.billing is True
@@ -348,7 +351,7 @@ def test_google_genai_prepay_depletion_is_billing() -> None:
     reason is free-text prose. The classifier must read all three so the
     first-occurrence billing alert fires — this is the 2026-09-07 incident
     shape that previously logged billing=false / status=None / class=unknown."""
-    exc = _FakeGoogleGenaiError(429, _GEMINI_PREPAY_DETAILS)
+    exc = _genai_error(429, _GEMINI_PREPAY_DETAILS)
     result = classify_error(exc)
     assert result.status == 429
     assert result.error_class is ErrorClass.TRANSIENT
@@ -360,14 +363,9 @@ def test_google_genai_prepay_depletion_is_billing() -> None:
 
 
 def test_langchain_wrapper_reveals_chained_genai_billing() -> None:
-    """The exact crash shape of the 2026-09-07 incident (task #2610):
-    langchain-google-genai re-wraps the ClientError in a message-only
-    `ChatGoogleGenerativeAIError`, chaining the original as `__cause__`. The
-    classifier walks that explicit chain for status + body, so the wrapper
-    classifies as billing instead of UNKNOWN — while the reported `provider`
-    label stays the wrapper's package, unchanged from every past gemini event."""
-    cause = _FakeGoogleGenaiError(429, _GEMINI_PREPAY_DETAILS)
-    wrapper = _FakeGenaiWrapperError(
+    """The official retryable Google model wrapper retains typed billing metadata."""
+    cause = _genai_error(429, _GEMINI_PREPAY_DETAILS)
+    wrapper = _google_wrapper(
         f"Error calling model 'gemini-3.7-flash' (RESOURCE_EXHAUSTED): {cause}", cause
     )
     result = classify_error(wrapper)
@@ -378,6 +376,17 @@ def test_langchain_wrapper_reveals_chained_genai_billing() -> None:
     # only the structured fields were read from the cause — so postmortems
     # that already filter gemini events by provider keep matching.
     assert result.provider == type(wrapper).__module__.split(".", 1)[0]
+
+
+@pytest.mark.parametrize("status", [408, 409, 425])
+def test_generic_google_wrapper_cannot_borrow_transient_sdk_cause(status: int) -> None:
+    cause = _genai_error(status, {"error": {"message": "request failed"}})
+    wrapper = _google_wrapper(str(cause), cause)
+    assert not isinstance(wrapper, ModelError)
+    assert classify_error(cause).error_class is ErrorClass.TRANSIENT
+    classified = classify_error(wrapper)
+    assert classified.error_class is ErrorClass.UNKNOWN
+    assert classified.status is None
 
 
 @pytest.mark.parametrize(
@@ -396,7 +405,7 @@ def test_google_genai_rate_limit_429_is_not_billing(message: str) -> None:
     429s share the RESOURCE_EXHAUSTED status name, so only the prepayment
     phrase — never the status — may flip the billing verdict."""
     details = {"error": {"code": 429, "message": message, "status": "RESOURCE_EXHAUSTED"}}
-    result = classify_error(_FakeGoogleGenaiError(429, details))
+    result = classify_error(_genai_error(429, details))
     assert result.error_class is ErrorClass.TRANSIENT
     assert result.billing is False
 
@@ -405,7 +414,7 @@ def test_prepay_phrase_without_status_is_not_billing() -> None:
     """The message arm is gated on the 429 status: a phrase-only wrapper with
     no chained status (nothing to prove this is Google's billing rejection)
     must stay non-billing rather than page on a hunch."""
-    wrapper = _FakeGenaiWrapperError(
+    wrapper = _google_wrapper(
         "Error calling model 'gemini-3.7-flash' (RESOURCE_EXHAUSTED): 429 "
         "RESOURCE_EXHAUSTED. Your prepayment credits are depleted.",
         None,
@@ -417,14 +426,11 @@ def test_prepay_phrase_without_status_is_not_billing() -> None:
 
 
 def test_google_genai_400_wrapper_classifies_permanent() -> None:
-    """Reading the chained `.code` restores status-driven classification for
-    gemini 4xx generally (they used to be UNKNOWN): a 400 invalid-argument is
-    deterministic within the turn, so the node fails fast instead of burning
-    the retry budget — same taxonomy every other provider already gets."""
-    cause = _FakeGoogleGenaiError(
+    """Official ModelInvalidRequestError owns permanent rejection and typed metadata."""
+    cause = _genai_error(
         400, {"error": {"message": "invalid argument", "status": "INVALID_ARGUMENT"}}
     )
-    wrapper = _FakeGenaiWrapperError(
+    wrapper = _google_wrapper(
         f"Error calling model 'gemini-3.7-flash' (INVALID_ARGUMENT): {cause}", cause
     )
     result = classify_error(wrapper)
@@ -436,7 +442,7 @@ def test_google_genai_400_wrapper_classifies_permanent() -> None:
 def test_google_genai_5xx_classifies_transient() -> None:
     """google.genai server errors (raised raw, not wrapped) carry the 5xx as
     `.code`; they classify TRANSIENT like every other provider's 5xx."""
-    exc = _FakeGoogleGenaiError(503, {"error": {"message": "unavailable", "status": "UNAVAILABLE"}})
+    exc = _genai_error(503, {"error": {"message": "unavailable", "status": "UNAVAILABLE"}})
     result = classify_error(exc)
     assert result.status == 503
     assert result.error_class is ErrorClass.TRANSIENT
@@ -472,4 +478,4 @@ def test_google_genai_5xx_classifies_transient() -> None:
 def test_non_billing_failures_are_not_billing(status: int, body: object) -> None:
     """The false-positive guard: this alert fires on the FIRST occurrence, so a
     plain auth failure or rate limit must never read as "out of credit"."""
-    assert classify_error(_FakeStatusError(status, body)).billing is False  # type: ignore[arg-type]
+    assert classify_error(_sdk_status_error(status, body)).billing is False

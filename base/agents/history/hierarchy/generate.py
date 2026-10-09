@@ -134,7 +134,7 @@ def _invoke_agent_shaped(
                 model=model,
                 usage_source="hierarchy.generate",
             )
-        except GenerateError as exc:
+        except Exception as exc:
             if on_call is not None:
                 on_call(ModelCall(rounds, None, (time.monotonic() - started) * 1_000, str(exc)))
             raise

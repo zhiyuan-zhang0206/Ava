@@ -55,10 +55,10 @@ v2 result as execution evidence. HTTP acceptance survives an unsupported or
 unreachable runner, which remains a delivery gap until a later same-intent
 reconciliation or the existing pending scan. No new durable worker is added.
 
-The original `/api/agents/{agent_id}/retry-launch` remains legacy one-shot and
-rotates per invocation. The new route is transactionally keyed but
-`legacy_keyed_retry=False`. Every SDK launch retry requires a caller key and
-observed UUID; see [[ava/agents/docs/launch-retry.ava.okf.md]]. Removal of the old HTTP entry and its current browser caller is tracked in
-#4473. Compatibility with old installed consumers is not a completion gate. There is no capability cache, client outbox
-or automatic ambiguous-failure retry, and no runtime command checkpoint recovery
-is added by the SDK consumer.
+The original `/api/agents/{agent_id}/retry-launch` route and its one-shot
+attempt-rotation owner are removed. The browser API and SDK require an explicit
+observed UUID and caller key for the versioned route. Launch-failure responses
+advertise that route. See [[ava/agents/docs/launch-retry.ava.okf.md]]. There is no
+capability cache, client outbox or automatic ambiguous-failure retry; recovery
+must reuse the original intent. Installed older consumers are not supported by a
+fallback route.

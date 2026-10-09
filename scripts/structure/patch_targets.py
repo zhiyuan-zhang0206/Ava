@@ -4,8 +4,7 @@ A test may replace a name in its own package, a public name anywhere, the proces
 environment, or a third-party / runtime boundary. It may not reach into a private name of a
 package it does not belong to. This module classifies every patch point of a test file
 (`scripts/structure/patch_points.py`) against the file's home package
-(`scripts/structure/placement.py`). Existing exemptions in the `patch_targets`
-baseline section use `path::target -> site count`, matched exactly like Rules 4 and 5.
+(`scripts/structure/placement.py`). Every foreign-private patch is rejected directly; no baseline can permit it.
 New violations must be fixed; introducing the lint cannot freeze new exemptions.
 
 Classes (each patch point lands in exactly one):
@@ -29,22 +28,17 @@ Classes (each patch point lands in exactly one):
 - **U unresolved**: the patched object cannot be resolved statically (a parameter, a call
   result). Counted, never a violation.
 
-Only D is a violation. Baseline growth is a violation; shrinkage fails until the entry is
-lowered or removed (`locality.site_errors` semantics); against the base revision the
-section is shrink-only with `git -M` renames carried (`scripts/lint/code_structure.py`).
+Only D is a violation. Every D site fails, including after a file or target moves.
 """
 
 from __future__ import annotations
 
 import ast
-import collections
-import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
-from scripts.structure import baseline_shards, imports, locality
+from scripts.structure import imports, locality
 from scripts.structure.patch_points import Point, extract_points
 from scripts.structure.placement import (
     PATCH_TOPS,
@@ -184,7 +178,7 @@ class Site:
     target: str  # the patched target as written or resolved
     sub: str = ""  # A: boundary kind; E: tier
     module: str = ""  # first-party module (B, C, D) or E module prefix
-    key: str = ""  # D: the baseline target (Rule 4 style, cut at the first private part)
+    key: str = ""  # D: the private target (Rule 4 style, cut at the first private part)
     owner: str = ""  # first-party: the owning package directory
     relation: str = ""  # D: ancestor | other-unit | sibling | top-level
     deep: bool = False  # C: a public attribute of an attribute of the module
@@ -268,7 +262,7 @@ class Classifier:
         return Site(line, "C", dotted, module=module, owner=owner, deep=len(remainder) >= 2)
 
     def _private(self, dotted: str, module: str) -> tuple[str, str] | None:
-        """(baseline target, owning package directory) of the first private component.
+        """(private target, owning package directory) of the first private component.
 
         Rule 4's owner (`locality._private_target`) for a private module or package segment.
         A private attribute past the module boundary (`mod.Class._name`, `mod._name`) belongs
@@ -380,38 +374,10 @@ def owner_dotted(owner_dir: str) -> str:
     return owner_dir.replace("/", ".")
 
 
-def new_site_errors(rel_path: str, result: FileResult, frozen: dict[str, int]) -> list[str]:
-    """Messages for the class D sites of `result` beyond their frozen counts."""
-    errors: list[str] = []
-    by_key: dict[str, list[Site]] = collections.defaultdict(list)
-    for site in result.sites:
-        if site.cat == "D":
-            by_key[f"{rel_path}::{site.key}"].append(site)
-    for key, sites in sorted(by_key.items()):
-        if len(sites) <= frozen.get(key, 0):
-            continue
-        suffix = f" (grew above its frozen count {frozen[key]})" if key in frozen else ""
-        errors.extend(
-            f"{rel_path}:{site.line}: {_message(site, result.home)}{suffix}"
-            for site in sorted(sites, key=lambda s: s.line)
-        )
-    return errors
-
-
-def stale_errors(
-    measured: Sites, frozen: dict[str, int], scanned: set[str], repo_root: Path
-) -> list[str]:
-    """Frozen entries of scanned (or deleted) files whose sites shrank below the count."""
-    return locality._stale_errors(SECTION, measured, frozen, scanned, repo_root)
-
-
-def read_baseline(repo_root: Path) -> dict[str, int]:
-    """The frozen `patch_targets` entries of every baseline shard (validated like `merge`)."""
-    texts: dict[str, str] = {}
-    for name, text in baseline_shards.read_worktree(repo_root).items():
-        shard = cast("object", json.loads(text))
-        if isinstance(shard, dict) and (section := cast("dict[str, object]", shard).get(SECTION)):
-            texts[name] = json.dumps({SECTION: section})
-    merged = baseline_shards.merge(texts, [SECTION])[SECTION]
-    locality.validate_entries(SECTION, merged, PATCH_TOPS)
-    return merged
+def site_errors(rel_path: str, result: FileResult) -> list[str]:
+    """Messages for every foreign-private patch, with no exemptions."""
+    return [
+        f"{rel_path}:{site.line}: {_message(site, result.home)}"
+        for site in sorted(result.sites, key=lambda site: site.line)
+        if site.cat == "D"
+    ]

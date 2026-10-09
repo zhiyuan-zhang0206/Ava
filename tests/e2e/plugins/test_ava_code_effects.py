@@ -33,7 +33,12 @@ import pytest
 from base.config import settings
 from base.paths import workspace_dir
 from tests.components.base.poll_until import poll_until
-from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
+from tests.e2e._db import (
+    chat_and_wait,
+    checkpoint_values,
+    enqueue_compact_history_fixture,
+    wait_for_status,
+)
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenarios import ava_code as world
 
@@ -319,7 +324,7 @@ def _compact_and_read_again(agent_id: int) -> tuple[Call, Call]:
     """Run the compact scenario; return the model input before the compact and after it."""
     chat_and_wait(agent_id, "set up the project")
     before = _calls(2)[1]
-    httpx.post(f"{GATEWAY_URL}/api/agents/{agent_id}/compact", timeout=30.0).raise_for_status()
+    enqueue_compact_history_fixture(agent_id)
     # The compaction costs two more model calls: the summary, then the post-compact narration.
     poll_until(
         lambda: (len(world.model_inputs()) == 4, len(world.model_inputs())),
