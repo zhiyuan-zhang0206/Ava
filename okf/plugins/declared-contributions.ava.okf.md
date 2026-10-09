@@ -48,11 +48,22 @@ including its identity and clients; they never read `ava.context` in the shared 
 `ava` is a singleton module that agent code reaches by attribute access, so it cannot be passed around as a value; its
 surface installation is concentrated in `ava/sdk_surface/install.py:install(registry)`. The execution bootstrap separately initializes the disposable child's `context`, `state` and `state_update` slots before agent code runs. Per plugin, in
 registry (plugin name) order: namespaces, members, expansions, wraps (a target may be a namespace or member just added),
-skill sources, flags, config. A plugin whose declaration cannot be applied (a conflicting or disabled namespace name, a wrap
-target that does not resolve, a config that does not bind) is rolled back whole, reported as a load failure and absent from
-the registry `install` returns. The SDK-usage recorder (`metering`) is installed last so it sits outermost over every wrap
-layer, and `uninstall()` takes it off first and undoes every layer newest-first. A second `install` without `uninstall` is
-an error; a reload is a new registry and a new install, and nothing triggers one at runtime.
+skill sources, flags, config. Only explicit declaration refusals (`RegisterNamespaceError`,
+`WrapTargetError`, `PluginFlagError`, config `SchemaDriftError` / `InvalidConfigData`) isolate one plugin:
+its already-applied pieces are undone newest-first, the refusal is reported, and it is absent from the
+returned registry. Rollback must succeed. Unknown programming, I/O or binding errors abort the whole
+installation, including earlier admitted plugins, and propagate with their original identity. A config
+write conflict escaping its binder (`PluginConfigChangedError`) and duplicate config binding are fatal;
+the installer does not retry them. Every undo is attempted; cleanup failure is fatal, or becomes a
+standard exception note when a primary failure already exists.
+
+The SDK-usage recorder (`metering`) is installed last so it sits outermost over every wrap layer, and
+`uninstall()` takes it off first and undoes every layer newest-first. A second `install` without
+`uninstall` is an error; a reload is a new registry and a new install, and nothing triggers one at runtime.
+`ava.ensure_plugins_loaded()` propagates errors escaping the loader in both launched and execution
+children. Its existing installation slot distinguishes in-flight work from failure: later calls re-raise
+the original error without retrying, and runtime faces are marked loaded only after success. A truly
+reentrant Python import defers until the loader module finishes initializing.
 
 ## Faces and registries
 

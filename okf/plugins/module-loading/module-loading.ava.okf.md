@@ -84,13 +84,16 @@ reporting through the one reporter: a plugin's `provider.py`
 (`base/lm/plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
 (`cli/commands/extensions/_plugin_scaffold.py`), a built-in plugin's `metrics.py`
 (`gateway/inspect/_plugin_metrics.py`), the gateway plugin inspector's
-`inspector.py` (`gateway/inspect/_plugin_widgets.py`), and the launched
-child's `import ava` self-load (`ava.ensure_plugins_loaded`, plus a stderr
-line — a child usually has no log sink). The config face `default_config.py` is read by two more processes through
+`inspector.py` (`gateway/inspect/_plugin_widgets.py`). The config face `default_config.py` is read by two more processes through
 `base/packages/plugins/config_face.py` (never importing `plugin.py`): `ava plugins update`
 (`enable_config.update_all_disk_images`, a failing face is an `error`-status entry on its result, off the
 reporter) and the gateway/ops overlay validation (`config_registration.overlay_config_classes`, the enabled
 plugins' declared classes, reported fail-soft).
+
+Child `ava.ensure_plugins_loaded` enters the same loader. Module-import containment remains separate;
+escaping errors abort boot unchanged and are re-raised on later access, without retry. Faces are marked
+loaded only after success. The installer isolates only typed declaration refusals after successful
+rollback; see [[okf/plugins/declared-contributions.ava.okf.md]].
 
 ## Semantics boundary: what stays fail-closed
 Containment covers *code* that fails to load; inventory and contract conflicts
