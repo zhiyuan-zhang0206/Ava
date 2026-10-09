@@ -76,7 +76,7 @@ initial request. External copies use independent
 `<client>-ava-guide` ledgers; legacy deployment/operator copies and their ledgers
 are preserved and are no longer refreshed by this bridge.
 
-- [[okf/skills/external-agent-operator-bridge.ava.okf.md]] — external publication and ownership
+- [[docs/skills/external-agent-operator-bridge.ava.okf.md]] — external publication and ownership
 - [[ava_builtins/skills/docs/skills.ava.okf.md]] — built-in catalog
 - [[cli/docs/cli.ava.okf.md]] — CLI owner
 - [[ava/docs/presets.ava.okf.md]] — agent preset model
