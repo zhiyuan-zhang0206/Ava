@@ -34,8 +34,10 @@ from psycopg_pool import ConnectionPool
 from base.agents import (
     AgentStatus,
     CrashRecoveryResult,
+    MachinePaused,
     RestartResult,
     ResurrectAlreadyAlive,
+    ResurrectError,
     ResurrectResult,
     ShellSessionKillTiming,
     TerminateResult,
@@ -56,7 +58,10 @@ from ops.agents import (
     get_agent_status,
     resurrect_agent,
 )
-from ops.agents.resurrection_retry import report_auto_resurrect_failure
+from ops.agents.resurrection_retry import (
+    report_auto_resurrect_failure,
+    resurrect_refusal_reason,
+)
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.cluster import rpc as _cluster_rpc
 from ops.cluster_status import kill_agent_shells
@@ -353,9 +358,10 @@ async def resurrect_if_terminated(
 
     Returns the agent's status after the attempt: the post-resurrect status when
     a process was spawned, otherwise the unchanged status (a non-terminated agent
-    is returned untouched). A resurrect failure is logged and swallowed — the
-    inbound is already queued, so a later manual resurrect picks it up; a
-    durable refusal (e.g. `runtime_cutover_required`) is a WARNING naming it.
+    is returned untouched). Known resurrection refusals and machine pauses are
+    reported while the inbound stays queued; a durable refusal (e.g.
+    `runtime_cutover_required`) is a WARNING naming it. Unknown local or remote
+    errors propagate to the caller instead of returning an apparent success.
 
     The process must start on the agent's home machine (`agents_meta.machine`)
     — launching it here when the agent lives elsewhere trips the boot placement
@@ -454,7 +460,11 @@ async def resurrect_if_terminated(
             agent_id,
             exc,
         )
-    except Exception as exc:
+    except (ResurrectError, MachinePaused) as exc:
+        report_auto_resurrect_failure(agent_id, exc)
+    except _cluster_rpc.ClusterOpFailed as exc:
+        if resurrect_refusal_reason(exc) is None:
+            raise
         report_auto_resurrect_failure(agent_id, exc)
     return status
 
