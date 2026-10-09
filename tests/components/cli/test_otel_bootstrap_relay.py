@@ -30,9 +30,8 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         "AVA_GATEWAY_OTLP_ENDPOINT=http://stale.invalid:1\n"
     )
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
-    monkeypatch.setattr(
-        "base.config.domains.storage.data_plane.self_machine_host", lambda: "10.0.0.10"
-    )
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.10")
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "relay-test-token")
     with TestClient(app) as client:
         assert client.get("/api/bootstrap").status_code == 401
