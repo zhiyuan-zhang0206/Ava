@@ -62,12 +62,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
-from base.agents.messages.delivery_outbox_types import FlushPool as FlushPool
-from base.agents.messages.delivery_outbox_types import FlushReport
-from base.agents.messages.delivery_outbox_types import (
+from base.agents.messages.delivery.outbox_types import FlushPool as FlushPool
+from base.agents.messages.delivery.outbox_types import FlushReport
+from base.agents.messages.delivery.outbox_types import (
     PermanentDeliveryError as PermanentDeliveryError,
 )
-from base.agents.messages.delivery_retry import retryable_database_error
+from base.agents.messages.delivery.retry import retryable_database_error
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules import completion_notices
 from base.host.atomic_io import write_text_atomic

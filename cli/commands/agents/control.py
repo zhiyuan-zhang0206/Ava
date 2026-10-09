@@ -249,7 +249,7 @@ def send_agent_message(
     import sys
 
     from base.agents.messages import delivery_outbox
-    from base.agents.messages.delivery_retry import NETWORK_ERRORS, retryable_response
+    from base.agents.messages.delivery.retry import NETWORK_ERRORS, retryable_response
     from base.config import Settings, settings
     from base.config.service_read import ConfigAuthority
     from base.paths import ava_home

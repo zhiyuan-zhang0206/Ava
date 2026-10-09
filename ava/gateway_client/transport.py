@@ -13,7 +13,7 @@ import httpx
 import ava
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.agents.context import AvaContext
-from base.agents.messages.delivery_retry import NETWORK_ERRORS, retryable_response
+from base.agents.messages.delivery.retry import NETWORK_ERRORS, retryable_response
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER, validate_idempotency_key
@@ -56,7 +56,7 @@ def _base_retry_delay_s() -> float:
 
 
 # ── Transient-failure retry policy ──
-# The gateway response policy lives in base.agents.messages.delivery_retry.
+# The gateway response policy lives in base.agents.messages.delivery.retry.
 # Transport retry and SDK/CLI outbox interception share its known statuses
 # (429/502/503/504) and respect committed/retryable wire controls.
 

@@ -14,7 +14,7 @@ from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.db import Database
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
-from services.agent_runner.agent_host.tests.test_hosted_force_quiescence import (
+from services.agent_runner.agent_host.tests.lifecycle.test_hosted_force_quiescence import (
     _host_wakes_need_no_provider_credentials as _host_wakes_need_no_provider_credentials,
 )
 from tests.fixtures.pin_agent import exec_context as ctx_of
