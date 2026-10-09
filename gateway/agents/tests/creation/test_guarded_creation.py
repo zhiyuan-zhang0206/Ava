@@ -72,9 +72,16 @@ def test_no_auth_posture_cannot_claim_guarded_scope(
     assert _count(db_conn) == 0
 
 
-def test_fork_is_outside_guarded_v1(client: TestClient, db_conn: psycopg.Connection) -> None:
-    assert client.post(PATH, json={"fork_from": 1}, headers=HEADERS).status_code == 422
-    assert _count(db_conn) == 0
+def test_fork_without_source_checkpoint_has_no_birth(
+    client: TestClient, db_conn: psycopg.Connection
+) -> None:
+    parent = client.post(PATH, json={}, headers={**HEADERS, "Idempotency-Key": "parent"})
+    assert parent.status_code == 201, parent.text
+    assert (
+        client.post(PATH, json={"fork_from": parent.json()["id"]}, headers=HEADERS).status_code
+        == 409
+    )
+    assert _count(db_conn) == 1
 
 
 def test_lost_response_and_concurrency_replay_one_birth(

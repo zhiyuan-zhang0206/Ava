@@ -455,7 +455,7 @@
     "/api/keyed/v1/agents": {
       "post": {
         "summary": "Post Guarded Agents",
-        "description": "Create a plain agent through a versioned, principal-bound keyed entry.\n\nOlder routing cannot execute this path. Callers must keep it fixed for an\nintent and never fall back to the legacy path after an uncertain response.",
+        "description": "Create or fork an agent through principal-bound keyed admission.\n\nOlder routing cannot execute this path. Callers must keep it fixed for an\nintent and never fall back to the legacy path after an uncertain response.",
         "operationId": "post_guarded_agents_api_keyed_v1_agents_post",
         "parameters": [
           {
