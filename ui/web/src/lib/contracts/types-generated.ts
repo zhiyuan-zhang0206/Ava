@@ -8062,6 +8062,42 @@ export interface components {
             estimated: boolean | null;
         };
         /**
+         * RunTimelineMessageBar
+         * @description One message the Messages row shows, weighed for the two context rows (one bar per message).
+         *
+         *     `start` / `end` are the extent of the block(s) that show the message, so its bars sit exactly
+         *     under them. `context_tokens` is what the message itself occupies in the context and `estimated`
+         *     whether that is a share rather than the provider's own number; `context_total` is the context
+         *     through this message: its session's head and every message up to it, at the weight each was
+         *     read with (before an AIMessage, the `input_tokens` of the request that produced it). `session`
+         *     is the zero-based compaction segment (the total starts over in each). `request` is the usage of
+         *     the LLM request this AIMessage was (input, output, cache, cost), None for any other message.
+         *     Only messages a request has read are served.
+         */
+        RunTimelineMessageBar: {
+            /** Idx */
+            idx: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Session */
+            session: number;
+            /** Context Tokens */
+            context_tokens: number;
+            /** Estimated */
+            estimated: boolean;
+            /** Context Total */
+            context_total: number;
+            request: components["schemas"]["RunTimelineUsage"] | null;
+        };
+        /**
          * RunTimelineMessagePart
          * @description One part of a raw message: its text, clipped to the per-part budget unless `full` was asked.
          */
@@ -8134,47 +8170,6 @@ export interface components {
             estimated: boolean | null;
         };
         /**
-         * RunTimelineRequest
-         * @description One LLM request of the agent: an AIMessage carrying `usage_metadata`.
-         *
-         *     `idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent
-         *     (the read time of the message before it, the start of the turn's thinking block);
-         *     `session` the zero-based compaction segment it was sent in; `input_tokens` the provider's
-         *     total input tokens of that request, the size of its context, and `output_tokens` what it
-         *     generated (both the provider's own numbers, never estimated).
-         *
-         *     `added_tokens` is what newly entered the context for this request: the token sum of the
-         *     messages first read by it, i.e. those from the previous request's AIMessage (its output is
-         *     re-sent) up to the message before this one; for a session's first request, from the session's
-         *     first message. The segment head (system prompt) is not counted. `added_estimated` is True when
-         *     any of those counts is a share rather than the provider's own number. `added_from` / `added_to`
-         *     are that message range as indices into the stitched history, half-open (`added_to` is the
-         *     request's own `idx`); the two are equal when the request read nothing new.
-         */
-        RunTimelineRequest: {
-            /** Idx */
-            idx: number;
-            /**
-             * Ts
-             * Format: date-time
-             */
-            ts: string;
-            /** Session */
-            session: number;
-            /** Input Tokens */
-            input_tokens: number;
-            /** Output Tokens */
-            output_tokens: number;
-            /** Added Tokens */
-            added_tokens: number;
-            /** Added Estimated */
-            added_estimated: boolean;
-            /** Added From */
-            added_from: number;
-            /** Added To */
-            added_to: number;
-        };
-        /**
          * RunTimelineResponse
          * @description GET /api/agents/{agent_id}/run-timeline response.
          *
@@ -8182,8 +8177,8 @@ export interface components {
          *     messages and understanding nodes — and the default window; None when it has
          *     neither. `nodes` are the tree's nodes intersecting the window, every level;
          *     `units` are layer 0 intersecting it. `events` are optional lifecycle markers
-         *     in the window; they play no part in the extent. `requests` are the agent's LLM requests
-         *     sent in the window (the context-size row).
+         *     in the window; they play no part in the extent. `messages` are the weighed messages whose
+         *     blocks intersect the window (the two context rows).
          */
         RunTimelineResponse: {
             /** Agent Id */
@@ -8196,8 +8191,8 @@ export interface components {
             units: components["schemas"]["RunTimelineUnit"][];
             /** Events */
             events: components["schemas"]["RunTimelineEvent"][];
-            /** Requests */
-            requests: components["schemas"]["RunTimelineRequest"][];
+            /** Messages */
+            messages: components["schemas"]["RunTimelineMessageBar"][];
         };
         /**
          * RunTimelineUnit

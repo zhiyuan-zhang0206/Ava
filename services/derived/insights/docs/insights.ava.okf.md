@@ -15,7 +15,7 @@ A gateway-side daemon (`ServiceSpec.capabilities=_GATEWAY`; no port and no fixed
 - `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: the only module that reads `settings` or builds the `Database`.
 - `app.py` — `build_app(db, pool, config)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `config`, `run_timeline_views`). Mount new routers here.
 - `config.py` — the settings slice (`InsightsConfig`).
-- `run_timeline/` — the single-agent run timeline, see [[run_timeline.ava.okf.md|run timeline reads]].
+- `run_timeline/` — the per-agent reads behind the agent view, see [[run_timeline.ava.okf.md|run timeline reads]].
 
 ## Transport and trust
 The service binds `$AVA_HOME/run/insights.sock` (`base.paths.insights_socket`, created under umask 0177, so mode 0600) and listens on no TCP port. It performs no authentication: the gateway admits the caller (session or bearer, pause policy, the eval-isolation check) and then forwards the request over the socket (`gateway/routers/insights.py`). Paths in the service equal the public paths, so the gateway forwards path and query unchanged. The browser never dials the service.

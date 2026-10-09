@@ -4,7 +4,7 @@
 
 import { firstLine, unitColor, unitKey, type Highlight, matchesHighlight } from "./timeline-model";
 import { snap, type Cell, type Place, type RowLayout } from "./timeline-canvas-model";
-import { requestLit, type Hover, type Selection } from "./timeline-model";
+import { messageLit, type Hover, type Selection } from "./timeline-model";
 
 /** Resolves a CSS color (a variable, a `color-mix`) to an opaque canvas color. */
 export type Resolve = (css: string) => string;
@@ -212,23 +212,22 @@ export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, de
 const BLUE = "#3b82f6";
 const AMBER = "#f59e0b";
 
-/** A context row: one bar per request as tall as its value, sessions alternating in color. */
+/** A context row: one bar per message as tall as its value, sessions alternating in color. */
 export function paintBars(p: PaintCtx, layout: RowLayout, top: number, added: boolean, state: PaintState, deco: RowDeco) {
   if (!(top > 0)) return;
   const area = p.height - 2 * BAR_ROOM_PX;
   const bottom = p.height - BAR_ROOM_PX;
   const heightOf = (key: string) => Math.max(((layout.values?.get(key) ?? 0) / top) * area, BAR_MIN_PX);
   const stateOf = (key: string) => {
-    const request = layout.items.get(key)?.request;
-    if (request === undefined) return null;
-    const lit = requestLit(request, null, state.hover);
+    const message = layout.items.get(key)?.message;
+    if (message === undefined) return null;
     const lifted = deco.primaryKey === key || deco.linkedKeys.has(key);
-    return { request, lifted, hovered: lit.hovered, height: heightOf(key) };
+    return { message, lifted, hovered: messageLit(message.idx, state.hover), height: heightOf(key) };
   };
   const colorOf = (s: NonNullable<ReturnType<typeof stateOf>>) => {
-    const hue = s.request.session % 2 === 0 ? BLUE : AMBER;
-    const solid = mix(hue, s.request.session % 2 === 0 ? 0.7 : 0.8, "var(--card)");
-    const own = added && s.request.added_estimated ? mix(solid, 0.6, p.trackBg) : solid;
+    const hue = s.message.session % 2 === 0 ? BLUE : AMBER;
+    const solid = mix(hue, s.message.session % 2 === 0 ? 0.7 : 0.8, "var(--card)");
+    const own = added && s.message.estimated ? mix(solid, 0.6, p.trackBg) : solid;
     return state.selection !== null && !s.lifted && !s.hovered ? mix(own, DIM_SHARE, p.trackBg) : own;
   };
   const draw = (x0: number, x1: number, key: string, ring: boolean) => {
@@ -239,7 +238,7 @@ export function paintBars(p: PaintCtx, layout: RowLayout, top: number, added: bo
   };
   for (const place of layout.wide) draw(place.x0, place.x1, place.key, true);
   for (const cell of layout.cells as readonly Cell[]) draw(cell.x0, cell.x1, cell.key, false);
-  // The selected and linked bars go on top again, so a hairline of another request inside their range does not cut them.
+  // The selected and linked bars go on top again, so a hairline of another message inside their range does not cut them.
   for (const place of layout.wide) if (deco.primaryKey === place.key || deco.linkedKeys.has(place.key)) draw(place.x0, place.x1, place.key, true);
   // A frame reaches the top of the tallest bar it surrounds, and no higher.
   const topOf = (keys: ReadonlySet<string>) => bottom - Math.max(BAR_MIN_PX, ...[...keys].map(heightOf));

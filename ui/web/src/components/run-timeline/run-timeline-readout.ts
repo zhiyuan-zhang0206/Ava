@@ -6,7 +6,7 @@ import { formatTokensCompact } from "@/lib/format/format-number";
 import { formatShort } from "@/lib/format/time";
 import type {
   RunTimelineNode,
-  RunTimelineRequest,
+  RunTimelineMessageBar,
   RunTimelineResponse,
   RunTimelineUnit,
 } from "@/lib/contracts/types";
@@ -17,12 +17,13 @@ const PREVIEW_CHARS = 80;
 
 type Translate = ReturnType<typeof useTranslations<"runTimeline">>;
 
-export function requestReadout(t: Translate, request: RunTimelineRequest): string {
-  return t("readoutRequest", {
-    session: request.session + 1,
-    time: formatShort(request.ts),
-    tokens: formatTokensCompact(request.input_tokens),
-    added: `${formatTokensCompact(request.added_tokens)}${request.added_estimated ? ` ${t("estimatedSuffix")}` : ""}`,
+export function messageReadout(t: Translate, message: RunTimelineMessageBar): string {
+  return t("readoutMessage", {
+    idx: message.idx,
+    session: message.session + 1,
+    time: formatShort(message.start),
+    tokens: `${t("readoutUnitTokens", { tokens: formatTokensCompact(message.context_tokens) })}${message.estimated ? ` ${t("estimatedSuffix")}` : ""}`,
+    total: formatTokensCompact(message.context_total),
   });
 }
 
@@ -54,9 +55,9 @@ export function readoutText(
 ): string | null {
   const { data, t } = ctx;
   if (target === null) return null;
-  if (target.kind === "request") {
-    const request = data.requests.find((candidate) => candidate.idx === target.idx);
-    return request === undefined ? null : requestReadout(t, request);
+  if (target.kind === "message") {
+    const message = data.messages.find((candidate) => candidate.idx === target.idx);
+    return message === undefined ? null : messageReadout(t, message);
   }
   if (target.kind === "node") {
     const node = data.nodes.find((candidate) => candidate.id === target.id);
