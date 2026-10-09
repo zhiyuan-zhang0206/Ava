@@ -166,7 +166,6 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     prompts: list[str] = []
     emitted: list[dict[str, object]] = []
 
-    monkeypatch.setattr(module, "claimed_slot", lambda: datetime(2026, 9, 21, 22, 30, tzinfo=UTC))
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
 
     def fake_scan(repo: Path, artifact_path: Path | None) -> object:
@@ -187,7 +186,7 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     monkeypatch.setattr(module, "init_gateway_process", init_gateway_process)
     monkeypatch.setattr("base.telemetry.emit", record_emit)
 
-    module._fire(None)
+    module._fire(datetime(2026, 9, 21, 22, 30, tzinfo=UTC), None)
 
     assert len(prompts) == 1
     assert "mechanical scan failed: exit 1" in prompts[0]
@@ -199,7 +198,7 @@ def test_scan_failure_is_passed_to_worker_and_registered(
                 "event_name": "debt_sweep_daily",
                 "source": "system",
                 "attributes": {
-                    "day": "2026-09-22",  # time-bomb-ok: derived from the pinned claimed_slot fixture (Asia/Shanghai), no real-clock window
+                    "day": "2026-09-22",  # time-bomb-ok: derived from the explicit slot argument (Asia/Shanghai), no real-clock window
                     "scan_status": "failed",
                     "action": "spawned",
                     "worker_agent_id": 44,
