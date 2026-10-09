@@ -21,6 +21,13 @@ a cold start launches one through the platform's ordinary process owner.
 macOS places the permission helper above the root. Linux starts the root under
 the caller or systemd without a helper.
 
+The CLI's existing caller-owned child list retains a directly launched root
+through readiness, any later command work and the CLI telemetry drain, just as
+it retains directly launched PostgreSQL children. A failed readiness attempt
+does not release that handle. An embedded caller keeps the same explicit list
+for as long as it needs the native PID retained; root launch neither reaps nor
+terminates a child when a start phase returns.
+
 An eligible macOS GUI handover returns a `StartDelegation` from the locked start
 body. The lifecycle wrapper leaves its lock and maintenance authorization before
 executing that handover. The GUI child runs ordinary locked start and owns
