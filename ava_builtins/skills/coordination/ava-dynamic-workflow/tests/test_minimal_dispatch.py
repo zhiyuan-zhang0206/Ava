@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -21,7 +22,8 @@ def dispatch(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[str]]:
     spec.loader.exec_module(module)
     calls: list[str] = []
 
-    def spawn(*, prompt: str) -> int:
+    def spawn(*, prompt: str, idempotency_key: str) -> int:
+        assert str(UUID(idempotency_key)) == idempotency_key
         calls.append(prompt)
         return 100 + len(calls)
 
@@ -63,10 +65,10 @@ def test_spawn_failure_persists_ambiguity_and_stops_batch(
     module, calls = dispatch
     spawn = module.ava.agents.spawn
 
-    def fail_second(*, prompt: str) -> int:
+    def fail_second(*, prompt: str, idempotency_key: str) -> int:
         if calls:
             raise ConnectionError("receipt unavailable")
-        return spawn(prompt=prompt)
+        return spawn(prompt=prompt, idempotency_key=idempotency_key)
 
     module.ava.agents.spawn = fail_second
     with pytest.raises(ConnectionError):
