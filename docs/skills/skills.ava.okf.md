@@ -32,10 +32,10 @@ installation, native plugin development, schedules, and external-agent execution
 Capability/timescale calibration is a sub-skill of `ava-workflow`.
 
 ## Skill Sources (Load Directory Sync)
-One load directory: `~/.ava/skills/`; converge syncs repo built-ins (`ava_builtins/skills/`) and plugin-carried skills into it; user installs land directly: [[okf/skills/load-directory-sync.ava.okf.md]]. The repo's `.agents/skills/` project skills are NOT converged — project-local mount only: [[okf/skills/project-local.ava.okf.md]].
+One load directory: `~/.ava/skills/`; converge syncs repo built-ins (`ava_builtins/skills/`) and plugin-carried skills into it; user installs land directly: [[docs/skills/load-directory-sync.ava.okf.md]]. The repo's `.agents/skills/` project skills are NOT converged — project-local mount only: [[docs/skills/project-local.ava.okf.md]].
 
 ## Skill Structure
-`SKILL.md` = frontmatter (`name` + `description`) + a markdown body; `description` is the capabilities line in the system prompt. This format **is** the [Agent Skills](https://agentskills.io) open standard — a Claude Code skill folder installs unmodified: [[okf/skills/agent-skills-standard.ava.okf.md]].
+`SKILL.md` = frontmatter (`name` + `description`) + a markdown body; `description` is the capabilities line in the system prompt. This format **is** the [Agent Skills](https://agentskills.io) open standard — a Claude Code skill folder installs unmodified: [[docs/skills/agent-skills-standard.ava.okf.md]].
 
 `skill-creator` owns catalog-audit criteria: precise descriptions, shared
 decisions in the entrypoint, and conditional procedures/examples in references
