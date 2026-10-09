@@ -2,9 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RunTimelineMessageBar, RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import { RunTimelineRows } from "./run-timeline-rows";
+import type { UnitHeights } from "./canvas/run-timeline-paint";
 import { ALL_ROWS } from "./model/timeline-nav";
 import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-test-canvas";
 import type { Selection } from "./model/timeline-model";
@@ -43,7 +44,8 @@ const node = (id: string, from: number, to: number, parent: string | null = null
   estimated: null,
 });
 
-const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: number): RunTimelineUnit => ({
+/** A block; with `total` a request has read it (own tokens 5, `total` the context through it). */
+const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: number, total: number | null = null): RunTimelineUnit => ({
   kind,
   i0,
   i1: i0,
@@ -52,14 +54,19 @@ const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: numbe
   source: null,
   preview: kind,
   parent: null,
-  context_tokens: null, generation_tokens: null, estimated: null,
+  context_tokens: total === null ? null : 5,
+  generation_tokens: null,
+  estimated: null,
+  session: 0,
+  context_total: total,
+  request: null,
 });
 
 const ENTRIES = (data: Partial<RunTimelineResponse>) => [
-  { id: 42, status: "loaded" as const, data: { nodes: [], units: [], events: [], messages: [], ...data } as RunTimelineResponse },
+  { id: 42, status: "loaded" as const, data: { nodes: [], units: [], events: [], ...data } as RunTimelineResponse },
 ];
 
-function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null) {
+function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null, heights: UnitHeights = "equal") {
   const onSelect = vi.fn();
   render(
     <RunTimelineRows
@@ -72,31 +79,13 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
       highlight={null}
       onHighlight={vi.fn()}
       options={ALL_ROWS}
+      unitHeights={heights}
       onRemove={null}
       onRetry={vi.fn()}
     />,
   );
   return onSelect;
 }
-
-const message = (
-  idx: number,
-  from: number,
-  to: number,
-  own: number,
-  total: number,
-  extra: Partial<RunTimelineMessageBar> = {},
-): RunTimelineMessageBar => ({
-  idx,
-  start: at(from),
-  end: at(to),
-  session: 0,
-  context_tokens: own,
-  estimated: false,
-  context_total: total,
-  request: null,
-  ...extra,
-});
 
 const fills = (row: string) => drawn(row).filter((d) => d.op === "fill");
 const strokes = (row: string, lineWidth?: number) =>
@@ -195,28 +184,25 @@ describe("RunTimelineRows narrow items", () => {
     expect(fills("level-1").filter((d) => d.color.includes("var(--foreground) 18%"))).toHaveLength(0);
   });
 
-  it("frames the primary bar strongly, and its block and its twin bar lightly", async () => {
-    const units = [unit("text", 0, 0, 100), unit("text", 1, 100, 200)];
-    renderRows({ units, messages: [message(0, 0, 100, 5, 5), message(1, 100, 200, 5, 10)] }, { kind: "message", idx: 1 });
+  it("frames the primary bar strongly, and its block in the other row lightly", async () => {
+    const units = [unit("text", 0, 0, 100, 5), unit("text", 1, 100, 200, 10)];
+    renderRows({ units }, { kind: "unit", i0: 1, i1: 1, unitKind: "text" });
     await paintFrame();
-    expect(strokes("input", 2)).toHaveLength(1);
-    expect(strokes("units", 2)).toHaveLength(0);
-    expect(strokes("added", 2)).toHaveLength(0);
-    // One light frame per row: the block that shows the message, and the same message in the other context row.
-    expect(linkedFrames("units")).toHaveLength(1);
-    expect(linkedFrames("added")).toHaveLength(1);
-    const [frame] = linkedFrames("units");
-    const block = fills("units")[1];
-    expect(frame.x).toBeLessThan(block.x);
-    expect(frame.x + frame.w).toBeGreaterThan(block.x + block.w);
+    // The cursor is taken to be in the Messages row: the block is framed strongly, its bar lightly.
+    expect(strokes("units", 2)).toHaveLength(1);
+    expect(strokes("input", 2)).toHaveLength(0);
+    expect(linkedFrames("input")).toHaveLength(1);
+    const [frame] = linkedFrames("input");
+    const bar = fills("input")[1];
+    expect(frame.x).toBeLessThan(bar.x);
+    expect(frame.x + frame.w).toBeGreaterThan(bar.x + bar.w);
   });
 
   it("hugs the bar: the frame is the bar's own width plus the frame room, never wider", async () => {
-    const instant = [unit("text", 0, 100, 100)];
-    renderRows({ units: instant, messages: [message(0, 100, 100, 5, 5)] }, { kind: "message", idx: 0 });
+    renderRows({ units: [unit("text", 0, 100, 100, 5)] }, { kind: "unit", i0: 0, i1: 0, unitKind: "text" });
     await paintFrame();
-    const [bar] = fills("input");
-    const [frame] = strokes("input", 2);
+    const [bar] = fills("units");
+    const [frame] = strokes("units", 2);
     expect(bar.w).toBe(3);
     // The stroke's centre line sits 2 px outside the bar: its outer edge is 3 px off.
     expect(frame.x).toBeCloseTo(bar.x - 2);
@@ -254,119 +240,133 @@ describe("RunTimelineRows tokens", () => {
 
 });
 
-describe("RunTimelineRows context rows", () => {
-  it("draws the context through each message and the message's own weight as two rows, each scaled to its own largest (the added one by square root)", async () => {
-    renderRows({
-      units: [unit("text", 0, 100, 300), unit("text", 1, 500, 700)],
-      messages: [message(0, 100, 300, 1000, 1000, { estimated: true }), message(1, 500, 700, 100, 2000)],
-    });
+describe("RunTimelineRows Messages heights", () => {
+  const sized = [unit("text", 0, 0, 100, 10), unit("text", 1, 200, 300, 40), unit("text", 2, 400, 500, 90)];
+  const withTokens = (tokens: number[]) => sized.map((u, i) => ({ ...u, context_tokens: tokens[i] }));
+
+  it("draws every block the same height by default, from the bottom", async () => {
+    renderRows({ units: withTokens([100, 400, 900]) });
     await paintFrame();
-    const absolute = fills("input");
-    const added = fills("added");
-    expect(absolute).toHaveLength(2);
-    expect(added).toHaveLength(2);
-    expect(absolute[0].h / absolute[1].h).toBeCloseTo(0.5);
-    expect(added[0].h / added[1].h).toBeCloseTo(Math.sqrt(10));
-    expect(added[0].h).toBeCloseTo(absolute[1].h);
-    // An estimated weight is drawn paler in the Added row, in an opaque mix.
-    expect(added[0].color).toContain("60%");
-    expect(added[1].color).not.toContain("60%");
-    expect(screen.getByTestId("run-timeline-row-added")).toBeTruthy();
+    const heights = fills("units").map((d) => d.h);
+    expect(new Set(heights).size).toBe(1);
+  });
+
+  it("draws a block as tall as the square root of its tokens, bottom-aligned, at least a few pixels", async () => {
+    renderRows({ units: withTokens([1, 400, 900]) }, null, "tokens");
+    await paintFrame();
+    const [small, mid, big] = fills("units");
+    expect(mid.h / big.h).toBeCloseTo(20 / 30);
+    expect(small.h).toBeGreaterThanOrEqual(4);
+    expect(small.h).toBeLessThan(mid.h);
+    for (const d of [small, mid]) expect(d.y + d.h).toBeCloseTo(big.y + big.h);
+  });
+
+  it("clicks a small block anywhere in the row's height, and frames what is drawn", async () => {
+    const onSelect = renderRows({ units: withTokens([1, 400, 900]) }, { kind: "unit", i0: 0, i1: 0, unitKind: "text" }, "tokens");
+    await paintFrame();
+    const [small, , big] = fills("units");
+    // The hit-test reads x only: the whole height of the row answers, not just the drawn part.
+    clickAt("units", small.x + small.w / 2);
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 0, i1: 0, unitKind: "text" });
+    const [frame] = strokes("units", 2);
+    expect(frame.y).toBeGreaterThan(big.y - 4);
+    expect(frame.h).toBeLessThan(big.h);
+  });
+});
+
+describe("RunTimelineRows context size row", () => {
+  it("draws the context through each block, scaled to the largest, sessions in alternating colors", async () => {
+    const units = [{ ...unit("text", 0, 100, 300, 1000), session: 0 }, { ...unit("text", 1, 500, 700, 2000), session: 1 }];
+    renderRows({ units });
+    await paintFrame();
+    const [first, second] = fills("input");
+    expect(first.h / second.h).toBeCloseTo(0.5);
+    expect(first.color).toContain("#3b82f6");
+    expect(second.color).toContain("#f59e0b");
     expect(screen.getByTestId("run-timeline-row-context")).toBeTruthy();
-    expect(added[1].x).toBe(absolute[1].x);
+    expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
   });
 
-  it("lines every bar up with the block that shows its message, to the pixel, in both rows", async () => {
-    const units = [unit("inbound", 0, 0, 100), unit("thinking", 1, 100, 500), unit("call", 1, 500, 500)];
-    renderRows({ units, messages: [message(0, 0, 100, 5, 5), message(1, 100, 500, 5, 10)] });
+  it("has the same blocks as the Messages row, to the pixel: same count, same x, same width", async () => {
+    const units = [
+      unit("inbound", 0, 0, 100, 5),
+      unit("thinking", 1, 100, 500, 10),
+      unit("call", 1, 500, 500, 12),
+      unit("output", 2, 500, 800, 40),
+      unit("inbound", 3, 900, 900, 50),
+    ];
+    renderRows({ units });
     await paintFrame();
-    const [first, second] = fills("units");
-    const [firstBar, secondBar] = fills("input");
-    expect([firstBar.x, firstBar.w]).toEqual([first.x, first.w]);
-    expect([secondBar.x, secondBar.w]).toEqual([second.x, second.w]);
-    expect(fills("added").map((d) => [d.x, d.w])).toEqual(fills("input").map((d) => [d.x, d.w]));
+    const messages = fills("units");
+    const context = fills("input");
+    expect(context).toHaveLength(messages.length);
+    expect(context.map((d) => [d.x, d.w])).toEqual(messages.map((d) => [d.x, d.w]));
   });
 
-  it("draws an instant message as wide as the minimum, from its time, in all three rows", async () => {
-    renderRows({ units: [unit("inbound", 0, 400, 400)], messages: [message(0, 400, 400, 5, 5)] });
+  it("keeps that in a crowd of instants and short blocks", async () => {
+    const units = Array.from({ length: 60 }, (_, i) => unit("text", i, i * 15, i * 15 + (i % 2 === 0 ? 0 : 6), 10 + i));
+    renderRows({ units });
     await paintFrame();
-    for (const row of ["units", "input", "added"]) expect(fills(row).map((d) => [d.x, d.w])).toEqual([[400, 3]]);
+    expect(fills("input").map((d) => [d.x, d.w])).toEqual(fills("units").map((d) => [d.x, d.w]));
+  });
+
+  it("draws an instant block as wide as the minimum, from its time, in both rows", async () => {
+    renderRows({ units: [unit("inbound", 0, 400, 400, 5)] });
+    await paintFrame();
+    for (const row of ["units", "input"]) expect(fills(row).map((d) => [d.x, d.w])).toEqual([[400, 3]]);
   });
 
   it("paints overlapping instants once per pixel column, never layered", async () => {
-    const units = [unit("inbound", 0, 400, 400), unit("inbound", 1, 401, 401), unit("inbound", 2, 402, 402)];
-    renderRows({
-      units,
-      messages: [message(0, 400, 400, 5, 5), message(1, 401, 401, 5, 10), message(2, 402, 402, 5, 15)],
-    });
+    renderRows({ units: [unit("inbound", 0, 400, 400, 5), unit("inbound", 1, 401, 401, 10), unit("inbound", 2, 402, 402, 15)] });
     await paintFrame();
-    for (const row of ["units", "input", "added"]) {
+    for (const row of ["units", "input"]) {
       const boxes = fills(row);
       boxes.forEach((d, i) => boxes.slice(i + 1).forEach((e) => expect(d.x + d.w <= e.x || e.x + e.w <= d.x).toBe(true)));
       // Three 3 px items starting 1 px apart cover 5 px, each column once.
       expect(boxes.reduce((sum, d) => sum + d.w, 0)).toBe(5);
     }
   });
+
+  it("has no Context size row for blocks no request has read", () => {
+    renderRows({ units: [unit("text", 0, 0, 100)] });
+    expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
+  });
 });
 
-describe("RunTimelineRows keyboard and message bars", () => {
-  const units = [unit("inbound", 0, 0, 100), unit("thinking", 1, 100, 500), unit("thinking", 2, 600, 900)];
-  const messages = [message(0, 0, 100, 10, 10), message(1, 100, 500, 10, 20), message(2, 600, 900, 10, 30)];
+describe("RunTimelineRows keyboard and context bars", () => {
+  const units = [unit("inbound", 0, 0, 100, 10), unit("thinking", 1, 100, 500, 20), unit("thinking", 2, 600, 900, 30)];
 
-  it("selects the message when a bar is clicked, in either context row", async () => {
-    const onSelect = renderRows({ units, messages });
+  it("selects the block when its bar is clicked", async () => {
+    const onSelect = renderRows({ units });
     await paintFrame();
     const [, second] = fills("input");
     clickAt("input", second.x + second.w / 2);
-    expect(onSelect).toHaveBeenLastCalledWith({ kind: "message", idx: 1 });
-    const [first] = fills("added");
-    clickAt("added", first.x + first.w / 2);
-    expect(onSelect).toHaveBeenLastCalledWith({ kind: "message", idx: 0 });
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
   });
 
-  it("keeps the session color on the selected message's bar, frames it and dims the others", async () => {
-    renderRows({ units, messages: [message(0, 0, 100, 10, 10), message(1, 100, 500, 10, 20, { session: 1 })] }, { kind: "message", idx: 0 });
+  it("keeps the session color on the selected bar, frames it and dims the others", async () => {
+    renderRows({ units: [units[0], { ...units[1], session: 1 }] }, { kind: "unit", i0: 0, i1: 0, unitKind: "inbound" });
     await paintFrame();
     const [first, second] = fills("input");
     expect(first.color).toContain("#3b82f6");
     expect(first.color).not.toContain("50%");
     expect(second.color).toContain("50%");
-    expect(strokes("input", 2)).toHaveLength(1);
-  });
-
-  it("alternates the bar color with the session, a compaction starting over", async () => {
-    renderRows({ units, messages: [message(0, 0, 100, 10, 10), message(1, 100, 500, 10, 20, { session: 1 })] });
-    await paintFrame();
-    const [first, second] = fills("input");
-    expect(first.color).toContain("#3b82f6");
-    expect(second.color).toContain("#f59e0b");
   });
 
   it("frames only the visible part of a bar that starts left of the track", async () => {
-    renderRows({ units: [unit("text", 0, -300, 400)], messages: [message(0, -300, 400, 5, 5)] }, { kind: "message", idx: 0 });
+    renderRows({ units: [unit("text", 0, -300, 400, 5)] }, { kind: "unit", i0: 0, i1: 0, unitKind: "text" });
     await paintFrame();
     const [bar] = fills("input");
-    const [frame] = strokes("input", 2);
-    // The bar runs from before the track to 400 px; the frame's right edge is 3 px past that, as for any bar.
-    expect(frame.x + frame.w).toBeCloseTo(bar.x + bar.w + 2);
+    const frames = strokes("input", 1).filter((d) => d.dash.length > 0);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].x + frames[0].w).toBeCloseTo(bar.x + bar.w + 2.5);
   });
 
-  it("frames the selected block strongly and the bars of the messages it shows lightly", async () => {
-    renderRows({ units, messages }, { kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
-    await paintFrame();
-    expect(strokes("units", 2)).toHaveLength(1);
-    expect(strokes("input", 2)).toHaveLength(0);
-    expect(linkedFrames("input")).toHaveLength(1);
-    const [first, second] = fills("input");
-    expect(second.color).not.toContain("50%");
-    expect(first.color).toContain("50%");
-  });
-
-  it("outlines the nodes over the blocks of a selected message as ancestors, like a selected block", async () => {
-    const covered = [{ ...unit("text", 1, 0, 100), parent: "a" }];
+  it("outlines the nodes over a selected block as ancestors", async () => {
+    const covered = [{ ...unit("text", 1, 0, 100, 5), parent: "a" }];
     renderRows(
-      { units: covered, nodes: [node("a", 0, 100, "p"), { ...node("p", 0, 100), level: 2 }], messages: [message(1, 0, 100, 5, 5)] },
-      { kind: "message", idx: 1 },
+      { units: covered, nodes: [node("a", 0, 100, "p"), { ...node("p", 0, 100), level: 2 }] },
+      { kind: "unit", i0: 1, i1: 1, unitKind: "text" },
     );
     await paintFrame();
     expect(strokes("level-1", 1).filter((d) => d.color.includes("var(--primary) 60%"))).toHaveLength(1);
@@ -386,7 +386,7 @@ describe("RunTimelineRows keyboard and message bars", () => {
   });
 
   it("an arrow key clears the hover echo of the pointer", async () => {
-    renderRows({ units, messages });
+    renderRows({ units });
     await paintFrame();
     const [bar] = fills("input");
     pointAt("input", bar.x + bar.w / 2);
