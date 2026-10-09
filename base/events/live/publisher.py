@@ -38,10 +38,15 @@ import time
 from contextlib import suppress
 
 import redis.asyncio as aredis
-from redis.exceptions import AuthenticationError, NoPermissionError
+from redis.exceptions import AuthenticationError, NoPermissionError, ResponseError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from base.events.live.redis_client import retry_auth_failures_async
-from base.log import logger
+from ...log import logger
+from .redis_client import retry_auth_failures_async
+
+_TRANSPORT_ERRORS = (RedisConnectionError, RedisTimeoutError, OSError, TimeoutError)
+_PUBLISH_ERRORS = (*_TRANSPORT_ERRORS, ResponseError)
 
 _DEFAULT_MAXSIZE = 2048
 _DEFAULT_PUBLISH_TIMEOUT_S = 2.0
@@ -53,11 +58,12 @@ _BATCH_SIZE = 64  # events drained per pipeline round-trip (see _run)
 class AgentEventPublisher:
     """Single-worker FIFO publisher for one agent's best-effort SSE events.
 
-    Lifecycle: build it, `await start()` once, hand it to the graph nodes via
-    the run context, and `await aclose()` at process exit (bounded drain, then
-    the worker stops). `emit(payload)` is a synchronous enqueue, safe to call
-    before start (the event waits in the queue) and after a full queue (the
-    newest event is dropped).
+    Lifecycle: build it, `await start(task_group)` once, hand it to graph nodes
+    through the invocation context, and `await aclose()` before the owning
+    TaskGroup exits (bounded drain, then the worker stops). `emit(payload)` is a
+    synchronous enqueue, safe to call before start (the event waits in the
+    queue) and after a full queue (the
+    oldest buffered event is dropped).
     """
 
     def __init__(
@@ -111,23 +117,33 @@ class AgentEventPublisher:
                 return
             self._note_drop("queue_full")
 
-    async def start(self) -> None:
-        """Spawn the single background publish worker. Idempotent."""
+    async def start(self, task_group: asyncio.TaskGroup) -> None:
+        """Start the worker under its invocation's entered TaskGroup. Idempotent."""
         if self._task is None:
-            self._task = asyncio.create_task(self._run(), name=f"event-publisher-{self._agent_id}")
+            self._task = task_group.create_task(
+                self._run(), name=f"event-publisher-{self._agent_id}"
+            )
 
     async def aclose(self) -> None:
         """Bounded drain, then stop: give the worker up to drain_timeout to
         flush the queue, then cancel it. Idempotent; safe if start() was never
         called (nothing to cancel)."""
-        with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(self._queue.join(), timeout=self._drain_timeout)
-        if self._task is not None:
-            self._task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        self._flush_warn()
+        task = self._task
+        if task is not None:
+            try:
+                if not task.done():
+                    with suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(self._queue.join(), timeout=self._drain_timeout)
+            finally:
+                task.cancel()
+                # The owning TaskGroup observes worker exceptions. Waiting here
+                # joins teardown without replacing an invocation's primary error
+                # or adding the same worker exception to the group a second time.
+                await asyncio.wait({task})
+                self._task = None
+                self._flush_warn()
+        else:
+            self._flush_warn()
 
     async def _run(self) -> None:
         while True:
@@ -139,30 +155,18 @@ class AgentEventPublisher:
                 await self._publish_batch(batch)
             except asyncio.CancelledError:
                 raise  # aclose cancelled us — propagate to exit the worker
-            except Exception as exc:
+            except _PUBLISH_ERRORS as exc:
                 # Slow / unreachable central Redis: drop this batch of
                 # live-view events rather than stalling the worker behind a
                 # hung publish, and tear down the client's connections so the
                 # next batch reconnects fresh instead of riding a half-dead
                 # socket (keepalive/health-check would take up to ~30s).
                 self._note_drop("publish_error", detail=f"{type(exc).__name__}: {exc}")
-                try:
-                    # Already-dead sockets fail their close (OSError / RedisError); the next
-                    # batch reconnects anyway.
-                    with suppress(OSError, aredis.RedisError):
-                        # redis-py (8.x) types disconnect() as async and it IS a
-                        # coroutine at runtime — it must be awaited or the
-                        # tear-down never runs (the coroutine object is created and
-                        # discarded, and every failed batch also emits a
-                        # "coroutine ... was never awaited" RuntimeWarning).
+                # Already-dead sockets can fail their close; the next batch
+                # reconnects anyway. Unknown disconnect defects reach the owner.
+                if isinstance(exc, _TRANSPORT_ERRORS):
+                    with suppress(*_TRANSPORT_ERRORS):
                         await self._redis.connection_pool.disconnect(inuse_connections=True)
-                except Exception:
-                    # The worker must keep draining, so this cannot propagate.
-                    logger.opt(exception=True).warning(
-                        "[event-publisher] tearing down the redis pool after a failed batch "
-                        "raised unexpectedly (agent_id={aid}); the next batch may ride a half-dead socket",
-                        aid=self._agent_id,
-                    )
             finally:
                 for _ in batch:
                     self._queue.task_done()
@@ -174,7 +178,8 @@ class AgentEventPublisher:
         Authentication and ACL-denial results retry the whole batch with the
         shared bounded backoff. Every command targets this one events channel,
         so an ACL transition rejects the complete batch before any publish can
-        land. Other command-level failures shed only their failing event; a
+        land. Known Redis command rejections shed only their failing event; unknown
+        command errors propagate to the invocation owner; a
         connection-level failure or a per-attempt timeout sheds the batch as
         before, so transport-failure behavior stays best-effort."""
 
@@ -184,6 +189,9 @@ class AgentEventPublisher:
                 # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
                 pipe.publish(self._events_channel, payload)  # pyright: ignore[reportUnknownMemberType]
             results = await pipe.execute(raise_on_error=False)
+            for result in results:
+                if isinstance(result, BaseException) and not isinstance(result, _PUBLISH_ERRORS):
+                    raise result
             auth_failure = next(
                 (
                     result
@@ -199,7 +207,7 @@ class AgentEventPublisher:
         results = await retry_auth_failures_async(
             _execute_batch, attempt_timeout_s=self._publish_timeout
         )
-        failed = [r for r in results if isinstance(r, Exception)]
+        failed = [r for r in results if isinstance(r, _PUBLISH_ERRORS)]
         if failed:
             self._note_drop("publish_error", detail=f"{type(failed[0]).__name__}: {failed[0]}")
 
