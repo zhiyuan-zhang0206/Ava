@@ -1,7 +1,7 @@
 """Host-platform facts and POSIX process primitives below the import graph.
 
-The Windows flag and subprocess constants remain as compatibility symbols for
-protected release and cluster modules while native Windows runtime is retired.
+Platform predicates query Python's current platform without import-time probes.
+Subprocess constants remain while native Windows runtime is retired.
 """
 
 from __future__ import annotations
