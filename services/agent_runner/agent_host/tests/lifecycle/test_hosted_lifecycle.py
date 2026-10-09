@@ -26,6 +26,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -97,6 +98,7 @@ async def test_hosted_applies_only_after_continuation_returns(
     kind: str,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent_id = _agent(db_conn)
     old = await _admit(
@@ -112,6 +114,7 @@ async def test_hosted_applies_only_after_continuation_returns(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     host._runtimes[agent_id] = Mock()
     assert [
@@ -129,6 +132,7 @@ async def test_hosted_applies_only_after_continuation_returns(
                     agent=AgentSlices.resolve(),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    catalog=model_catalog,
                 ),
                 original_incarnation=old,
                 hosted_resources=None,
@@ -168,6 +172,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
     monkeypatch: pytest.MonkeyPatch,
     crash: str,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent_id = _agent(db_conn)
     owner = await _admit(
@@ -186,6 +191,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     host._runtimes[agent_id] = Mock()
     original_execute = psycopg.AsyncConnection.execute
@@ -228,6 +234,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
                         agent=AgentSlices.resolve(),
                         db=Database.from_settings(),
                         bus=EventBus.from_settings(),
+                        catalog=model_catalog,
                     ),
                     original_incarnation=owner,
                     hosted_resources=None,
@@ -251,6 +258,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
                     agent=AgentSlices.resolve(),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    catalog=model_catalog,
                 ),
                 original_incarnation=owner,
                 hosted_resources=None,
@@ -266,7 +274,10 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
 
 
 async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent_id = _agent(db_conn)
     owner = await _admit(
@@ -286,6 +297,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     wakes = await host.pending_inbound_wakes(stale_after_s=60)
     assert agent_id in [wake.agent_id for wake in wakes]
@@ -332,7 +344,7 @@ def _record_kills(
 
 
 async def _run_terminating_turn(
-    aops_pool: AsyncConnectionPool, agent_id: int, *, incarnation: RuntimeIncarnation
+    aops_pool: AsyncConnectionPool, agent_id: int, *, incarnation: RuntimeIncarnation, model_catalog: ModelCatalog
 ) -> None:
     graph = Mock()
     graph.ainvoke = AsyncMock(
@@ -345,6 +357,7 @@ async def _run_terminating_turn(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     host._runtimes[agent_id] = Mock()
     assert await host._invoke_until_done(
@@ -356,6 +369,7 @@ async def _run_terminating_turn(
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=model_catalog,
         ),
     )
 
@@ -366,6 +380,7 @@ async def test_hosted_terminate_kills_requested_shell_sessions_before_the_death(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     requested: bool,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent_id = _agent(db_conn)
     owner = await _admit(
@@ -375,7 +390,7 @@ async def test_hosted_terminate_kills_requested_shell_sessions_before_the_death(
     _terminate_command(db_conn, agent_id, kill=requested)
     kills = _record_kills(monkeypatch)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
-    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner)
+    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
     # The kill ran after the last step returned, before `terminated` committed.
     assert kills == ([(agent_id, "running")] if requested else [])
     assert db_conn.execute(
@@ -384,7 +399,10 @@ async def test_hosted_terminate_kills_requested_shell_sessions_before_the_death(
 
 
 async def test_hosted_self_terminate_honors_a_queued_kill_request(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The agent's own terminate won acceptance; the operator's kill-requesting
     terminate queued behind it still takes the sessions with the death."""
@@ -400,7 +418,7 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
         row.id
         for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     ] == [own]
-    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner)
+    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
     assert kills == [(agent_id, "running")]
 
 
@@ -409,6 +427,7 @@ async def test_hosted_failed_kill_still_applies_the_termination(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
 ) -> None:
     """A session-kill failure is an ERROR, never a crashed turn: the death applies."""
     agent_id = _agent(db_conn)
@@ -419,7 +438,7 @@ async def test_hosted_failed_kill_still_applies_the_termination(
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch, fail=True)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
-    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner)
+    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
     assert kills == [(agent_id, "running")]
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
@@ -459,6 +478,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     monkeypatch: pytest.MonkeyPatch,
     requested: bool,
     database: Database,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A step still draining past a force's kill may create a shell; the live
     host sweeps again when it observes the force quiescent, before recording
@@ -474,6 +494,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     await admit_hosted_runtime(
         aops_pool, agent_id, "claim-test", host._owner, expected_from="idling", db=database
@@ -500,6 +521,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent_id = _agent(db_conn)
     old = AgentHost(
@@ -509,6 +531,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     await admit_hosted_runtime(
         aops_pool, agent_id, "claim-test", old._owner, expected_from="idling", db=database

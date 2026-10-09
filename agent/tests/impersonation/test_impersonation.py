@@ -26,8 +26,11 @@ from agent.tests._fakes import placeholder_runtime
 from base.agents.context import AvaContext
 from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from tests.fixtures.pin_agent import exec_context, pin_agent
@@ -239,12 +242,16 @@ def test_exec_envelope_carries_parent_incarnation(
 
 
 async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     from agent.db import claim_inbound_batch
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     for kind in ("chat", "compact_request", "cancel"):
         db_conn.execute(
             "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'wait',%s,'user')",
@@ -277,6 +284,9 @@ async def test_control_claim_records_superseded_accepted_intent(
     aops_pool: AsyncConnectionPool[Any],
     kind: str,
     database: Database,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
 
     from agent.db import claim_inbound_batch
@@ -284,7 +294,7 @@ async def test_control_claim_records_superseded_accepted_intent(
     from base.cluster.machine import machine_name
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     owner = await admit_hosted_runtime(
         aops_pool,
         agent_id,
@@ -333,12 +343,17 @@ async def test_control_claim_records_superseded_accepted_intent(
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 async def test_control_claim_preserves_unaccepted_intent(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], kind: str
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    kind: str,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     from agent.db import claim_inbound_batch
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
         (agent_id, kind),

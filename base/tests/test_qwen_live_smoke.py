@@ -90,6 +90,8 @@ from pydantic import SecretStr
 
 from base.agents.messages.kwargs import message_addl_kwargs, message_content
 from base.config import settings
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks
 from base.lm.factory import build_chat_model
 
@@ -126,14 +128,22 @@ def _live_provider(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "dashscope_base_url", _LIVE_BASE_URL)
 
 
-def _stream(model: str, text: str, *, thinking_disabled: bool) -> AIMessage:
+def _stream(
+    model: str, text: str, *, thinking_disabled: bool, model_catalog: ModelCatalog
+) -> AIMessage:
     """Stream one turn and accumulate it exactly as `agent/graph/llm/node.py` does.
 
     Chunk accumulation followed by `message_chunk_to_message` is what preserves
     usage_metadata on the committed message — reproducing it here is the point,
     since fact 2 is specifically about the streamed terminal frame.
     """
-    llm = build_chat_model(model, thinking={"type": "disabled"} if thinking_disabled else None)
+    llm = build_chat_model(
+        model,
+        thinking={"type": "disabled"} if thinking_disabled else None,
+        catalog=model_catalog,
+        llm_override="",
+        overrides=ModelOverrides.from_pins({}),
+    )
     chunks = list(llm.stream([HumanMessage(text)]))
     assert chunks, "stream produced no chunks"
     merged = chunks[0]
@@ -171,7 +181,9 @@ def _reasoning_tokens(msg: AIMessage) -> int:
 
 
 @pytest.mark.parametrize("model", _MODELS)
-def test_enable_thinking_false_actually_suppresses_reasoning(model: str) -> None:
+def test_enable_thinking_false_actually_suppresses_reasoning(
+    model: str, *, model_catalog: ModelCatalog
+) -> None:
     """Fact 1, asserted from both sides so a green cannot be vacuous.
 
     Checking only the disabled call would pass just as happily if this model
@@ -179,13 +191,23 @@ def test_enable_thinking_false_actually_suppresses_reasoning(model: str) -> None
     while the reasoning simply landed somewhere unread. So prove reasoning is
     observable with thinking ON first, then prove it disappears with it OFF.
     """
-    thinking_on = _stream(model, "In two sentences: why is the sky blue?", thinking_disabled=False)
+    thinking_on = _stream(
+        model,
+        "In two sentences: why is the sky blue?",
+        thinking_disabled=False,
+        model_catalog=model_catalog,
+    )
     assert _reasoning_text(thinking_on) or _reasoning_tokens(thinking_on) > 0, (
         f"{model}: no reasoning observed even with thinking ON — the rest of this "
         "test would be vacuous; check whether it still reasons by default"
     )
 
-    off = _stream(model, "In two sentences: why is the sky blue?", thinking_disabled=True)
+    off = _stream(
+        model,
+        "In two sentences: why is the sky blue?",
+        thinking_disabled=True,
+        model_catalog=model_catalog,
+    )
     assert _reasoning_text(off) == "", f"{model}: enable_thinking=false did not suppress reasoning"
     assert _reasoning_tokens(off) == 0, (
         f"{model}: enable_thinking=false hid the reasoning text but the model still "
@@ -195,7 +217,9 @@ def test_enable_thinking_false_actually_suppresses_reasoning(model: str) -> None
 
 
 @pytest.mark.parametrize("model", _MODELS)
-def test_streamed_usage_frame_carries_the_implicit_cache_hit(model: str) -> None:
+def test_streamed_usage_frame_carries_the_implicit_cache_hit(
+    model: str, *, model_catalog: ModelCatalog
+) -> None:
     """Fact 2. Two turns over an identical long prefix: the second hits
     DashScope's implicit cache, which is always on and cannot be opted out of.
 
@@ -206,12 +230,22 @@ def test_streamed_usage_frame_carries_the_implicit_cache_hit(model: str) -> None
     """
     prefix = "The quick brown fox jumps over the lazy dog near the river bank. " * 400
 
-    first = _stream(model, f"{prefix}\n\nReply with exactly: ONE", thinking_disabled=True)
+    first = _stream(
+        model,
+        f"{prefix}\n\nReply with exactly: ONE",
+        thinking_disabled=True,
+        model_catalog=model_catalog,
+    )
     assert (first.usage_metadata or {}).get("input_tokens", 0) > 1024, (
         f"{model}: prefix did not clear the minimum cacheable length"
     )
 
-    second = _stream(model, f"{prefix}\n\nReply with exactly: TWO", thinking_disabled=True)
+    second = _stream(
+        model,
+        f"{prefix}\n\nReply with exactly: TWO",
+        thinking_disabled=True,
+        model_catalog=model_catalog,
+    )
     details = (second.usage_metadata or {}).get("input_token_details") or {}
     assert "cache_read" in details, (
         f"{model}: the streamed terminal usage frame carried no cache_read — "

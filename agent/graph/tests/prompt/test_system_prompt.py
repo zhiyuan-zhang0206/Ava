@@ -25,7 +25,9 @@ from agent.graph.prompt.system_prompt import (
 )
 from ava.sdk_surface import install, sdk_disable
 from base.config import FIELD_INFOS, AgentSettings, settings
+from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.telemetry import audit_events
 
@@ -55,7 +57,7 @@ def _no_plugin_expansions() -> Iterator[None]:
     yield
     install.uninstall()
     if prior is not None:
-        install.install(prior.registry)
+        install.install(prior.registry, catalog=prior.catalog, authority=prior.authority)
 
 
 @pytest.fixture
@@ -84,7 +86,7 @@ def test_wildcard_expands_all_public_namespaces(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_wildcard_excludes_functions_and_private_names(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """Top-level functions (`help`, `understand`) and private names are not
     namespaces — the SDK overview already prints functions in full, so the
@@ -94,11 +96,15 @@ def test_wildcard_excludes_functions_and_private_names(
     assert "help" not in result
     assert "understand" not in result
     assert "external" not in result
-    assert "## ava.external" not in _sdk_expand_section(AgentSlices.resolve())
+    assert "## ava.external" not in _sdk_expand_section(
+        AgentSlices.resolve(), catalog=model_catalog
+    )
     assert not any(name.startswith("_") for name in result)
 
 
-def test_wildcard_skips_capability_surfaces(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wildcard_skips_capability_surfaces(
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+) -> None:
     """`skills` and `mcps` are capability surfaces, not SDK API: expanding them
     renders a full listing of every installed skill / configured server, which
     is exactly what `# Capabilities` already indexes. `"*"` skips both so the
@@ -107,13 +113,13 @@ def test_wildcard_skips_capability_surfaces(monkeypatch: pytest.MonkeyPatch) -> 
     result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert {"skills", "mcps"} == _CAPABILITY_SURFACES
     assert not (_CAPABILITY_SURFACES & set(result))
-    text = _sdk_expand_section(AgentSlices.resolve())
+    text = _sdk_expand_section(AgentSlices.resolve(), catalog=model_catalog)
     assert "## ava.skills" not in text
     assert "## ava.mcps" not in text
 
 
 def test_capability_surface_expands_when_named_explicitly(
-    monkeypatch: pytest.MonkeyPatch, skill_writes: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, skill_writes: list[dict[str, Any]], model_catalog: ModelCatalog
 ) -> None:
     """The skip is a wildcard default, not a ban — an operator who names a
     capability SURFACE explicitly still gets it expanded. Expanding the surface
@@ -122,7 +128,7 @@ def test_capability_surface_expands_when_named_explicitly(
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*", "skills"])
 
     assert "skills" in effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
-    text = _sdk_expand_section(AgentSlices.resolve())
+    text = _sdk_expand_section(AgentSlices.resolve(), catalog=model_catalog)
     assert "## ava.skills" in text
     assert skill_writes == []
     # An index render carries descriptions, never bodies. Every SKILL.md in this
@@ -133,7 +139,7 @@ def test_capability_surface_expands_when_named_explicitly(
 
 
 def test_member_of_a_capability_surface_is_refused(
-    monkeypatch: pytest.MonkeyPatch, skill_writes: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, skill_writes: list[dict[str, Any]], model_catalog: ModelCatalog
 ) -> None:
     """`skills.<name>` / `mcps.<server>` are refused even when named explicitly.
 
@@ -152,7 +158,7 @@ def test_member_of_a_capability_surface_is_refused(
 
     assert "skills.gmail" not in effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert "mcps.chrome" not in effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
-    text = _sdk_expand_section(AgentSlices.resolve())
+    text = _sdk_expand_section(AgentSlices.resolve(), catalog=model_catalog)
     assert "## ava.skills.gmail" not in text
     assert "## ava.mcps.chrome" not in text
     assert skill_writes == []
@@ -214,7 +220,7 @@ def test_legacy_explicit_list_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_missing_unregistered_expand_path_warns(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, model_catalog: ModelCatalog
 ) -> None:
     """An unregistered missing path reaches the existing resolution warning."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["missing_sdk_namespace"])
@@ -222,7 +228,7 @@ def test_missing_unregistered_expand_path_warns(
     monkeypatch.setattr(sdk_disable, "applied_entries", frozenset)
 
     with caplog.at_level("WARNING", logger="agent.graph.prompt.system_prompt"):
-        text = _sdk_expand_section(AgentSlices.resolve())
+        text = _sdk_expand_section(AgentSlices.resolve(), catalog=model_catalog)
 
     assert text == ""
     assert "ava.missing_sdk_namespace does not resolve" in caplog.text
@@ -230,10 +236,16 @@ def test_missing_unregistered_expand_path_warns(
 
 def test_plugin_expansions_lead_the_wildcard(
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Plugin-promoted paths keep their lead position ahead of the discovered
     set even when the configured list is just `["*"]`."""
-    install.install(ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd",))),)))
+    install.install(
+        ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd",))),)),
+        catalog=model_catalog,
+        authority=config_authority,
+    )
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert result[0] == "cwd"
@@ -241,12 +253,12 @@ def test_plugin_expansions_lead_the_wildcard(
 
 
 def test_section_renders_all_wildcard_namespaces(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """The rendered section carries one `## ava.<name>` contract per discovered
     namespace and no heading for the skipped top-level functions."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    text = _sdk_expand_section(AgentSlices.resolve())
+    text = _sdk_expand_section(AgentSlices.resolve(), catalog=model_catalog)
     assert text.startswith("# Expanded SDK reference")
     for ns in FRAMEWORK_NAMESPACES:
         assert f"## ava.{ns}" in text
@@ -265,6 +277,8 @@ def test_field_default_is_production_p95() -> None:
 def test_p95_contracts_leave_rare_namespaces_on_demand(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     from ava_builtins.plugins.ava_fleet import plugin as fleet
     from base.agents.sdk import call_policy
@@ -273,9 +287,13 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", factory())
-    install.install(ExtensionRegistry((("ava_fleet", fleet.contribute()),)))
+    install.install(
+        ExtensionRegistry((("ava_fleet", fleet.contribute()),)),
+        catalog=model_catalog,
+        authority=config_authority,
+    )
 
-    text = _sdk_expand_section(AgentSlices.resolve())
+    text = _sdk_expand_section(AgentSlices.resolve(), catalog=model_catalog)
 
     for module in ["shell", "files", "agents", "tasks"]:
         assert f"## ava.{module}\n" in text
@@ -292,12 +310,16 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
 
 def test_plugin_expansions_merge_with_p95_without_duplicates(
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", factory())
     install.install(
-        ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd", "tasks"))),))
+        ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd", "tasks"))),)),
+        catalog=model_catalog,
+        authority=config_authority,
     )
 
     assert effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable) == [
@@ -317,24 +339,24 @@ def test_env_comma_string_with_wildcard_parses() -> None:
 
 
 def test_section_hides_attach_for_text_only_model(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """A text-only model's expanded SDK reference carries no attach contract —
     the member is unavailable to it (user ruling 2026-08-28)."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
-    text = _sdk_expand_section(AgentSlices.resolve())
+    text = _sdk_expand_section(AgentSlices.resolve(), catalog=model_catalog)
     assert "## ava.self" in text
     assert "def attach(" not in text
 
 
 def test_section_keeps_attach_for_media_capable_model(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """A media-capable model's expanded SDK reference keeps the attach
     contract unchanged (user ruling 2026-08-28)."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
-    text = _sdk_expand_section(AgentSlices.resolve())
+    text = _sdk_expand_section(AgentSlices.resolve(), catalog=model_catalog)
     assert "## ava.self" in text
     assert "def attach(" in text

@@ -12,8 +12,10 @@ from psycopg_pool import AsyncConnectionPool
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host.recovery import interrupt as recovery_interrupt
@@ -27,9 +29,16 @@ async def test_pending_external_interrupt_shortens_backoff_without_claiming(
     kind: str,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
-        database, event_bus, spawner="user", machine=machine_name()
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     incarnation = RuntimeIncarnation(agent, uuid4(), uuid4())
     command = insert_inbound_message(
@@ -57,9 +66,16 @@ async def test_interrupt_arriving_during_backoff_is_observed(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
-        database, event_bus, spawner="user", machine=machine_name()
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     interrupt = RecoveryInterrupt(
         aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()), asyncio.Lock(), work=None
@@ -103,9 +119,16 @@ async def test_self_control_does_not_shorten_backoff(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
-        database, event_bus, spawner="user", machine=machine_name()
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     insert_inbound_message(
         db_conn, agent, "", "self", kind="terminate", bus=event_bus, database=database

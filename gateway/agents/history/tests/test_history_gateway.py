@@ -10,6 +10,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -30,7 +31,9 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
     return incarnation
 
 
-def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
+def start(
+    owner: RuntimeIncarnation, *, active: bool = True, config_authority: ConfigAuthority
+) -> dict[str, Any]:
     result = sessions.request(
         Database.from_settings(),
         EventBus.from_settings(),
@@ -40,6 +43,7 @@ def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
         provider="codex",
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
+        authority=config_authority,
     )
     lease = history.resolve(Database.from_settings(), owner.agent_id, result["session_id"])
     if active:
@@ -61,13 +65,15 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     owner: RuntimeIncarnation,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from agent.impersonation_handoff import start_marker
     from base.agents.history.timeline import build_timeline_items
     from base.agents.impersonation.timeline import hydrate
     from gateway.agents.history.timeline import _window_before
 
-    lease = start(owner)
+    lease = start(owner, config_authority=config_authority)
     marker = start_marker(lease)
     for number in range(15):
         history.say(

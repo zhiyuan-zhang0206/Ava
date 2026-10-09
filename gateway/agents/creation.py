@@ -9,8 +9,10 @@ from fastapi import Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from base.agents.labels import spawn_prompt_with_label
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
@@ -70,6 +72,8 @@ async def create_and_launch_agent(
     db: Database,
     bus: EventBus,
     *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
     creation_key: str | None = None,
     creation_identity: dict[str, object] | None = None,
     immutable_birth: bool = False,
@@ -99,19 +103,31 @@ async def create_and_launch_agent(
             creation_receipt, pool, creation_key, request_hash, immutable_snapshot=snapshot
         )
         if existing is not None:
-            return await recover_launch(pool, db, bus, existing, immutable_snapshot=snapshot)
+            return await recover_launch(
+                pool, db, bus, existing, immutable_snapshot=snapshot, catalog=catalog
+            )
     preset_name, tail_skills, model_receipt = await asyncio.to_thread(
-        agent_router._spawn_preflight_blocking, db, target, body, pool
+        agent_router._spawn_preflight_blocking,
+        db,
+        target,
+        body,
+        pool,
+        catalog=catalog,
+        authority=authority,
     )
     # fork_checkpoint resolution stays gateway-side: LangGraph checkpoints are
     # append-only and "latest" drifts under concurrent writes, so the gateway
     # resolves an explicit id before creating the row.
-    fork_checkpoint = await asyncio.to_thread(agent_router.spawn_prechecks_blocking, body, pool)
+    fork_checkpoint = await asyncio.to_thread(
+        agent_router.spawn_prechecks_blocking, body, pool, catalog=catalog, authority=authority
+    )
     try:
         new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
             agent_router.create_agent_row,
             db,
             bus,
+            catalog=catalog,
+            authority=authority,
             spawner=body.spawner,
             fork_from=body.fork_from,
             fork_checkpoint=fork_checkpoint,
@@ -137,7 +153,9 @@ async def create_and_launch_agent(
         if committed is None:
             raise RuntimeError("committed agent creation receipt is missing")
         if not committed.launch_pending:
-            return await recover_launch(pool, db, bus, committed, immutable_snapshot=snapshot)
+            return await recover_launch(
+                pool, db, bus, committed, immutable_snapshot=snapshot, catalog=catalog
+            )
         target, birth_config, launch_attempt_id = (
             committed.machine,
             committed.birth_config,
@@ -154,7 +172,9 @@ async def create_and_launch_agent(
     # The endpoint response is the launch op's verdict (the launched agent id —
     # equal to new_id in production; the runner answers for the launch). A
     # withdrawal settlement travels as the spawner's receipt (task #4306).
-    spawned = await agent_router._dispatch_committed_launch(pool, db, bus, target, launch)
+    spawned = await agent_router._dispatch_committed_launch(
+        pool, db, bus, target, launch, catalog=catalog
+    )
     if model_receipt is not None:
         spawned = spawned.model_copy(
             update={
@@ -163,7 +183,7 @@ async def create_and_launch_agent(
                 )
             }
         )
-    return await agent_router._accepted_launch_receipt(pool, spawned)
+    return await agent_router._accepted_launch_receipt(pool, spawned, catalog=catalog)
 
 
 async def recover_launch(
@@ -172,6 +192,7 @@ async def recover_launch(
     bus: EventBus,
     existing: CreationReceipt,
     *,
+    catalog: ModelCatalog,
     immutable_snapshot: bool = False,
 ) -> SpawnedAgent:
     """Recover only an unadmitted birth; a completed incarnation is never revived."""
@@ -191,10 +212,11 @@ async def recover_launch(
                 config=existing.config,
                 birth_config=existing.birth_config,
             ),
+            catalog=catalog,
         )
     else:
         spawned = SpawnedAgent(id=existing.agent_id)
-    return await agent_router._accepted_launch_receipt(pool, spawned)
+    return await agent_router._accepted_launch_receipt(pool, spawned, catalog=catalog)
 
 
 async def announce_creation_prompt(

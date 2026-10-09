@@ -6,12 +6,13 @@ from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import _BatchState, _handle_restart
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 async def test_hosted_restart_marker_does_not_claim_completion() -> None:
     state = _BatchState()
     await _handle_restart(
-        AvaContext(agent=AgentSlices.resolve()),
+        AvaContext(agent=AgentSlices.resolve(), catalog=build_model_catalog()),
         1,
         ClaimedInbound(id=1, agent_id=1, content="", kind="restart", source="self", payload={}),
         state,

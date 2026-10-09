@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 from base.telemetry import report_sink_failure
 
 AVA_BILLING_ATTR_LINE = "ava.billing.line"
@@ -33,7 +34,7 @@ def _is_qwen_family(model: str) -> bool:
     return model == "qwen" or (model.startswith("qwen") and len(model) > 4 and model[4].isdigit())
 
 
-def vendor_of_model(model: str) -> str | None:
+def vendor_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
     """Return the registered manufacturer for ``model``, if one is known."""
     for prefix, vendor in _CORE_VENDOR_PREFIXES:
         if model.startswith(prefix):
@@ -41,9 +42,7 @@ def vendor_of_model(model: str) -> str | None:
     if _is_qwen_family(model):
         return "alibaba"
 
-    from base.lm.plugin_providers import model_catalog
-
-    for prefix, binding in model_catalog().bindings.items():
+    for prefix, binding in catalog.bindings.items():
         if model.startswith(prefix):
             return binding.display_name.lower()
     return None
@@ -118,6 +117,7 @@ def emit_billing_from_message(
     line: str = "ava",
     start_time_ns: int | None = None,
     vendor: str | None = None,
+    catalog: ModelCatalog,
 ) -> None:
     """Price a LangChain message and emit its billing span when usage is known."""
     try:
@@ -128,8 +128,8 @@ def emit_billing_from_message(
         tok_in, tok_out, tok_cached = tally_tokens([msg])
         if tok_in is None or tok_out is None or tok_cached is None:
             return
-        model = usage_model(msg, model)
-        resolved_vendor = vendor or vendor_of_model(model)
+        model = usage_model(msg, model, catalog=catalog)
+        resolved_vendor = vendor or vendor_of_model(model, catalog=catalog)
         if resolved_vendor is None:
             return
         write_5m, write_1h = cache_write_tokens(msg.usage_metadata.get("input_token_details") or {})
@@ -140,6 +140,7 @@ def emit_billing_from_message(
             tok_cached,
             cache_write_5m=write_5m,
             cache_write_1h=write_1h,
+            prices=catalog.prices,
         )
         emit_billing_event(
             line=line,

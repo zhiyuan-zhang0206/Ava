@@ -13,9 +13,12 @@ from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.state import AgentState, CircuitState
 from base.agents.context import AvaContext
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from tests.fixtures.units import spawn_agent
 
 
@@ -28,6 +31,7 @@ def _breaker_ctx(pool: AsyncConnectionPool) -> AvaContext:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
 
 
@@ -36,6 +40,9 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     overflow: bool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A real graph failure is flushed to PG; a fresh reader sees its breaker."""
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -45,7 +52,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     from base.config import settings
     from services.agent_runner.agent_host.host import AgentHost
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     row = db_conn.execute("SELECT machine FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert row is not None
     incarnation = await admit_hosted_runtime(
@@ -82,6 +89,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             checkpointer=saver,
             graph=graph,
             machine="test",
+            catalog=model_catalog,
             bus=EventBus.from_settings(),
             db=Database.from_settings(),
         )

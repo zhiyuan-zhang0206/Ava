@@ -64,7 +64,7 @@ This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and
 - [[agent/graph/docs/context-notes/context-notes.ava.okf.md]] — where this plugin's index + inherited notes are laid down
 - [[context-window.ava.okf.md]] — memory injection affects context
 - [[memory-indexer.ava.okf.md]] — background indexing service
-- [[base/lm/docs/lm.ava.okf.md]] — semantic search uses LLM embeddings
+- [[base/lm/docs/lm/lm.ava.okf.md]] — semantic search uses LLM embeddings
 
 ## Configuration
 

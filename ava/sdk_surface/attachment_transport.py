@@ -17,25 +17,32 @@ from base.lm.attach.constants import (
     ATTACH_MAX_LABEL_CHARS,
     ATTACH_MEDIA_MIME,
 )
+from base.lm.catalog import ModelCatalog
 
 # The graph-state channel a registration is appended to (`BaseAgentState.attach`).
 _ATTACH_CHANNEL = "attach"
 
 
-def media_gated_members(model: str) -> frozenset[str]:
+def media_gated_members(model: str, *, catalog: ModelCatalog) -> frozenset[str]:
     """Dotted ``ava`` member paths unavailable for `model`'s media capability
     — ``ava.self.attach`` on a text-only model (user ruling 2026-08-28). The
     help() renderer hides these from the SDK docs; empty for a media-capable
     model."""
     from base.lm.registry import resolve_available_model
 
-    return _gated(_attach_unavailable_reason(resolve_available_model(model)))
+    return _gated(
+        _attach_unavailable_reason(
+            resolve_available_model(model, models=catalog.models), catalog=catalog
+        )
+    )
 
 
 def own_media_gated_members() -> frozenset[str]:
     """`media_gated_members` for the model of the process this runs in — the exec child, whose
     settings carry its agent's overlay."""
-    return _gated(_attach_unavailable_reason())
+    from ava.sdk_surface import settings as sdk_settings
+
+    return _gated(_attach_unavailable_reason(catalog=sdk_settings.model_catalog()))
 
 
 def _gated(unavailable_reason: str | None) -> frozenset[str]:
@@ -50,10 +57,12 @@ def _current_model() -> str:
     from ava.sdk_surface import settings as _settings
     from base.lm.registry import resolve_available_model
 
-    return resolve_available_model(_settings.agent_setting("llm_model"))
+    return resolve_available_model(
+        _settings.agent_setting("llm_model"), models=_settings.model_catalog().models
+    )
 
 
-def _attach_unavailable_reason(model: str | None = None) -> str | None:
+def _attach_unavailable_reason(model: str | None = None, *, catalog: ModelCatalog) -> str | None:
     """Why ``attach`` is unavailable for `model` (default: this process's agent's), or None.
 
     A model with an empty attach-modality set (text-only, or an explicit empty
@@ -63,7 +72,11 @@ def _attach_unavailable_reason(model: str | None = None) -> str | None:
     from base.lm.registry import attach_modalities_for_model
 
     model = model or _current_model()
-    if attach_modalities_for_model(model):
+    if attach_modalities_for_model(
+        model,
+        models=catalog.models,
+        vision_prefixes={prefix: binding.vision for prefix, binding in catalog.bindings.items()},
+    ):
         return None
     return f"your model ({model}) is text-only and cannot receive media attachments"
 
@@ -72,12 +85,18 @@ def _validate_modality(suffix: str) -> None:
     """Reject a file whose modality the current model's attach set does not
     include — a clear error at registration, never a silent pack-time skip
     (user ruling 2026-08-28)."""
+    from ava.sdk_surface import settings as sdk_settings
     from base.lm.registry import attach_modalities_for_model
 
+    catalog = sdk_settings.model_catalog()
     model = _current_model()
     mime = ATTACH_MEDIA_MIME[suffix]
     modality = "pdf" if mime == "application/pdf" else mime.split("/", maxsplit=1)[0]
-    allowed = attach_modalities_for_model(model)
+    allowed = attach_modalities_for_model(
+        model,
+        models=catalog.models,
+        vision_prefixes={prefix: binding.vision for prefix, binding in catalog.bindings.items()},
+    )
     if modality in allowed:
         return
     raise ValueError(
@@ -96,7 +115,9 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
     with an error naming the allowed set. Attach at most 8 files and 48 MiB per
     turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
     """
-    if reason := _attach_unavailable_reason():
+    from ava.sdk_surface import settings as sdk_settings
+
+    if reason := _attach_unavailable_reason(catalog=sdk_settings.model_catalog()):
         raise RuntimeError(
             f"ava.self.attach is unavailable: {reason}; switch to a vision-capable model"
         )

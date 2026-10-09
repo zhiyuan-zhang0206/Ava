@@ -14,6 +14,7 @@ import pytest
 
 from base.config import settings
 from base.host.net.resilience import ExponentialBackoff, Policy
+from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings import factory, gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.gemini import DIM, GeminiEmbeddingProvider
@@ -23,9 +24,6 @@ from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
     _embedding_server,
     _provider,
-)
-from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
-    _load_provider_plugins as _load_provider_plugins,
 )
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
     pytestmark as pytestmark,
@@ -50,15 +48,17 @@ def test_worst_case_single_attempt_has_no_sleep(monkeypatch: pytest.MonkeyPatch)
     backoff.assert_not_called()
 
 
-def test_factory_default_is_gemini() -> None:
+def test_factory_default_is_gemini(model_catalog: ModelCatalog) -> None:
     """The unset switch yields the Gemini provider — behavior unchanged."""
     from base.config import settings
 
     assert settings.services.embedding_backend == "gemini"
-    assert isinstance(factory.get_provider(), GeminiEmbeddingProvider)
+    assert isinstance(factory.get_provider(catalog=model_catalog), GeminiEmbeddingProvider)
 
 
-def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_factory_unknown_backend_fails_fast(
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+) -> None:
     """An unrecognized AVA_EMBEDDING_BACKEND must not silently fall back to
     gemini — a typo would keep the old provider while the operator believes
     the switch happened."""
@@ -66,15 +66,19 @@ def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(settings.services, "embedding_backend", "openai")
     with pytest.raises(ValueError, match="unknown embedding provider"):
-        factory.get_provider()
+        factory.get_provider(catalog=model_catalog)
 
 
-def test_factory_provider_named_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_factory_provider_named_dispatch(
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+) -> None:
     """AVA_EMBEDDING_BACKEND=gemini yields the Gemini adapter."""
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
-    assert isinstance(factory.get_provider_named("gemini"), GeminiEmbeddingProvider)
+    assert isinstance(
+        factory.get_provider_named("gemini", catalog=model_catalog), GeminiEmbeddingProvider
+    )
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])
@@ -84,6 +88,7 @@ def test_embed_trickle_total_deadline(
     trickle_server: tuple[str, list[float]],
     mode: str,
     attempts: int,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Bound one attempt AND retry exhaustion on real sockets, despite timely reads."""
     from base.host.net import resilience
@@ -102,9 +107,13 @@ def test_embed_trickle_total_deadline(
     started = time.monotonic()
     with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
         if mode == "sync":
-            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
+            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", catalog=model_catalog, policy=policy)
         else:
-            asyncio.run(gemini._embed_async(["hello"], "RETRIEVAL_QUERY", policy=policy))
+            asyncio.run(
+                gemini._embed_async(
+                    ["hello"], "RETRIEVAL_QUERY", catalog=model_catalog, policy=policy
+                )
+            )
     elapsed = time.monotonic() - started
     assert isinstance(error.value.__cause__, httpx.ReadTimeout)
     assert len(requests) == attempts
@@ -116,7 +125,10 @@ def test_embed_trickle_total_deadline(
 @pytest.mark.parametrize("mode", ["sync", "async"])
 @pytest.mark.parametrize("attempts", [1, 3])
 def test_embed_compressed_trickle_deadline(
-    monkeypatch: pytest.MonkeyPatch, attempts: int, mode: str
+    monkeypatch: pytest.MonkeyPatch,
+    attempts: int,
+    mode: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Gzip metadata cannot hide body reads from the deadline or retry budget."""
     from base.host.net import resilience
@@ -135,9 +147,13 @@ def test_embed_compressed_trickle_deadline(
         started = time.monotonic()
         with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
             if mode == "sync":
-                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
+                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", catalog=model_catalog, policy=policy)
             else:
-                asyncio.run(gemini._embed_async(["hello"], "RETRIEVAL_QUERY", policy=policy))
+                asyncio.run(
+                    gemini._embed_async(
+                        ["hello"], "RETRIEVAL_QUERY", catalog=model_catalog, policy=policy
+                    )
+                )
         elapsed = time.monotonic() - started
         assert isinstance(error.value.__cause__, httpx.ReadTimeout)
         assert len(requests) == attempts
@@ -150,7 +166,11 @@ def test_embed_compressed_trickle_deadline(
 @pytest.mark.parametrize("framing", ["extension", "trailer"])
 @pytest.mark.parametrize("attempts", [1, 3])
 def test_embed_framing_drip_deadline(
-    monkeypatch: pytest.MonkeyPatch, mode: str, framing: str, attempts: int
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    framing: str,
+    attempts: int,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Chunk extensions and trailers cannot hide timely reads from cancellation."""
     from base.host.net import resilience
@@ -169,9 +189,13 @@ def test_embed_framing_drip_deadline(
         started = time.monotonic()
         with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
             if mode == "sync":
-                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
+                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", catalog=model_catalog, policy=policy)
             else:
-                asyncio.run(gemini._embed_async(["hello"], "RETRIEVAL_QUERY", policy=policy))
+                asyncio.run(
+                    gemini._embed_async(
+                        ["hello"], "RETRIEVAL_QUERY", catalog=model_catalog, policy=policy
+                    )
+                )
         elapsed = time.monotonic() - started
         assert isinstance(error.value.__cause__, httpx.ReadTimeout)
         assert len(requests) == attempts
@@ -192,7 +216,11 @@ def test_embed_gzip_response_round_trip(monkeypatch: pytest.MonkeyPatch, chunked
 @pytest.mark.parametrize("mode", ["sync", "async"])
 @pytest.mark.parametrize("status", [400, 429])
 def test_embed_slow_error_body_preserves_status(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], mode: str, status: int
+    monkeypatch: pytest.MonkeyPatch,
+    retry_waits: list[float],
+    mode: str,
+    status: int,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Real HTTPX rejects error headers immediately, preserving classification and delay."""
     from base.host.net import resilience
@@ -215,8 +243,14 @@ def test_embed_slow_error_body_preserves_status(
 
         def invoke() -> np.ndarray:
             if mode == "sync":
-                return gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
-            return asyncio.run(gemini._embed_async(["hello"], "RETRIEVAL_QUERY", policy=policy))
+                return gemini._embed(
+                    ["hello"], "RETRIEVAL_DOCUMENT", catalog=model_catalog, policy=policy
+                )
+            return asyncio.run(
+                gemini._embed_async(
+                    ["hello"], "RETRIEVAL_QUERY", catalog=model_catalog, policy=policy
+                )
+            )
 
         started = time.monotonic()
         if status == 400:
@@ -240,7 +274,9 @@ def test_embed_slow_error_body_preserves_status(
         assert not status_error.response.is_stream_consumed
 
 
-def test_sync_embed_slow_resolver_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_embed_slow_resolver_deadline(
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+) -> None:
     """The sync caller returns at the deadline while its DNS thread finishes later."""
     real_getaddrinfo = socket.getaddrinfo
     finished = threading.Event()
@@ -262,7 +298,12 @@ def test_sync_embed_slow_resolver_deadline(monkeypatch: pytest.MonkeyPatch) -> N
         started = time.monotonic()
         try:
             with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
-                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=Policy(max_attempts=1))
+                gemini._embed(
+                    ["hello"],
+                    "RETRIEVAL_DOCUMENT",
+                    catalog=model_catalog,
+                    policy=Policy(max_attempts=1),
+                )
             elapsed = time.monotonic() - started
             assert isinstance(error.value.__cause__, httpx.ReadTimeout)
             assert len(resolver_calls) == 1
@@ -272,3 +313,21 @@ def test_sync_embed_slow_resolver_deadline(monkeypatch: pytest.MonkeyPatch) -> N
         finally:
             # Join our finite stub before its monkeypatch and server are torn down.
             assert finished.wait(timeout=2)
+
+
+def test_metadata_descriptor_does_not_construct_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    _, budget, descriptor = factory._PROVIDERS["gemini"]
+    constructor = Mock(side_effect=AssertionError("metadata must not construct a provider"))
+    monkeypatch.setitem(factory._PROVIDERS, "gemini", (constructor, budget, descriptor))
+    assert factory.get_descriptor() is descriptor
+    assert descriptor.dim == GeminiEmbeddingProvider.dim
+    assert descriptor.fingerprint == GeminiEmbeddingProvider.fingerprint
+    constructor.assert_not_called()
+
+
+def test_unknown_metadata_provider_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.services, "embedding_backend", "unknown-provider")
+    with pytest.raises(ValueError, match="unknown embedding provider"):
+        factory.get_descriptor()

@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderContribution
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.inspector import InspectWidgetSpec
@@ -34,7 +35,16 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec
 # `object` here because this module is imported by processes that must stay off the LM stack (a
 # child's surface load), and `agent.graph.prompt.context_notes` checks what a builder returns.
 NoteBuilder = Callable[[AvaContext], object | None]
-SectionFn = Callable[[AgentSlices], str]
+
+
+class SectionFn(Protocol):
+    """A plugin prompt section reads the caller's explicit model catalog."""
+
+    @property
+    def __name__(self) -> str: ...
+
+    def __call__(self, slices: AgentSlices, /, *, catalog: ModelCatalog) -> str: ...
+
 
 HookPoint = Literal["after_init", "before_llm", "before_exec", "after_exec"]
 HOOK_POINTS: tuple[HookPoint, ...] = ("after_init", "before_llm", "before_exec", "after_exec")

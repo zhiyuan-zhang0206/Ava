@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 from loguru import logger
 
 from base.lm.effort import validate_effort
-from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
@@ -27,7 +26,7 @@ from base.lm.provider_api import (
     require_key,
     with_fast_variants,
 )
-from base.lm.registry import ModelSpec, ModelTuning, resolve_setting
+from base.lm.registry import ModelSpec, ModelTuning
 from base.lm.stop import StopSpec
 from base.packages.plugins.extensions import PluginContributions
 
@@ -53,6 +52,7 @@ def claude_extended_thinking_kwarg(
     thinking: Mapping[str, Any] | None,
     budget_tokens: int,
     reasoning_effort: str,
+    spec: ModelSpec | None,
 ) -> dict[str, Any] | None:
     """Resolve the `thinking` kwarg for extended-thinking-only claude models
     (`ModelSpec.extended_thinking_only`, currently haiku-4-5) when the caller
@@ -66,7 +66,6 @@ def claude_extended_thinking_kwarg(
     thinking unset (provider default OFF); also None for any model that is not
     extended-thinking-only or when the caller already set `thinking`.
     """
-    spec = model_catalog().models.get(model)
     if thinking is not None or spec is None or not spec.extended_thinking_only:
         return None
     if budget_tokens > 0:
@@ -161,9 +160,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     extended_thinking = claude_extended_thinking_kwarg(
         ctx.model,
         thinking=thinking,
-        budget_tokens=resolve_setting(
-            "claude_thinking_budget_tokens", model=ctx.model, overrides=ctx.overrides
-        ),
+        budget_tokens=ctx.thinking_budget_tokens,
+        spec=spec,
         reasoning_effort=effort,
     )
     if extended_thinking is not None:

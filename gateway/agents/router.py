@@ -35,10 +35,13 @@ from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
 from base.cluster.machine import machine_name
+from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents import forward
@@ -96,14 +99,13 @@ def get_models(request: Request) -> ModelsResponse:
     resolution as the birth stamp and spawn preflight.
     """
     from base.agents.birth_config import resolve_default_model
-    from base.lm.plugin_providers import model_catalog
     from base.lm.pricing import rates_at
     from base.lm.registry import explain_setting
     from gateway.schemas.models import ModelInfo, ModelPricing
 
     # Plugin provider models are in the catalog (loaded once per process) — the spawn
     # dropdown must list them even though the gateway never loads plugin.py.
-    catalog = model_catalog()
+    catalog = request.app.state.catalog
 
     # Stable model facts come off the registry; volatile prices come off the
     # effective-dated catalog. `effort_levels` is the same vocabulary the factory
@@ -114,7 +116,7 @@ def get_models(request: Request) -> ModelsResponse:
     for provider, model_list in catalog.supported_models.items():
         for model in model_list:
             spec = catalog.models[model]
-            rates = rates_at(model, input_tokens=0)
+            rates = rates_at(model, input_tokens=0, prices=catalog.prices)
             if rates is None:
                 raise RuntimeError(f"spawnable model {model!r} has no current catalog price")
             pricing = ModelPricing(
@@ -132,7 +134,9 @@ def get_models(request: Request) -> ModelsResponse:
             # view). Validation guarantees spawnable models pin a concrete
             # value; "" (provider's own default) surfaces as None for any
             # model that slipped through without one.
-            resolved_effort = explain_setting("reasoning_effort", model=model, explicit=None).value
+            resolved_effort = explain_setting(
+                "reasoning_effort", model=model, explicit=None, models=catalog.models
+            ).value
             models[model] = ModelInfo(
                 provider=provider,
                 context_window=spec.context_window or 0,
@@ -147,7 +151,9 @@ def get_models(request: Request) -> ModelsResponse:
             )
 
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        default_model = resolve_default_model(cur).model
+        default_model = resolve_default_model(
+            cur, catalog=catalog, authority=request.app.state.config_authority
+        ).model
     return ModelsResponse(
         providers=dict(catalog.supported_models),
         models=models,
@@ -167,6 +173,7 @@ def get_agents(
     with request.app.state.db_pool.connection() as conn:
         return roster.list_directory(
             conn,
+            catalog=request.app.state.catalog,
             scope=scope,
             query=query,
             before_id=before_id,
@@ -178,7 +185,7 @@ def get_agents(
 def get_agent_roster(request: Request) -> roster.AgentRoster:
     """Read the live tree and its necessary ancestor links in one snapshot."""
     with request.app.state.db_pool.connection() as conn:
-        return roster.select_roster(conn)
+        return roster.select_roster(conn, catalog=request.app.state.catalog)
 
 
 def _patch_label_blocking(
@@ -213,7 +220,13 @@ def _patch_label_blocking(
 
 
 def _spawn_preflight_blocking(
-    db: Database, target: str, body: SpawnAgentRequest, pool: ConnectionPool
+    db: Database,
+    target: str,
+    body: SpawnAgentRequest,
+    pool: ConnectionPool,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> tuple[str | None, list[str] | None, tuple[str, str] | None]:
     """Sync spawn preflight — via to_thread: registry capability check, preset
     fold, fork config rule + tail-skills delta, model-config settlement and
@@ -264,13 +277,20 @@ def _spawn_preflight_blocking(
     if body.config:
         from base.lm.registry import normalize_overlay_llm_model
 
-        model_receipt = normalize_overlay_llm_model(body.config)
+        model_receipt = normalize_overlay_llm_model(body.config, models=catalog.models)
     # Validate model config before forwarding — fail fast at the gateway
     # instead of letting the agent process silently hang on a missing API key.
     from base.lm.model_config import validate_spawn_model_config
 
     with pool.connection() as conn, conn.cursor() as cur:
-        validate_spawn_model_config(cur, body.config, body.fork_from)
+        validate_spawn_model_config(
+            cur,
+            body.config,
+            body.fork_from,
+            catalog=catalog,
+            authority=authority,
+            llm_override=settings.lm.llm_override,
+        )
     if model_receipt is not None:
         logger.warning(
             "spawn config_overlay llm_model {requested!r} is withdrawn; stored "
@@ -426,8 +446,10 @@ def _validate_fork_config(
     return (preset_name or source_preset), (delta or None)
 
 
-async def _accepted_launch_receipt(pool: ConnectionPool, spawned: SpawnedAgent) -> SpawnedAgent:
-    observed = await asyncio.to_thread(_creation_availability, pool, spawned.id)
+async def _accepted_launch_receipt(
+    pool: ConnectionPool, spawned: SpawnedAgent, *, catalog: ModelCatalog
+) -> SpawnedAgent:
+    observed = await asyncio.to_thread(_creation_availability, pool, spawned.id, catalog=catalog)
     return spawned.model_copy(
         update={
             "accepted": True,
@@ -468,14 +490,16 @@ def _clear_launch_failure(
         publish_agent_updated_sync(bus, agent_id)
 
 
-def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, object], bool, bool]:
+def _read_launch_state(
+    pool: ConnectionPool, agent_id: int, *, catalog: ModelCatalog
+) -> tuple[dict[str, object], bool, bool]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT status, last_admission_at, last_launch_attempt_id FROM agents_meta WHERE id=%s",
             (agent_id,),
         )
         row = cur.fetchone()
-        snapshot = snapshot_module.select_one(conn, agent_id)
+        snapshot = snapshot_module.select_one(conn, agent_id, catalog=catalog)
     if row is None or snapshot is None:
         return {"status": "unknown", "availability": None}, False, False
     status, admission_at, attempt_id = row
@@ -492,7 +516,13 @@ def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, o
 
 
 async def _dispatch_committed_launch(
-    pool: ConnectionPool, db: Database, bus: EventBus, target: str, launch: LaunchAgentRequest
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    target: str,
+    launch: LaunchAgentRequest,
+    *,
+    catalog: ModelCatalog,
 ) -> SpawnedAgent:
     attempt_id = launch.launch_attempt_id
     try:
@@ -519,7 +549,7 @@ async def _dispatch_committed_launch(
                 _mark_launch_failure, pool, bus, launch.agent_id, attempt_id, reason
             )
             state, admitted, retry_legal = await asyncio.to_thread(
-                _read_launch_state, pool, launch.agent_id
+                _read_launch_state, pool, launch.agent_id, catalog=catalog
             )
         except Exception as persistence_exc:
             # The retry endpoint re-reads status/attempt once Postgres returns.
@@ -556,10 +586,12 @@ def _require_matching_launch_receipt(spawned: SpawnedAgent, agent_id: int, targe
         )
 
 
-def _creation_availability(pool: ConnectionPool, agent_id: int) -> AgentAvailability:
+def _creation_availability(
+    pool: ConnectionPool, agent_id: int, *, catalog: ModelCatalog
+) -> AgentAvailability:
     try:
         with pool.connection() as conn:
-            snap = snapshot_module.select_one(conn, agent_id)
+            snap = snapshot_module.select_one(conn, agent_id, catalog=catalog)
     except Exception as exc:
         logger.warning(
             "created agent {} receipt read failed ({}): {}",
@@ -644,6 +676,8 @@ async def _create_agent_http(
             request.app.state.db_pool,
             request.app.state.db,
             request.app.state.bus,
+            catalog=request.app.state.catalog,
+            authority=request.app.state.config_authority,
             **arguments,
         )
     except CreationConflictError as exc:
@@ -659,7 +693,7 @@ def get_agent(agent_id: int, request: Request) -> AgentRow:
     A nonexistent ID returns 404 rather than falling back to another agent.
     """
     with request.app.state.db_pool.connection() as conn:
-        snap = snapshot_module.select_one(conn, agent_id)
+        snap = snapshot_module.select_one(conn, agent_id, catalog=request.app.state.catalog)
     if snap is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
     return AgentRow.model_validate(snap.model_dump())

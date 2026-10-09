@@ -17,22 +17,27 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
 from tests.fixtures.model_catalog import AddModels
 
 
 @pytest.fixture
-def withdrawn_model(add_models: AddModels) -> str:
+def withdrawn_model(add_models: AddModels, model_catalog: ModelCatalog) -> tuple[str, ModelCatalog]:
     model = "deepseek-retired-fixture"
-    base = model_catalog().models["deepseek-flash"]
-    add_models({model: replace(base, spawnable=False, unavailable_fallback="deepseek-flash")})
-    return model
+    base = model_catalog.models["deepseek-flash"]
+    catalog = add_models(
+        model_catalog,
+        {model: replace(base, spawnable=False, unavailable_fallback="deepseek-flash")},
+    )
+    return model, catalog
 
 
-def _spawn_agent(spawner: str = "test") -> int:
+def _spawn_agent(spawner: str = "test", *, config_authority: ConfigAuthority) -> int:
     """Setup helper — a row with a stamped birth_config (the #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only read
     the stamp)."""
@@ -40,7 +45,12 @@ def _spawn_agent(spawner: str = "test") -> int:
     from ops.agents.spawn import create_agent_row
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(), EventBus.from_settings(), spawner=spawner, machine=machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner=spawner,
+        machine=machine_name(),
+        catalog=build_model_catalog(),
+        authority=config_authority,
     )
     return agent_id
 
@@ -66,27 +76,36 @@ class TestGet:
         assert resp.json() == {"model": "claude-sonnet-5", "source": "cluster"}
 
     def test_unset_resolves_a_withdrawn_config_model(
-        self, monkeypatch: pytest.MonkeyPatch, withdrawn_model: str
+        self, monkeypatch: pytest.MonkeyPatch, withdrawn_model: tuple[str, ModelCatalog]
     ) -> None:
         """A config chain naming a withdrawn id reports what actually runs: the
         spawn boundary resolves it the same way (`factory.validate_model_config`)."""
         from base.config import settings
 
-        monkeypatch.setattr(settings.lm, "llm_model", withdrawn_model)
+        model, catalog = withdrawn_model
+        import gateway.app as gateway_app
+
+        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
+        monkeypatch.setattr(settings.lm, "llm_model", model)
         with TestClient(app) as client:
             resp = client.get("/api/config/default-model")
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"model": "deepseek-flash", "source": "config"}
 
     def test_resolves_a_withdrawn_cluster_row(
-        self, db_conn: psycopg.Connection, withdrawn_model: str
+        self,
+        db_conn: psycopg.Connection,
+        withdrawn_model: tuple[str, ModelCatalog],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A row written while its model was still spawnable keeps the id; the
         endpoint still answers with the model a new agent actually runs."""
+        model, catalog = withdrawn_model
+        import gateway.app as gateway_app
+
+        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE cluster_defaults SET llm_model = %s WHERE id = 1", (withdrawn_model,)
-            )
+            cur.execute("UPDATE cluster_defaults SET llm_model = %s WHERE id = 1", (model,))
         db_conn.commit()
         with TestClient(app) as client:
             resp = client.get("/api/config/default-model")
@@ -142,9 +161,11 @@ class TestPut:
         assert row is not None
         assert row[0] is None
 
-    def test_does_not_move_an_existing_agent(self, db_conn: psycopg.Connection) -> None:
+    def test_does_not_move_an_existing_agent(
+        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+    ) -> None:
         """The panel control is safe to use on a live cluster."""
-        agent_id = _spawn_agent(spawner="test")
+        agent_id = _spawn_agent(spawner="test", config_authority=config_authority)
         with db_conn.cursor() as cur:
             cur.execute("SELECT birth_config FROM agents_meta WHERE id = %s", (agent_id,))
             row = cur.fetchone()

@@ -165,6 +165,9 @@ class BuildContext:
     resolved_effort: str  # explicit env/overlay wins, else per-model default, else ""
     disable_streaming: bool
     timeout: float | None
+    thinking_budget_tokens: int
+    provider_model_ids: tuple[str, ...] = ()
+    """Registered IDs for this binding, used in provider validation diagnostics."""
     effort_levels: tuple[str, ...] | None = None
     media_resolution: str | None = None
     media_thinking_level: str | None = None
@@ -260,11 +263,8 @@ class ProviderRegistrationError(ValueError):
     duplicate or nested prefix, a model/binding mismatch, an unpriced spawnable
     model, malformed price data.
 
-    Distinct from an arbitrary module-body exception on purpose: the loader
-    contains those (skip + loud report, fail-soft), but the prefix and
-    model-id maps are flat — a collision has no precedence order to resolve
-    it — so the loader lets this class propagate (fail-closed; user ruling
-    2026-09-11 draws that line).
+    The loader propagates this error and arbitrary module-load errors.
+    A failed catalog build never installs a partial catalog.
     """
 
 

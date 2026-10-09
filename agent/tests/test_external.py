@@ -23,6 +23,7 @@ from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.settings import agent_setting
 from base import telemetry
 from base.db import Database
+from base.lm.plugin_providers import build_model_catalog
 from base.telemetry.otlp.tests.external_flush import paused_otlp_record as paused_otlp_record
 from tests.factories.external_attachment import HANDSHAKE_BOUND_S as _HANDSHAKE_BOUND_S
 from tests.factories.external_attachment import ExampleMessagesPlugin, ExamplePlugin, ExampleState
@@ -529,7 +530,9 @@ def test_external_controls_stay_out_of_native_prompt(
     from base.host.env.agent_slices import AgentSlices
     from base.packages.plugins.extensions import ExtensionRegistry
 
-    prompt = build_system_prompt(ExtensionRegistry(()), AgentSlices.resolve(), agent_id=None)
+    prompt = build_system_prompt(
+        ExtensionRegistry(()), AgentSlices.resolve(), agent_id=None, catalog=build_model_catalog()
+    )
     assert "external" not in ava.__all_for_ava__
     assert "ava.external.attach" not in prompt
     assert "## ava.external" not in prompt

@@ -204,9 +204,9 @@ def test_provider_registration_surface_stays_off_the_lm_stack() -> None:
 
 
 _PROVIDER_PLUGIN_LOAD = """
-from base.lm.plugin_providers import model_catalog
+from base.lm.plugin_providers import build_model_catalog
 
-catalog = model_catalog()
+catalog = build_model_catalog()
 heavy = sorted(
     name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
 )

@@ -12,7 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.impersonation import flush_checkpoint
 from agent.state import ContextReset
 from base.agents.compaction.models import CompactHeldError
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
@@ -29,11 +29,14 @@ async def test_actual_cold_materialization_gap_never_acknowledges_marker_alone(
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     corruption: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     model = SummaryModel(responses=["Original summary with enough useful content. " * 100])
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings({"gpt-": replace(binding, build_single_attempt=lambda _: model)})
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+    )
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     acknowledge = compact_apply.acknowledge
     observed: list[bool] = []
 

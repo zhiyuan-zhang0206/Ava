@@ -15,13 +15,17 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.agents import ShellKillMode, TerminateResult
+from base.agents import ShellKillMode
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
+from base.lm.catalog import ModelCatalog
+from ops.rpc_schemas import LaunchAgentRequest, UploadReceivePayload
 from services.agent_runner.agent_ops import daemon, health
 
 _db = Database.from_settings
@@ -76,6 +80,8 @@ def test_ops_components_report_free_and_no_active_workers() -> None:
 async def test_dispatch_spawn_launch_calls_launch_agent_op(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """spawn-launch kind -> ops.launch_agent_op."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -83,12 +89,19 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
 
     from ops.rpc_schemas import SpawnedAgent
 
-    async def _fake_launch(_db: object, _bus: object, body, pool):  # type: ignore[no-untyped-def]
-        captured["agent_id"] = body.agent_id  # pyright: ignore[reportUnknownMemberType]
+    async def _fake_launch(
+        _db: object,
+        _bus: object,
+        body: LaunchAgentRequest,
+        pool: ConnectionPool | None,
+        *,
+        catalog: ModelCatalog,
+    ):
+        captured["agent_id"] = body.agent_id
         captured["pool"] = pool
         return SpawnedAgent(id=777)
 
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_launch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_launch)
     status, result = await daemon._dispatch(
         "spawn-launch-v2",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
@@ -96,6 +109,8 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert result == {"id": 777}
@@ -106,6 +121,8 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
 async def test_dispatch_shell_probe_calls_shell_probe_op(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """shell_probe kind -> cluster.shell_probe_op(agent_id), serialized."""
     from ops.rpc_schemas import ShellInfo, ShellProbeResult
@@ -125,6 +142,8 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42}
@@ -145,16 +164,29 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
 async def test_dispatch_shell_probe_bad_payload_fails(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """shell_probe without agent_id fails without invoking the op."""
     dispatch_pool: ConnectionPool = _stub_pool()
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("must not dispatch on bad payload")
+
     monkeypatch.setattr(
         daemon.cluster,
         "shell_probe_op",
-        lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
+        forbidden,
     )
     status, result = await daemon._dispatch(
-        "shell_probe", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
+        "shell_probe",
+        {},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "failed"
     assert "agent_id" in str(result["error"])
@@ -164,6 +196,8 @@ async def test_dispatch_shell_probe_bad_payload_fails(
 async def test_dispatch_shell_kill_calls_shell_kill_op(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """shell_kill resolves and kills one host-local persistent session."""
     from ops.rpc_schemas import ShellKillResult
@@ -183,6 +217,8 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 5}
@@ -193,15 +229,21 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
 async def test_dispatch_shell_kill_reports_absent(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A shell already gone is a successful, idempotent absent result."""
     from ops.rpc_schemas import ShellKillResult
 
     dispatch_pool: ConnectionPool = _stub_pool()
+
+    def absent(_agent_id: int, _session_id: int) -> ShellKillResult:
+        return ShellKillResult(mode=ShellKillMode.ABSENT)
+
     monkeypatch.setattr(
         daemon.cluster,
         "shell_kill_op",
-        lambda _agent_id, _session_id: ShellKillResult(mode=ShellKillMode.ABSENT),  # pyright: ignore[reportUnknownArgumentType]
+        absent,
     )
     status, result = await daemon._dispatch(
         "shell_kill",
@@ -210,6 +252,8 @@ async def test_dispatch_shell_kill_reports_absent(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert result == {"mode": "absent", "interrupted": False, "name": None}
@@ -219,6 +263,8 @@ async def test_dispatch_shell_kill_reports_absent(
 async def test_dispatch_agent_skill_view_calls_machine_op(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """agent_skill_view kind -> cluster.agent_skill_view_op(agent_id, pool)."""
     from ops.rpc_schemas import AgentSkillViewResult, OpsCommandItem
@@ -242,6 +288,8 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "pool": pool}
@@ -255,13 +303,19 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
 async def test_dispatch_agent_skill_view_bad_payload_fails(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """agent_skill_view without an id is rejected before it reaches the op."""
     dispatch_pool: ConnectionPool = _stub_pool()
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("must not dispatch on bad payload")
+
     monkeypatch.setattr(
         daemon.cluster,
         "agent_skill_view_op",
-        lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
+        forbidden,
     )
     status, result = await daemon._dispatch(
         "agent_skill_view",
@@ -270,6 +324,8 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "failed"
     assert "agent_id" in str(result["error"])
@@ -279,6 +335,8 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
 async def test_dispatch_shell_capture_calls_shell_capture_op(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """shell_capture kind -> cluster.shell_capture_op(agent_id, session_id, lines)."""
     from ops.rpc_schemas import ShellCaptureResult
@@ -300,6 +358,8 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 3, "lines": 500}
@@ -315,6 +375,8 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
 async def test_dispatch_shell_capture_defaults_lines(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """shell_capture without lines defaults to 200."""
     from ops.rpc_schemas import ShellCaptureResult
@@ -334,6 +396,8 @@ async def test_dispatch_shell_capture_defaults_lines(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert seen == {"lines": 200}
@@ -343,6 +407,8 @@ async def test_dispatch_shell_capture_defaults_lines(
 async def test_dispatch_upload_receive_calls_upload_receive_op(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """upload_receive kind -> uploads.upload_receive_op(payload)."""
     from ops.rpc_schemas import UploadReceiveResult
@@ -350,15 +416,15 @@ async def test_dispatch_upload_receive_calls_upload_receive_op(
     dispatch_pool: ConnectionPool = _stub_pool()
     seen: dict[str, object] = {}
 
-    def _fake_receive(payload, *, pool=None):
+    def _fake_receive(payload: UploadReceivePayload, *, pool: ConnectionPool | None = None):
         assert pool is dispatch_pool
-        seen["agent_id"] = payload.agent_id  # pyright: ignore[reportUnknownMemberType]
-        seen["name"] = payload.name  # pyright: ignore[reportUnknownMemberType]
+        seen["agent_id"] = payload.agent_id
+        seen["name"] = payload.name
         return UploadReceiveResult(
-            path=f"/home/runner/Downloads/AvaAgent-{payload.agent_id}/{payload.name}"  # pyright: ignore[reportUnknownMemberType]
+            path=f"/home/runner/Downloads/AvaAgent-{payload.agent_id}/{payload.name}"
         )
 
-    monkeypatch.setattr(daemon.uploads, "upload_receive_op", _fake_receive)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.uploads, "upload_receive_op", _fake_receive)
     status, result = await daemon._dispatch(
         "upload_receive",
         {"agent_id": 42, "name": "report.pdf"},
@@ -366,6 +432,8 @@ async def test_dispatch_upload_receive_calls_upload_receive_op(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "name": "report.pdf"}
@@ -376,6 +444,8 @@ async def test_dispatch_upload_receive_calls_upload_receive_op(
 async def test_dispatch_upload_receive_bad_payload_fails(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """upload_receive with a malformed payload -> failed (not a crash)."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -386,128 +456,42 @@ async def test_dispatch_upload_receive_bad_payload_fails(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "failed"
     assert "error" in result
 
 
 @pytest.mark.asyncio
-async def test_dispatch_lifecycle_calls_lifecycle_op(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """lifecycle kind -> ops.lifecycle_op with parsed path."""
-    dispatch_pool: ConnectionPool = _stub_pool()
-    captured: dict[str, object] = {}
-
-    async def _fake_lifecycle(  # type: ignore[no-untyped-def]
-        _db: object,
-        _bus: object,
-        path,
-        body,
-        pool,
-        *,
-        trigger_inbound_id=None,
-        trigger_inbound_kind=None,
-    ):
-        from ops.rpc_schemas import TerminateAgentResponse
-
-        captured["path"] = path
-        captured["body"] = body
-        captured["trigger_inbound_id"] = trigger_inbound_id
-        captured["trigger_inbound_kind"] = trigger_inbound_kind
-        return TerminateAgentResponse(status=TerminateResult.ENQUEUED)
-
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
-    status, result = await daemon._dispatch(
-        "lifecycle",
-        {
-            "path": "/api/agents/42/resurrect-if-pending-work-v2",
-            "body": {"resurrected_by": "system"},
-            "trigger_inbound_id": 123,
-            "trigger_inbound_kind": "chat",
-        },
-        active_ops={},
-        workers=set(),
-        pool=dispatch_pool,
-        executor=op_executor,
-    )
-    assert status == "completed"
-    # _dispatch serializes the lifecycle response model to a JSON dict for the wire.
-    assert result == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-    assert captured["path"] == "/api/agents/42/resurrect-if-pending-work-v2"
-    assert captured["body"] == {"resurrected_by": "system"}
-    assert captured["trigger_inbound_id"] == 123
-    assert captured["trigger_inbound_kind"] == "chat"
-
-
-@pytest.mark.asyncio
-async def test_dispatch_lifecycle_missing_path_fails(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """lifecycle payload without 'path' returns failed without invoking ops."""
-    dispatch_pool: ConnectionPool = _stub_pool()
-
-    async def _should_not_be_called(_db: object, _bus: object, *_a, **_kw):  # type: ignore[no-untyped-def]
-        raise AssertionError("lifecycle_op should not be invoked on missing path")
-
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _should_not_be_called)  # pyright: ignore[reportUnknownArgumentType]
-    status, result = await daemon._dispatch(
-        "lifecycle", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
-    )
-    assert status == "failed"
-    # LifecyclePayload validation rejects a missing 'path' before lifecycle_op runs.
-    assert "path" in str(result["error"])
-
-
-@pytest.mark.asyncio
 async def test_dispatch_unknown_kind(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+    op_executor: ThreadPoolExecutor,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Unknown kind returns failed; routing table is exhaustive."""
     dispatch_pool: ConnectionPool = _stub_pool()
     status, result = await daemon._dispatch(
-        "bogus_kind", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
+        "bogus_kind",
+        {},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "failed"
     assert "unknown kind" in str(result["error"])
 
 
 @pytest.mark.asyncio
-async def test_dispatch_unparseable_lifecycle_path(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """ops.lifecycle_op raising ValueError lands as failed result, not a crash."""
-    dispatch_pool: ConnectionPool = _stub_pool()
-
-    async def _raises(  # type: ignore[no-untyped-def]
-        _db: object,
-        _bus: object,
-        path,
-        body,
-        pool,
-        *,
-        trigger_inbound_id=None,
-        trigger_inbound_kind=None,
-    ):
-        raise ValueError(f"lifecycle path not recognized: {path!r}")
-
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
-    status, result = await daemon._dispatch(
-        "lifecycle",
-        {"path": "/garbage", "body": {}},
-        active_ops={},
-        workers=set(),
-        pool=dispatch_pool,
-        executor=op_executor,
-    )
-    assert status == "failed"
-    assert "not recognized" in str(result["error"])
-
-
-@pytest.mark.asyncio
 async def test_dispatch_shell_capture_shell_not_found_fails(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """shell_capture_op raising ShellNotFoundError (the session died) lands as a
     plain failed result, not a crash for _ops_route's catch-all to log."""
@@ -526,81 +510,12 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "failed"
     assert "ShellNotFoundError" in str(result["error"])
     assert "no live shell" in str(result["error"])
-
-
-@pytest.mark.asyncio
-async def test_dispatch_resurrect_refusal_fails_with_its_reason(
-    op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A resurrection refusal is a durable verdict, returned in the wire form
-    the caller classifies (`ResurrectRefused: <reason>`), not a dispatch crash."""
-    from base.agents import ResurrectRefused
-
-    dispatch_pool: ConnectionPool = _stub_pool()
-
-    async def _raises(  # type: ignore[no-untyped-def]
-        _db: object,
-        _bus: object,
-        path,
-        body,
-        pool,
-        *,
-        trigger_inbound_id=None,
-        trigger_inbound_kind=None,
-    ):
-        raise ResurrectRefused("runtime_cutover_required")
-
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
-    status, result = await daemon._dispatch(
-        "lifecycle",
-        {"path": "/api/agents/7/resurrect-explicit-v2", "body": {}},
-        active_ops={},
-        workers=set(),
-        pool=dispatch_pool,
-        executor=op_executor,
-    )
-    assert (status, result) == ("failed", {"error": "ResurrectRefused: runtime_cutover_required"})
-
-
-@pytest.mark.asyncio
-async def test_dispatch_wire_error_carries_reason(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """AvaAgentError raised by an op is converted to a failed result with reason field
-    so the gateway's _raise_proxied_wire_error_from_payload can re-emit."""
-    dispatch_pool: ConnectionPool = _stub_pool()
-
-    from base.agents import AgentNotFound
-
-    async def _raises(  # type: ignore[no-untyped-def]
-        _db: object,
-        _bus: object,
-        path,
-        body,
-        pool,
-        *,
-        trigger_inbound_id=None,
-        trigger_inbound_kind=None,
-    ):
-        raise AgentNotFound("agent 999 does not exist")
-
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
-    status, result = await daemon._dispatch(
-        "lifecycle",
-        {"path": "/api/agents/999/terminate", "body": {}},
-        active_ops={},
-        workers=set(),
-        pool=dispatch_pool,
-        executor=op_executor,
-    )
-    assert status == "failed"
-    assert "AgentNotFound" in str(result["error"])
-    assert result.get("reason") == "agent_not_found"
 
 
 # ─── _ops_route (the POST /ops handler) ─────────────────────────────────────────
@@ -608,25 +523,30 @@ async def test_dispatch_wire_error_carries_reason(
 
 @pytest.mark.asyncio
 async def test_ops_route_wraps_dispatch_in_envelope(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+    op_executor: ThreadPoolExecutor,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A valid body returns 200 with {status, result} from _dispatch."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_sem = asyncio.Semaphore(4)
 
     async def _fake_dispatch(
-        kind,
-        payload,
+        kind: str,
+        payload: dict[str, Any],
         *,
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
         pool: ConnectionPool,
         executor: ThreadPoolExecutor,
-    ):  # type: ignore[no-untyped-def]
+        catalog: ModelCatalog,
+        authority: ConfigAuthority,
+    ) -> tuple[str, dict[str, object]]:
         assert kind == "status_probe"
         return "completed", {"paused": False}
 
-    monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)
     status, body, ctype = await daemon._ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
@@ -635,6 +555,8 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         requests=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == 200
     assert ctype == "application/json"
@@ -645,6 +567,8 @@ async def test_ops_route_wraps_dispatch_in_envelope(
 async def test_ops_route_status_probe_serializes_datetime_fields(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """status_probe through the real _dispatch must survive _ops_route's json.dumps
     even when ClusterStatus carries datetime values nested inside it.
@@ -693,6 +617,8 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
         requests=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == 200
     assert ctype == "application/json"
@@ -707,6 +633,8 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
 async def test_ops_route_completes_with_a_db_down_degraded_status(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """DB-down, including an unreachable paused row, remains HTTP 200 completed."""
     from ops.cluster_status import ClusterStatus
@@ -735,6 +663,8 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
         requests=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
 
     assert status == 200
@@ -776,7 +706,14 @@ def _fake_spawn_factory(calls: dict[str, int]) -> object:
     """A launch_agent_op stand-in that counts executions and returns id 777."""
     from ops.rpc_schemas import SpawnedAgent
 
-    async def _fake_spawn(_db, _bus, body, pool):  # type: ignore[no-untyped-def]
+    async def _fake_spawn(
+        _db: object,
+        _bus: object,
+        body: LaunchAgentRequest,
+        pool: ConnectionPool | None,
+        *,
+        catalog: ModelCatalog,
+    ) -> SpawnedAgent:
         calls["n"] = calls.get("n", 0) + 1
         return SpawnedAgent(id=777)
 

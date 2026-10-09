@@ -44,7 +44,7 @@ def _is_runner_db_url(url: str) -> bool:
     return _RUNNER_LOGIN.fullmatch(urlsplit(url).username or "") is not None
 
 
-def _loopback_if_self(url: str) -> str:
+def _loopback_if_self(url: str, *, machine_host: str | None = None) -> str:
     """Return `url` with its host swapped to `127.0.0.1` when it names this
     machine's own reachable address; any other host — and an already-loopback
     host — passes through verbatim. The placeholder URL is skipped
@@ -61,7 +61,13 @@ def _loopback_if_self(url: str) -> str:
     host = urlsplit(url).hostname or ""
     if not host or is_loopback_host(host):
         return url
-    machine = self_machine_host().strip().lower().removeprefix("[").removesuffix("]")
+    machine = (
+        (self_machine_host() if machine_host is None else machine_host)
+        .strip()
+        .lower()
+        .removeprefix("[")
+        .removesuffix("]")
+    )
     if host == machine:  # urlsplit lowercases + unbrackets hostname; match that form
         return url_with_host(url, "127.0.0.1")
     return url
@@ -126,11 +132,49 @@ class AgentProfileOwnerDbUrlRefusedError(ValueError):
     Raised by `_refuse_agent_owner_url` when an agent-profile process would dial
     the local plane as anything but a runner-class login — a deliberate
     fail-fast, not a decode failure. A `ValueError` subclass so the
-    config-service read path (`base/config/service_read.py`) can classify this
-    EXPECTED topology precisely (type test, never a message match) and serve the
-    boot-time value silently for the agent-profile process's own `.env` line,
-    while every other decode failure still surfaces as an operator warning (#4332).
+    config-service read path can reject a missing runner projection before
+    validating fresh file values. The authority chooses the delivered runner
+    login explicitly; invalid file values never recover from validation errors.
     """
+
+
+def project_service_db_url(
+    raw: str,
+    projected: str,
+    *,
+    profile: str | None,
+    home: Path,
+    cluster_secret: str,
+    machine_host: str,
+) -> str:
+    """Select a delivered runner login for the guarded local owner-file topology.
+
+    A default-home agent's owner file carries the launcher endpoint, while its
+    runtime carries the runner login. All other sources retain their file URL.
+    Malformed URLs are left for domain validation to reject in its normal
+    ValidationError; a missing runner projection is refused by name.
+    """
+    if profile != "agent" or not cluster_secret:
+        return raw
+    if home.expanduser().resolve() != (Path.home() / ".ava").resolve():
+        return raw
+    try:
+        local_owner = (
+            raw != PLACEHOLDER_DB_URL
+            and not _is_runner_db_url(raw)
+            and is_loopback_host(
+                urlsplit(_loopback_if_self(raw, machine_host=machine_host)).hostname or ""
+            )
+        )
+    except ValueError:
+        return raw
+    if not local_owner:
+        return raw
+    if not _is_runner_db_url(projected):
+        raise AgentProfileOwnerDbUrlRefusedError(
+            "agent config reads require a delivered runner-class database login"
+        )
+    return projected
 
 
 class DataPlaneSettings(EnvSettings):

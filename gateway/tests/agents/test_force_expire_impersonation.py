@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from base.agents import impersonation
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.app import app
@@ -18,6 +19,8 @@ def test_force_expire_endpoint_requires_observed_session_and_returns_distinct_st
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
@@ -36,6 +39,7 @@ def test_force_expire_endpoint_requires_observed_session_and_returns_distinct_st
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     path = f"/api/agents/{agent_id}/impersonation/force-expire"
     with TestClient(app) as client:

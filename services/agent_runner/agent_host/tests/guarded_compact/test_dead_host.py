@@ -18,7 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _agent, _insert
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
@@ -72,6 +72,7 @@ async def test_actual_sigkill_certified_successor_and_cancellation_order(
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     stage: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = prepare_agent(db_conn)
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential
@@ -88,11 +89,13 @@ async def test_actual_sigkill_certified_successor_and_cancellation_order(
         accepted, active, cancelled = await kill_at_boundary(child, client, path, headers, stage)
         chat = _insert(db_conn, agent)
         model = SummaryModel(responses=["MUST NEVER GENERATE ANOTHER SUMMARY" * 100])
-        binding = model_catalog().bindings["gpt-"]
-        add_bindings({"gpt-": replace(binding, build_single_attempt=lambda _: model)})
+        binding = model_catalog.bindings["gpt-"]
+        model_catalog = add_bindings(
+            model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+        )
         ordinary: list[object] = []
         host, saver, config = await make_host(
-            aops_pool, agent, 100, ordinary, monkeypatch, seed_history=False
+            aops_pool, agent, 100, ordinary, monkeypatch, seed_history=False, catalog=model_catalog
         )
         await host.run_turn(agent)
         status = client.get(

@@ -35,6 +35,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from tests.factories.maintenance import WHEN, maintenance_agent, start_cluster_through_ready_gate
@@ -47,6 +48,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = _agent(db_conn)
     old = AgentHost(
@@ -56,6 +58,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         machine=machine_name(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     incarnation = await admit_hosted_runtime(
         aops_pool,
@@ -89,6 +92,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         machine=machine_name(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     await successor.run_turn(agent)
     current = admission.snapshot()
@@ -186,6 +190,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    model_catalog: ModelCatalog,
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -218,6 +223,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         machine=machine_name(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     assert (
         await admit_hosted_runtime(
@@ -246,6 +252,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         machine=machine_name(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
@@ -254,6 +261,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(
@@ -289,6 +297,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = _agent(db_conn)
     host = AgentHost(
@@ -298,6 +307,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
         machine=machine_name(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     incarnation = await admit_hosted_runtime(
         aops_pool,
@@ -426,6 +436,7 @@ def _host_driving_invoke_until_done(
     saver: AsyncPostgresSaver,
     graph: Any,
     ctx: AvaContext,
+    model_catalog: ModelCatalog,
 ) -> AgentHost:
     host = AgentHost(
         pool=pool,
@@ -434,6 +445,7 @@ def _host_driving_invoke_until_done(
         machine=machine_name(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
 
@@ -471,6 +483,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = maintenance_agent(db_conn)
     entered, finish = asyncio.Event(), asyncio.Event()
@@ -496,11 +509,14 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=agent, owns_loop=True),
+        catalog=model_catalog,
     )
     monkeypatch.setattr(
         "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
     )
-    host = _host_driving_invoke_until_done(monkeypatch, aops_pool, saver, graph, ctx)
+    host = _host_driving_invoke_until_done(
+        monkeypatch, aops_pool, saver, graph, ctx, model_catalog=model_catalog
+    )
     work = asyncio.create_task(host.run_turn(agent))
     try:
         await asyncio.wait_for(entered.wait(), 5)
@@ -534,6 +550,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
             AsyncPostgresSaver(aops_pool),
             builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
             ctx,
+            model_catalog=model_catalog,
         )
         wakes = await successor.pending_inbound_wakes(stale_after_s=300)
         assert agent in [wake.agent_id for wake in wakes]

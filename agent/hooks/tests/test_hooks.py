@@ -23,6 +23,7 @@ from base.agents.context import AvaContext
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
@@ -78,6 +79,7 @@ def _empty_runtime() -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     return Runtime(context=ctx)
 

@@ -13,6 +13,8 @@ from base.agents.labels import publish_label_updated
 from base.agents.messages.kwargs import message_content
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks
 from base.lm.factory import build_chat_model
 from services.derived.labeler.config import LabelerConfig
@@ -146,7 +148,15 @@ def _rejection_reason(label: str, max_chars: int) -> str | None:
 
 
 async def generate_label_async(
-    agent_id: int, prompt: str, config: LabelerConfig, db: Database, bus: EventBus
+    agent_id: int,
+    prompt: str,
+    config: LabelerConfig,
+    db: Database,
+    bus: EventBus,
+    *,
+    catalog: ModelCatalog,
+    llm_override: str,
+    overrides: ModelOverrides,
 ) -> bool | None:
     """Generate a label via the LLM, CAS-write to DB, publish the event.
 
@@ -167,7 +177,13 @@ async def generate_label_async(
         # parsing complexity (PR #69 hit a thinking block signature
         # leaking into the label). Disable at the source so the consumer
         # typically only needs to handle str content.
-        llm = build_chat_model(config.labeler_model, thinking={"type": "disabled"})
+        llm = build_chat_model(
+            config.labeler_model,
+            thinking={"type": "disabled"},
+            catalog=catalog,
+            llm_override=llm_override,
+            overrides=overrides,
+        )
         response = await llm.ainvoke(
             [
                 SystemMessage(content=_system_prompt(config.labeler_max_chars)),
@@ -178,6 +194,7 @@ async def generate_label_async(
 
         log_usage_from_message(
             response,
+            catalog=catalog,
             model=config.labeler_model,
             usage_kind="batch",
             for_agent_id=agent_id,

@@ -11,8 +11,9 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
+import ava
+from ava.sdk_surface.install import installed
 from base.agents.compaction.commands import observe
-from base.lm.plugin_providers import model_catalog, use_catalog
 from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
 from services.agent_runner.agent_host.invocation.compact import execute as compact_execute
 from services.agent_runner.agent_host.invocation.compact import lifecycle as compact_lifecycle
@@ -99,21 +100,25 @@ async def main() -> None:
     model = SummaryModel(
         responses=["short" if stage == "short" else "Original child summary. " * 100]
     )
-    catalog = model_catalog()
+    ava.ensure_plugins_loaded()
+    installation = installed()
+    assert installation is not None
+    catalog = installation.require_catalog()
     binding = replace(catalog.bindings["gpt-"], build_single_attempt=lambda _: model)
-    with use_catalog(replace(catalog, bindings={**catalog.bindings, "gpt-": binding})):
-        async with AsyncConnectionPool[psycopg.AsyncConnection](
-            os.environ["AVA_DB_URL"], open=False
-        ) as pool:
-            host, _, _ = await make_host(pool, agent, 100, [], patch)
-            await host.run_turn(agent)
-            with ConnectionPool[psycopg.Connection](os.environ["AVA_DB_URL"]) as sync:
-                target = observe(sync, agent)
-            sys.stdout.write(target.model_dump_json() + "\n")
-            sys.stdout.flush()
-            await asyncio.to_thread(sys.stdin.readline)
-            install(stage, model, patch, host, agent)
-            await host.run_turn(agent)
+    catalog = replace(catalog, bindings={**catalog.bindings, "gpt-": binding})
+    patch.setattr(ava, "__plugin_installation__", replace(installation, catalog=catalog))
+    async with AsyncConnectionPool[psycopg.AsyncConnection](
+        os.environ["AVA_DB_URL"], open=False
+    ) as pool:
+        host, _, _ = await make_host(pool, agent, 100, [], patch, catalog=catalog)
+        await host.run_turn(agent)
+        with ConnectionPool[psycopg.Connection](os.environ["AVA_DB_URL"]) as sync:
+            target = observe(sync, agent)
+        sys.stdout.write(target.model_dump_json() + "\n")
+        sys.stdout.flush()
+        await asyncio.to_thread(sys.stdin.readline)
+        install(stage, model, patch, host, agent)
+        await host.run_turn(agent)
 
 
 if __name__ == "__main__":

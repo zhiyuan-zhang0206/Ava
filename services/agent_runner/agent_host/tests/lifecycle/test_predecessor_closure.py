@@ -20,11 +20,13 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.deploy.maintenance.cohort import _applied_capture, verify_drained
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host.maintenance import record_drained
@@ -59,11 +61,22 @@ def _retired(generation: UUID, owner: UUID, *, open_request: bool = False) -> di
     }
 
 
-def _drained(db: psycopg.Connection, **resources: bool) -> tuple[int, int, dict[str, Any]]:
+def _drained(
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    **resources: bool,
+) -> tuple[int, int, dict[str, Any]]:
     """An idle agent exactly as the retired drain left it: the applied restart
     receipt is still the lifecycle pointer and the old owner was released."""
     aid, _, _, _ = create_agent_row(
-        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     before = _retired(uuid4(), uuid4(), **resources)
     receipt = db.execute(
@@ -126,8 +139,14 @@ async def test_retired_row_is_a_recorded_loud_refusal(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    aid, receipt, before = _drained(db_conn)
+    aid, receipt, before = _drained(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+    )
     unchanged = _snapshot(db_conn, aid, receipt)
 
     assert (
@@ -147,9 +166,16 @@ async def test_retired_row_is_a_recorded_loud_refusal(
 
 
 async def test_closed_form_is_admitted_exactly_once(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    aid, receipt, before = _drained(db_conn)
+    aid, receipt, before = _drained(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+    )
     closed = _closed_form(db_conn, aid, before)
     stored = _snapshot(db_conn, aid, receipt)
     assert decode_resources(stored[0]["incarnation_resources"]) == closed
@@ -181,9 +207,16 @@ async def test_closed_form_is_admitted_exactly_once(
 
 
 async def test_closed_form_without_its_receipt_is_not_admissible(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    aid, receipt, before = _drained(db_conn)
+    aid, receipt, before = _drained(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+    )
     _closed_form(db_conn, aid, before)
     # Withdraw the receipt: the same bytes without a settled decision prove nothing.
     db_conn.execute("UPDATE inbound_messages SET applied_at=NULL WHERE id=%s", (receipt,))
@@ -196,12 +229,21 @@ async def test_closed_form_without_its_receipt_is_not_admissible(
         )
 
 
-def _resurrected(db: psycopg.Connection) -> tuple[int, int, dict[str, Any]]:
+def _resurrected(
+    db: psycopg.Connection,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+) -> tuple[int, int, dict[str, Any]]:
     """An agent whose recorded incarnation ended through an applied and observed
     terminate, then resurrected and never readmitted: idling, its owner
     released, no lifecycle pointer, the retired value still stored."""
     aid, _, _, _ = create_agent_row(
-        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     before = _retired(uuid4(), uuid4())
     receipt = db.execute(
@@ -222,11 +264,18 @@ def _resurrected(db: psycopg.Connection) -> tuple[int, int, dict[str, Any]]:
 
 
 async def test_a_resurrected_row_never_readmitted_is_admitted_through_its_terminate_receipt(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Resurrection released the owner and left no pointer; the successor's
     admission consumes the closed form through the observed terminate."""
-    aid, receipt, before = _resurrected(db_conn)
+    aid, receipt, before = _resurrected(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+    )
     _closed_form(db_conn, aid, before)
     successor = await _admit(
         aops_pool,
@@ -244,11 +293,17 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The next release drains a converted agent: a restart released by the
     managed host leaves the complete empty set of exactly that incarnation,
     which the host receipt, a preparation retry and certification all accept."""
-    aid, _receipt, before = _drained(db_conn)
+    aid, _receipt, before = _drained(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+    )
     _closed_form(db_conn, aid, before)
     incarnation = await _admit(
         aops_pool,

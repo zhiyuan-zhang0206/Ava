@@ -31,6 +31,7 @@ import pytest
 from base.config import settings
 from base.daemon import health
 from base.daemon.health import Liveness
+from base.lm.plugin_providers import build_model_catalog
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.embeddings import factory
@@ -499,7 +500,7 @@ def test_factory_worst_case_registry_complete(monkeypatch: pytest.MonkeyPatch) -
     unknown = "unknown-provider"
     monkeypatch.setattr(settings.services, "embedding_backend", unknown)
     with pytest.raises(ValueError, match="unknown embedding provider") as provider_error:
-        factory.get_provider_named(unknown)
+        factory.get_provider_named(unknown, catalog=build_model_catalog())
     with pytest.raises(ValueError) as budget_error:
         factory.worst_case_batch_seconds()
     assert str(budget_error.value) == str(provider_error.value)

@@ -12,6 +12,7 @@ from pydantic import model_validator
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.config.admin import plugin_config
+from base.config.service_read import ConfigAuthority
 from base.packages import plugin_config_images
 from base.packages.plugin_config_images import PluginConfigOwner
 from gateway.app import app
@@ -39,20 +40,25 @@ def owned_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def write_request(
-    consumer: Literal["gateway", "host"], *, bad_candidate: bool = False
+    consumer: Literal["gateway", "host"],
+    *,
+    bad_candidate: bool = False,
+    config_authority: ConfigAuthority,
 ) -> Response | ConfigWriteOpResult:
     if consumer == "gateway":
         with TestClient(app) as client:
             return client.put("/api/config", json={"task_escalate_n": -1 if bad_candidate else 7})
-    return config_write_op({"task_maintenance_enabled": not bad_candidate}, local=False)
+    return config_write_op(
+        {"task_maintenance_enabled": not bad_candidate}, local=False, authority=config_authority
+    )
 
 
 @pytest.mark.parametrize("consumer", ["gateway", "host"])
 def test_invalid_whole_candidate_is_rejected_without_writing(
-    owned_image: Path, consumer: Literal["gateway", "host"]
+    owned_image: Path, consumer: Literal["gateway", "host"], *, config_authority: ConfigAuthority
 ) -> None:
     saved = owned_image.read_bytes()
-    result = write_request(consumer, bad_candidate=True)
+    result = write_request(consumer, bad_candidate=True, config_authority=config_authority)
     if isinstance(result, Response):
         assert result.status_code == 400
         assert "candidate Fleet policy rejected" in result.json()["detail"]
@@ -66,7 +72,11 @@ def test_invalid_whole_candidate_is_rejected_without_writing(
 
 @pytest.mark.parametrize("consumer", ["gateway", "host"])
 def test_concurrent_image_change_is_rejected_without_overwriting(
-    owned_image: Path, monkeypatch: pytest.MonkeyPatch, consumer: Literal["gateway", "host"]
+    owned_image: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: Literal["gateway", "host"],
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     concurrent = ValidatedFleetConfig(task_escalate_n=19).model_dump_json().encode()
     original_lock = plugin_config_images.file_lock
@@ -80,7 +90,7 @@ def test_concurrent_image_change_is_rejected_without_overwriting(
             yield
 
     monkeypatch.setattr(plugin_config_images, "file_lock", lock_after_competing_write)
-    result = write_request(consumer)
+    result = write_request(consumer, config_authority=config_authority)
     if isinstance(result, Response):
         assert result.status_code == 409
         assert "plugin config changed" in result.json()["detail"]
@@ -99,6 +109,8 @@ def test_unexpected_persistence_failure_keeps_original_exception_and_bytes(
     monkeypatch: pytest.MonkeyPatch,
     consumer: Literal["gateway", "host"],
     error_type: type[Exception],
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     saved = owned_image.read_bytes()
     failure = error_type("unexpected persistence failure")
@@ -108,7 +120,7 @@ def test_unexpected_persistence_failure_keeps_original_exception_and_bytes(
 
     monkeypatch.setattr(plugin_config_images, "write_bytes_atomic", fail_write)
     with pytest.raises(error_type) as captured:
-        write_request(consumer)
+        write_request(consumer, config_authority=config_authority)
     assert captured.value is failure
     assert owned_image.read_bytes() == saved
 
@@ -120,6 +132,8 @@ def test_unexpected_owner_failure_keeps_original_exception_and_bytes(
     monkeypatch: pytest.MonkeyPatch,
     consumer: Literal["gateway", "host"],
     error_type: type[Exception],
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from gateway.routers.configuration import runtime as config_router
     from ops import host_config
@@ -133,6 +147,6 @@ def test_unexpected_owner_failure_keeps_original_exception_and_bytes(
     module = config_router if consumer == "gateway" else host_config
     monkeypatch.setattr(module, "patch_owner", fail_owner)
     with pytest.raises(error_type) as captured:
-        write_request(consumer)
+        write_request(consumer, config_authority=config_authority)
     assert captured.value is failure
     assert owned_image.read_bytes() == saved

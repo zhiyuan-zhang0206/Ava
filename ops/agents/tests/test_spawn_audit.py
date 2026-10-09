@@ -12,8 +12,10 @@ import psycopg
 import pytest
 
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.plugin_providers import build_model_catalog
 from ops.agents import birth_transaction
 from ops.agents.spawn import create_agent_row
 
@@ -41,11 +43,22 @@ def _first_checkpoint(db: psycopg.Connection, agent_id: int) -> str:
 
 
 def test_a_spawn_is_recorded_with_its_machine(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     machine = machine_name()
 
-    agent_id, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine)
+    agent_id, _, _, _ = create_agent_row(
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine,
+        catalog=build_model_catalog(),
+        authority=config_authority,
+    )
 
     [(source, target, attributes)] = _audit(db_conn, agent_id, "spawn")
     assert (source, target) == ("user", None)
@@ -53,9 +66,20 @@ def test_a_spawn_is_recorded_with_its_machine(
 
 
 def test_a_fork_is_recorded_against_its_source_agent(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
-    parent, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
+    parent, _, _, _ = create_agent_row(
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_name(),
+        catalog=build_model_catalog(),
+        authority=config_authority,
+    )
     checkpoint = _first_checkpoint(db_conn, parent)
 
     child, _, _, _ = create_agent_row(
@@ -65,6 +89,8 @@ def test_a_fork_is_recorded_against_its_source_agent(
         fork_from=parent,
         fork_checkpoint=checkpoint,
         machine=machine_name(),
+        catalog=build_model_catalog(),
+        authority=config_authority,
     )
 
     [(source, target, attributes)] = _audit(db_conn, child, "fork")
@@ -77,6 +103,8 @@ def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     agent_id, _, inbound_id, _ = create_agent_row(
         database,
@@ -85,6 +113,8 @@ def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
         machine=machine_name(),
         prompt="hello",
         prompt_source="agent:4242",
+        catalog=build_model_catalog(),
+        authority=config_authority,
     )
 
     [(source, target, attributes)] = _audit(db_conn, agent_id, "send_message")
@@ -97,6 +127,8 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
     db_conn.commit()
@@ -107,7 +139,14 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     monkeypatch.setattr(birth_transaction, "record_audit", refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
-        create_agent_row(database, event_bus, spawner="user", machine=machine_name())
+        create_agent_row(
+            database,
+            event_bus,
+            spawner="user",
+            machine=machine_name(),
+            catalog=build_model_catalog(),
+            authority=config_authority,
+        )
 
     after = db_conn.execute("SELECT count(*) FROM agents").fetchone()
     db_conn.commit()

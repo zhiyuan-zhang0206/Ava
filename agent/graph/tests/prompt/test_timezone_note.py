@@ -19,6 +19,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
@@ -33,6 +34,7 @@ def _context(agent_id: int | None = 7) -> AvaContext:
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         agent=AgentSlices.resolve(),
+        catalog=build_model_catalog(),
     )
 
 

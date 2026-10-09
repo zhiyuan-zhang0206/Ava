@@ -22,9 +22,12 @@ from agent.hooks.compact import (
     emergency_compact_summary,
 )
 from base.agents.context import AvaContext
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from services.agent_runner.agent_host.tests.test_circuit_breaker import (
     _ancestor_halt_notes,
     _overflow_state,
@@ -45,7 +48,9 @@ async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> Non
     llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=ModelAPIError("provider 502"))
 
     with pytest.raises(CompactionFailedError, match="no usable summary"):
-        await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
+        await emergency_compact_summary(
+            msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+        )
     assert llm.bind_tools.return_value.ainvoke.await_count == COMPACT_MAX_ATTEMPTS
 
 
@@ -110,13 +115,17 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Two consecutive permanent rejections with no successful turn between
     them halt automatic recovery: the durable streak reaches the threshold,
     the wake suppression names the reason, the metadata-only report reaches
     the nearest live ancestor, and the frontend gets a blocked Error — while
     ONE rejection alone changes none of it."""
-    ancestor_id, child_id = _spawn_child_under_idling_ancestor(db_conn)
+    ancestor_id, child_id = _spawn_child_under_idling_ancestor(
+        db_conn, model_catalog=model_catalog, config_authority=config_authority
+    )
     publisher = _RecordingPublisher()
 
     await _reject_turn(aops_pool, child_id, publisher=publisher)
@@ -153,11 +162,15 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
 
 
 async def test_transient_rejection_does_not_count_or_trip(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Only the PERMANENT class counts: a configured-fatal/transient rejection
     aborts the turn but never arms the recovery breaker."""
-    child_id = spawn_agent(spawner="user")
+    child_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     exc = FatalProviderError(
         "rate limited", error_class="transient", provider="deepseek", status=429
     )
@@ -171,14 +184,18 @@ async def test_transient_rejection_does_not_count_or_trip(
 
 
 async def test_completed_turn_resets_the_streak_and_clears_the_marker(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The completed-turn UPDATE is the single reset: it clears the corpse
     marker, the recovery-breaker streak, and the recorded reject reason
     together (agent/graph/llm/node.py)."""
     from agent.graph.llm.node import _persist_last_active
 
-    child_id = spawn_agent(spawner="user")
+    child_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     db_conn.execute(
         "UPDATE agents_meta SET permanent_reject_streak = 2, "
         "last_permanent_reject_reason = 'billing', last_turn_fatal_at = now() "
@@ -195,6 +212,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=build_model_catalog(),
         ),
         child_id,
         "done",

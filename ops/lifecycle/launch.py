@@ -10,14 +10,21 @@ from base.agents import ForkSourceEmpty
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
+from base.config.service_read import ConfigAuthority
 from base.db import Database, publish_inbound_wake
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.agents import latest_checkpoint_id
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 
 async def launch_agent_op(
-    db: Database, bus: EventBus, body: LaunchAgentRequest, db_pool: ConnectionPool
+    db: Database,
+    bus: EventBus,
+    body: LaunchAgentRequest,
+    db_pool: ConnectionPool,
+    *,
+    catalog: ModelCatalog,
 ) -> SpawnedAgent:
     """Validate a gateway-created row and wake its host without changing identity.
 
@@ -31,6 +38,8 @@ async def launch_agent_op(
 
     await asyncio.to_thread(
         validate_model_config,
+        catalog=catalog,
+        llm_override=settings.lm.llm_override,
         model=settings.lm.llm_model,
         config=resolve_agent_config_pins(body.config, body.birth_config),
     )
@@ -51,14 +60,27 @@ def _validate_launch_row(db_pool: ConnectionPool, body: LaunchAgentRequest) -> N
         raise ValueError(f"agent {body.agent_id} launch attempt is stale or misplaced")
 
 
-def spawn_prechecks_blocking(body: SpawnAgentRequest, db_pool: ConnectionPool) -> str | None:
+def spawn_prechecks_blocking(
+    body: SpawnAgentRequest,
+    db_pool: ConnectionPool,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
+) -> str | None:
     """Sync spawn pre-checks — via to_thread: model-config validation (may read
     provider API keys) + fork checkpoint lookup. Returns the fork checkpoint
     (None for a plain spawn)."""
     from base.lm.model_config import validate_spawn_model_config
 
     with db_pool.connection() as conn, conn.cursor() as cur:
-        validate_spawn_model_config(cur, body.config, body.fork_from)
+        validate_spawn_model_config(
+            cur,
+            body.config,
+            body.fork_from,
+            catalog=catalog,
+            authority=authority,
+            llm_override=settings.lm.llm_override,
+        )
     fork_checkpoint: str | None = None
     if body.fork_from is not None:
         with db_pool.connection() as conn, conn.cursor() as cur:

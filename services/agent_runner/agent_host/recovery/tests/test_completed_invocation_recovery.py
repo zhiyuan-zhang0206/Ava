@@ -14,6 +14,7 @@ from base.agents.context import AvaContext
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.invocation import PendingWorkResult
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
@@ -27,6 +28,7 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     site: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent)
@@ -40,6 +42,7 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
         graph=graph,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
@@ -47,6 +50,7 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     original_invoke = host_module.run_invocation_with_stall_guard
     original_flush = host_module.flush_checkpoint
@@ -110,8 +114,7 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
 
 
 async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
 ) -> None:
     agent = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent)
@@ -122,6 +125,7 @@ async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
         graph=graph,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
@@ -129,6 +133,7 @@ async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     host._runtimes[agent] = MagicMock()
     # A forced or superseded lifecycle return can carry its graph flag while

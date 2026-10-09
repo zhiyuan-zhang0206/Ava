@@ -7,6 +7,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.invocation import native_work as owner
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
@@ -25,6 +26,7 @@ async def test_pause_fault_cannot_ack_then_resume_original_conversation(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     site: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     target, successor, _force = await _force_successor(db_conn, aops_pool)
     replies: list[str] = []
@@ -98,4 +100,5 @@ async def test_pause_fault_cannot_ack_then_resume_original_conversation(
         config,
         replies,
         expected_first=["continued"],
+        model_catalog=model_catalog,
     )

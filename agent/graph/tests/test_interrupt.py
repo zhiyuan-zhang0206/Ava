@@ -22,10 +22,13 @@ from agent.graph.llm_errors import LlmLedger
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
@@ -451,6 +454,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=build_model_catalog(),
         )
     )
     invocation = asyncio.create_task(
@@ -503,6 +507,9 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     marker: str,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     from typing import Any, cast
     from unittest.mock import AsyncMock, MagicMock
@@ -560,7 +567,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     model, publisher = MagicMock(), MagicMock()
     model.bind_tools.return_value = model
     model.astream.return_value = ordinary_generation()
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
     runtime = Runtime(
         context=AvaContext(
@@ -570,6 +577,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=build_model_catalog(),
         )
     )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)
@@ -586,13 +594,17 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     state = state.model_copy(
         update={"messages": serde.loads_typed(serde.dumps_typed(state.messages))}
     )
-    assert not auto_compact_will_fire(state, runtime.context.require_agent())
+    assert not auto_compact_will_fire(
+        state, runtime.context.require_agent(), catalog=build_model_catalog()
+    )
     _insert(db_conn, tid, "cancel")
     cancelled = await claim_node(state, runtime, config)
     assert cancelled.goto == "claim"
     state = apply(state, cancelled)
     assert state.halted
-    assert not auto_compact_will_fire(state, runtime.context.require_agent())
+    assert not auto_compact_will_fire(
+        state, runtime.context.require_agent(), catalog=build_model_catalog()
+    )
     model.astream.assert_not_called()
 
     db_conn.execute(
@@ -603,7 +615,9 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     resumed = await claim_node(state, runtime, config)
     assert resumed.goto == "before_llm"
     state = apply(state, resumed)
-    assert not auto_compact_will_fire(state, runtime.context.require_agent())
+    assert not auto_compact_will_fire(
+        state, runtime.context.require_agent(), catalog=build_model_catalog()
+    )
     assert await _compact_reminder(state, runtime, config) is None
     generated = await llm_node(state, runtime, config, ledger=LlmLedger())
     assert generated.goto == "after_exec"
@@ -613,5 +627,5 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     summary.assert_awaited_once()
     model.astream.assert_called_once()
     assert auto_compact_will_fire(
-        state, runtime.context.require_agent()
+        state, runtime.context.require_agent(), catalog=build_model_catalog()
     )  # A committed ordinary result re-arms the threshold.

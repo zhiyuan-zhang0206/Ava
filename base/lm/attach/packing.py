@@ -18,8 +18,8 @@ from base.lm.attach.constants import (
     ATTACH_MAX_TOTAL_BYTES,
     ATTACH_MEDIA_MIME,
 )
+from base.lm.catalog import ModelCatalog
 from base.lm.factory import attach_modalities_for_model
-from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import AttachPolicy
 
 # Keep the notice bare: attachments persist in the message history, so any
@@ -123,9 +123,11 @@ class _PackingState:
         label: str | None,
         attachment: _AttachmentFile,
         data: bytes,
+        *,
+        catalog: ModelCatalog,
     ) -> None:
         self.media_blocks.append(
-            _content_block(model, attachment.media_type, attachment.mime, data)
+            _content_block(model, attachment.media_type, attachment.mime, data, catalog=catalog)
         )
         self.delivered.append(attachment.path_text)
         self.delivered_bytes += len(data)
@@ -137,7 +139,9 @@ class _PackingState:
         self.delivered_flags.append(True)
 
 
-def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack | None:
+def pack_attachments(
+    model: str, entries: list[AttachEntry], *, catalog: ModelCatalog
+) -> AttachmentPack | None:
     """Pack current attachment files into content blocks without raising on bad files."""
     if not entries:
         return None
@@ -145,7 +149,11 @@ def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack |
     # The attach contract, not the raw endpoint matrix: a model with an
     # attach-specific `attach_modalities` declaration packs exactly that set,
     # so a file attach() already rejected never slips through as a caption.
-    supported_media_types = attach_modalities_for_model(model)
+    supported_media_types = attach_modalities_for_model(
+        model,
+        models=catalog.models,
+        vision_prefixes={prefix: binding.vision for prefix, binding in catalog.bindings.items()},
+    )
     state = _PackingState()
 
     for index, entry in enumerate(entries, start=1):
@@ -160,10 +168,14 @@ def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack |
                 _skip_for(attachment, f"your model cannot receive {attachment.media_type}"),
             )
             continue
-        if reason := _delivery_error(model, state, attachment.size, attachment.media_type):
+        if reason := _delivery_error(
+            model, state, attachment.size, attachment.media_type, catalog=catalog
+        ):
             state.skip(index, entry.label, _skip_for(attachment, reason))
             continue
-        if reason := _image_dimension_error(model, state.delivered_images, attachment):
+        if reason := _image_dimension_error(
+            model, state.delivered_images, attachment, catalog=catalog
+        ):
             state.skip(index, entry.label, _skip_for(attachment, reason))
             continue
         data, read_error = _read_attachment(attachment)
@@ -171,10 +183,12 @@ def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack |
             state.skip(index, entry.label, _skip_for(attachment, read_error))
             continue
         assert data is not None  # noqa: S101 — paired result from _read_attachment
-        if reason := _delivery_error(model, state, len(data), attachment.media_type):
+        if reason := _delivery_error(
+            model, state, len(data), attachment.media_type, catalog=catalog
+        ):
             state.skip(index, entry.label, _skip_for(attachment, reason, len(data)))
             continue
-        state.deliver(model, index, entry.label, attachment, data)
+        state.deliver(model, index, entry.label, attachment, data, catalog=catalog)
 
     text = "\n".join(state.caption_lines)
     # Interleave each entry's caption line with its media block, ahead of the
@@ -229,12 +243,14 @@ def _skip_for(
     return _SkippedAttachment(attachment.path_text, attachment.mime, attachment_size, reason)
 
 
-def _delivery_error(model: str, state: _PackingState, size: int, media_type: str) -> str | None:
+def _delivery_error(
+    model: str, state: _PackingState, size: int, media_type: str, *, catalog: ModelCatalog
+) -> str | None:
     # The core ceiling is checked before the provider policy so a policy can
     # only narrow the effective cap, never raise it (pre-plugin behavior).
     if size > ATTACH_MAX_FILE_BYTES:
         return f"file exceeds {_mib(ATTACH_MAX_FILE_BYTES)} limit"
-    provider_size_limit = _file_size_limit(model, media_type)
+    provider_size_limit = _file_size_limit(model, media_type, catalog=catalog)
     if size > provider_size_limit:
         return f"file exceeds {_mib(provider_size_limit)} limit"
     if len(state.delivered) >= ATTACH_MAX_FILES_PER_TURN:
@@ -245,7 +261,7 @@ def _delivery_error(model: str, state: _PackingState, size: int, media_type: str
 
 
 def _image_dimension_error(
-    model: str, delivered_images: int, attachment: _AttachmentFile
+    model: str, delivered_images: int, attachment: _AttachmentFile, *, catalog: ModelCatalog
 ) -> str | None:
     if attachment.media_type != "image":
         return None
@@ -253,7 +269,7 @@ def _image_dimension_error(
     if read_error is not None:
         return read_error
     assert dimensions is not None  # noqa: S101 — paired result from _image_dimensions
-    dimension_limit = _image_dimension_limit(model, delivered_images + 1)
+    dimension_limit = _image_dimension_limit(model, delivered_images + 1, catalog=catalog)
     if max(dimensions) > dimension_limit:
         return f"image exceeds {dimension_limit} px dimension limit"
     return None
@@ -272,15 +288,15 @@ def _media_type_for_mime(mime: str) -> str:
     return mime.split("/", maxsplit=1)[0]
 
 
-def _file_size_limit(model: str, media_type: str) -> int:
-    policy = _attach_policy(model)
+def _file_size_limit(model: str, media_type: str, *, catalog: ModelCatalog) -> int:
+    policy = _attach_policy(model, catalog=catalog)
     if policy is not None:
         return policy.file_size_limits.get(media_type, ATTACH_MAX_FILE_BYTES)
     return ATTACH_MAX_FILE_BYTES
 
 
-def _attach_policy(model: str) -> AttachPolicy | None:
-    for prefix, binding in model_catalog().bindings.items():
+def _attach_policy(model: str, *, catalog: ModelCatalog) -> AttachPolicy | None:
+    for prefix, binding in catalog.bindings.items():
         if model.startswith(prefix):
             return binding.attach
     return None
@@ -297,13 +313,13 @@ def _image_dimensions(path: Path) -> tuple[tuple[int, int] | None, str | None]:
         return None, "cannot read image dimensions"
 
 
-def _image_dimension_limit(model: str, image_count: int) -> int:
+def _image_dimension_limit(model: str, image_count: int, *, catalog: ModelCatalog) -> int:
     # Sentinel high (the int32 ceiling) until a model policy tier applies:
     # nothing constrains the dimension, and the value stays representable
     # everywhere it flows (task #3696 exception inventory; tiers below
     # override).
     dimension_limit = 2**31 - 1
-    policy = _attach_policy(model)
+    policy = _attach_policy(model, catalog=catalog)
     if policy is None:
         return dimension_limit
     for min_image_count, max_px in policy.image_dimension_tiers:
@@ -313,11 +329,13 @@ def _image_dimension_limit(model: str, image_count: int) -> int:
     return dimension_limit
 
 
-def _content_block(model: str, media_type: str, mime: str, file_bytes: bytes) -> dict[str, object]:
+def _content_block(
+    model: str, media_type: str, mime: str, file_bytes: bytes, *, catalog: ModelCatalog
+) -> dict[str, object]:
     if media_type == "image":
         encoded = base64.b64encode(file_bytes).decode("ascii")
         return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}
-    policy = _attach_policy(model)
+    policy = _attach_policy(model, catalog=catalog)
     if media_type == "pdf" and policy is not None and policy.pdf_document_block:
         encoded = base64.b64encode(file_bytes).decode("ascii")
         return {

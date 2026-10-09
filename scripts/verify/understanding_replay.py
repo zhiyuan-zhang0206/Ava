@@ -92,7 +92,9 @@ from base.agents.history.hierarchy.rebuild import run_rebuild  # noqa: E402
 from base.agents.observation.snapshot import agent_model_target  # noqa: E402
 from base.config import settings  # noqa: E402
 from base.db import Database  # noqa: E402
+from base.lm.catalog import ModelCatalog  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
+from base.lm.plugin_providers import build_model_catalog  # noqa: E402
 
 _DOCKERENV = Path("/.dockerenv")
 
@@ -112,18 +114,26 @@ def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[str]]:
 
 
 def _threshold(
-    db: Database, agent_id: int, ratio: float | None, explicit: int | None
+    db: Database,
+    agent_id: int,
+    ratio: float | None,
+    explicit: int | None,
+    *,
+    catalog: ModelCatalog,
 ) -> tuple[str, int, int]:
     """(model, soft threshold, chunk threshold) for the agent."""
-    model, overrides = agent_model_target(db, agent_id, fallback="")
-    soft = resolve_context_budget(model, overrides).soft_compact_tokens
+    model, overrides = agent_model_target(db, agent_id, fallback="", catalog=catalog)
+    soft = resolve_context_budget(model, overrides, catalog=catalog).soft_compact_tokens
     if explicit is not None:
         return model, soft, explicit
     return (
         model,
         soft,
         chunk_threshold(
-            model, overrides, settings.agent.understanding_chunk_ratio if ratio is None else ratio
+            model,
+            overrides,
+            settings.agent.understanding_chunk_ratio if ratio is None else ratio,
+            catalog=catalog,
         ),
     )
 
@@ -171,12 +181,19 @@ async def _enqueue(db: Database, agent_id: int, planned: Sequence[PlannedChunk])
         await pool.close()
 
 
-async def _consume(db: Database, agent_id: int) -> None:
+async def _consume(db: Database, agent_id: int, *, catalog: ModelCatalog) -> None:
     pool = db.async_pool(AsyncConnectionPool, min_size=1, max_size=32, timeout=30.0)
     await pool.open()
     try:
         print(f"agent {agent_id}: describing its jobs, every segment at once")
-        await replay_jobs(pool, db, [execute_code], agent_id)
+        await replay_jobs(
+            pool,
+            db,
+            [execute_code],
+            agent_id,
+            catalog=catalog,
+            llm_override=settings.lm.llm_override,
+        )
     finally:
         await pool.close()
     _report_jobs(db, agent_id)
@@ -193,11 +210,13 @@ def _report_jobs(db: Database, agent_id: int) -> None:
         print(f"  segment {segment}: {count} {status}")
 
 
-async def _regroup(db: Database, agent_id: int) -> None:
+async def _regroup(db: Database, agent_id: int, *, catalog: ModelCatalog) -> None:
     pool = db.async_pool(AsyncConnectionPool, min_size=1, max_size=3, timeout=30.0)
     await pool.open()
     try:
-        leaves = await run_rebuild(pool, db, ModelCache(), agent_id)
+        leaves = await run_rebuild(
+            pool, db, ModelCache(catalog, settings.lm.llm_override), agent_id
+        )
         print(f"agent {agent_id}: upper levels rebuilt over {leaves} leaves")
     finally:
         await pool.close()
@@ -298,14 +317,17 @@ def main() -> None:
     if args.command == "report":
         _report(db, args.agent_id)
         return
+    catalog = build_model_catalog()
     if args.command == "consume":
-        asyncio.run(_consume(db, args.agent_id))
+        asyncio.run(_consume(db, args.agent_id, catalog=catalog))
         return
     if args.command == "regroup":
-        asyncio.run(_regroup(db, args.agent_id))
+        asyncio.run(_regroup(db, args.agent_id, catalog=catalog))
         return
     history, boundaries = _load(db, args.agent_id)
-    model, soft, threshold = _threshold(db, args.agent_id, args.ratio, args.threshold_tokens)
+    model, soft, threshold = _threshold(
+        db, args.agent_id, args.ratio, args.threshold_tokens, catalog=catalog
+    )
     planned = plan_history(history, boundaries, threshold=threshold)
     print(
         f"agent {args.agent_id}: {len(history.messages)} messages in {len(history.segment_starts)}"

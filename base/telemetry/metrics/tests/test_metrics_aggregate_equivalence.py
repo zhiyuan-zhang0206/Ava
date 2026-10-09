@@ -21,6 +21,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.lm.catalog import ModelCatalog
 from base.telemetry.metrics.aggregate import (
     build_report_from_aggregate,
     fetch_agent_rollups,
@@ -35,12 +36,21 @@ def fake(db_conn: psycopg.Connection) -> TelemetryStream:
 
 
 def _run_aggregate(
-    stream: TelemetryStream, *, days: int = 1, agent: int | None = None, since_compact: bool = False
+    stream: TelemetryStream,
+    *,
+    days: int = 1,
+    agent: int | None = None,
+    since_compact: bool = False,
+    model_catalog: ModelCatalog,
 ) -> tuple[str, dict[str, Any], dict[int, Any]]:
     """Run the aggregate path and return (text, data, per-agent rollups)."""
     agg = fetch_aggregate(stream.db, days, agent, since_compact=since_compact, now=stream.now)
-    text, data = build_report_from_aggregate(agg, days, agent, since_compact=since_compact)
-    _total, roll = fetch_agent_rollups(stream.db, days, since_compact=since_compact, now=stream.now)
+    text, data = build_report_from_aggregate(
+        agg, days, agent, since_compact=since_compact, prices=model_catalog.prices
+    )
+    _total, roll = fetch_agent_rollups(
+        stream.db, days, since_compact=since_compact, now=stream.now, prices=model_catalog.prices
+    )
     return text, data, roll
 
 
@@ -65,13 +75,13 @@ def _add(
 # ── deterministic scenario tests ────────────────────────────────────────────
 
 
-def test_equivalence_empty(fake: TelemetryStream) -> None:
-    _run_aggregate(fake)
-    _run_aggregate(fake, since_compact=True)
+def test_equivalence_empty(fake: TelemetryStream, *, model_catalog: ModelCatalog) -> None:
+    _run_aggregate(fake, model_catalog=model_catalog)
+    _run_aggregate(fake, since_compact=True, model_catalog=model_catalog)
 
 
 def test_pre_snapshot_compatibility_keeps_model_and_agent_tier_scopes(
-    fake: TelemetryStream,
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
 ) -> None:
     for aid in (1, 2):
         _add(
@@ -85,7 +95,7 @@ def test_pre_snapshot_compatibility_keeps_model_and_agent_tier_scopes(
                 "cache_read": 0,
             },
         )
-    _text, data, rollups = _run_aggregate(fake)
+    _text, data, rollups = _run_aggregate(fake, model_catalog=model_catalog)
     # The old compatibility path selects tiers from per-model window sums;
     # per-agent rollups select from each agent's sums. Recorded calls never use it.
     assert data["metrics"]["llm_turns"]["cost_usd"] == pytest.approx(1.6)
@@ -94,7 +104,7 @@ def test_pre_snapshot_compatibility_keeps_model_and_agent_tier_scopes(
 
 
 def test_cache_write_cost_snapshots_survive_aggregation_and_unpriced_calls(
-    fake: TelemetryStream,
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
 ) -> None:
     base = {
         "model": "claude-opus-5-5",
@@ -122,7 +132,7 @@ def test_cache_write_cost_snapshots_survive_aggregation_and_unpriced_calls(
             "cache_read": 0,
         },
     )
-    _text, data, rollups = _run_aggregate(fake)
+    _text, data, rollups = _run_aggregate(fake, model_catalog=model_catalog)
     llm = data["metrics"]["llm_turns"]
     assert llm["cost_usd"] == pytest.approx(round(0.00614 + 0.01228 + 0.004, 4))
     assert llm["cost_unpriced_calls"] == 1
@@ -130,7 +140,9 @@ def test_cache_write_cost_snapshots_survive_aggregation_and_unpriced_calls(
     assert rollups[2]["cost_usd"] == pytest.approx(0.004)
 
     # Aggregation also shares the single-agent and since-compact scope.
-    _text, filtered, _rollups = _run_aggregate(fake, agent=1, since_compact=True)
+    _text, filtered, _rollups = _run_aggregate(
+        fake, agent=1, since_compact=True, model_catalog=model_catalog
+    )
     assert filtered["metrics"]["llm_turns"]["cost_usd"] == pytest.approx(round(0.00614, 4))
 
 
@@ -179,7 +191,7 @@ def _assert_full_thread_rollup(roll: dict[int, Any], aid: int) -> None:
     assert roll[aid]["exec_ok"] == 1
 
 
-def test_equivalence_full_thread(fake: TelemetryStream) -> None:
+def test_equivalence_full_thread(fake: TelemetryStream, *, model_catalog: ModelCatalog) -> None:
     """One agent with every unit-relevant event — the router wiring scenario.
 
     Golden lock on the aggregate output: the text digest, the
@@ -189,18 +201,20 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
     aid = 1
     _write_full_thread_scenario(fake, aid)
 
-    text, data, roll = _run_aggregate(fake)
+    text, data, roll = _run_aggregate(fake, model_catalog=model_catalog)
     _assert_full_thread_text_digest(text)
     _assert_full_thread_data_fragment(data)
     _assert_full_thread_rollup(roll, aid)
 
     # since-compact window (no compact rows here) — identical counts
-    text2, _data2, roll2 = _run_aggregate(fake, since_compact=True)
+    text2, _data2, roll2 = _run_aggregate(fake, since_compact=True, model_catalog=model_catalog)
     assert "7 events / 1 agents" in _norm(text2)
     assert roll2[aid]["events"] == 7
 
 
-def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStream) -> None:
+def test_plugin_activation_section_is_the_obsolescence_gauge(
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
+) -> None:
     """Philosophy §6 asks a shim to measure its own obsolescence. The section
     counts activations per contribution (the `<plugin>/<surface>/<identifier>`
     key `ava plugins inspect` lists as registered) and per plugin x model, so a
@@ -225,7 +239,7 @@ def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStre
     _act("ava_syntax_fix", "hooks", "before_exec", "old-model")
     _act("ava_code", "sdkWraps", "files.read", "new-model")
 
-    text, data, _roll = _run_aggregate(fake)
+    text, data, _roll = _run_aggregate(fake, model_catalog=model_catalog)
     section = data["metrics"]["plugin_activation"]
     assert section["total_activations"] == 3
     assert section["distinct_plugins"] == 2
@@ -241,12 +255,14 @@ def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStre
     assert "ava_syntax_fix/hooks/before_exec" in text
 
 
-def test_plugin_activation_section_empty_when_nothing_fired(fake: TelemetryStream) -> None:
+def test_plugin_activation_section_empty_when_nothing_fired(
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
+) -> None:
     """A window in which no plugin surface fired renders the zero state — the
     other half of the gauge: silence is the removal evidence."""
     _add(fake, event="code", agent_id=1, payload={"body": "print(1)"})
 
-    text, data, _roll = _run_aggregate(fake)
+    text, data, _roll = _run_aggregate(fake, model_catalog=model_catalog)
     assert data["metrics"]["plugin_activation"] == {
         "total_activations": 0,
         "distinct_plugins": 0,
@@ -257,7 +273,9 @@ def test_plugin_activation_section_empty_when_nothing_fired(fake: TelemetryStrea
     assert "no plugin hook, wrap, or prompt section fired" in text
 
 
-def test_equivalence_multi_agent_service_and_ties(fake: TelemetryStream) -> None:
+def test_equivalence_multi_agent_service_and_ties(
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
+) -> None:
     """Two agents + service-level rows (agent_id None) — the NULL group feeds
     turns_per_agent / agent_lifetime_s in both paths."""
     a1, a2 = 1, 2
@@ -267,11 +285,13 @@ def test_equivalence_multi_agent_service_and_ties(fake: TelemetryStream) -> None
     _add(fake, event="log", agent_id=None, payload={}, ts_offset_days=0.9)
     _add(fake, event="turn_end", agent_id=a1, payload={"ok": True, "duration_seconds": 1.0})
     _add(fake, event="turn_end", agent_id=a2, payload={"ok": False, "duration_seconds": 2.0})
-    _run_aggregate(fake)
-    _run_aggregate(fake, since_compact=True)
+    _run_aggregate(fake, model_catalog=model_catalog)
+    _run_aggregate(fake, since_compact=True, model_catalog=model_catalog)
 
 
-def test_equivalence_exec_failure_variants(fake: TelemetryStream) -> None:
+def test_equivalence_exec_failure_variants(
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
+) -> None:
     aid = 1
     _add(fake, event="exec", agent_id=aid, payload={"body": "ok"})
     _add(fake, event="exec_failed", agent_id=aid, payload={"body": "t", "exc_type": "ValueError"})
@@ -279,7 +299,7 @@ def test_equivalence_exec_failure_variants(fake: TelemetryStream) -> None:
     _add(fake, event="exec_timeout", agent_id=aid, payload={"body": "t"})
     _add(fake, event="exec_cancelled", agent_id=aid, payload={"body": "t"})
     _add(fake, event="exec(failed)", agent_id=aid, payload={"body": "t", "exc_type": "ValueError"})
-    _text, data, roll = _run_aggregate(fake)
+    _text, data, roll = _run_aggregate(fake, model_catalog=model_catalog)
     ex = data["metrics"]["exec"]
     assert (ex["exec_ok"], ex["exec_failed"]) == (1, 5)
     assert ex["failure_types"] == {
@@ -291,7 +311,9 @@ def test_equivalence_exec_failure_variants(fake: TelemetryStream) -> None:
     assert roll[aid]["exec_failed"] == 5
 
 
-def test_equivalence_since_compact_cutoffs(fake: TelemetryStream) -> None:
+def test_equivalence_since_compact_cutoffs(
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
+) -> None:
     """Pre-compact rows dropped for the compacted agent, everything kept for
     the other; the compact halt row itself is kept (ts >= cutoff)."""
     a1, a2 = 1, 2
@@ -317,20 +339,22 @@ def test_equivalence_since_compact_cutoffs(fake: TelemetryStream) -> None:
     # since-compact: a1's pre-compact rows (old at 0.8d) are dropped, the
     # compact halt itself (0.1d) and everything after are kept; a2's rows and
     # the agentless log row survive (agentless row counts in total, not rollup)
-    text, data, roll = _run_aggregate(fake, since_compact=True)
+    text, data, roll = _run_aggregate(fake, since_compact=True, model_catalog=model_catalog)
     assert "4 events / 2 agents" in _norm(text), text[:200]
     assert data["meta"]["total_events"] == 4
     assert roll[a1]["events"] == 2
     assert roll[a2]["events"] == 1
     # the non-compact window keeps everything (no cutoffs applied)
-    text2, data2, roll2 = _run_aggregate(fake)
+    text2, data2, roll2 = _run_aggregate(fake, model_catalog=model_catalog)
     assert "7 events / 2 agents" in _norm(text2)
     assert data2["meta"]["total_events"] == 7
     assert roll2[a1]["events"] == 5
     assert roll2[a2]["events"] == 1
 
 
-def test_equivalence_syntax_fix_block_edges(fake: TelemetryStream) -> None:
+def test_equivalence_syntax_fix_block_edges(
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
+) -> None:
     """fixes before any code (dropped), none sentinel, (n) suffixes, multi-kind
     events, blocks with no attached fix, two agents with different block counts."""
     a1, a2 = 1, 2
@@ -343,10 +367,10 @@ def test_equivalence_syntax_fix_block_edges(fake: TelemetryStream) -> None:
     _add(fake, event="code", agent_id=a2, payload={"body": "d"})
     _add(fake, event="syntax_fix", agent_id=a2, payload={"fixes": "ruff_format"})
     _add(fake, event="syntax_fix", agent_id=a2, payload={"fixes": "missing_imports(2)"})
-    _run_aggregate(fake)
+    _run_aggregate(fake, model_catalog=model_catalog)
 
 
-def test_equivalence_agent_filter(fake: TelemetryStream) -> None:
+def test_equivalence_agent_filter(fake: TelemetryStream, *, model_catalog: ModelCatalog) -> None:
     a1, a2 = 1, 2
     for aid in (a1, a2):
         _add(fake, event="code", agent_id=aid, payload={"body": "x"})
@@ -356,15 +380,17 @@ def test_equivalence_agent_filter(fake: TelemetryStream) -> None:
             agent_id=aid,
             payload={"in_total": 10, "out_total": 1, "cache_read": 5, "model": "deepseek-v4-pro"},
         )
-    _run_aggregate(fake, agent=a1)
+    _run_aggregate(fake, agent=a1, model_catalog=model_catalog)
 
 
-def test_equivalence_window_respects_days(fake: TelemetryStream) -> None:
+def test_equivalence_window_respects_days(
+    fake: TelemetryStream, *, model_catalog: ModelCatalog
+) -> None:
     aid = 1
     _add(fake, event="code", agent_id=aid, payload={"body": "old"}, ts_offset_days=5)
     _add(fake, event="code", agent_id=aid, payload={"body": "new"})
-    _run_aggregate(fake, days=1)
-    _run_aggregate(fake, days=7)
+    _run_aggregate(fake, days=1, model_catalog=model_catalog)
+    _run_aggregate(fake, days=7, model_catalog=model_catalog)
 
 
 # ── randomized equivalence (seeded) ─────────────────────────────────────────
@@ -421,7 +447,7 @@ def _random_payload(rng: random.Random, event_name: str) -> dict[str, Any]:
     return {}
 
 
-def test_equivalence_randomized(fake: TelemetryStream) -> None:
+def test_equivalence_randomized(fake: TelemetryStream, *, model_catalog: ModelCatalog) -> None:
     """Seeded pseudo-random stream — hundreds of rows across every event, all
     agents (incl. service rows), ts ties, windows of 1/3/7 days."""
     rng = random.Random(20260806)  # noqa: S311 — seeded, deterministic test data
@@ -452,7 +478,7 @@ def test_equivalence_randomized(fake: TelemetryStream) -> None:
         offset = rng.randint(0, 3500) / 1000
         _add(fake, event=event_name, agent_id=aid, payload=payload, ts_offset_days=offset)
     for days in (1, 3, 7):
-        text, data, _roll = _run_aggregate(fake, days=days)
+        text, data, _roll = _run_aggregate(fake, days=days, model_catalog=model_catalog)
         # structure: every section present, per-agent rollups subset the total
         assert set(data["metrics"]) == {
             "syntax_fix",
@@ -462,9 +488,9 @@ def test_equivalence_randomized(fake: TelemetryStream) -> None:
             "plugin_activation",
         }
         assert data["meta"]["total_events"] >= 0
-        _run_aggregate(fake, days=days, since_compact=True)
+        _run_aggregate(fake, days=days, since_compact=True, model_catalog=model_catalog)
     # single-agent windows over the same data
-    text, data, _roll = _run_aggregate(fake, days=7, agent=agents[0])
+    text, data, _roll = _run_aggregate(fake, days=7, agent=agents[0], model_catalog=model_catalog)
     assert data["meta"]["agent_filter"] == agents[0]
     # the window header names the single agent
     assert str(agents[0]) in text or "1 agents" in _norm(text)

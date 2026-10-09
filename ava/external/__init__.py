@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import ava
 from ava.sdk_surface import process_context
+from ava.sdk_surface import settings as sdk_settings
 from ava.sdk_surface.settings import database
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
@@ -169,6 +170,7 @@ class Attachment:
         ava.bind_context(
             dataclasses.replace(
                 bound or AvaContext(clients=process_context.process_clients()),
+                catalog=sdk_settings.model_catalog(),
                 identity=dataclasses.replace(own, lease=borrowed),
             )
         )

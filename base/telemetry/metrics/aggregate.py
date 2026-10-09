@@ -18,7 +18,7 @@ from typing import Any
 
 import psycopg
 
-from base.lm.pricing import cost_usd
+from base.lm.pricing import PriceBook, cost_usd
 from base.telemetry.metrics import (
     MetricSection,
     _fix_kinds,
@@ -209,6 +209,7 @@ def fetch_agent_rollups(
     conn: psycopg.Connection[Any],
     days: int,
     *,
+    prices: PriceBook,
     since_compact: bool = False,
     now: datetime | None = None,
 ) -> tuple[int, dict[int, dict[str, Any]]]:
@@ -220,10 +221,14 @@ def fetch_agent_rollups(
     raw: dict[int | None, dict[str, Any]] = data["per_agent"]
     per_agent = _per_agent_aggs(raw, datetime.now(UTC))
     total = sum(int(r["events"]) for r in raw.values())
-    return total, agent_rollups(per_agent, _llm_by_agent(data["llm_per_agent"]), data["llm_costs"])
+    return total, agent_rollups(
+        per_agent, _llm_by_agent(data["llm_per_agent"]), data["llm_costs"], prices=prices
+    )
 
 
-def _cost_totals(rows: Iterable[tuple[str, LlmCostSums]]) -> tuple[float, int]:
+def _cost_totals(
+    rows: Iterable[tuple[str, LlmCostSums]], *, prices: PriceBook
+) -> tuple[float, int]:
     """Sum immutable cost snapshots, retaining the pre-snapshot compatibility path."""
     cost = 0.0
     unpriced = 0
@@ -238,7 +243,7 @@ def _cost_totals(rows: Iterable[tuple[str, LlmCostSums]]) -> tuple[float, int]:
             ):
                 totals[index] += count
     for model, (calls, tin, tout, cached) in legacy.items():
-        price = cost_usd(model, tin, tout, cached)
+        price = cost_usd(model, tin, tout, cached, prices=prices)
         if price is None:
             unpriced += calls
         else:
@@ -249,6 +254,8 @@ def _cost_totals(rows: Iterable[tuple[str, LlmCostSums]]) -> tuple[float, int]:
 def _llm_totals_from_models(
     rows: list[tuple[str, int, int, int, int, int]],
     costs: dict[int | None, dict[str, LlmCostSums]],
+    *,
+    prices: PriceBook,
 ) -> _LlmTotals:
     """Sum token counts and recorded USD independently; only legacy rows reprice."""
     calls = sum(r[1] for r in rows)
@@ -256,7 +263,9 @@ def _llm_totals_from_models(
     tout = sum(r[3] for r in rows)
     tcached = sum(r[4] for r in rows)
     treason = sum(r[5] for r in rows)
-    cost, unpriced = _cost_totals(row for models in costs.values() for row in models.items())
+    cost, unpriced = _cost_totals(
+        (row for models in costs.values() for row in models.items()), prices=prices
+    )
     return _LlmTotals(calls, tin, tout, tcached, treason, cost, unpriced)
 
 
@@ -307,9 +316,9 @@ def _data_exec(agg: EventAggregate) -> dict[str, Any]:
     }
 
 
-def _data_llm_turns(agg: EventAggregate) -> dict[str, Any]:
+def _data_llm_turns(agg: EventAggregate, *, prices: PriceBook) -> dict[str, Any]:
     """The `llm_turns` section data."""
-    totals = _llm_totals_from_models(agg.llm_by_model, agg.llm_costs)
+    totals = _llm_totals_from_models(agg.llm_by_model, agg.llm_costs, prices=prices)
     # position thirds over each agent's llm_usage rows: (cache_read, in_total) sums.
     pos_hit = {
         b: round(c / i * 100, 1) if i else 0.0
@@ -385,13 +394,13 @@ def _data_plugin_activation(agg: EventAggregate) -> dict[str, Any]:
     }
 
 
-def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
+def _sections_from_aggregate(agg: EventAggregate, *, prices: PriceBook) -> list[MetricSection]:
     """Rebuild the five unit data dicts from `EventAggregate`, then render
     them with the shared render functions — the text blocks stay identical to
     the per-row path because the renders are the same functions."""
     data_syntax = _data_syntax_fix(agg)
     data_exec = _data_exec(agg)
-    data_llm = _data_llm_turns(agg)
+    data_llm = _data_llm_turns(agg, prices=prices)
     data_activity = _data_agent_activity(agg)
     data_plugin = _data_plugin_activation(agg)
 
@@ -409,13 +418,14 @@ def build_report_from_aggregate(
     days: int,
     agent_id: int | None,
     *,
+    prices: PriceBook,
     since_compact: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Assemble the same text + data `build_report` produces, from an
     `EventAggregate` (see `fetch_aggregate`). Meta semantics are identical:
     `total_events` counts every telemetry/log row in the window (service-level
     rows included), `distinct_agents` excludes agent_id NULL."""
-    sections = _sections_from_aggregate(agg)
+    sections = _sections_from_aggregate(agg, prices=prices)
     names = [s.name for s in sections]
     if len(names) != len(set(names)):
         raise ValueError(f"duplicate metric section names would clobber the JSON: {names}")
@@ -447,6 +457,8 @@ def agent_rollups(
     per_agent: dict[int | None, _PerAgentAgg],
     per_agent_llm: dict[int | None, list[tuple[str, int, int, int, int]]],
     costs: dict[int | None, dict[str, LlmCostSums]],
+    *,
+    prices: PriceBook,
 ) -> dict[int, dict[str, Any]]:
     """Per-agent headline counters for `/api/metrics/agents` (service rows excluded)."""
     out: dict[int, dict[str, Any]] = {}
@@ -458,7 +470,7 @@ def agent_rollups(
         tin = sum(r[2] for r in usage)
         tout = sum(r[3] for r in usage)
         tcached = sum(r[4] for r in usage)
-        cost, _unpriced = _cost_totals(costs.get(aid, {}).items())
+        cost, _unpriced = _cost_totals(costs.get(aid, {}).items(), prices=prices)
         out[aid] = {
             "events": row.events,
             "cost_usd": round(cost, 4),

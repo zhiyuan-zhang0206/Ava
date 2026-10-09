@@ -119,6 +119,7 @@ async def init_context_node(
                         content=build_system_prompt(
                             runtime.context.plugin_registry(),
                             runtime.context.require_agent(),
+                            catalog=runtime.context.require_catalog(),
                             agent_id=runtime.context.identity.agent_id
                             if runtime.context.identity is not None
                             else None,

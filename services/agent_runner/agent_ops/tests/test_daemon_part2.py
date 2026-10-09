@@ -20,6 +20,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
+from ops.rpc_schemas import LaunchAgentRequest
 
 _db = Database.from_settings
 
@@ -67,7 +68,7 @@ def _fake_spawn_factory(calls: dict[str, int]) -> object:
     """A launch_agent_op stand-in that counts executions and returns id 777."""
     from ops.rpc_schemas import SpawnedAgent
 
-    async def _fake_spawn(body, pool):  # type: ignore[no-untyped-def]
+    async def _fake_spawn(body: LaunchAgentRequest, pool: ConnectionPool | None) -> SpawnedAgent:
         calls["n"] = calls.get("n", 0) + 1
         return SpawnedAgent(id=777)
 

@@ -378,8 +378,8 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     """
     from base.cluster.authority import AuthorityRefusedError
     from base.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
-    from base.config import settings
-    from base.config.service_read import served_db_endpoint
+    from base.config import Settings, settings
+    from base.config.service_read import ConfigAuthority
 
     target = Path(out).expanduser().absolute()
     gateway_home = _gateway_authority_home("issue-unit")
@@ -390,7 +390,11 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
         issued = issue_bundle(
             gateway_home,
             unit=unit,
-            endpoint=served_db_endpoint(),
+            endpoint=ConfigAuthority(
+                runtime=settings,
+                all_domains=settings if settings.profile is None else Settings(profile=None),
+                env_path=gateway_home / ".env",
+            ).served_db_endpoint(),
             cluster_secret=settings.data_plane.cluster_secret,
             ttl_s=ttl_hours * 3600,
         )

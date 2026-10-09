@@ -42,6 +42,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 _MODEL = "deepseek-flash"
 _ZERO_PHASE = 1000  # agent_id % 1000 == 0: the transient schedule starts unshifted
@@ -50,7 +51,15 @@ _ZERO_PHASE = 1000  # agent_id % 1000 == 0: the transient schedule starts unshif
 def _wait(
     exc: Exception, attempts: int = 1, agent_id: int = _ZERO_PHASE, *, ledger: LlmLedger
 ) -> float | None:
-    return retry_wait(exc, attempts, model=_MODEL, agent_id=agent_id, ledger=ledger)
+    return retry_wait(
+        exc,
+        attempts,
+        model=_MODEL,
+        agent_id=agent_id,
+        ledger=ledger,
+        catalog=build_model_catalog(),
+        max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+    )
 
 
 def _uniform_low(low: float, _high: float) -> float:
@@ -68,7 +77,8 @@ def _fixed_delay(_streak: int) -> float:
 def _caps(by_model: dict[str, int]) -> Callable[..., int]:
     """A `resolve_setting` stand-in giving each model its own try cap."""
 
-    def resolve(_name: str, *, model: str) -> int:
+    def resolve(_name: str, *, model: str, models: object, explicit: object) -> int:
+        del models, explicit
         return by_model[model]
 
     return resolve
@@ -77,8 +87,8 @@ def _caps(by_model: dict[str, int]) -> Callable[..., int]:
 def _fixed_cap(cap: int) -> Callable[..., int]:
     """A `resolve_setting` stand-in giving every model the same try cap."""
 
-    def resolve(_name: str, *, model: str) -> int:
-        del model
+    def resolve(_name: str, *, model: str, models: object, explicit: object) -> int:
+        del model, models, explicit
         return cap
 
     return resolve
@@ -126,14 +136,36 @@ def test_the_model_caps_the_number_of_tries(
 ) -> None:
     seen: list[str] = []
 
-    def fake_resolve(_name: str, *, model: str) -> int:
+    def fake_resolve(_name: str, *, model: str, models: object, explicit: object) -> int:
         seen.append(model)
         return 3
 
     monkeypatch.setattr("base.lm.registry.resolve_setting", fake_resolve)
     exc = ModelConnectionError("x")
-    assert retry_wait(exc, 2, model="model-for-this-agent", agent_id=1, ledger=ledger) is not None
-    assert retry_wait(exc, 3, model="model-for-this-agent", agent_id=1, ledger=ledger) is None
+    assert (
+        retry_wait(
+            exc,
+            2,
+            model="model-for-this-agent",
+            agent_id=1,
+            ledger=ledger,
+            catalog=build_model_catalog(),
+            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+        )
+        is not None
+    )
+    assert (
+        retry_wait(
+            exc,
+            3,
+            model="model-for-this-agent",
+            agent_id=1,
+            ledger=ledger,
+            catalog=build_model_catalog(),
+            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+        )
+        is None
+    )
     assert set(seen) == {"model-for-this-agent"}
 
 
@@ -271,10 +303,29 @@ def test_the_stall_pair_headroom_extends_the_transient_attempts_gate(
     pairs = settings.lm.llm_stall_retry_max_consecutive
     pair = LLMStreamStallPairError("pair")
     assert (
-        retry_wait(pair, 2 + pairs - 1, model=_MODEL, agent_id=streak_agent, ledger=ledger)
+        retry_wait(
+            pair,
+            2 + pairs - 1,
+            model=_MODEL,
+            agent_id=streak_agent,
+            ledger=ledger,
+            catalog=build_model_catalog(),
+            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+        )
         is not None
     )
-    assert retry_wait(pair, 2 + pairs, model=_MODEL, agent_id=streak_agent, ledger=ledger) is None
+    assert (
+        retry_wait(
+            pair,
+            2 + pairs,
+            model=_MODEL,
+            agent_id=streak_agent,
+            ledger=ledger,
+            catalog=build_model_catalog(),
+            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+        )
+        is None
+    )
 
 
 def test_the_delayed_schedule_can_be_disabled(
@@ -317,6 +368,7 @@ def _runtime() -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     return Runtime(context=ctx)
 
@@ -466,6 +518,7 @@ def _failing_node_run(
         agent=AgentSlices.resolve({"llm_model": model}),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     config: RunnableConfig = {"configurable": {"thread_id": thread}}
     with pytest.raises(ModelConnectionError):

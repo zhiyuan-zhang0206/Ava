@@ -31,6 +31,8 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.host import AgentHost
 
@@ -124,6 +126,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
     database: Database,
+    model_catalog: ModelCatalog,
 ) -> None:
     ancestor, agent, owner = await _admitted_descendant(db_conn, aops_pool)
     model_calls: list[str] = []
@@ -152,6 +155,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         graph=graph,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     publisher = MagicMock()
     ctx = AvaContext(
@@ -161,6 +165,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     assert not (
         await host._invoke_until_done(
@@ -208,6 +213,7 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     pending = PendingTurnFailure(failure)
     with pytest.raises(FatalProviderError):

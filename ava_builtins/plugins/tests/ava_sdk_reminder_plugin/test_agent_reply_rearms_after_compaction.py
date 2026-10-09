@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -27,6 +28,7 @@ from ava_builtins.plugins.tests.test_ava_sdk_reminder_plugin import (
     _loaded as _loaded,
 )
 from base.agents.messages.kwargs import ExecStatus
+from base.lm.catalog import ModelCatalog
 
 
 async def test_agent_reply_rearms_after_compaction(_loaded: Any):
@@ -196,6 +198,7 @@ async def test_defer_predicate_matches_real_gate(
     auto_compact_tokens,
     expect_fire,
     fake_cancel_event,
+    model_catalog: ModelCatalog,
 ):
     """`auto_compact_will_fire(state)` is the single shared gate the reminder plugins
     call; this pins it to the real `auto_compact_for_llm` firing across the
@@ -225,21 +228,32 @@ async def test_defer_predicate_matches_real_gate(
     # Stub generate_summary so a "would fire" path produces a real replacement
     # dict without invoking a live Compaction LLM. Long enough to clear the
     # auto-compact retry floor on the first attempt.
-    async def _fake_generate_summary(messages, llm, _model, *, binding: object = None):
+    async def _fake_generate_summary(
+        messages, llm, _model, *, catalog: ModelCatalog, binding: object = None
+    ):
+        assert catalog is model_catalog
         return "stub summary " * 100
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
 
     state = _state(msgs)
-    predicate = auto_compact_will_fire(state, _runtime_for_runner().context.require_agent())
-    real = await compact_mod.auto_compact_for_llm(state, _runtime_for_runner(), _config())  # pyright: ignore[reportUnknownMemberType]
+    runtime = _runtime_for_runner()
+    runtime = replace(runtime, context=replace(runtime.context, catalog=model_catalog))
+    predicate = auto_compact_will_fire(
+        state, runtime.context.require_agent(), catalog=model_catalog
+    )
+    real = await compact_mod.auto_compact_for_llm(state, runtime, _config())  # pyright: ignore[reportUnknownMemberType]
     assert predicate is expect_fire
     assert predicate == (real is not None)
 
 
 @pytest.mark.parametrize("reminder_first", [True, False])
 async def test_real_runner_compaction_wins_no_note(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch, reminder_first, fake_cancel_event
+    _loaded: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    reminder_first,
+    fake_cancel_event,
+    model_catalog: ModelCatalog,
 ):
     """Both hook orderings defer to the LLM compaction operation.
 
@@ -260,7 +274,10 @@ async def test_real_runner_compaction_wins_no_note(
     # Long enough to clear the auto-compact retry floor on the first attempt.
     long_summary = "compacted summary " * 100
 
-    async def _fake_generate_summary(messages, llm, _model, *, binding: object = None):
+    async def _fake_generate_summary(
+        messages, llm, _model, *, catalog: ModelCatalog, binding: object = None
+    ):
+        assert catalog is model_catalog
         return long_summary
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
@@ -279,14 +296,16 @@ async def test_real_runner_compaction_wins_no_note(
         _agent_inbound(source="agent:9"),
     ]
     state = _state(msgs, compact=CompactState(version=0))
-    cmd = await runner(state, _runtime_for_runner(), _config())
+    runtime = _runtime_for_runner()
+    runtime = replace(runtime, context=replace(runtime.context, catalog=model_catalog))
+    cmd = await runner(state, runtime, _config())
 
     assert cmd.goto == "llm"
     hook_update = cast("dict[str, object]", cmd.update)
     assert isinstance(hook_update, dict) and "messages" not in hook_update
     from agent.graph.llm.node import llm_node
 
-    cmd = await llm_node(state, _runtime_for_runner(), _config(), ledger=LlmLedger())
+    cmd = await llm_node(state, runtime, _config(), ledger=LlmLedger())
     update = cmd.update
     assert isinstance(update, dict)
     # Apply the real add_messages reducer to get the committed messages.

@@ -15,9 +15,11 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
+from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog.daemon import (
     dispatch_wakes,
     scan_once,
@@ -40,24 +42,28 @@ def pool():
         p.close()
 
 
-def _make_idling_agent(db: psycopg.Connection) -> int:
+def _make_idling_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     """spawn_agent creates the agents_meta row (create_agent does not — that
     is the spawn path's job); the alert filter reads owner status, so tests
     spawn then park the agent 'idling' (same pattern as the heartbeat daemon
     tests)."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (aid,))
     db.commit()
     return aid
 
 
-def _make_running_agent(db: psycopg.Connection) -> int:
+def _make_running_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
     db.commit()
@@ -121,9 +127,16 @@ def _healthy_host_verdict(db_conn: psycopg.Connection) -> None:
 
 class TestSelectStalePending:
     def test_returns_only_chat_pending_older_than_threshold(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         old = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S - 10)  # fresh — excluded
         with db_conn.cursor() as cur:
@@ -141,9 +154,16 @@ class TestSelectStalePending:
         assert [(r[0], r[2]) for r in rows] == [(old, f"#{aid}")] or [r[0] for r in rows] == [old]
 
     def test_claimed_or_done_rows_never_stale(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE inbound_messages SET status = 'claimed' WHERE id = %s", (iid,))
@@ -151,19 +171,33 @@ class TestSelectStalePending:
         assert select_stale_pending(pool, _THRESHOLD_S) == []
 
     def test_empty_when_nothing_stale(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S - 1)
         assert select_stale_pending(pool, _THRESHOLD_S) == []
 
     def test_running_owner_queues_are_not_stalls(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A chat inbound queued behind a long in-flight turn (owner
         status='running') is normal, not a delivery stall — the turn-end SELECT
         picks it up. Only waiting/terminal owners signal a real stall."""
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
@@ -173,9 +207,16 @@ class TestSelectStalePending:
 
 class TestScanOnce:
     def test_alerts_each_stale_row_once_while_pending(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
 
         newly, alerted = scan_once(pool, _THRESHOLD_S, set())
@@ -188,9 +229,16 @@ class TestScanOnce:
         assert alerted == {iid}
 
     def test_row_that_leaves_pending_forgets_alert(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         _, alerted = scan_once(pool, _THRESHOLD_S, set())
 
@@ -208,12 +256,19 @@ class TestScanOnce:
         assert newly == 1
 
     def test_alert_writes_unified_event(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """The alert emits through the unified emitter: the canonical
         `events` row (telemetry/delivery_stalled). The legacy agent_events
         mirror is gone (tracker #898 term-alignment)."""
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         scan_once(pool, _THRESHOLD_S, set())
         # The emitter drains asynchronously (0.5s cadence) — flush() can race
@@ -270,12 +325,17 @@ class TestDispatchWakes:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """dispatch_wakes re-publishes one wake (payload = inbound id) per
         stale pending row of an idling owner — the lost-wake recovery."""
         import base.db
 
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
 
         calls: list[tuple[int, str]] = []
@@ -303,12 +363,17 @@ class TestDispatchWakes:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A failing publish is logged, not raised — the alert path and the
         claim loop's 30s recheck remain as backstops."""
         import base.db
 
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
 
         def boom(_db: object, _bus: object, *_a, **_k) -> bool:
@@ -335,13 +400,18 @@ class TestDispatchWakes:
         aredis_inbound_listener: RedisInboundListener,
         database: Database,
         event_bus: EventBus,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """End-to-end: dispatch_wakes publishes on the agent's Redis channel,
         so a listener subscribed to it wakes immediately — the lost-wake window
         collapses from 30s to ~1 tick."""
         from base.events.live.redis_listener import RedisInboundListener
 
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
         # The shared fixture listener is bound to the pseudo-agent-0 channel;
         # build one on THIS agent's channel.
@@ -405,10 +475,12 @@ def _wait_for_poisoned_events(agent_id: int) -> list[dict[str, object]]:
 # ── Terminated-owner resurrect retry (Task #689 G4) ───────────────────────────
 
 
-def _make_terminated_agent(db: psycopg.Connection) -> int:
+def _make_terminated_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'exit' "
@@ -419,10 +491,12 @@ def _make_terminated_agent(db: psycopg.Connection) -> int:
     return aid
 
 
-def _make_reaped_crash_agent(db: psycopg.Connection) -> int:
+def _make_reaped_crash_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     """A `terminated` row the SYSTEM reaped after a crash: reaper source plus
     the retained crash marker (task #3617's relaxed-trigger population)."""
-    aid = _make_terminated_agent(db)
+    aid = _make_terminated_agent(db, model_catalog=model_catalog, config_authority=config_authority)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET termination_source = 'reaper', "
@@ -493,13 +567,15 @@ def _insert_pending_resurrect_row(
     return inbound_id
 
 
-def _make_crash_marked_agent(db: psycopg.Connection) -> int:
+def _make_crash_marked_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     """An idling row with the corpse marker set — the corpse reaper's own
     predicate (`last_turn_fatal_at IS NOT NULL` on an idling row).
     spawn_agent leaves the marker NULL, so the scenario stamps it."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'idling', last_turn_fatal_at = now() WHERE id = %s",

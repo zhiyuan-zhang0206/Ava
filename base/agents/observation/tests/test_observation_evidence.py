@@ -13,16 +13,23 @@ from base.agents.observation.evidence import (
 )
 from base.agents.observation.roster import AgentCard, select_roster
 from base.agents.observation.snapshot import select_one
+from base.config.service_read import ConfigAuthority
 from base.db import create_agent
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 
 @pytest.mark.parametrize("probe_age", [None, 0, 600])
 @pytest.mark.parametrize("lease_offset", [None, -60, 60])
 def test_snapshot_retains_independent_probe_and_lease_clocks(
-    db_conn: psycopg.Connection, probe_age: int | None, lease_offset: int | None
+    db_conn: psycopg.Connection,
+    probe_age: int | None,
+    lease_offset: int | None,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     now = datetime.now(UTC)
     probe = None if probe_age is None else now - timedelta(seconds=probe_age)
     lease = None if lease_offset is None else now + timedelta(seconds=lease_offset)
@@ -38,7 +45,7 @@ def test_snapshot_retains_independent_probe_and_lease_clocks(
                 ("observation-test", probe),
             )
     db_conn.commit()
-    full = select_one(db_conn, aid)
+    full = select_one(db_conn, aid, catalog=model_catalog)
     assert full is not None and full.observation is not None
     evidence = full.observation
     assert evidence.runtime_owner == "unknown"
@@ -49,7 +56,9 @@ def test_snapshot_retains_independent_probe_and_lease_clocks(
         if probe is None
         else probe + timedelta(seconds=LIVENESS_PASS_INTERVAL_S * MACHINE_OFFLINE_AFTER_FAILURES)
     )
-    summary = next(row for row in select_roster(db_conn).agents if row.agent_id == aid)
+    summary = next(
+        row for row in select_roster(db_conn, catalog=model_catalog).agents if row.agent_id == aid
+    )
     assert isinstance(summary, AgentCard)
     assert summary.observation == evidence
 
@@ -144,8 +153,10 @@ def test_launch_failure_remains_visible_without_a_fresh_host_probe() -> None:
     assert observed.observed_at == NOW
 
 
-def test_launch_failure_projects_on_card_and_detail(db_conn: psycopg.Connection) -> None:
-    aid = spawn_agent(spawner="user")
+def test_launch_failure_projects_on_card_and_detail(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> None:
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_launch_failure_reason='launch_rejected', "
@@ -153,8 +164,10 @@ def test_launch_failure_projects_on_card_and_detail(db_conn: psycopg.Connection)
             (aid,),
         )
     db_conn.commit()
-    card = next(row for row in select_roster(db_conn).agents if row.agent_id == aid)
-    detail = select_one(db_conn, aid)
+    card = next(
+        row for row in select_roster(db_conn, catalog=model_catalog).agents if row.agent_id == aid
+    )
+    detail = select_one(db_conn, aid, catalog=model_catalog)
     assert detail is not None
     assert card.availability is not None and detail.availability is not None
     assert (
@@ -163,7 +176,9 @@ def test_launch_failure_projects_on_card_and_detail(db_conn: psycopg.Connection)
     assert card.availability.evidence_at == detail.availability.evidence_at
 
 
-def test_snapshot_and_roster_share_machine_verdict(db_conn: psycopg.Connection) -> None:
+def test_snapshot_and_roster_share_machine_verdict(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta (id,status,machine) VALUES (%s,'idling','availability-host') "
@@ -176,8 +191,12 @@ def test_snapshot_and_roster_share_machine_verdict(db_conn: psycopg.Connection) 
     )
     db_conn.commit()
 
-    card = next(card for card in select_roster(db_conn).agents if card.agent_id == agent_id)
-    detail = select_one(db_conn, agent_id)
+    card = next(
+        card
+        for card in select_roster(db_conn, catalog=model_catalog).agents
+        if card.agent_id == agent_id
+    )
+    detail = select_one(db_conn, agent_id, catalog=model_catalog)
     assert detail is not None
     assert card.status.value == detail.status.value == "idling"
     assert card.availability is not None and detail.availability is not None

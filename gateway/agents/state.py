@@ -34,6 +34,7 @@ from base.agents.messages.inbound_images import inbound_image_urls
 from base.agents.model_overrides import agent_overrides
 from base.agents.upload_delivery.paths import image_mime_for, parse_upload_url, resolve_upload_path
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
     current_default_completion_notice_policy,
@@ -110,13 +111,15 @@ def _prepare_message_content(
 
     blocks = content
     if any(isinstance(b, ImageUrlContentBlock) for b in blocks):
-        model = resolve_agent_model(request.app.state.db_pool, agent_id)
-        if not model_supports_vision(model):
+        model = resolve_agent_model(
+            request.app.state.db_pool, agent_id, catalog=request.app.state.catalog
+        )
+        if not model_supports_vision(model, catalog=request.app.state.catalog):
             raise HTTPException(
                 422,
                 f"agent {agent_id}'s model {model!r} cannot see images — "
                 "switch it to a vision-capable model "
-                f"({', '.join(vision_capable_provider_names())})",
+                f"({', '.join(vision_capable_provider_names(catalog=request.app.state.catalog))})",
             )
         for b in blocks:
             if isinstance(b, ImageUrlContentBlock):
@@ -167,7 +170,11 @@ def _scoped_message_key(request: Request, agent_id: int, key: str) -> str:
 
 
 def _completion_delivery_required(
-    agent_id: int, notice: CompletionNotice, pool: ConnectionPool
+    agent_id: int,
+    notice: CompletionNotice,
+    pool: ConnectionPool,
+    *,
+    authority: ConfigAuthority,
 ) -> bool:
     """Commit one hourly buffer entry before deciding whether to deliver it."""
     with pool.connection() as conn:
@@ -175,7 +182,7 @@ def _completion_delivery_required(
             conn,
             agent_id,
             notice,
-            current_default_completion_notice_policy(),
+            current_default_completion_notice_policy(authority),
         )
         conn.commit()
     return required
@@ -256,6 +263,7 @@ async def post_agent_message(
             agent_id,
             notice,
             request.app.state.db_pool,
+            authority=request.app.state.config_authority,
         ):
             return AgentMessageEnqueued(
                 status=await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id),
@@ -608,7 +616,9 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
 
             model = settings.lm.llm_model
         if model:
-            budget = resolve_context_budget(model, overrides)
+            budget = resolve_context_budget(
+                model, catalog=request.app.state.catalog, overrides=overrides
+            )
             max_input_tokens = budget.max_context_tokens
             soft_compact_tokens = budget.soft_compact_tokens
             hard_compact_tokens = budget.hard_compact_tokens
@@ -681,5 +691,8 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         )
         messages = []
     return context_breakdown_response(
-        request.app.state.db_pool, agent_id, latest_request_breakdown(messages)
+        request.app.state.db_pool,
+        agent_id,
+        latest_request_breakdown(messages),
+        catalog=request.app.state.catalog,
     )

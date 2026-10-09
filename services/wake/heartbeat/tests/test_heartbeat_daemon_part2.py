@@ -20,6 +20,8 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
     _reconcile_checkin_outcomes,
     _select_idle_agents_needing_heartbeat,
@@ -47,6 +49,8 @@ def _make_idle(
     last_active_s_ago: float | None = None,
     paused_until_s_ahead: float | None = None,
     status: str = "idling",
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> int:
     """Spawn an agent and park it. `status_changed_s_ago` backdates
     status_changed_at via a timestamp-only UPDATE (the BEFORE-UPDATE-OF-status
@@ -60,7 +64,7 @@ def _make_idle(
     window. Returns the agent id."""
     if last_active_s_ago is None:
         last_active_s_ago = status_changed_s_ago
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = %s, "
@@ -164,11 +168,21 @@ class TestNudgeBackoffB7:
         db_conn.commit()
 
     def test_select_stretches_reminder_floor_by_level(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """last_heartbeat_at 10 min ago is due at the default 5 min cadence
         but not at level 2 (5 min * 4 = 20 min)."""
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=400,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET last_heartbeat_at = now() - make_interval(secs => 600) "
@@ -181,9 +195,19 @@ class TestNudgeBackoffB7:
         assert aid not in _selected(pool)
 
     def test_reconcile_raises_level_after_n_consecutive_noops(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=400,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         noop: dict[int, int] = {aid: 2}
 
         _reconcile_checkin_outcomes(
@@ -208,9 +232,19 @@ class TestNudgeBackoffB7:
         assert ev["attributes"]["interval_seconds"] == 600
 
     def test_reconcile_clears_streak_on_real_inbound(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=400,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET last_heartbeat_at = now() - make_interval(secs => 60) "
@@ -238,9 +272,20 @@ class TestNudgeBackoffB7:
         assert noop == {}
 
     def test_reconcile_clears_streak_on_pause(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400, paused_until_s_ahead=3600)
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=400,
+            paused_until_s_ahead=3600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         noop: dict[int, int] = {aid: 2}
 
         _reconcile_checkin_outcomes(
@@ -256,11 +301,21 @@ class TestNudgeBackoffB7:
         assert noop == {}
 
     def test_raise_is_capped_at_24h_max_level(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from services.wake.heartbeat.daemon import _backoff_max_level
 
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=400,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         max_level = _backoff_max_level(_THRESHOLD_S)
         self._set_level(db_conn, aid, max_level)
         noop: dict[int, int] = {aid: 2}
@@ -282,9 +337,19 @@ class TestNudgeBackoffB7:
             assert row[0] == max_level
 
     def test_sweep_resets_level_on_real_inbound(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=400,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET heartbeat_backoff_level = 2, "
@@ -311,9 +376,19 @@ class TestNudgeBackoffB7:
         assert ev["attributes"]["reason"] == "real_inbound"
 
     def test_sweep_leaves_level_without_engagement(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=400,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET heartbeat_backoff_level = 2, last_heartbeat_at = now() "

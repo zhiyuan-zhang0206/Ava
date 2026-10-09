@@ -19,8 +19,10 @@ import pytest
 
 from base.agents.birth_config import set_cluster_default_model
 from base.config import frozen_field_names
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.agents.spawn import create_agent_row
 
 
@@ -28,6 +30,8 @@ def _spawn_agent(
     *,
     spawner: str = "user",
     config: dict[str, object] | None = None,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
     **kw: Any,
 ) -> int:
     """Test setup helper — the #1236 split collapsed for setup: create_agent_row
@@ -43,6 +47,8 @@ def _spawn_agent(
         machine=machine_name(),
         config=config,
         **kw,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     return agent_id
 
@@ -74,31 +80,60 @@ def _first_checkpoint(conn: psycopg.Connection, agent_id: int) -> str:
 
 class TestSpawnStamping:
     def test_absent_from_overlay_frozen_fields_are_stamped(
-        self, db_conn: psycopg.Connection
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
-        agent_id = _spawn_agent(spawner="test")
+        agent_id = _spawn_agent(
+            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+        )
         assert set(_birth_config(db_conn, agent_id) or {}) == frozen_field_names()
 
-    def test_overlay_present_frozen_field_is_not_stamped(self, db_conn: psycopg.Connection) -> None:
-        agent_id = _spawn_agent(spawner="test", config={"llm_model": "claude-sonnet-5"})
+    def test_overlay_present_frozen_field_is_not_stamped(
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
+    ) -> None:
+        agent_id = _spawn_agent(
+            spawner="test",
+            config={"llm_model": "claude-sonnet-5"},
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+        )
         stamped = _birth_config(db_conn, agent_id) or {}
         assert "llm_model" not in stamped
         assert set(stamped) == frozen_field_names() - {"llm_model"}
 
     def test_the_cluster_default_model_is_what_gets_frozen(
-        self, db_conn: psycopg.Connection
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         with db_conn.cursor() as cur:
             set_cluster_default_model(cur, "claude-sonnet-5", updated_by="test")
         db_conn.commit()
-        agent_id = _spawn_agent(spawner="test")
+        agent_id = _spawn_agent(
+            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+        )
         assert (_birth_config(db_conn, agent_id) or {})["llm_model"] == "claude-sonnet-5"
 
     def test_a_later_default_flip_does_not_move_an_existing_agent(
-        self, db_conn: psycopg.Connection
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """The whole point of the feature, end to end."""
-        agent_id = _spawn_agent(spawner="test")
+        agent_id = _spawn_agent(
+            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+        )
         born_with = (_birth_config(db_conn, agent_id) or {})["llm_model"]
         with db_conn.cursor() as cur:
             set_cluster_default_model(cur, "claude-sonnet-5", updated_by="test")
@@ -111,11 +146,19 @@ class TestReplayOnWake:
     """Resurrection preserves the birth configuration for hosted successor admission."""
 
     def test_resurrect_replays_the_stamp(
-        self, db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         from ops.agents.wake import resurrect_agent
 
-        agent_id = _spawn_agent(spawner="test")
+        agent_id = _spawn_agent(
+            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+        )
         stamp = _birth_config(db_conn, agent_id)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -131,24 +174,50 @@ class TestReplayOnWake:
 
 
 class TestForkInheritance:
-    def test_a_fork_inherits_the_parents_stamp(self, db_conn: psycopg.Connection) -> None:
-        parent = _spawn_agent(spawner="test")
+    def test_a_fork_inherits_the_parents_stamp(
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
+    ) -> None:
+        parent = _spawn_agent(
+            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+        )
         ckpt = _first_checkpoint(db_conn, parent)
         with db_conn.cursor() as cur:
             set_cluster_default_model(cur, "claude-sonnet-5", updated_by="test")
         db_conn.commit()
-        child = _spawn_agent(spawner="test", fork_from=parent, fork_checkpoint=ckpt)
+        child = _spawn_agent(
+            spawner="test",
+            fork_from=parent,
+            fork_checkpoint=ckpt,
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+        )
         assert _birth_config(db_conn, child) == _birth_config(db_conn, parent)
 
     def test_a_fork_of_an_unstamped_agent_is_stamped_fresh(
-        self, db_conn: psycopg.Connection
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """A pre-column agent (or one the migration backfill skipped) has NULL. Its
         fork must still come out fully stamped rather than inherit the hole."""
-        parent = _spawn_agent(spawner="test")
+        parent = _spawn_agent(
+            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+        )
         ckpt = _first_checkpoint(db_conn, parent)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET birth_config = NULL WHERE id = %s", (parent,))
         db_conn.commit()
-        child = _spawn_agent(spawner="test", fork_from=parent, fork_checkpoint=ckpt)
+        child = _spawn_agent(
+            spawner="test",
+            fork_from=parent,
+            fork_checkpoint=ckpt,
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+        )
         assert set(_birth_config(db_conn, child) or {}) == frozen_field_names()

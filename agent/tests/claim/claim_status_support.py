@@ -11,7 +11,9 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 import ava
+from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 
@@ -77,14 +79,20 @@ def _set_agent_status(db: psycopg.Connection, agent_id: int, status: str) -> Non
 
 
 @pytest.fixture
-async def running_agent(aops_pool: AsyncConnectionPool, database: Database):
+async def running_agent(
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
 
     from agent.ownership.hosted import admit_hosted_runtime
     from base.cluster.machine import machine_name
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent_id,

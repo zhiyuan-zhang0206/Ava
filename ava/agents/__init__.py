@@ -487,11 +487,16 @@ def spawn_impl(
                     f"config_overlay['preset'] must be a non-empty string, got {name!r}"
                 )
         if overlay:
+            from ava.sdk_surface import settings as sdk_settings
             from ava.sdk_surface.install import installed
             from base.packages.plugins.config_registration import validate_config_overlay
 
             installation = installed()
-            validate_config_overlay(overlay, None if installation is None else installation.configs)
+            validate_config_overlay(
+                overlay,
+                None if installation is None else installation.configs,
+                models=sdk_settings.model_catalog().models,
+            )
     return _client.spawn(
         spawner=spawner,
         prompt=prompt,

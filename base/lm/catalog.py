@@ -4,8 +4,8 @@ A `ModelCatalog` is an immutable value. `CatalogBuilder` is how one is made: the
 loader (`base/lm/plugin_providers.py`) installs each enabled plugin's `ProviderContribution`
 into a builder and takes `build()`, which validates the whole graph. Nothing is registered at
 import and nothing is mutated after `build()`; a failed installation discards the builder, so
-a retry starts from scratch. The process holds one catalog, handed out by
-`plugin_providers.model_catalog()`.
+a retry starts from scratch. Each process composition root retains the catalog it built and passes it explicitly
+to provider consumers.
 
 The prefix map is flat: a duplicate prefix, or one that nests inside another (``foo-`` vs
 ``foo-bar-``), fails fast, as does a duplicate model id or stop vocabulary key — two claimants
@@ -97,19 +97,19 @@ def _check_prefix(
     prefix: str, plugin: str, existing_prefixes: Mapping[str, ProviderBinding]
 ) -> None:
     if not prefix or not prefix.endswith("-"):
-        raise ValueError(
+        raise ProviderRegistrationError(
             f"provider plugin {plugin!r}: prefix {prefix!r} must end with '-' "
             "(e.g. 'foo-'); dispatch is model.startswith(prefix)"
         )
     for existing in existing_prefixes:
         if prefix == existing:
-            raise ValueError(
+            raise ProviderRegistrationError(
                 f"provider plugin {plugin!r}: prefix {prefix!r} already claimed "
                 "by another plugin — the prefix map is flat and a "
                 "collision is an error, not a precedence order"
             )
         if prefix.startswith(existing) or existing.startswith(prefix):
-            raise ValueError(
+            raise ProviderRegistrationError(
                 f"provider plugin {plugin!r}: prefix {prefix!r} nests inside "
                 f"existing prefix {existing!r} — nested prefixes are an ordered "
                 "fallback chain wearing another name; rejected"
@@ -138,75 +138,52 @@ class CatalogBuilder:
         is fail-fast, not best-effort, and the loader propagates this class instead of
         containing it — the flat maps cannot pick a winner between two claimants.
         """
-        try:
-            self._install(plugin, contribution)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except ProviderRegistrationError:
-            raise
-        except Exception as exc:
-            raise ProviderRegistrationError(str(exc)) from exc
+        self._install(plugin, contribution)
 
     def _install(self, plugin: str, contribution: ProviderContribution) -> None:
         binding = contribution.binding
         models = contribution.models
         pricing = contribution.pricing
         _check_prefix(binding.prefix, plugin, self._bindings)
-        provider = binding.provider_key or binding.prefix.rstrip("-")
-
-        extra_prices = set(pricing) - set(models)
-        if extra_prices:
-            raise ValueError(
-                f"provider plugin {plugin!r}: prices declared for unregistered models "
-                f"{sorted(extra_prices)!r}"
-            )
-        for model_id, spec in models.items():
-            if not model_id.startswith(binding.prefix):
-                raise ValueError(
-                    f"provider plugin {plugin!r}: model id {model_id!r} must start with "
-                    f"the binding prefix {binding.prefix!r} so factory dispatch can reach it"
-                )
-            if spec.provider != provider:
-                raise ValueError(
-                    f"provider plugin {plugin!r}: model {model_id!r} declares "
-                    f"provider {spec.provider!r} but the binding prefix {binding.prefix!r} "
-                    f"implies {provider!r} — fix the ModelSpec.provider"
-                )
-            if model_id in self._models:
-                raise RuntimeError(
-                    f"model id {model_id!r} is already registered by an earlier plugin — "
-                    "model ids are flat and a duplicate is an error"
-                )
+        self._validate_model_declarations(plugin, contribution)
         prices = PriceBook(self._archive, self._plugin_prices)
         for model_id, spec in models.items():
             if spec.fast_of is not None and binding.served_speed is None:
-                raise ValueError(f"Fast model {model_id!r} needs a served_speed adapter")
-            validate_spec(
-                model_id,
-                spec,
-                anthropic_protocol=binding.anthropic_protocol,
-                prices=prices,
-                pending_price_models=pricing.keys(),
-            )
-        new_prices = {
-            model_id: plugin_model_price(
-                model_id,
-                cache_miss=price.cache_miss,
-                cache_hit=price.cache_hit,
-                output=price.output,
-                source_url=price.source_url,
-                source_checked_at=price.source_checked_at,
-                vendor=price.vendor,
-                periods=price.periods,
-                cache_write_5m=price.cache_write_5m,
-                cache_write_1h=price.cache_write_1h,
-                plugin=plugin,
-            )
-            for model_id, price in pricing.items()
-        }
+                raise ProviderRegistrationError(
+                    f"Fast model {model_id!r} needs a served_speed adapter"
+                )
+            try:
+                validate_spec(
+                    model_id,
+                    spec,
+                    anthropic_protocol=binding.anthropic_protocol,
+                    prices=prices,
+                    pending_price_models=pricing.keys(),
+                )
+            except (ValueError, RuntimeError) as exc:
+                raise ProviderRegistrationError(str(exc)) from exc
+        try:
+            new_prices = {
+                model_id: plugin_model_price(
+                    model_id,
+                    cache_miss=price.cache_miss,
+                    cache_hit=price.cache_hit,
+                    output=price.output,
+                    source_url=price.source_url,
+                    source_checked_at=price.source_checked_at,
+                    vendor=price.vendor,
+                    periods=price.periods,
+                    cache_write_5m=price.cache_write_5m,
+                    cache_write_1h=price.cache_write_1h,
+                    plugin=plugin,
+                )
+                for model_id, price in pricing.items()
+            }
+        except ValueError as exc:
+            raise ProviderRegistrationError(str(exc)) from exc
         stop_spec = binding.stop_spec
         if stop_spec is not None and stop_spec.provider_key in self._stops:
-            raise ValueError(
+            raise ProviderRegistrationError(
                 f"provider plugin {plugin!r}: stop vocabulary key {stop_spec.provider_key!r} already "
                 "registered — bind the existing client class's entry instead of "
                 "re-declaring it"
@@ -217,6 +194,37 @@ class CatalogBuilder:
         if stop_spec is not None:
             self._stops[stop_spec.provider_key] = stop_spec
         self._bindings[binding.prefix] = binding
+
+    def _validate_model_declarations(self, plugin: str, contribution: ProviderContribution) -> None:
+        """Reject declaration ownership collisions before changing the builder."""
+        binding = contribution.binding
+        models = contribution.models
+        pricing = contribution.pricing
+        provider = binding.provider_key or binding.prefix.rstrip("-")
+
+        extra_prices = set(pricing) - set(models)
+        if extra_prices:
+            raise ProviderRegistrationError(
+                f"provider plugin {plugin!r}: prices declared for unregistered models "
+                f"{sorted(extra_prices)!r}"
+            )
+        for model_id, spec in models.items():
+            if not model_id.startswith(binding.prefix):
+                raise ProviderRegistrationError(
+                    f"provider plugin {plugin!r}: model id {model_id!r} must start with "
+                    f"the binding prefix {binding.prefix!r} so factory dispatch can reach it"
+                )
+            if spec.provider != provider:
+                raise ProviderRegistrationError(
+                    f"provider plugin {plugin!r}: model {model_id!r} declares "
+                    f"provider {spec.provider!r} but the binding prefix {binding.prefix!r} "
+                    f"implies {provider!r} — fix the ModelSpec.provider"
+                )
+            if model_id in self._models:
+                raise ProviderRegistrationError(
+                    f"model id {model_id!r} is already registered by an earlier plugin — "
+                    "model ids are flat and a duplicate is an error"
+                )
 
     def build(self) -> ModelCatalog:
         """Validate the complete model graph and freeze it."""

@@ -10,6 +10,7 @@ never raising, returning `(decision, reason)`.
 from __future__ import annotations
 
 from typing import Any, NamedTuple
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -17,8 +18,10 @@ from pydantic import ValidationError
 
 from base.agents import AgentNotFound, CrashRecoveryResult
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.plugin_providers import build_model_catalog
 from base.telemetry import Event
 from ops import lifecycle
 from ops.agents import create_agent_row
@@ -64,6 +67,7 @@ def _park_corpse(
     lease_seconds: float | None = None,
     suppress_reason: str | None = None,
     suppress_seconds: float | None = None,
+    config_authority: ConfigAuthority,
 ) -> int:
     """A row shaped like a crash-marked corpse: `create_agent_row` leaves the
     death marker NULL (the production stamp is
@@ -74,6 +78,8 @@ def _park_corpse(
         EventBus.from_settings(),
         spawner="user",
         machine=machine or machine_name(),
+        catalog=build_model_catalog(),
+        authority=config_authority,
     )
     with db.cursor() as cur:
         cur.execute(
@@ -164,9 +170,15 @@ def _local_home_name() -> str:
 
 class TestRecoverCrashMarkedOp:
     def test_harvests_a_marked_idling_corpse(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _park_corpse(db_conn)
+        aid = _park_corpse(db_conn, config_authority=config_authority)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert response.status is CrashRecoveryResult.HARVESTED
         assert response.reason is None
@@ -203,9 +215,15 @@ class TestRecoverCrashMarkedOp:
         ]
 
     def test_repeat_call_is_idempotent(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _park_corpse(db_conn)
+        aid = _park_corpse(db_conn, config_authority=config_authority)
         assert (
             lifecycle._recover_crash_marked_blocking(database, event_bus, aid).status
             is CrashRecoveryResult.HARVESTED
@@ -216,17 +234,29 @@ class TestRecoverCrashMarkedOp:
         assert len(stubs.events) == 1  # no second harvest event
 
     def test_refuses_unmarked(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _park_corpse(db_conn, marked=False)
+        aid = _park_corpse(db_conn, marked=False, config_authority=config_authority)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (CrashRecoveryResult.REFUSED, "not_marked")
         assert stubs.events == []
 
     def test_refuses_unsettled_running_owner(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _park_corpse(db_conn, status="running")
+        aid = _park_corpse(db_conn, status="running", config_authority=config_authority)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
             CrashRecoveryResult.REFUSED,
@@ -234,9 +264,15 @@ class TestRecoverCrashMarkedOp:
         )
 
     def test_refuses_non_hosted_runtime(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _park_corpse(db_conn, runtime_kind="process")
+        aid = _park_corpse(db_conn, runtime_kind="process", config_authority=config_authority)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
             CrashRecoveryResult.REFUSED,
@@ -244,26 +280,47 @@ class TestRecoverCrashMarkedOp:
         )
 
     def test_refuses_foreign_machine(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _park_corpse(db_conn, machine="somewhere-else")
+        aid = _park_corpse(db_conn, machine="somewhere-else", config_authority=config_authority)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (CrashRecoveryResult.REFUSED, "wrong_machine")
 
     def test_refuses_live_lease(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _park_corpse(db_conn, lease_seconds=3600.0)
+        aid = _park_corpse(db_conn, lease_seconds=3600.0, config_authority=config_authority)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (CrashRecoveryResult.REFUSED, "lease_alive")
 
     def test_refuses_while_wake_suppressed(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
         """An active suppression window (without a tripped breaker) still
         refuses: automatic recovery is halted until the window expires."""
         aid = _park_corpse(
-            db_conn, suppress_reason="permanent_provider_reject", suppress_seconds=3600.0
+            db_conn,
+            suppress_reason="permanent_provider_reject",
+            suppress_seconds=3600.0,
+            config_authority=config_authority,
         )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
@@ -273,11 +330,17 @@ class TestRecoverCrashMarkedOp:
         assert stubs.events == []
 
     def test_refuses_when_the_recovery_breaker_tripped(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
         """The durable streak gate holds even with no suppression window: a
         claim that cleared the window must not unlock a halted agent."""
-        aid = _park_corpse(db_conn, streak=2)
+        aid = _park_corpse(db_conn, streak=2, config_authority=config_authority)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
             CrashRecoveryResult.REFUSED,
@@ -286,9 +349,15 @@ class TestRecoverCrashMarkedOp:
         assert stubs.events == []
 
     def test_refuses_with_fallback_reason_for_reasonless_window(
-        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+        self,
+        db_conn: psycopg.Connection,
+        stubs: _Stubs,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _park_corpse(db_conn, suppress_seconds=3600.0)
+        aid = _park_corpse(db_conn, suppress_seconds=3600.0, config_authority=config_authority)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
             CrashRecoveryResult.REFUSED,
@@ -446,7 +515,8 @@ async def test_lifecycle_op_dispatches_the_recover_path(
         event_bus,
         "/api/agents/42/recover-crash-marked-v2",
         {},
-        object(),  # type: ignore[arg-type]
+        MagicMock(),
+        catalog=build_model_catalog(),  # type: ignore[arg-type]
     )
     assert isinstance(result, RecoverCrashMarkedResponse)
     assert result.status is CrashRecoveryResult.HARVESTED

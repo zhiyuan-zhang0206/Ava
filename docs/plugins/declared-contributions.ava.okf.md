@@ -12,7 +12,7 @@ A plugin does not register hooks, state, system prompt sections or context notes
 `contribute() -> PluginContributions` (`base/packages/plugins/extensions.py`), a pure function returning a
 frozen declaration.
 
-- `system_prompt_sections` — `(slices: AgentSlices) -> str`; an empty string contributes nothing.
+- `system_prompt_sections` — `(slices: AgentSlices, *, catalog: ModelCatalog) -> str`; an empty string contributes nothing.
 - `context_notes` — `ContextNote(build, on_fork, rank)`; `build(ctx: AvaContext)` returns a `HumanMessage` or `None` when it has
   nothing to say. Lower `rank` sits closer to the SystemMessage; `on_fork` also grafts the note onto a fork.
 - `after_init` / `before_llm` / `before_exec` / `after_exec` — `Hook` instances ([[docs/plugins/graph-edge-hooks.ava.okf.md]]).
@@ -45,6 +45,12 @@ in-process swap.
 `build_system_prompt(extensions, slices, agent_id=...)`, `context_notes(extensions, ctx)` and
 `fork_notes(extensions, ctx)` read it. Context-note builders receive the actual turn context,
 including its identity and clients; they never read `ava.context` in the shared host. The attribution catalog (`ava plugins inspect`) reads each plugin's declaration records and compares them with the `ava-plugin.json` contribution keys.
+
+System-prompt builders pass their own `ModelCatalog` to every section. Sections never read a host
+SDK Installation. External sections using the old one-argument signature must add the required
+`catalog` keyword; the builder does not inspect signatures or retry an incompatible call. Plugin
+name and declaration order determine section priority, after the framework's SDK detail,
+Conversation, Conduct and Capabilities groups.
 
 ## The SDK install
 

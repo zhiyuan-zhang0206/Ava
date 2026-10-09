@@ -19,6 +19,7 @@ from base.agents.history.hierarchy.sessions import (
     coverage_of,
 )
 from base.agents.history.hierarchy.units import read_times
+from base.lm.catalog import ModelCatalog
 from base.lm.pricing import quote
 
 _T0 = datetime(2026, 10, 5, tzinfo=UTC)
@@ -168,17 +169,31 @@ def test_covered_runs_are_skipped_exactly() -> None:
     assert plan_jobs(history, [first], [(0, 11)], threshold=_THRESHOLD) == []
 
 
-def test_the_estimate_prices_a_cold_prefix_plus_cached_rereads() -> None:
+def test_the_estimate_prices_a_cold_prefix_plus_cached_rereads(
+    *, model_catalog: ModelCatalog
+) -> None:
     history = _history(6)
     (session,) = _sessions(history)
     jobs = plan_jobs(history, [session], [], threshold=_THRESHOLD)
     # The first job ends before the AI turn that follows it: that turn's reported input is its prefix.
     assert [j.input_tokens for j in jobs] == [3200, 4000 + 10]
-    estimate = estimate_cost("deepseek-v4-flash", jobs)
+    estimate = estimate_cost("deepseek-v4-flash", jobs, prices=model_catalog.prices)
     assert estimate.jobs == 2 and estimate.output_tokens == 2 * OUTPUT_TOKENS_PER_JOB
-    cold = [quote("deepseek-v4-flash", j.input_tokens, OUTPUT_TOKENS_PER_JOB, 0) for j in jobs]
-    warm = [quote("deepseek-v4-flash", j.input_tokens, 0, j.input_tokens) for j in jobs]
+    cold = [
+        quote(
+            "deepseek-v4-flash",
+            j.input_tokens,
+            OUTPUT_TOKENS_PER_JOB,
+            0,
+            prices=model_catalog.prices,
+        )
+        for j in jobs
+    ]
+    warm = [
+        quote("deepseek-v4-flash", j.input_tokens, 0, j.input_tokens, prices=model_catalog.prices)
+        for j in jobs
+    ]
     assert estimate.cost_usd == pytest.approx(
         sum(c.cost_usd + 0.85 * w.cost_usd for c, w in zip(cold, warm, strict=True))  # type: ignore[union-attr]
     )
-    assert estimate_cost("no-such-model", jobs).cost_usd is None
+    assert estimate_cost("no-such-model", jobs, prices=model_catalog.prices).cost_usd is None

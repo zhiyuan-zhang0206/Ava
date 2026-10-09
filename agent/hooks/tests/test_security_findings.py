@@ -32,6 +32,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
@@ -129,6 +130,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
             bus=EventBus.from_settings(),
             clients=process_clients(),
             identity=AgentIdentity(agent_id=1042, owns_loop=True),
+            catalog=build_model_catalog(),
         )
     )
     code = (

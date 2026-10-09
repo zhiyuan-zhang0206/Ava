@@ -49,18 +49,23 @@ import psycopg
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base import paths
 from base.agents import AvaAgentError, ResurrectRefused
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.cluster.machine import machine_name
 from base.cluster.transport_encryption import verify_transport_encryption
-from base.config import settings
+from base.config import Settings, ensure_eager, settings
+from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
+from base.packages.plugins.config_registration import InvalidConfigOverlay
 from ops import host_config as host_config
 from ops import inventory as inventory
 from ops import lifecycle
@@ -184,6 +189,7 @@ async def _run_arm(
     workers: maintenance_activity.WorkerFutures,
     pool: ConnectionPool,
     executor: ThreadPoolExecutor,
+    authority: ConfigAuthority,
 ) -> tuple[OpStatus, dict[str, object]]:
     """`_dispatch_sync` on this daemon's executor, with its explicit DB pool.
 
@@ -196,7 +202,8 @@ async def _run_arm(
     active_ops[kind] = active
     try:
         future = loop.run_in_executor(
-            executor, functools.partial(_dispatch_sync, kind, payload, pool=pool)
+            executor,
+            functools.partial(_dispatch_sync, kind, payload, pool=pool, authority=authority),
         )
         maintenance_activity.track_worker(future, workers=workers)
         return await asyncio.shield(future)
@@ -206,7 +213,7 @@ async def _run_arm(
 
 
 def _dispatch_sync(
-    kind: str, payload: dict[str, Any], *, pool: ConnectionPool
+    kind: str, payload: dict[str, Any], *, pool: ConnectionPool, authority: ConfigAuthority
 ) -> tuple[OpStatus, dict[str, object]]:
     """The blocking op arms, bound to this daemon's shared pool.
 
@@ -214,7 +221,7 @@ def _dispatch_sync(
     ceiling, task #4129 I4). The binding stays here so `_run_arm` and the
     worker's explicit pool binding stay in this daemon.
     """
-    return dispatch_sync(kind, payload, pool=pool, db=_ops_handles()[0])
+    return dispatch_sync(kind, payload, pool=pool, db=_ops_handles()[0], authority=authority)
 
 
 async def _dispatch(
@@ -225,6 +232,8 @@ async def _dispatch(
     workers: maintenance_activity.WorkerFutures,
     pool: ConnectionPool,
     executor: ThreadPoolExecutor,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
@@ -258,7 +267,7 @@ async def _dispatch(
             case "spawn-launch-v2":
                 db, bus = _ops_handles()
                 spawned = await lifecycle.launch_agent_op(
-                    db, bus, LaunchAgentRequest.model_validate(payload), pool
+                    db, bus, LaunchAgentRequest.model_validate(payload), pool, catalog=catalog
                 )
                 # `exclude_none`: the settlement receipt is present only when a
                 # withdrawn model was rewritten (task #4306) — the common wire
@@ -283,6 +292,7 @@ async def _dispatch(
                     pool,
                     trigger_inbound_id=lc.trigger_inbound_id,
                     trigger_inbound_kind=lc.trigger_inbound_kind,
+                    catalog=catalog,
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
@@ -293,6 +303,7 @@ async def _dispatch(
                     workers=workers,
                     pool=pool,
                     executor=executor,
+                    authority=authority,
                 )
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
@@ -303,7 +314,7 @@ async def _dispatch(
             "detail": str(exc),
             "reason": exc.reason.value,
         }
-    except (ValidationError, ValueError) as exc:
+    except (ValidationError, ValueError, InvalidConfigOverlay) as exc:
         # ValidationError: a payload that failed its per-kind model_validate.
         # ValueError: lifecycle.lifecycle_op raises it for an unparseable path.
         return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
@@ -325,6 +336,8 @@ async def _dispatch_idempotent(
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
     executor: ThreadPoolExecutor,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
@@ -341,7 +354,15 @@ async def _dispatch_idempotent(
     for attempt in range(_DISPATCH_RETRY_ATTEMPTS):
         try:
             return await _dispatch_idempotent_pass(
-                kind, payload, key, pool, active_ops=active_ops, workers=workers, executor=executor
+                kind,
+                payload,
+                key,
+                pool,
+                active_ops=active_ops,
+                workers=workers,
+                executor=executor,
+                catalog=catalog,
+                authority=authority,
             )
         except psycopg.OperationalError:
             if attempt + 1 >= _DISPATCH_RETRY_ATTEMPTS:
@@ -364,6 +385,8 @@ async def _dispatch_idempotent_pass(
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
     executor: ThreadPoolExecutor,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Replay one immutable request; unresolved execution never frees its identity.
 
@@ -384,7 +407,14 @@ async def _dispatch_idempotent_pass(
         if operation.operation_key != key:
             return OpStatus.FAILED, {"error": "guarded restart envelope identity differs"}
         return await _dispatch(
-            kind, payload, active_ops=active_ops, workers=workers, pool=pool, executor=executor
+            kind,
+            payload,
+            active_ops=active_ops,
+            workers=workers,
+            pool=pool,
+            executor=executor,
+            catalog=catalog,
+            authority=authority,
         )
     request_hash = hashlib.sha256(
         json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -401,7 +431,14 @@ async def _dispatch_idempotent_pass(
         # Exceptions, cancellation and result-write failure retain the committed
         # claim. A retry cannot infer that execution had no side effects.
         status, result = await _dispatch(
-            kind, payload, active_ops=active_ops, workers=workers, pool=pool, executor=executor
+            kind,
+            payload,
+            active_ops=active_ops,
+            workers=workers,
+            pool=pool,
+            executor=executor,
+            catalog=catalog,
+            authority=authority,
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -445,6 +482,8 @@ async def _ops_route(
     requests: maintenance_activity.RequestTokens,
     pool: ConnectionPool,
     executor: ThreadPoolExecutor,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
@@ -489,6 +528,8 @@ async def _ops_route(
                         active_ops=active_ops,
                         workers=workers,
                         executor=executor,
+                        catalog=catalog,
+                        authority=authority,
                     )
                 else:
                     status, result = await _dispatch(
@@ -498,6 +539,8 @@ async def _ops_route(
                         workers=workers,
                         pool=pool,
                         executor=executor,
+                        catalog=catalog,
+                        authority=authority,
                     )
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -515,6 +558,13 @@ async def _ops_route(
 
 
 async def _main() -> None:
+    ensure_eager()
+    catalog = build_model_catalog()
+    authority = ConfigAuthority(
+        runtime=settings,
+        all_domains=settings if settings.profile is None else Settings(profile=None),
+        env_path=paths.ava_home() / ".env",
+    )
     # Request arms and health snapshots share only this daemon invocation's state.
     active_ops: ActiveOps = {}
     requests: maintenance_activity.RequestTokens = set()
@@ -568,6 +618,8 @@ async def _main() -> None:
                 ("POST", "/ops"): functools.partial(
                     _ops_route,
                     executor=executor,
+                    catalog=catalog,
+                    authority=authority,
                     active_ops=active_ops,
                     dispatch_sem=dispatch_sem,
                     requests=requests,
@@ -597,7 +649,9 @@ async def _main() -> None:
             # cancels the server and ends the process, and the supervisor restarts it.
             async with server, asyncio.TaskGroup() as resident:
                 resident.create_task(server.serve_forever())
-                resident.create_task(outbox_flusher.outbox_loop(pool, db, bus, outbox_progress))
+                resident.create_task(
+                    outbox_flusher.outbox_loop(pool, db, bus, outbox_progress, authority=authority)
+                )
         finally:
             await stop_health_server(server)
             _remove_pidfile()

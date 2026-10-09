@@ -29,6 +29,8 @@ from agent.graph.tests.test_llm_helpers import (
 )
 from agent.state import AgentState
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 
 
 async def test_llm_node_billing_error_logs_billing_vendor_and_model(
@@ -39,7 +41,9 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     from base.config import settings
     from base.lm.context_budget import ContextBudget
 
-    def fixture_budget(_model: str, _overrides: object = None) -> ContextBudget:
+    def fixture_budget(
+        _model: str, _overrides: object = None, *, catalog: ModelCatalog
+    ) -> ContextBudget:
         return ContextBudget(10_000, 3_000, 4_000)
 
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixture_budget)
@@ -86,7 +90,16 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(ledger: Ll
         await llm_attempt(state, runtime, _CONFIG, Attempt(1, time.time()), ledger=ledger)
     assert not isinstance(exc_info.value, FatalProviderError)
     assert (
-        retry_wait(exc_info.value, 1, model="deepseek-flash", agent_id=7, ledger=ledger) is not None
+        retry_wait(
+            exc_info.value,
+            1,
+            model="deepseek-flash",
+            agent_id=7,
+            ledger=ledger,
+            catalog=build_model_catalog(),
+            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+        )
+        is not None
     )
 
 

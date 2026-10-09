@@ -16,6 +16,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 
+from base.lm.catalog import ModelCatalog
+
 # ---------------------------------------------------------------------------
 # 5. LLM repair (only on the rare path where deterministic fixes left it broken)
 # ---------------------------------------------------------------------------
@@ -83,7 +85,7 @@ def _strip_code_fence(text: str) -> str:
     return m.group(1) if m else text.strip()
 
 
-async def _repair_once(llm: Any, messages: list[Any]) -> str | None:
+async def _repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) -> str | None:
     """One LLM repair attempt: invoke with timeout, then flatten + strip the
     response. Returns the candidate source, or None when the model is
     unavailable (missing key, timeout, empty output)."""
@@ -106,6 +108,7 @@ async def _repair_once(llm: Any, messages: list[Any]) -> str | None:
     emit_billing_from_message(
         resp,
         model=_REPAIR_MODEL,
+        catalog=catalog,
         usage_kind="chat",
         start_time_ns=time.time_ns() - int((time.monotonic() - started) * 1_000_000_000),
     )
@@ -124,10 +127,18 @@ async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
     degrades to surfacing the error to the agent. A non-None return is
     guaranteed to compile.
     """
+    from ava.sdk_surface import settings as sdk_settings
     from base.lm.factory import build_chat_model
 
+    catalog = sdk_settings.model_catalog()
+
     try:
-        llm = build_chat_model(_REPAIR_MODEL)
+        llm = build_chat_model(
+            _REPAIR_MODEL,
+            catalog=catalog,
+            llm_override=sdk_settings.settings.lm.llm_override,
+            overrides=sdk_settings.model_overrides(),
+        )
     except (
         Exception
     ) as exc:  # best-effort: any failure degrades to surfacing the error to the agent
@@ -151,7 +162,7 @@ async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
             model=_REPAIR_MODEL,
             lines=len(code.splitlines()),
         )
-        candidate = await _repair_once(llm, messages)
+        candidate = await _repair_once(llm, messages, catalog=catalog)
         if candidate is None:
             return None
         try:

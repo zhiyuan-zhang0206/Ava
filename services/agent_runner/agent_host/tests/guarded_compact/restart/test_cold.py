@@ -15,7 +15,7 @@ from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
 from base.config import settings
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
 from services.agent_runner.agent_host.tests.guarded_compact.test_dead_host import (
@@ -34,6 +34,7 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     fence: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = prepare_agent(db_conn)
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential
@@ -65,6 +66,9 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
                 agent,
                 NativeRestartRequest(target=original),
                 lambda _: None,
+                catalog=model_catalog,
+                llm_override=settings.lm.llm_override,
+                default_model=settings.lm.llm_model,
             )
             child.stdin.write("close\n")
             child.stdin.flush()
@@ -82,11 +86,19 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
             await asyncio.wait_for(asyncio.to_thread(child.wait), 10)
             chat = _insert(db_conn, agent)
             model = SummaryModel(responses=["MUST NOT GENERATE" * 100])
-            binding = model_catalog().bindings["gpt-"]
-            add_bindings({"gpt-": replace(binding, build_single_attempt=lambda _: model)})
+            binding = model_catalog.bindings["gpt-"]
+            model_catalog = add_bindings(
+                model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+            )
             ordinary: list[object] = []
             host, _, _ = await make_host(
-                aops_pool, agent, 100, ordinary, monkeypatch, seed_history=False
+                aops_pool,
+                agent,
+                100,
+                ordinary,
+                monkeypatch,
+                seed_history=False,
+                catalog=model_catalog,
             )
             await host.run_turn(agent)
             progress = await asyncio.to_thread(

@@ -36,8 +36,11 @@ import redis.asyncio as aredis
 from langchain_core.messages import AIMessage
 
 import services.derived.labeler.labeler as labeler_module
+from base.config.service_read import ConfigAuthority
 from base.db import create_agent
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from services.derived.labeler.labeler import _rejection_reason as _reason_for
 from services.derived.labeler.labeler import _system_prompt as _prompt_for
 from services.derived.labeler.labeler import generate_label_async
@@ -286,6 +289,9 @@ class TestGenerateLabelRejectsNonLabels:
         monkeypatch: pytest.MonkeyPatch,
         _no_publish: list[str],
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         tid = create_agent(db_conn)
         monkeypatch.setattr(labeler_module, "build_chat_model", lambda _m, **_: _FakeLLM(raw))  # pyright: ignore[reportUnknownArgumentType]
@@ -296,6 +302,9 @@ class TestGenerateLabelRejectsNonLabels:
             labeler_config(labeler_model="deepseek-v4-flash"),
             labeler_db(),
             event_bus,
+            catalog=model_catalog,
+            llm_override=config_authority.runtime.lm.llm_override,
+            overrides=ModelOverrides.from_pins({}),
         )
 
         assert result is False, f"expected a generation failure for {raw!r}"
@@ -309,6 +318,9 @@ class TestGenerateLabelRejectsNonLabels:
         monkeypatch: pytest.MonkeyPatch,
         _no_publish: list[str],
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """The other half of the contract: the classifier must not fire on a
         real label."""
@@ -327,6 +339,9 @@ class TestGenerateLabelRejectsNonLabels:
             labeler_config(labeler_model="deepseek-v4-flash"),
             labeler_db(),
             event_bus,
+            catalog=model_catalog,
+            llm_override=config_authority.runtime.lm.llm_override,
+            overrides=ModelOverrides.from_pins({}),
         )
 
         assert result is True
@@ -343,6 +358,9 @@ async def test_generated_label_overwrites_stray_empty_string(
     monkeypatch: pytest.MonkeyPatch,
     _no_publish: list[str],
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Regression: a stray label='' row was invisible to the CAS's `label IS
     NULL` predicate, so it could never be auto-labeled — empty string must be
@@ -363,6 +381,9 @@ async def test_generated_label_overwrites_stray_empty_string(
         labeler_config(labeler_model="deepseek-v4-flash"),
         labeler_db(),
         event_bus,
+        catalog=model_catalog,
+        llm_override=config_authority.runtime.lm.llm_override,
+        overrides=ModelOverrides.from_pins({}),
     )
 
     assert result is True
@@ -376,6 +397,9 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
     monkeypatch: pytest.MonkeyPatch,
     _no_publish: list[str],
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The sticky bit still wins: label='' with label_user_set=TRUE means the
     user owns the (unset) label — the CAS must skip it just like it skips a
@@ -396,6 +420,9 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
         labeler_config(labeler_model="deepseek-v4-flash"),
         labeler_db(),
         event_bus,
+        catalog=model_catalog,
+        llm_override=config_authority.runtime.lm.llm_override,
+        overrides=ModelOverrides.from_pins({}),
     )
 
     assert result is None
@@ -410,6 +437,9 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
     _no_publish: list[str],
     loguru_records: list[dict[str, Any]],
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A labeler's daemon record must charge the label's agent, not the daemon."""
     agent_id = create_agent(db_conn)
@@ -437,6 +467,9 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
             labeler_config(labeler_model="deepseek-v4-flash"),
             labeler_db(),
             event_bus,
+            catalog=model_catalog,
+            llm_override=config_authority.runtime.lm.llm_override,
+            overrides=ModelOverrides.from_pins({}),
         )
         is True
     )

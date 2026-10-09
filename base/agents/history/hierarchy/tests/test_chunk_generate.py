@@ -22,6 +22,7 @@ from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.history.hierarchy.units import divide_units
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 
 
 @pytest.fixture(autouse=True)
@@ -294,13 +295,17 @@ _ONE = '<group first="1" last="3">  everything  </group>'
 _TWO = '<group first="1" last="2">look</group><group first="3" last="3">run</group>'
 
 
-def _gen(llm: Any, **kw: Any) -> Any:
-    return generate_chunk(llm, _PREFIX, 1, model="m", agent_id=7, tools=["T"], **kw)
+def _gen(llm: Any, *, model_catalog: ModelCatalog, **kw: Any) -> Any:
+    return generate_chunk(
+        llm, _PREFIX, 1, model="m", agent_id=7, tools=["T"], **kw, catalog=model_catalog
+    )
 
 
-def test_request_is_prefix_plus_one_instruction_with_tools_bound() -> None:
+def test_request_is_prefix_plus_one_instruction_with_tools_bound(
+    model_catalog: ModelCatalog,
+) -> None:
     llm = _Recorder([AIMessage(content=_TWO)])
-    out = _gen(llm)
+    out = _gen(llm, model_catalog=model_catalog)
     assert out.groups == [UnitGroup(0, 1, "look"), UnitGroup(2, 2, "run")]
     assert [u.kind for u in out.units] == ["inbound", "work", "work"]
     assert llm.bound == ["T"]
@@ -310,7 +315,7 @@ def test_request_is_prefix_plus_one_instruction_with_tools_bound() -> None:
     assert "[1] human message: fix the flaky test" in request[-1].content
 
 
-def test_an_unclosed_group_is_refused_and_corrected() -> None:
+def test_an_unclosed_group_is_refused_and_corrected(model_catalog: ModelCatalog) -> None:
     llm = _Recorder(
         [
             AIMessage(
@@ -319,35 +324,37 @@ def test_an_unclosed_group_is_refused_and_corrected() -> None:
             AIMessage(content=_TWO),
         ]
     )
-    out = _gen(llm, corrections=1)
+    out = _gen(llm, corrections=1, model_catalog=model_catalog)
     assert out.groups[-1] == UnitGroup(2, 2, "run")  # the corrected reply tiles the catalog
     assert "opens 2 <group> tags but holds 1" in llm.requests[1][-1].content
 
 
-def test_tool_call_reply_is_refused_and_retried_then_answered() -> None:
+def test_tool_call_reply_is_refused_and_retried_then_answered(model_catalog: ModelCatalog) -> None:
     call = AIMessage(
         content="", tool_calls=[{"name": "execute_code", "id": "c1", "args": {"code": "1"}}]
     )
     llm = _Recorder([call, AIMessage(content=_ONE)])
-    out = _gen(llm)
+    out = _gen(llm, model_catalog=model_catalog)
     assert out.groups == [UnitGroup(0, 2, "everything")]
     retry = llm.requests[1]
     assert retry[-1].type == "tool" and "unavailable" in retry[-1].content
 
 
-def test_endless_tool_calls_fail_after_the_refusal_rounds() -> None:
+def test_endless_tool_calls_fail_after_the_refusal_rounds(model_catalog: ModelCatalog) -> None:
     call = AIMessage(
         content="", tool_calls=[{"name": "execute_code", "id": "c", "args": {"code": "1"}}]
     )
     with pytest.raises(GenerateError, match="kept calling tools"):
-        _gen(_Recorder([call] * 10))
+        _gen(_Recorder([call] * 10), model_catalog=model_catalog)
 
 
-def test_a_refused_reply_is_resent_alone_in_the_same_conversation() -> None:
+def test_a_refused_reply_is_resent_alone_in_the_same_conversation(
+    model_catalog: ModelCatalog,
+) -> None:
     bad = '<group first="1" last="2">a</group><group first="3" last="9">b</group>'
     llm = _Recorder([AIMessage(content=bad), AIMessage(content=_TWO)])
     seen: list[Any] = []
-    out = _gen(llm, corrections=2, on_call=seen.append)
+    out = _gen(llm, corrections=2, on_call=seen.append, model_catalog=model_catalog)
     assert out.groups == [UnitGroup(0, 1, "look"), UnitGroup(2, 2, "run")]
     second = llm.requests[1]
     assert (
@@ -361,24 +368,28 @@ def test_a_refused_reply_is_resent_alone_in_the_same_conversation() -> None:
     assert seen[1].instruction == second[-1].content
 
 
-def test_corrections_are_bounded_and_the_call_then_fails_with_every_attempt_recorded() -> None:
+def test_corrections_are_bounded_and_the_call_then_fails_with_every_attempt_recorded(
+    model_catalog: ModelCatalog,
+) -> None:
     bad = "<groups>nonsense</groups>"
     llm = _Recorder([AIMessage(content=bad)] * 3)
     seen: list[Any] = []
     with pytest.raises(GenerateError, match=r"refused after 2 correction\(s\)"):
-        _gen(llm, corrections=2, on_call=seen.append)
+        _gen(llm, corrections=2, on_call=seen.append, model_catalog=model_catalog)
     assert len(llm.requests) == 3 and [c.round for c in seen] == [0, 1, 2]
     assert all(c.problem for c in seen)
 
 
-def test_no_corrections_means_the_first_refusal_fails() -> None:
+def test_no_corrections_means_the_first_refusal_fails(model_catalog: ModelCatalog) -> None:
     llm = _Recorder([AIMessage(content="no envelope")])
     with pytest.raises(GenerateError, match=r"refused after 0 correction\(s\)"):
-        _gen(llm)
+        _gen(llm, model_catalog=model_catalog)
     assert len(llm.requests) == 1
 
 
-def test_a_provider_error_in_a_correction_fails_the_call_and_is_recorded() -> None:
+def test_a_provider_error_in_a_correction_fails_the_call_and_is_recorded(
+    model_catalog: ModelCatalog,
+) -> None:
     class Flaky(_Recorder):
         def invoke(self, messages: list[Any]) -> AIMessage:
             if self.replies:
@@ -392,17 +403,20 @@ def test_a_provider_error_in_a_correction_fails_the_call_and_is_recorded() -> No
             corrections=1,
             retry_attempts=0,
             on_call=seen.append,
+            model_catalog=model_catalog,
         )
     assert [c.kind for c in seen] == ["leaf", "group-correction"] and seen[1].response is None
 
 
-def test_every_provider_call_is_reported_including_the_failed_one() -> None:
+def test_every_provider_call_is_reported_including_the_failed_one(
+    model_catalog: ModelCatalog,
+) -> None:
     call = AIMessage(
         content="", tool_calls=[{"name": "execute_code", "id": "c1", "args": {"code": "1"}}]
     )
     llm = _Recorder([call, AIMessage(content=[{"type": "text", "text": _ONE}])])
     seen: list[Any] = []
-    _gen(llm, on_call=seen.append)
+    _gen(llm, on_call=seen.append, model_catalog=model_catalog)
     assert [c.round for c in seen] == [0, 1]
     assert seen[0].response is call and seen[0].error is None
     assert all(c.prefix_len == len(_PREFIX) and c.start_offset == 1 for c in seen)
@@ -414,12 +428,14 @@ def test_every_provider_call_is_reported_including_the_failed_one() -> None:
 
     failed: list[Any] = []
     with pytest.raises(GenerateError):
-        _gen(Boom([]), retry_attempts=0, on_call=failed.append)
+        _gen(Boom([]), retry_attempts=0, on_call=failed.append, model_catalog=model_catalog)
     assert len(failed) == 1 and failed[0].response is None and "400" in failed[0].error
 
 
 @pytest.mark.parametrize("error", [TypeError("bad code"), ValueError("bad input")])
-def test_unknown_chunk_invocation_error_is_recorded_once_and_preserved(error: Exception) -> None:
+def test_unknown_chunk_invocation_error_is_recorded_once_and_preserved(
+    model_catalog: ModelCatalog, error: Exception
+) -> None:
     class Broken(_Recorder):
         def invoke(self, messages: list[Any]) -> AIMessage:
             self.requests.append(list(messages))
@@ -428,16 +444,18 @@ def test_unknown_chunk_invocation_error_is_recorded_once_and_preserved(error: Ex
     llm = Broken([])
     calls: list[ChunkCall] = []
     with pytest.raises(type(error)) as raised:
-        _gen(llm, corrections=2, retry_attempts=2, on_call=calls.append)
+        _gen(
+            llm, corrections=2, retry_attempts=2, on_call=calls.append, model_catalog=model_catalog
+        )
     assert raised.value is error
     assert len(llm.requests) == len(calls) == 1
     assert calls[0].response is None and calls[0].error == str(error)
 
 
-def test_a_chunk_is_numbered_from_its_own_first_unit() -> None:
+def test_a_chunk_is_numbered_from_its_own_first_unit(model_catalog: ModelCatalog) -> None:
     # A chunk that starts at the second work turn: its catalog numbers from 1 there.
     llm = _Recorder([AIMessage(content='<group first="1" last="1">a</group>')])
-    out = generate_chunk(llm, _PREFIX, 4, model="m", agent_id=7, tools=["T"])
+    out = generate_chunk(llm, _PREFIX, 4, model="m", agent_id=7, tools=["T"], catalog=model_catalog)
     catalog = llm.requests[0][-1].content.split("whole units):\n")[1]
     assert catalog.startswith("[1] ") and "pytest -x" in catalog and "[2]" not in catalog
     assert [u.i0 for u in out.units] == [0]
@@ -449,14 +467,15 @@ def test_a_chunk_is_numbered_from_its_own_first_unit() -> None:
         ]
     )
     with pytest.raises(GenerateError, match=r"first 2 is not in the catalog \(units 1 to 1\)"):
-        generate_chunk(llm, _PREFIX, 4, model="m", agent_id=7, tools=["T"])
+        generate_chunk(llm, _PREFIX, 4, model="m", agent_id=7, tools=["T"], catalog=model_catalog)
 
 
 def test_chunk_calls_log_their_usage_under_the_job_agent(
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
 ) -> None:
     usage: Any = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
-    _gen(_Recorder([AIMessage(content=_TWO, usage_metadata=usage)]))
+    _gen(_Recorder([AIMessage(content=_TWO, usage_metadata=usage)]), model_catalog=model_catalog)
     [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
     extra = record["extra"]
     assert extra["agent_id"] == 7

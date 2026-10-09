@@ -252,11 +252,11 @@ class RestartAgentRequest(BaseModel):
             return self
         from base.packages.plugins.config_registration import (
             InvalidConfigOverlay,
-            validate_config_overlay,
+            validate_config_overlay_shape,
         )
 
         try:
-            validate_config_overlay(self.config_overlay)
+            validate_config_overlay_shape(self.config_overlay)
         except InvalidConfigOverlay as exc:
             # Pydantic converts ValueError into a boundary validation failure;
             # propagating InvalidConfigOverlay directly would become a 500.

@@ -44,6 +44,7 @@ from base.config import env_override_values, field_domain, get_config_metadata, 
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
 from base.config.admin.plugin_config import patch_owner, write_plugin_patch
+from base.config.service_read import ConfigAuthority
 from base.host.env import runtime_config
 from base.host.env.audit import check_env_integrity
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
@@ -117,7 +118,7 @@ def _target_capabilities(target: str) -> list[MachineRole]:
         return []
 
 
-async def _dispatch_config_read(target: str) -> ConfigReadResult:
+async def _dispatch_config_read(target: str, *, authority: ConfigAuthority) -> ConfigReadResult:
     """Run config_read on `target` via its ops server — one uniform path.
 
     Every machine with an agent-runner capability (the gateway's own box
@@ -164,7 +165,9 @@ async def _dispatch_config_read(target: str) -> ConfigReadResult:
             status_code=503,
             detail=f"machine {target!r} has no agent-runner ops server — its config cannot be read",
         )
-    return ConfigReadResult.model_validate(await asyncio.to_thread(host_config.config_read_op))
+    return ConfigReadResult.model_validate(
+        await asyncio.to_thread(host_config.config_read_op, authority=authority)
+    )
 
 
 async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditReadResult:
@@ -219,6 +222,7 @@ async def _dispatch_config_write(
     target: str,
     overrides: dict[str, Any],
     *,
+    authority: ConfigAuthority,
     local: bool = False,
     actor: str | None = None,
     trace_id: str | None = None,
@@ -277,7 +281,12 @@ async def _dispatch_config_write(
         )
     return ConfigWriteOpResult.model_validate(
         await asyncio.to_thread(
-            host_config.config_write_op, overrides, local=local, actor=actor, trace_id=trace_id
+            host_config.config_write_op,
+            overrides,
+            authority=authority,
+            local=local,
+            actor=actor,
+            trace_id=trace_id,
         )
     )
 
@@ -300,7 +309,7 @@ def _assemble_write_result(
 
 
 @router.get("/api/config")
-async def get_config(machine: str | None = None) -> ConfigView:
+async def get_config(request: Request, machine: str | None = None) -> ConfigView:
     """Return metadata + current value + the override set for all config items.
 
     Host-scope fields come from `machine` (default = this gateway): their
@@ -316,11 +325,11 @@ async def get_config(machine: str | None = None) -> ConfigView:
     await asyncio.to_thread(check_env_integrity)
     target = machine or machine_name()
     await asyncio.to_thread(_assert_machine_known, target)
-    read = await _dispatch_config_read(target)
+    read = await _dispatch_config_read(target, authority=request.app.state.config_authority)
     host_fields = read.host_fields
 
     fields: list[ConfigFieldView] = []
-    for meta in get_config_metadata():
+    for meta in get_config_metadata(authority=request.app.state.config_authority):
         if meta.scope == "host":
             hf = host_fields[meta.name]
             fields.append(
@@ -383,7 +392,11 @@ async def get_config(machine: str | None = None) -> ConfigView:
     # selection would collapse into the Cluster view and its host-only,
     # remote_writable-gated fields (heartbeat_enabled / task_maintenance_enabled)
     # would be unreachable.
-    raw_overrides = env_override_values(local=True) if machine is None else read.raw_overrides
+    raw_overrides = (
+        env_override_values(authority=request.app.state.config_authority, local=True)
+        if machine is None
+        else read.raw_overrides
+    )
 
     return ConfigView(
         fields=fields,
@@ -437,7 +450,7 @@ async def get_config_audit(
 
 
 @router.get("/api/config/resolved")
-def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
+def get_resolved_config(request: Request, model: str | None = None) -> ResolvedConfigView:
     """Resolve every per-model-defaultable setting for one model — read-only.
 
     Answers "what will an agent on this model actually run with, and which layer
@@ -457,11 +470,10 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
     which fields a spawn/restart overlay may still override.
     """
     from base.config import per_agent_field_names
-    from base.lm.plugin_providers import model_catalog
     from base.lm.registry import explain_setting, tuning_field_names
 
     target = model or settings.lm.llm_model
-    metas = {m.name: m for m in get_config_metadata()}
+    metas = {m.name: m for m in get_config_metadata(authority=request.app.state.config_authority)}
     per_agent = per_agent_field_names()
 
     fields: list[ResolvedFieldView] = []
@@ -470,7 +482,9 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
         # (base/lm/tests/test_model_registry.py) — hard index, so a rename that
         # orphans one side 500s here instead of silently dropping the row.
         meta = metas[name]
-        resolved = explain_setting(name, model=target, explicit=meta.current_value)
+        resolved = explain_setting(
+            name, model=target, explicit=meta.current_value, models=request.app.state.catalog.models
+        )
         fields.append(
             ResolvedFieldView(
                 name=name,
@@ -492,7 +506,7 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
         )
 
     return ResolvedConfigView(
-        model=target, registered=target in model_catalog().models, fields=fields
+        model=target, registered=target in request.app.state.catalog.models, fields=fields
     )
 
 
@@ -542,6 +556,7 @@ async def _put_local(
     plan: ConfigPatchPlan,
     metas: dict[str, Any],
     *,
+    authority: ConfigAuthority,
     has_cluster_patch: bool,
     actor: str | None,
     trace_id: str | None,
@@ -552,7 +567,7 @@ async def _put_local(
     # No in-memory apply, no restart — the change is persisted and the named
     # process picks it up on its next restart (restart_required says which).
     host_result = await _dispatch_config_write(
-        target, plan.host_body, local=True, actor=actor, trace_id=trace_id
+        target, plan.host_body, authority=authority, local=True, actor=actor, trace_id=trace_id
     )
     cluster_changed: set[str] = set()
     if host_result.applied and has_cluster_patch:
@@ -659,7 +674,7 @@ async def put_config(
     actor, trace_id = _request_actor(request)
     await asyncio.to_thread(_assert_machine_known, target)
 
-    metas = {m.name: m for m in get_config_metadata()}
+    metas = {m.name: m for m in get_config_metadata(authority=request.app.state.config_authority)}
     plan = ConfigPatchPlan.parse(body, metas, is_remote=machine is not None)
     _reject_invalid_plan(plan)
     try:
@@ -674,7 +689,13 @@ async def put_config(
 
     if machine is None:
         host_result, restart_required = await _put_local(
-            target, plan, metas, has_cluster_patch=has_cluster_patch, actor=actor, trace_id=trace_id
+            target,
+            plan,
+            metas,
+            authority=request.app.state.config_authority,
+            has_cluster_patch=has_cluster_patch,
+            actor=actor,
+            trace_id=trace_id,
         )
     else:
         # Remote target: cluster config is machine-independent; only host fields
@@ -684,7 +705,11 @@ async def put_config(
         # hand-edited .env, not normal traffic. The host-side op stays the
         # authoritative per-field gate.
         host_result = await _dispatch_config_write(
-            target, plan.host_body, actor=actor, trace_id=trace_id
+            target,
+            plan.host_body,
+            authority=request.app.state.config_authority,
+            actor=actor,
+            trace_id=trace_id,
         )
         restart_required = host_result.restart_required
 

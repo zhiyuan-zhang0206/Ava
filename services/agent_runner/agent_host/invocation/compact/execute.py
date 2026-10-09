@@ -28,6 +28,7 @@ from base.agents.compaction.source_owner import require_source_receiver
 from base.agents.context import AvaContext
 from base.agents.incarnation.native_work import activate_work
 from base.agents.incarnation.native_work_models import NativeWorkTarget
+from base.config import settings
 from base.db.transaction import async_write_transaction
 from base.lm.factory import build_chat_model_bound, provider_key_of_model
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -87,7 +88,11 @@ async def _generate_original(
         return False
     try:
         model, binding = build_chat_model_bound(
-            target_model, overrides=ctx.require_agent().overrides, single_attempt=True
+            target_model,
+            overrides=ctx.require_agent().overrides,
+            single_attempt=True,
+            catalog=ctx.require_catalog(),
+            llm_override=settings.lm.llm_override,
         )
     except ValueError:
         # Construction has not claimed an attempt or entered the provider.
@@ -96,7 +101,7 @@ async def _generate_original(
             pool, command, incarnation, reason="single_attempt_unavailable"
         )
         return False
-    provider = provider_key_of_model(target_model)
+    provider = provider_key_of_model(target_model, catalog=ctx.require_catalog())
     if provider is None:
         await _settle_without_generation(pool, command, incarnation, reason="provider_unavailable")
         return False
@@ -122,6 +127,7 @@ async def _generate_original(
                     model,
                     ctx.require_agent(),
                     single_attempt=True,
+                    catalog=ctx.require_catalog(),
                     binding=binding,
                 ),
                 interrupted,

@@ -238,7 +238,10 @@ def _send(args: argparse.Namespace) -> int:
 def _request(args: argparse.Namespace) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
     from base.agents.impersonation import sessions
+    from base.config import Settings, settings
+    from base.config.service_read import ConfigAuthority
     from base.native_process.ownership import process_metadata
+    from base.paths import ava_home
     from cli.commands.agents.codex_app_server import require_control_endpoint
 
     _reject_used_resident_relay()
@@ -250,6 +253,11 @@ def _request(args: argparse.Namespace) -> int:
         Database.from_settings(),
         EventBus.from_settings(),
         args.agent_id,
+        authority=ConfigAuthority(
+            runtime=settings,
+            all_domains=settings if settings.profile is None else Settings(profile=None),
+            env_path=ava_home() / ".env",
+        ),
         name=args.name,
         executor_name=args.caller,
         process_metadata={**process_metadata(), "invoked_python": sys.executable},

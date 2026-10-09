@@ -4,9 +4,7 @@ import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, LiteralString
-from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import psycopg
@@ -31,11 +29,13 @@ from base.agents.incarnation.resources import ResourceBirth
 from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
@@ -54,9 +54,16 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.daemon, "host_db_recovery_budget_seconds", 3600.0)
 
 
-async def _admit(pool: AsyncConnectionPool) -> RuntimeIncarnation:
+async def _admit(
+    pool: AsyncConnectionPool, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> RuntimeIncarnation:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     async with pool.connection() as conn:
         await conn.execute(
@@ -94,8 +101,12 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     recovering = asyncio.Event()
     refresh = db_recovery._refresh_owner
@@ -130,12 +141,14 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
             graph=graph,
             bus=EventBus.from_settings(),
             db=Database.from_settings(),
+            catalog=model_catalog,
         )
         original = asyncio.create_task(
             host._invoke_until_done(
                 agent,
                 replace(
                     AvaContext(
+                        catalog=model_catalog,
                         agent=AgentSlices.resolve(),
                     ),
                     original_incarnation=incarnation,
@@ -182,9 +195,15 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
 
 @pytest.mark.parametrize("lost", ["owner", "generation", "terminated", "released", "frozen"])
 async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, lost: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    lost: str,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
@@ -223,8 +242,12 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
 async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
@@ -292,8 +315,12 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
     action: str,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
@@ -350,9 +377,14 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
 
 
 async def test_repair_timeout_retries_and_remains_cancellable(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
         raise AssertionError("repair never invokes agent work")
@@ -507,12 +539,16 @@ async def test_healthy_stages_each_get_their_own_deadline(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Issue #1972: stages that each fit the old 5s aggregate but not together
     must still complete — the chain is bounded per stage, not per attempt."""
     import time
 
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     saver, graph, config, inbound, hold, graph_calls, at = await _seed_stalled_repair_scenario(
         db_conn, aops_pool, incarnation
     )

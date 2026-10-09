@@ -106,7 +106,9 @@ async def _race_stream_vs_cancel(
             # instead of exhausting the full backoff budget and dying into
             # terminated. TRANSIENT errors reach the explicit retry predicate;
             # UNKNOWN errors propagate once with their original traceback.
-            fatal = _classify_and_log_provider_error(e, ctx.require_agent())
+            fatal = _classify_and_log_provider_error(
+                e, ctx.require_agent(), catalog=ctx.require_catalog()
+            )
             if fatal is not None:
                 raise fatal from e
             raise

@@ -12,6 +12,7 @@ from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.messages.chat_delivery import insert_chat_inbound_once
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -19,7 +20,13 @@ from tests.impersonation_support import attested_caller, recorded_tree
 
 
 @pytest.fixture
-def session(db_conn: psycopg.Connection, database: Database, event_bus: EventBus) -> dict[str, Any]:
+def session(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+) -> dict[str, Any]:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
@@ -38,6 +45,7 @@ def session(db_conn: psycopg.Connection, database: Database, event_bus: EventBus
         provider="codex",
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
+        authority=config_authority,
     )
     lease = history.resolve(database, agent_id, requested["session_id"])
     leases.accept(

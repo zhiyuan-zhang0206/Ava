@@ -8,7 +8,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_ops import daemon
 
 
@@ -30,6 +32,8 @@ def test_dispatch_idempotent_requires_daemon_pool() -> None:
 async def test_dispatch_status_probe_passes_the_daemon_pool(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The steady-state probe reuses the daemon's already-open central DB pool."""
     from ops.cluster_status import ClusterStatus
@@ -50,7 +54,14 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
 
     status, result = await daemon._dispatch(
-        "status_probe", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
+        "status_probe",
+        {},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
 
     assert status == "completed"

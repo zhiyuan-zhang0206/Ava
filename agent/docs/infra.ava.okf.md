@@ -24,7 +24,7 @@ Ava's infrastructure layer—provides underlying capabilities for agent runtime 
 ## Key Dependencies
 
 - [[loop.ava.okf.md]] — The agent host owns database pools and inbound scheduling
-- [[base/lm/docs/lm.ava.okf.md]] — The LLM invocation chain depends on the observe usage logging
+- [[base/lm/docs/lm/lm.ava.okf.md]] — The LLM invocation chain depends on the observe usage logging
 - [[gateway-cli.ava.okf.md]] — The gateway depends on infra services (heartbeat, labeler)
 
 ## Entry Points

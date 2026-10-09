@@ -11,9 +11,11 @@ from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.messages.inbound import InboundKind
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db import pool as db_pool
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
@@ -27,11 +29,19 @@ def test_reassigned_task_refuses_delayed_home_wake(
     root_task_id: int,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """An in-flight selector/RPC cannot revive a recipient after reassignment."""
     actor = _seed_agent(db_conn)
     pin_agent(actor)
-    owner = _terminated(db_conn, ResourceBirth(birth=uuid4()).model_dump(mode="json"))
+    owner = _terminated(
+        db_conn,
+        ResourceBirth(birth=uuid4()).model_dump(mode="json"),
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+    )
     next_owner = _seed_agent(db_conn)
     task = task_registry.create(
         "fenced", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())

@@ -1,79 +1,81 @@
-"""Fixtures that change the process's model catalog for one test: `add_models`, `add_bindings`, `set_prices`.
+"""Explicit immutable catalog fixtures for model consumers."""
 
-The catalog is an immutable value (`base/lm/catalog.py`), so a test that needs a model or a
-provider binding the installed plugins do not declare, or one with a different fact, lends the
-process a catalog with those rows (`base.lm.plugin_providers.use_catalog`) instead of writing into
-a table. The rows are taken as given, unvalidated, and the process's own catalog comes back when
-the test ends.
-
-Opt-in, never autouse:
-
-    def test_withdrawn_model(add_models):
-        base = model_catalog().models["deepseek-flash"]
-        add_models({"deepseek-retired": replace(base, spawnable=False, unavailable_fallback="deepseek-flash")})
-"""
-
-from __future__ import annotations
-
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import ExitStack
+from collections.abc import Callable, Mapping
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
+from ava.sdk_surface.install import Installation
+from base.agents.messages.delivery_outbox import DeliverySenderConfig
+from base.config import Settings, settings
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.lm.pricing import PriceBook
 from base.lm.provider_api import ProviderBinding
 from base.lm.registry import ModelSpec
+from base.packages.plugins.extensions import EMPTY
 
-AddModels = Callable[[Mapping[str, ModelSpec]], None]
-"""The type of the `add_models` fixture's value."""
-
-AddBindings = Callable[[Mapping[str, ProviderBinding]], None]
-"""The type of the `add_bindings` fixture's value."""
-
-SetPrices = Callable[[PriceBook], None]
-"""The type of the `set_prices` fixture's value."""
+AddModels = Callable[[ModelCatalog, Mapping[str, ModelSpec]], ModelCatalog]
+AddBindings = Callable[[ModelCatalog, Mapping[str, ProviderBinding]], ModelCatalog]
+SetPrices = Callable[[ModelCatalog, PriceBook], ModelCatalog]
 
 
 @pytest.fixture
-def add_models() -> Iterator[AddModels]:
-    """Return a function that adds (or replaces) model rows until the test ends."""
-    from base.lm.plugin_providers import model_catalog, use_catalog
-
-    with ExitStack() as stack:
-
-        def add(models: Mapping[str, ModelSpec]) -> None:
-            catalog = model_catalog()
-            stack.enter_context(use_catalog(replace(catalog, models={**catalog.models, **models})))
-
-        yield add
+def model_catalog() -> ModelCatalog:
+    """A catalog the test owns and passes to its consumers."""
+    return build_model_catalog()
 
 
 @pytest.fixture
-def add_bindings() -> Iterator[AddBindings]:
-    """Return a function that adds (or replaces) provider bindings, by dispatch prefix, until the
-    test ends."""
-    from base.lm.plugin_providers import model_catalog, use_catalog
+def add_models() -> AddModels:
+    """Return a catalog containing the supplied model rows."""
 
-    with ExitStack() as stack:
+    def add(catalog: ModelCatalog, models: Mapping[str, ModelSpec]) -> ModelCatalog:
+        return replace(catalog, models={**catalog.models, **models})
 
-        def add(bindings: Mapping[str, ProviderBinding]) -> None:
-            catalog = model_catalog()
-            stack.enter_context(
-                use_catalog(replace(catalog, bindings={**catalog.bindings, **bindings}))
-            )
-
-        yield add
+    return add
 
 
 @pytest.fixture
-def set_prices() -> Iterator[SetPrices]:
-    """Return a function that replaces the catalog's price book until the test ends."""
-    from base.lm.plugin_providers import model_catalog, use_catalog
+def add_bindings() -> AddBindings:
+    """Return a catalog containing the supplied bindings."""
 
-    with ExitStack() as stack:
+    def add(catalog: ModelCatalog, bindings: Mapping[str, ProviderBinding]) -> ModelCatalog:
+        return replace(catalog, bindings={**catalog.bindings, **bindings})
 
-        def put(prices: PriceBook) -> None:
-            stack.enter_context(use_catalog(replace(model_catalog(), prices=prices)))
+    return add
 
-        yield put
+
+@pytest.fixture
+def set_prices() -> SetPrices:
+    """Return a catalog using the supplied price book."""
+    return lambda catalog, prices: replace(catalog, prices=prices)
+
+
+@pytest.fixture
+def config_authority(unit_home: Path) -> ConfigAuthority:
+    """The test's explicit boot models and unit file, with no installed holder."""
+    complete = settings if settings.profile is None else Settings(profile=None)
+    return ConfigAuthority(settings, complete, unit_home / ".env")
+
+
+@pytest.fixture
+def model_installation(
+    model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> Installation:
+    """Return an explicit SDK owner; the caller chooses when to install it."""
+    return Installation(
+        registry=EMPTY,
+        expansions=(),
+        wrap_layers={},
+        skill_providers=(),
+        metered=(),
+        disabled=frozenset(),
+        faces=False,
+        undo=(),
+        catalog=model_catalog,
+        authority=config_authority,
+        delivery_sender=DeliverySenderConfig(config_authority),
+    )

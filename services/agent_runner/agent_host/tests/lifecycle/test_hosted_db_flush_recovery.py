@@ -16,6 +16,7 @@ from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
@@ -33,6 +34,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
     monkeypatch: pytest.MonkeyPatch,
     failure_site: str,
     command_kind: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = _agent(db_conn)
     incarnation = await _admit(
@@ -50,6 +52,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
         graph=graph,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
@@ -57,6 +60,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     # A real closed PostgreSQL connection supplies the I/O failure. Injection
     # selects only the boundary; checkpoint, graph and lifecycle transactions run.

@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.config import field_names, settings
+from base.lm.catalog import ModelCatalog
 from base.lm.registry import DEFAULT_TUNING, ModelSpec, ModelTuning, tuning_field_names
 from gateway.app import app
 from tests.fixtures.model_catalog import AddModels
@@ -27,18 +28,19 @@ TUNED_MODEL = "test-tuned-model"
 
 
 @pytest.fixture
-def tuned_model(add_models: AddModels) -> str:
+def tuned_model(add_models: AddModels, model_catalog: ModelCatalog) -> tuple[str, ModelCatalog]:
     """Register a throwaway model whose per-model layer has an opinion on one
     mechanical and one prompt-behavior field, leaving the rest to the floor."""
-    add_models(
+    catalog = add_models(
+        model_catalog,
         {
             TUNED_MODEL: ModelSpec(
                 provider="claude",
                 tuning=ModelTuning(auto_compact_fraction=0.55, agent_communication_style="silent"),
             )
-        }
+        },
     )
-    return TUNED_MODEL
+    return TUNED_MODEL, catalog
 
 
 def test_resolved_covers_every_tuning_field() -> None:
@@ -69,11 +71,17 @@ def test_resolved_defaults_to_the_cluster_model() -> None:
     assert body["registered"] is True
 
 
-def test_shared_default_layer(tuned_model: str) -> None:
+def test_shared_default_layer(
+    tuned_model: tuple[str, ModelCatalog], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A field neither pinned nor tuned reports the DEFAULT_TUNING floor and
     says so — the shared floor is never presented as the model's own choice."""
+    model, catalog = tuned_model
+    import gateway.app as gateway_app
+
+    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
     with TestClient(app) as client:
-        resp = client.get("/api/config/resolved", params={"model": tuned_model})
+        resp = client.get("/api/config/resolved", params={"model": model})
     fields = {f["name"]: f for f in resp.json()["fields"]}
 
     row = fields["llm_retry_max_attempts"]
@@ -84,11 +92,17 @@ def test_shared_default_layer(tuned_model: str) -> None:
     assert row["explicit_value"] is None
 
 
-def test_model_default_layer(tuned_model: str) -> None:
+def test_model_default_layer(
+    tuned_model: tuple[str, ModelCatalog], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A model's own tuning beats the floor, and the losing floor stays visible
     next to it (the point of the view: see the layer, not just the number)."""
+    model, catalog = tuned_model
+    import gateway.app as gateway_app
+
+    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
     with TestClient(app) as client:
-        resp = client.get("/api/config/resolved", params={"model": tuned_model})
+        resp = client.get("/api/config/resolved", params={"model": model})
     fields = {f["name"]: f for f in resp.json()["fields"]}
 
     row = fields["auto_compact_fraction"]
@@ -107,12 +121,19 @@ def test_model_default_layer(tuned_model: str) -> None:
     assert "oriented" in (style["choices"] or [])
 
 
-def test_explicit_layer_beats_the_model(tuned_model: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_layer_beats_the_model(
+    tuned_model: tuple[str, ModelCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An explicit `.env` value overrides the model's tuning for EVERY model —
     the documented cost of pinning one value cluster-wide, made visible."""
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.42)
+    model, catalog = tuned_model
+    import gateway.app as gateway_app
+
+    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
     with TestClient(app) as client:
-        resp = client.get("/api/config/resolved", params={"model": tuned_model})
+        resp = client.get("/api/config/resolved", params={"model": model})
     row = {f["name"]: f for f in resp.json()["fields"]}["auto_compact_fraction"]
 
     assert row["source"] == "explicit"

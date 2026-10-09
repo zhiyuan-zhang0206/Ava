@@ -44,6 +44,7 @@ from base.agents.history.hierarchy.chunks import (
 from base.agents.messages.kwargs import message_read_time
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 
@@ -55,7 +56,8 @@ async def due_chunk_update(
     pool: AsyncConnectionPool | None,
     agent_id: int,
     model: str,
-    overrides: ModelOverrides | None,
+    overrides: ModelOverrides,
+    catalog: ModelCatalog,
 ) -> dict[str, Any]:
     """The state update after one llm turn: `{}`, or the moved cut once a chunk is enqueued.
 
@@ -84,7 +86,9 @@ async def due_chunk_update(
         cut_tokens=compact.understanding_cut_tokens,
         input_tokens=input_tokens,
         request_len=len(request),
-        threshold=chunk_threshold(model, overrides, settings.agent.understanding_chunk_ratio),
+        threshold=chunk_threshold(
+            model, overrides, settings.agent.understanding_chunk_ratio, catalog=catalog
+        ),
     )
     if chunk is None:
         return {}

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from base.agents.history.context_breakdown import RequestBreakdown, SectionNode
 from base.agents.model_overrides import read_agent_overrides
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
 from base.lm.registry import resolve_available_model
 
@@ -74,7 +75,7 @@ class ContextBreakdownResponse(BaseModel):
     categories: list[ContextCategory]
 
 
-def resolve_agent_model(pool: ConnectionPool[Any], agent_id: int) -> str:
+def resolve_agent_model(pool: ConnectionPool[Any], agent_id: int, *, catalog: ModelCatalog) -> str:
     """The agent's effective LLM model: its per-agent overlay, else the cluster default
     (`settings.lm.llm_model`), resolved through any withdrawal fallback so callers judge the model
     that will actually run. Capability gates (image input) must use this resolved id, never the raw
@@ -84,7 +85,7 @@ def resolve_agent_model(pool: ConnectionPool[Any], agent_id: int) -> str:
         row = cur.fetchone()
     overlay = row[0] if row and row[0] else None
     model = overlay.get("llm_model") if overlay else None
-    return resolve_available_model(model or settings.lm.llm_model)
+    return resolve_available_model(model or settings.lm.llm_model, models=catalog.models)
 
 
 def _to_context_section(node: SectionNode) -> ContextSection:
@@ -97,15 +98,19 @@ def _to_context_section(node: SectionNode) -> ContextSection:
 
 
 def context_breakdown_response(
-    pool: ConnectionPool[Any], agent_id: int, breakdown: RequestBreakdown
+    pool: ConnectionPool[Any],
+    agent_id: int,
+    breakdown: RequestBreakdown,
+    *,
+    catalog: ModelCatalog,
 ) -> ContextBreakdownResponse:
     """`breakdown` (one LLM request's input) with the agent's resolved window and compaction
     thresholds; the thresholds are 0 when the agent's model has no known window."""
-    model = resolve_agent_model(pool, agent_id)
+    model = resolve_agent_model(pool, agent_id, catalog=catalog)
     overrides = read_agent_overrides(pool, agent_id)
     max_input_tokens = soft_compact_tokens = hard_compact_tokens = 0
     try:
-        budget = resolve_context_budget(model, overrides)
+        budget = resolve_context_budget(model, overrides, catalog=catalog)
         max_input_tokens = budget.max_context_tokens
         soft_compact_tokens = budget.soft_compact_tokens
         hard_compact_tokens = budget.hard_compact_tokens

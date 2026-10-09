@@ -411,21 +411,14 @@ class PriceBook:
         return Rates(*retired) if retired is not None else None
 
 
-def _book() -> PriceBook:
-    """The process's price book, from its model catalog (loads the provider plugins once)."""
-    from base.lm.plugin_providers import model_catalog
-
-    return model_catalog().prices
-
-
-def model_vendor(model: str) -> str | None:
+def model_vendor(model: str, *, prices: PriceBook) -> str | None:
     """Vendor recorded by the catalog or a plugin, or None when unavailable."""
-    return _book().vendor(model)
+    return prices.vendor(model)
 
 
-def plugin_price_provenance(model: str) -> tuple[str, str] | None:
+def plugin_price_provenance(model: str, *, prices: PriceBook) -> tuple[str, str] | None:
     """(source_url, source_checked_at) of a plugin-declared price, or None."""
-    return _book().provenance(model)
+    return prices.provenance(model)
 
 
 def plugin_model_price(
@@ -574,36 +567,10 @@ def _aware_utc(instant: datetime | None) -> datetime:
 
 
 def rates_at(
-    model: str,
-    at: datetime | None = None,
-    input_tokens: int | None = None,
+    model: str, at: datetime | None = None, input_tokens: int | None = None, *, prices: PriceBook
 ) -> Rates | None:
-    """`PriceBook.rates_at` over the process's price book."""
-    return _book().rates_at(model, at, input_tokens)
-
-
-class _CurrentPricing(Mapping[str, tuple[float, float, float]]):
-    """Compatibility mapping whose values follow the current UTC schedule.
-
-    Iterates the archive plus plugin prices — a plugin model must
-    be visible wherever MODEL_PRICING is enumerated (e.g. the usage view).
-    """
-
-    def __getitem__(self, model: str) -> tuple[float, float, float]:
-        book = _book()
-        selected = book.rates_at(model)
-        if selected is None or model not in book:
-            raise KeyError(model)
-        return selected.as_tuple()
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(_book())
-
-    def __len__(self) -> int:
-        return len(_book())
-
-
-MODEL_PRICING: Mapping[str, tuple[float, float, float]] = _CurrentPricing()
+    """`PriceBook.rates_at` over the supplied price book."""
+    return prices.rates_at(model, at, input_tokens)
 
 
 def tally_tokens(
@@ -657,6 +624,7 @@ def quote(
     at: datetime | None = None,
     cache_write_5m: int = 0,
     cache_write_1h: int = 0,
+    prices: PriceBook,
 ) -> CostQuote | None:
     """Price one call, with cache reads/writes included in total input.
 
@@ -672,7 +640,7 @@ def quote(
         or cache_read + cache_write_5m + cache_write_1h > tok_in
     ):
         raise ValueError("token counts must be non-negative and cached tokens cannot exceed input")
-    selected = rates_at(model, at, tok_in)
+    selected = rates_at(model, at, tok_in, prices=prices)
     if selected is None:
         return None
     if (cache_write_5m and selected.cache_write_5m is None) or (
@@ -699,6 +667,7 @@ def cost_usd(
     at: datetime | None = None,
     cache_write_5m: int = 0,
     cache_write_1h: int = 0,
+    prices: PriceBook,
 ) -> float | None:
     """Compatibility wrapper returning only ``quote(...).cost_usd``.
 
@@ -714,5 +683,6 @@ def cost_usd(
         at=at,
         cache_write_5m=cache_write_5m,
         cache_write_1h=cache_write_1h,
+        prices=prices,
     )
     return priced.cost_usd if priced is not None else None

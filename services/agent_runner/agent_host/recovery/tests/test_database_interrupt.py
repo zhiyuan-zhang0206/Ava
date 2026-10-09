@@ -10,8 +10,10 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import state as states
 from base.agents.observation.db_wait import DatabaseWaits
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
 
@@ -24,8 +26,12 @@ async def test_recovery_retries_promptly_but_does_not_execute_or_ack_control(
     persistent_failure: bool,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
 
     async def never(_state: states.AgentState) -> dict[str, Any]:

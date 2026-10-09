@@ -56,7 +56,9 @@ from typing import Any, NamedTuple
 
 import psycopg
 
-from base.config import current_field_values, frozen_field_names
+from base.config import frozen_field_names
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.lm.registry import resolve_available_model
 
 
@@ -73,17 +75,25 @@ class DefaultModelResolution(NamedTuple):
 
 
 def resolve_default_model(
-    cur: psycopg.Cursor, *, config_model: str | None = None
+    cur: psycopg.Cursor,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
+    config_model: str | None = None,
 ) -> DefaultModelResolution:
     """Resolve the DB choice over fresh configuration, including withdrawals."""
     stored = cluster_default_model(cur)
     if stored is not None:
-        return DefaultModelResolution(resolve_available_model(stored), DefaultModelSource.CLUSTER)
+        return DefaultModelResolution(
+            resolve_available_model(stored, models=catalog.models), DefaultModelSource.CLUSTER
+        )
     if config_model is None:
-        config_model = current_field_values()["llm_model"]
+        config_model = authority.current_field_values()["llm_model"]
     if not isinstance(config_model, str):
         raise ValueError("default llm_model must be a string")  # noqa: TRY004
-    return DefaultModelResolution(resolve_available_model(config_model), DefaultModelSource.CONFIG)
+    return DefaultModelResolution(
+        resolve_available_model(config_model, models=catalog.models), DefaultModelSource.CONFIG
+    )
 
 
 def cluster_default_model(cur: psycopg.Cursor) -> str | None:
@@ -120,6 +130,8 @@ def resolve_birth_config(
     cur: psycopg.Cursor,
     overlay: Mapping[str, object] | None = None,
     *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
     inherited: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """The frozen-field map to persist on a newly born agent's row.
@@ -150,9 +162,11 @@ def resolve_birth_config(
         return stamped
     # One .env read for the whole batch (current_field_values re-reads the file
     # so an edit since this process started is reflected).
-    values = current_field_values()
+    values = authority.current_field_values()
     default_model = (
-        resolve_default_model(cur, config_model=values["llm_model"]).model
+        resolve_default_model(
+            cur, config_model=values["llm_model"], catalog=catalog, authority=authority
+        ).model
         if "llm_model" in pending
         else None
     )

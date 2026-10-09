@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -24,11 +24,14 @@ async def test_actual_persisted_pending_write_is_not_materialized_summary_input(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
+    model_catalog: ModelCatalog,
 ) -> None:
     model = SummaryModel(responses=["Original source summary. " * 100])
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings({"gpt-": replace(binding, build_single_attempt=lambda _: model)})
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+    )
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     before = await cold_reader(accepted.saver).aget_tuple(accepted.config)
     assert before is not None
     raw = AsyncPostgresSaver(cast(Any, aops_pool), serde=accepted.saver.serde)

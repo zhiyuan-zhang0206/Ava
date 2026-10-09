@@ -43,17 +43,21 @@ from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
+from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host import settlement
+from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.runtime import TurnOutcome
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
-from .. import settlement
-from ..host import AgentHost
-from ..runtime import TurnOutcome
 
-
-def _host(**kwargs: Any) -> AgentHost:
+def _host(*, catalog: ModelCatalog, **kwargs: Any) -> AgentHost:
     """An `AgentHost` on this box with the handles the tests share."""
     return AgentHost(
-        machine="this-box", bus=EventBus.from_settings(), db=Database.from_settings(), **kwargs
+        machine="this-box",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+        catalog=catalog,
+        **kwargs,
     )
 
 
@@ -382,7 +386,9 @@ def _stub_host_transitions(
 
 
 @pytest.fixture
-def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel]) -> _Build:
+def wired(
+    monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel], model_catalog: ModelCatalog
+) -> _Build:
     """An `AgentHost` over fakes, with the per-agent build stubbed.
 
     The per-agent build is stubbed because it needs a live key.
@@ -410,13 +416,19 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel]) ->
     monkeypatch.setattr(host_mod, "publish_agent_updated", _noop_reconcile)
 
     async def _fake_boot_agent_scope(
-        _agent_id: int, llm_model: str, *_: object
+        _agent_id: int, llm_model: str, *_: object, **_kwargs: object
     ) -> tuple[_Model, None]:
         return _Model(llm_model), None
 
     monkeypatch.setattr(runtime_mod, "boot_agent_scope", _fake_boot_agent_scope)
 
-    def _allow_model_config(*, model: str | None = None) -> None:
+    def _allow_model_config(
+        *,
+        model: str | None = None,
+        catalog: ModelCatalog,
+        llm_override: str,
+        overrides: object = None,
+    ) -> None:
         """Keep fake host tests independent of installed provider credentials."""
 
     monkeypatch.setattr(runtime_mod, "validate_model_config", _allow_model_config)
@@ -447,11 +459,20 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel]) ->
     monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", _no_force)
 
     def _build(
-        rows: dict[int, _Row], results: dict[int, list[dict[str, Any]]] | None = None
+        rows: dict[int, _Row],
+        results: dict[int, list[dict[str, Any]]] | None = None,
+        *,
+        catalog: ModelCatalog | None = None,
     ) -> tuple[AgentHost, _FakeGraph, _FakePool]:
         graph = _FakeGraph(results or {})
         pool = _FakePool(rows)
-        host = _host(pool=pool, checkpointer=object(), graph=graph, plugin_configs=host_plugin)
+        host = _host(
+            pool=pool,
+            checkpointer=object(),
+            graph=graph,
+            plugin_configs=host_plugin,
+            catalog=model_catalog if catalog is None else catalog,
+        )
         return host, graph, pool
 
     return _build
@@ -461,12 +482,14 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel]) ->
 
 
 class TestPendingInboundBackstop:
-    async def test_stale_running_rows_qualified_by_the_scan(self) -> None:
+    async def test_stale_running_rows_qualified_by_the_scan(
+        self, *, model_catalog: ModelCatalog
+    ) -> None:
         """The hosted dispatcher scans only this machine's runnable rows. A
         fresh pending inbound wakes its agent; database timestamps identify backlog, while current turn progress must
         independently authorize cancellation."""
         pool = _PendingScanPool([(17, True, False), (23, False, True)])
-        host = _host(pool=pool, checkpointer=object(), graph=object())
+        host = _host(catalog=model_catalog, pool=pool, checkpointer=object(), graph=object())
 
         candidates = await host.pending_inbound_wakes(180.0)
 
@@ -491,7 +514,9 @@ class TestPendingInboundBackstop:
         assert "m.machine = %s" in pool.sql
         assert "pending.status = 'pending'" in pool.sql
 
-    async def test_scan_uses_the_reserved_control_pool(self) -> None:
+    async def test_scan_uses_the_reserved_control_pool(
+        self, *, model_catalog: ModelCatalog
+    ) -> None:
         """Turn-query saturation must not starve the durable recovery scan."""
 
         class _ForbiddenTurnPool:
@@ -500,6 +525,7 @@ class TestPendingInboundBackstop:
 
         control_pool = _PendingScanPool([(17, True, False)])
         host = _host(
+            catalog=model_catalog,
             pool=cast(AsyncConnectionPool[Any], _ForbiddenTurnPool()),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
             checkpointer=object(),

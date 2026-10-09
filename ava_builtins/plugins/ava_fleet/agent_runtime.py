@@ -12,11 +12,13 @@ from __future__ import annotations
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.config_registration import get_plugin_config
 from base.packages.plugins.extensions import PluginContributions
 
 
-def _fleet_self_section(_slices: AgentSlices) -> str:
+def _fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+    del catalog
     return (
         "## Fleet\n\n"
         "Fleet provides optional labels (`ava.self.set_label`), user notices "
@@ -43,8 +45,9 @@ def _fleet_self_section(_slices: AgentSlices) -> str:
     )
 
 
-def _reduce_context_switch_section(slices: AgentSlices) -> str:
+def _reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Keep the interruption boundary resident; load the playbook on demand."""
+    del catalog
     if not get_plugin_config("ava_fleet", slices, FleetConfig).reduce_context_switch:
         return ""
     return (

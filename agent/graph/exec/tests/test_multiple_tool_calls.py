@@ -21,6 +21,7 @@ from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
@@ -65,6 +66,7 @@ async def test_calls_execute_separately_without_rewriting_assistant(
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
+            catalog=build_model_catalog(),
         )
     )
     command = await _run_calls(
@@ -106,6 +108,7 @@ def _runtime() -> Runtime[AvaContext]:
             bus=EventBus.from_settings(),
             clients=process_clients(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
+            catalog=build_model_catalog(),
         )
     )
 
@@ -118,6 +121,7 @@ def _node_runtime() -> Runtime[AvaContext]:
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
+            catalog=build_model_catalog(),
         )
     )
 

@@ -55,8 +55,10 @@ from base.api_contracts.mcp_tool_contract import (
     tool_description,
 )
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 from gateway.agents import router as _agents_router
 from gateway.agents.delivery import deliver_chat_inbound
@@ -217,6 +219,7 @@ async def _record_tool_call(db: Database, caller: CallerIdentity, payload: dict[
 def _select_directory_blocking(
     pool: Any,
     *,
+    catalog: ModelCatalog,
     scope: roster.AgentDirectoryScope,
     query: str,
     before_id: int | None,
@@ -224,13 +227,13 @@ def _select_directory_blocking(
 ) -> roster.AgentDirectoryPage:
     with pool.connection() as conn:
         return roster.list_directory(
-            conn, scope=scope, query=query, before_id=before_id, limit=limit
+            conn, catalog=catalog, scope=scope, query=query, before_id=before_id, limit=limit
         )
 
 
-def _select_one_blocking(pool: Any, agent_id: int) -> Any:
+def _select_one_blocking(pool: Any, agent_id: int, *, catalog: ModelCatalog) -> Any:
     with pool.connection() as conn:
-        return snapshot_module.select_one(conn, agent_id)
+        return snapshot_module.select_one(conn, agent_id, catalog=catalog)
 
 
 def _require_write_scope(tool: str, client: dict[str, Any]) -> None:
@@ -245,6 +248,8 @@ def _register_read_tools(
     server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     pool: Any,
     db: Database,
+    *,
+    catalog: ModelCatalog,
 ) -> None:
     """Read-side tools: list / inspect / cluster snapshot."""
     from mcp.server.mcpserver import MCPServer
@@ -262,6 +267,7 @@ def _register_read_tools(
         page = await asyncio.to_thread(
             _select_directory_blocking,
             pool,
+            catalog=catalog,
             scope=scope,
             query=query,
             before_id=before_id,
@@ -271,7 +277,7 @@ def _register_read_tools(
 
     @typed_server.tool(description=tool_description("get_agent"))
     async def get_agent(agent_id: int) -> dict[str, Any]:
-        snap = await asyncio.to_thread(_select_one_blocking, pool, agent_id)
+        snap = await asyncio.to_thread(_select_one_blocking, pool, agent_id, catalog=catalog)
         if snap is None:
             raise ToolError(f"agent {agent_id} does not exist")
         return AgentRow.model_validate(snap.model_dump()).model_dump(mode="json")
@@ -350,6 +356,9 @@ def _register_spawn_tools(
     pool: Any,
     db: Database,
     bus: EventBus,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> None:
     """Register keyed creation through the immutable native birth owner."""
     from mcp.server.mcpserver import MCPServer
@@ -392,7 +401,15 @@ def _register_spawn_tools(
         # spawn route.
         try:
             spawned = await _agents_router.create_and_launch_agent(
-                body, target, pool, db, bus, creation_key=creation_key, immutable_birth=True
+                body,
+                target,
+                pool,
+                db,
+                bus,
+                catalog=catalog,
+                authority=authority,
+                creation_key=creation_key,
+                immutable_birth=True,
             )
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from exc
@@ -415,13 +432,16 @@ def _register_fleet_tools(
     pool: Any,
     db: Database,
     bus: EventBus,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
 ) -> None:
     """Register fleet mutation and transcript tools with their native owners."""
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
 
     typed_server = cast(MCPServer, server)
-    _register_spawn_tools(typed_server, pool, db, bus)
+    _register_spawn_tools(typed_server, pool, db, bus, catalog=catalog, authority=authority)
 
     @typed_server.tool(description=tool_description("send_message"))
     async def send_message(
@@ -485,7 +505,9 @@ def _register_fleet_tools(
         return result.model_dump(mode="json")
 
 
-def _build_server(pool: Any, db: Database, bus: EventBus):  # noqa: ANN202 — inferred from the lazy import
+def _build_server(  # noqa: ANN202 — inferred from the lazy import
+    pool: Any, db: Database, bus: EventBus, *, catalog: ModelCatalog, authority: ConfigAuthority
+):
     """Assemble the MCP server: one tool per gateway control route.
 
     Kept a builder so the manager (and its tool closures over the live
@@ -495,12 +517,14 @@ def _build_server(pool: Any, db: Database, bus: EventBus):  # noqa: ANN202 — i
     from mcp.server.mcpserver import MCPServer
 
     server = MCPServer("ava", instructions=server_instructions(), middleware=[_AuditMiddleware(db)])
-    _register_read_tools(server, pool, db)
-    _register_fleet_tools(server, pool, db, bus)
+    _register_read_tools(server, pool, db, catalog=catalog)
+    _register_fleet_tools(server, pool, db, bus, catalog=catalog, authority=authority)
     return server
 
 
-def build_manager(pool: Any, db: Database, bus: EventBus):  # noqa: ANN201 — inferred from the lazy import
+def build_manager(  # noqa: ANN201 — inferred from the lazy import
+    pool: Any, db: Database, bus: EventBus, *, catalog: ModelCatalog, authority: ConfigAuthority
+):
     """Create the /mcp session manager (server + stateless HTTP transport).
 
     Built fresh per gateway lifespan: `StreamableHTTPSessionManager.run()` can
@@ -509,7 +533,7 @@ def build_manager(pool: Any, db: Database, bus: EventBus):  # noqa: ANN201 — i
     """
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    server = _build_server(pool, db, bus)
+    server = _build_server(pool, db, bus, catalog=catalog, authority=authority)
     # The public path builds the manager too: streamable_http_app() constructs
     # it and stores it on the server; session_manager then hands it over. The
     # Starlette sub-app it returns is discarded — the gateway mounts the bare

@@ -125,7 +125,7 @@ def _model_vendor(ctx: AvaContext) -> str | None:
     """
     from base.lm.factory import provider_key_of_model
 
-    return provider_key_of_model(ctx.require_agent().brain.llm_model)
+    return provider_key_of_model(ctx.require_agent().brain.llm_model, catalog=ctx.require_catalog())
 
 
 async def _record_permanent_reject_outcome(

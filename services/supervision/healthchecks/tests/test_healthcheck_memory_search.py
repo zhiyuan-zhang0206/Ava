@@ -40,3 +40,25 @@ def test_probe_down_when_payload_lacks_paths(monkeypatch: pytest.MonkeyPatch) ->
     """A foreign process answering 200 on the port is not the search service."""
     monkeypatch.setattr(hc, "_post_search", lambda _uri: {"nope": 1})  # pyright: ignore[reportUnknownArgumentType]
     assert hc._probe().alive is False
+
+
+def test_search_probe_uses_metadata_without_constructing_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    import httpx
+
+    from services.derived.memory_indexer.embeddings import factory
+
+    descriptor = factory.get_descriptor()
+    constructor = Mock(side_effect=AssertionError("health probes must not construct a provider"))
+    monkeypatch.setattr(factory, "get_provider", constructor)
+    response = Mock()
+    response.json.return_value = {"paths": []}
+    post = Mock(return_value=response)
+    monkeypatch.setattr(httpx, "post", post)
+    assert hc._post_search("http://memory-search") == {"paths": []}
+    assert post.call_args.kwargs["json"] == {"vector": [0.0] * descriptor.dim, "k": 1}
+    response.raise_for_status.assert_called_once_with()
+    constructor.assert_not_called()

@@ -10,7 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_daemon import _stub_pool
 from services.agent_runner.agent_ops.tests.test_daemon import (
@@ -22,6 +24,8 @@ from services.agent_runner.agent_ops.tests.test_daemon import (
 async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A readiness probe stays reachable while an unrelated worker is blocked."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -38,7 +42,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     monkeypatch.setattr(daemon.inventory, "inventory_read_op", _wedged)
 
     class _Status:
-        def model_dump(self, *, mode: str) -> dict[str, bool]:
+        def model_dump(self: object, *, mode: str) -> dict[str, bool]:
             del mode
             return {"ready": True}
 
@@ -55,12 +59,21 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
             workers=set(),
             pool=dispatch_pool,
             executor=op_executor,
+            catalog=model_catalog,
+            authority=config_authority,
         )
     )
     await asyncio.to_thread(started.wait, 10)
 
     status, result = await daemon._dispatch(
-        "status_probe", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
+        "status_probe",
+        {},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert (status, result) == ("completed", {"ready": True})
 
@@ -70,7 +83,10 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
 
 @pytest.mark.asyncio
 async def test_two_config_writes_cannot_interleave(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+    op_executor: ThreadPoolExecutor,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """`config_write` is a read-modify-write: `write_fields` walks the requested
     keys through dotenv's `set_key`, rewriting the whole `.env` once per key. The
@@ -86,7 +102,7 @@ async def test_two_config_writes_cannot_interleave(
     overlapped = False
 
     class _Result:
-        def model_dump(self, **_kw: object) -> dict[str, object]:
+        def model_dump(self: object, **_kw: object) -> dict[str, object]:
             return {"ok": True}
 
     def _slow_write(*_a: object, **_kw: object) -> _Result:
@@ -109,6 +125,8 @@ async def test_two_config_writes_cannot_interleave(
             workers=set(),
             pool=dispatch_pool,
             executor=op_executor,
+            catalog=model_catalog,
+            authority=config_authority,
         ),
         daemon._dispatch(
             "config_write",
@@ -117,6 +135,8 @@ async def test_two_config_writes_cannot_interleave(
             workers=set(),
             pool=dispatch_pool,
             executor=op_executor,
+            catalog=model_catalog,
+            authority=config_authority,
         ),
         daemon._dispatch(
             "inventory_write",
@@ -125,6 +145,8 @@ async def test_two_config_writes_cannot_interleave(
             workers=set(),
             pool=dispatch_pool,
             executor=op_executor,
+            catalog=model_catalog,
+            authority=config_authority,
         ),
     )
 
@@ -133,13 +155,16 @@ async def test_two_config_writes_cannot_interleave(
 
 @pytest.mark.asyncio
 async def test_config_write_op_receives_actor_and_trace(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+    op_executor: ThreadPoolExecutor,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The gateway-stamped actor/trace ride the payload into config_write_op."""
     captured: dict[str, object] = {}
 
     class _Result:
-        def model_dump(self, **_kw: object) -> dict[str, object]:
+        def model_dump(self: object, **_kw: object) -> dict[str, object]:
             return {"ok": True}
 
     def _capture(*_a: object, **_kw: object) -> _Result:
@@ -155,9 +180,12 @@ async def test_config_write_op_receives_actor_and_trace(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert captured == {
+        "authority": config_authority,
         "local": False,
         "actor": "user_session:administrator",
         "trace_id": "trace-9",
@@ -165,13 +193,16 @@ async def test_config_write_op_receives_actor_and_trace(
 
 
 async def test_config_audit_read_op_receives_last(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+    op_executor: ThreadPoolExecutor,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The config_audit_read arm forwards `last` into config_audit_read_op."""
     captured: dict[str, object] = {}
 
     class _Result:
-        def model_dump(self, **_kw: object) -> dict[str, object]:
+        def model_dump(self: object, **_kw: object) -> dict[str, object]:
             return {"ok": True}
 
     def _capture(last: int) -> _Result:
@@ -187,6 +218,8 @@ async def test_config_audit_read_op_receives_last(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert captured == {"last": 7}
@@ -195,6 +228,8 @@ async def test_config_audit_read_op_receives_last(
 async def test_config_audit_read_rejects_out_of_range_last(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """`last` outside 1..200 fails payload validation before any read."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -205,6 +240,8 @@ async def test_config_audit_read_rejects_out_of_range_last(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "failed"
     assert "last" in str(result["error"])
@@ -214,6 +251,8 @@ async def test_config_audit_read_rejects_out_of_range_last(
 async def test_op_arms_do_not_run_on_the_default_executor(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """`asyncio.run` closes by JOINING every default-executor thread, so an arm
     wedged there holds the interpreter's exit after everything else has cleaned up —
@@ -227,11 +266,11 @@ async def test_op_arms_do_not_run_on_the_default_executor(
     dispatch_pool: ConnectionPool = _stub_pool()
     seen: list[str] = []
 
-    def _note_thread() -> object:
+    def _note_thread(*, authority: ConfigAuthority) -> object:
         seen.append(threading.current_thread().name)
 
         class _R:
-            def model_dump(self, **_kw: object) -> dict[str, object]:
+            def model_dump(self: object, **_kw: object) -> dict[str, object]:
                 return {}
 
         return _R()
@@ -239,7 +278,14 @@ async def test_op_arms_do_not_run_on_the_default_executor(
     monkeypatch.setattr(daemon.host_config, "config_read_op", _note_thread)
 
     await daemon._dispatch(
-        "config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
+        "config_read",
+        {},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
 
     assert seen and seen[0].startswith("ava-ops-arm"), f"arm ran on {seen!r}"

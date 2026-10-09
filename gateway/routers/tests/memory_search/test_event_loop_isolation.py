@@ -16,6 +16,7 @@ from gateway.routers.tests.test_memory_search import (
     _asgi_client,
     _assert_semaphore_locked,
     _never_returns,
+    _patch_provider,
     _search,
     _stub_search_backend,
 )
@@ -39,7 +40,6 @@ class TestEventLoopIsolation:
 
         import gateway.routers.memory as _gw_memory
         import services.derived.memory_indexer.backends.factory as _factory
-        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
         (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n")
@@ -56,7 +56,7 @@ class TestEventLoopIsolation:
                 await asyncio.sleep(1.0)
                 return [0.0] * 768
 
-        monkeypatch.setattr(_embedding_factory, "get_provider", _SlowProvider)
+        _patch_provider(monkeypatch, _SlowProvider)
 
         class _FakeBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -141,7 +141,6 @@ class TestWedgedBackendReleasesPermits:
         permit — a deadline covering only one phase would leave the other able to
         pin the endpoint the same way.
         """
-        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         class _StuckProvider:
             dim = 768
@@ -149,7 +148,7 @@ class TestWedgedBackendReleasesPermits:
             embed_query_async = _never_returns
 
         _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
-        monkeypatch.setattr(_embedding_factory, "get_provider", _StuckProvider)
+        _patch_provider(monkeypatch, _StuckProvider)
 
         async with _asgi_client() as client:
             responses = await asyncio.wait_for(

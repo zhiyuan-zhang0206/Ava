@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env import runtime_config
 from gateway.app import app
@@ -196,7 +197,7 @@ REMOTE = "remote-host"
 
 
 def test_get_remote_machine_composes_host_from_dispatch(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
 ) -> None:
     """GET ?machine=<remote>: host fields reflect the remote config_read result,
     cluster fields reflect local metadata, raw_overrides == the remote host
@@ -223,7 +224,9 @@ def test_get_remote_machine_composes_host_from_dispatch(
     }
     canned: dict[str, Any] = {
         "machine": REMOTE,
-        "host_fields": _full_host_fields_for_remote(explicit_host),
+        "host_fields": _full_host_fields_for_remote(
+            explicit_host, config_authority=config_authority
+        ),
         "raw_overrides": {"browser_enabled": True, "ops_concurrency": 16},
     }
 
@@ -254,14 +257,16 @@ def test_get_remote_machine_composes_host_from_dispatch(
     assert kwargs["kind"] == "config_read"
 
 
-def _full_host_fields_for_remote(overrides: dict[str, Any]) -> dict[str, Any]:
+def _full_host_fields_for_remote(
+    overrides: dict[str, Any], *, config_authority: ConfigAuthority
+) -> dict[str, Any]:
     """Build a full host_fields dict for every host-scope meta, taking explicit
     overrides where given and a neutral stub otherwise — so the GET composer can
     index every host field without a real remote runner."""
     from base.config import get_config_metadata
 
     out: dict[str, Any] = {}
-    for meta in get_config_metadata():
+    for meta in get_config_metadata(authority=config_authority):
         if meta.scope != "host":
             continue
         if meta.name in overrides:
@@ -531,14 +536,16 @@ def test_put_host_failure_leaves_cluster_unwritten(_clean_overrides: Path) -> No
     assert "AVA_MODEL" not in runtime_config.read_env_aliases()
 
 
-def test_put_rejects_bad_scalar(_clean_overrides: Path) -> None:
+def test_put_rejects_bad_scalar(
+    _clean_overrides: Path, *, config_authority: ConfigAuthority
+) -> None:
     """A non-numeric value for a cluster int/float field 400s before any write,
     rather than landing in .env and crashing Settings at the next restart."""
     from base.config import get_config_metadata
 
     scalar = next(
         m
-        for m in get_config_metadata()
+        for m in get_config_metadata(authority=config_authority)
         if m.scope != "host" and m.writable and m.field_type in ("int", "float")
     )
     with TestClient(app) as client:
@@ -548,14 +555,16 @@ def test_put_rejects_bad_scalar(_clean_overrides: Path) -> None:
     assert runtime_config.read_env_aliases() == {}
 
 
-def test_put_rejects_bool_for_int_field(_clean_overrides: Path) -> None:
+def test_put_rejects_bool_for_int_field(
+    _clean_overrides: Path, *, config_authority: ConfigAuthority
+) -> None:
     """A JSON bool for an int field is rejected (it would otherwise pass int() and
     persist as 'true', breaking Settings at the next restart)."""
     from base.config import get_config_metadata
 
     scalar = next(
         m
-        for m in get_config_metadata()
+        for m in get_config_metadata(authority=config_authority)
         if m.scope != "host" and m.writable and m.field_type == "int"
     )
     with TestClient(app) as client:
@@ -596,6 +605,7 @@ def test_put_self_edits_writable_host_capability_field(
 @pytest.mark.asyncio
 async def test_put_self_host_field_skips_empty_cluster_audit(
     monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A host-only self PUT must not append an empty gateway cluster record."""
     from types import SimpleNamespace
@@ -619,7 +629,13 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
     monkeypatch.setattr(config_router, "_dispatch_config_write", dispatch)
     monkeypatch.setattr(config_router.runtime_config, "write_fields", _write_fields)
 
-    anon = cast("Any", SimpleNamespace(state=SimpleNamespace()))
+    anon = cast(
+        "Any",
+        SimpleNamespace(
+            state=SimpleNamespace(),
+            app=SimpleNamespace(state=SimpleNamespace(config_authority=config_authority)),
+        ),
+    )
     result = await config_router.put_config(anon, {"cross_machine_transfer_backend": "none"})
 
     assert result.applied is True
@@ -684,10 +700,11 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
 # ── PUT remote ──
 
 
-def test_plugin_config_owner_metadata_and_mixed_patch_rejection() -> None:
+def test_plugin_config_owner_metadata_and_mixed_patch_rejection(_clean_overrides: Path) -> None:
     """A mixed request cannot partly commit Core env and a Fleet image."""
     from base.packages.plugins.config_registration import disk_image_path
 
+    runtime_config.env_file_path().touch()
     before_env = runtime_config.env_file_path().read_bytes()
     image = disk_image_path("ava_fleet")
     before_image = image.read_bytes() if image.exists() else None
@@ -702,10 +719,11 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection() -> None:
     assert (image.read_bytes() if image.exists() else None) == before_image
 
 
-def test_fleet_cluster_write_goes_only_to_owned_image() -> None:
+def test_fleet_cluster_write_goes_only_to_owned_image(_clean_overrides: Path) -> None:
     from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
 
+    runtime_config.env_file_path().touch()
     before_env = runtime_config.env_file_path().read_bytes()
     with TestClient(app) as client:
         response = client.put(
@@ -721,20 +739,28 @@ def test_fleet_cluster_write_goes_only_to_owned_image() -> None:
     assert runtime_config.env_file_path().read_bytes() == before_env
 
 
-def test_remote_host_fleet_toggle_respects_owned_image_and_policy() -> None:
+def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
+    *, config_authority: ConfigAuthority
+) -> None:
     from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
     from ops.host_config import config_write_op
 
-    rejected = config_write_op({"task_maintenance_enabled": False}, local=True)
+    rejected = config_write_op(
+        {"task_maintenance_enabled": False}, local=True, authority=config_authority
+    )
     assert rejected.applied is False
-    accepted = config_write_op({"task_maintenance_enabled": False}, local=False)
+    accepted = config_write_op(
+        {"task_maintenance_enabled": False}, local=False, authority=config_authority
+    )
     assert accepted.applied is True
     assert (
         read_config_image(FleetConfig, disk_image_path("ava_fleet")).task_maintenance_enabled
         is False
     )
-    mixed = config_write_op({"task_maintenance_enabled": True, "heartbeat_enabled": False})
+    mixed = config_write_op(
+        {"task_maintenance_enabled": True, "heartbeat_enabled": False}, authority=config_authority
+    )
     assert mixed.applied is False
     assert "mixes owners" in str(mixed.results["task_maintenance_enabled"].reason)
     assert (

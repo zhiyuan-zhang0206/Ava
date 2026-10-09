@@ -99,6 +99,8 @@ async def _draft_package(
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,
+        catalog=request.app.state.catalog,
+        authority=request.app.state.config_authority,
         **identity,
     )
     return PackageDraftResponse(agent_id=spawned.id)

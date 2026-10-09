@@ -12,6 +12,8 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
@@ -77,12 +79,14 @@ def receipts(pool: ConnectionPool) -> list[tuple[Any, ...]]:
 
 
 async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_buttons(
-    pool: ConnectionPool,
+    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.initialize_poll()  # The daemon initializes before readiness, not a user command.
     with pool.connection() as conn:
-        notice = insert_notice(conn, spawn_agent(), 0)
+        notice = insert_notice(
+            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0
+        )
     await core.notice_bridge.poll_once()
     accepted = receipts(pool)
     assert accepted[0][0] == notice and accepted[0][1] == "queued"
@@ -101,11 +105,11 @@ async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_but
 
 
 async def test_two_connections_reverse_commit_do_not_skip_late_lower_id(
-    pool: ConnectionPool,
+    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
-    agent = spawn_agent()
+    agent = spawn_agent(catalog=model_catalog, authority=config_authority)
     with pool.connection() as low:
         low_id = insert_notice(low, agent, 0, "low")
         with pool.connection() as high:
@@ -124,10 +128,17 @@ async def test_two_connections_reverse_commit_do_not_skip_late_lower_id(
 
 @pytest.mark.parametrize("raw", [None, True, -1, {}, "invalid"])
 async def test_missing_or_corrupt_legacy_cursor_retains_old_range_only(
-    pool: ConnectionPool, tmp_path: Path, raw: Any
+    pool: ConnectionPool,
+    tmp_path: Path,
+    raw: Any,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     with pool.connection() as conn:
-        old = insert_notice(conn, spawn_agent(), 0, "old history")
+        old = insert_notice(
+            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0, "old history"
+        )
     if raw is not None:
         path = tmp_path / "state" / "im_bridge" / "notice_cursor.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,7 +149,9 @@ async def test_missing_or_corrupt_legacy_cursor_retains_old_range_only(
     floor, _, reason = core.notice_bridge.poll_store.initialize_notice_poll(0)
     assert floor == old and reason == NoticePollImportReason.LEGACY_HISTORY_UNKNOWN
     with pool.connection() as conn:
-        new = insert_notice(conn, spawn_agent(), 0, "new range")
+        new = insert_notice(
+            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0, "new range"
+        )
     await core.notice_bridge.poll_once()
     assert [r[0] for r in receipts(pool)] == [new]
     await core.outbound_worker.run_once()
@@ -148,9 +161,13 @@ async def test_missing_or_corrupt_legacy_cursor_retains_old_range_only(
 
 
 async def test_valid_legacy_cursor_imports_once_preserving_skip(
-    pool: ConnectionPool, tmp_path: Path
+    pool: ConnectionPool,
+    tmp_path: Path,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent = spawn_agent()
+    agent = spawn_agent(catalog=model_catalog, authority=config_authority)
     with pool.connection() as conn:
         old = insert_notice(conn, agent, 0, "old")
         new = insert_notice(conn, agent, 1, "new")
@@ -168,12 +185,14 @@ async def test_valid_legacy_cursor_imports_once_preserving_skip(
 
 
 async def test_filtered_decision_commits_without_owner_and_does_not_later_replay(
-    pool: ConnectionPool,
+    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
     with pool.connection() as conn:
-        notice = insert_notice(conn, spawn_agent(), 0)
+        notice = insert_notice(
+            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0
+        )
     adapter.recipient = None
     core.notice_bridge._filters = {"min_priority": "P1", "agent": None}
     await core.notice_bridge.poll_once()
@@ -187,12 +206,12 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
 
 
 async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
-    pool: ConnectionPool,
+    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
     with pool.connection() as conn:
-        insert_notice(conn, spawn_agent(), 0)
+        insert_notice(conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0)
     adapter.recipient = None
     await core.notice_bridge.poll_once()
     assert not receipts(pool)
@@ -204,12 +223,16 @@ async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
 
 
 async def test_acceptance_rollback_then_lost_response_converge_without_inline_send(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
     with pool.connection() as conn:
-        insert_notice(conn, spawn_agent(), 0)
+        insert_notice(conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0)
     insert = IMOutboxStore.insert_intent
 
     def rollback(conn: Connection, intent: Any) -> int:
@@ -243,12 +266,14 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
 
 
 async def test_concurrent_normal_acceptances_freeze_first_target_without_duplicate(
-    pool: ConnectionPool,
+    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
     with pool.connection() as conn:
-        notice = insert_notice(conn, spawn_agent(), 0)
+        notice = insert_notice(
+            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0
+        )
     snapshot = core.notice_bridge._notices_after(0)[0]
 
     def accept(_index: int) -> None:
@@ -323,9 +348,17 @@ async def test_unreadable_legacy_payload_uses_only_the_declared_historical_cutov
     pool: ConnectionPool,
     tmp_path: Path,
     raw: bytes,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     with pool.connection() as conn:
-        old = insert_notice(conn, spawn_agent(), 0, "possibly already sent")
+        old = insert_notice(
+            conn,
+            spawn_agent(catalog=model_catalog, authority=config_authority),
+            0,
+            "possibly already sent",
+        )
     path = tmp_path / "state" / "im_bridge" / "notice_cursor.json"
     path.parent.mkdir(parents=True)
     path.write_bytes(raw)

@@ -396,14 +396,11 @@ def resolve_overlay_targets(
     return out
 
 
-def _validate_model_membership(value: object) -> str | None:
+def _validate_model_membership(value: object, models: Mapping[str, object]) -> str | None:
     """A model-name overlay field must be a registered id (the model catalog,
     plugin-registered models included). An unregistered id would pass
     the Pydantic str type check, persist, and crash the next boot at model
     build (Task #1704 — the deepseek-v4-flash-vision incident)."""
-    from base.lm.plugin_providers import model_catalog
-
-    models = model_catalog().models
     if isinstance(value, str) and value in models:
         return None
     valid_models = ", ".join(sorted(models))
@@ -473,9 +470,6 @@ def _range_validator(
 # Literal / free-form str, already fully enforced by their own types or the
 # field validators in base/config/*.py.
 _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
-    # model-name universe
-    "llm_model": _validate_model_membership,
-    "memory_recall_filter_model": _validate_model_membership,
     # reasoning-effort vocabulary ("" pins the provider default; None = unset)
     "reasoning_effort": _validate_reasoning_effort_range,
     # durations / timeouts — strictly positive and finite
@@ -509,7 +503,7 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
             raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
-def validate_config_overlay(
+def validate_config_overlay_shape(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> None:
     """SDK-side validation — called before `ava.self.restart(config_overlay=overlay)` writes to DB.
@@ -567,6 +561,21 @@ def validate_config_overlay(
 
     if None in grouped:
         _validate_framework_overlay_ranges(grouped[None])
+
+
+def validate_config_overlay(
+    overlay: dict[str, object],
+    configs: Mapping[str, BaseModel] | None = None,
+    *,
+    models: Mapping[str, object],
+) -> None:
+    """Validate shape and catalog membership before an overlay is admitted or persisted."""
+    validate_config_overlay_shape(overlay, configs)
+    for field in ("llm_model", "memory_recall_filter_model"):
+        if field in overlay:
+            error = _validate_model_membership(overlay[field], models)
+            if error is not None:
+                raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
 def apply_config_overlay(
@@ -636,7 +645,9 @@ def _framework_field_is_sensitive(name: str) -> bool:
     return _field_is_sensitive(info.json_schema_extra)
 
 
-def effective_config_snapshot(configs: Mapping[str, BaseModel]) -> dict[str, object]:
+def effective_config_snapshot(
+    configs: Mapping[str, BaseModel], *, framework_values: Mapping[str, object]
+) -> dict[str, object]:
     """Full snapshot of current framework + plugin config — used as `restart_completed`
     inbound payload, so the event trail records the config the new process actually runs with.
 
@@ -651,11 +662,9 @@ def effective_config_snapshot(configs: Mapping[str, BaseModel]) -> dict[str, obj
     sensitive value must not get a second plaintext copy there even though
     SecretStr masking already redacts the value itself.
     """
-    from base.config import flat_dump
-
     out: dict[str, object] = {
         name: value
-        for name, value in flat_dump(mode="json").items()
+        for name, value in framework_values.items()
         if not _framework_field_is_sensitive(name)
     }
     for plugin, instance in configs.items():

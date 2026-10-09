@@ -1,5 +1,6 @@
 """An external attachment's memory writes use the borrowed identity and recheck the lease before any filesystem effect."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -20,6 +21,7 @@ from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -38,7 +40,10 @@ class IntegrationPlugin(BaseModel):
 
 @pytest.fixture
 def native_checkpoint(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    model_installation: Installation,
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
     pin_no_identity()
     ava.unbind_exec_turn()
@@ -51,16 +56,7 @@ def native_checkpoint(
     extensions = ExtensionRegistry(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
     )
-    installation = Installation(
-        registry=extensions,
-        expansions=(),
-        wrap_layers={},
-        skill_providers=(),
-        metered=(),
-        disabled=frozenset(),
-        faces=True,
-        undo=(),
-    )
+    installation = replace(model_installation, registry=extensions, faces=True)
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
     # The attachment builds its state class from the loaded plugins' registry; hand it ours.
     monkeypatch.setattr(registry_module, "build_registry", lambda: extensions)
@@ -104,6 +100,7 @@ def test_external_memory_write_uses_borrowed_identity(
     stale_process_identity: bool,
     database: Database,
     event_bus: EventBus,
+    config_authority: ConfigAuthority,
 ) -> None:
     from ava_builtins.plugins.ava_memory import sdk as memory_sdk
     from base import paths
@@ -125,6 +122,7 @@ def test_external_memory_write_uses_borrowed_identity(
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
@@ -155,6 +153,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     operation: str,
     database: Database,
     event_bus: EventBus,
+    config_authority: ConfigAuthority,
 ) -> None:
     from ava_builtins.plugins.ava_memory import notes, sdk
     from base import paths
@@ -175,6 +174,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)

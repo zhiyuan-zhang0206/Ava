@@ -250,6 +250,17 @@ def send_agent_message(
 
     from base.agents.messages import delivery_outbox
     from base.agents.messages.delivery_retry import NETWORK_ERRORS, retryable_response
+    from base.config import Settings, settings
+    from base.config.service_read import ConfigAuthority
+    from base.paths import ava_home
+
+    sender = delivery_outbox.DeliverySenderConfig(
+        ConfigAuthority(
+            runtime=settings,
+            all_domains=settings if settings.profile is None else Settings(profile=None),
+            env_path=ava_home() / ".env",
+        )
+    )
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.host.net.http_dial import post as dial_post
 
@@ -258,6 +269,7 @@ def send_agent_message(
     # All attempts of one logical message share one key; minting it here also
     # arms the server's client_message_id receipt for the flush replay.
     key = delivery_outbox.logical_key(
+        sender=sender,
         agent_id=agent_id,
         source=source,
         content=content,
@@ -279,6 +291,7 @@ def send_agent_message(
         )
     except NETWORK_ERRORS:
         delivery_outbox.record_failed_send(
+            authority=sender.authority,
             agent_id=agent_id,
             origin_agent_id=origin_agent_id,
             source=source,
@@ -289,6 +302,7 @@ def send_agent_message(
         raise
     if retryable_response(resp):
         delivery_outbox.record_failed_send(
+            authority=sender.authority,
             agent_id=agent_id,
             origin_agent_id=origin_agent_id,
             source=source,

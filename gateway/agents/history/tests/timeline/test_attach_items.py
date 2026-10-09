@@ -15,6 +15,7 @@ from base.agents.history.timeline import (
 from base.agents.messages.kwargs import ExecStatus
 from base.db import Database, create_agent, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from gateway.agents.history.tests.test_timeline import (
     test_client as test_client,
 )
@@ -35,6 +36,7 @@ class TestAttachItems:
         tmp_path: Path,
         *,
         blocks_override: list[dict[str, Any]] | None = None,
+        model_catalog: ModelCatalog,
     ) -> HumanMessage:
         from agent.messages import attach_message
         from base.lm.attach.packing import AttachEntry, pack_attachments
@@ -46,6 +48,7 @@ class TestAttachItems:
         pack = pack_attachments(
             "glm-5.3-flash",
             [AttachEntry(path=str(image.resolve()), label="after fix")],
+            catalog=model_catalog,
         )
         assert pack is not None
         blocks = blocks_override if blocks_override is not None else pack.blocks
@@ -53,8 +56,10 @@ class TestAttachItems:
 
         return attach_message(blocks=blocks, text=pack.text, created_at=datetime.now(UTC))
 
-    def test_attach_renders_caption_only_with_image_data_uris(self, tmp_path: Path):
-        msg = self._attach_message(tmp_path)
+    def test_attach_renders_caption_only_with_image_data_uris(
+        self, tmp_path: Path, *, model_catalog: ModelCatalog
+    ):
+        msg = self._attach_message(tmp_path, model_catalog=model_catalog)
         items, _ = build_timeline_items([msg], [])
         assert len(items) == 1
         item = items[0]
@@ -74,7 +79,9 @@ class TestAttachItems:
         assert "[1] render.png" in item.payload
         assert "after fix" in item.payload
 
-    def test_attach_without_images_has_no_images_field(self, tmp_path: Path):
+    def test_attach_without_images_has_no_images_field(
+        self, tmp_path: Path, *, model_catalog: ModelCatalog
+    ):
         # A text-only attach (e.g. a model that cannot receive media: the pack
         # still emits a caption message listing skipped files).
         msg = self._attach_message(
@@ -85,6 +92,7 @@ class TestAttachItems:
                     "text": "[system] Files attached during this turn:\n- [1] x.png (image/png) — not delivered",
                 }
             ],
+            model_catalog=model_catalog,
         )
         items, _ = build_timeline_items([msg], [])
         assert len(items) == 1
@@ -94,7 +102,9 @@ class TestAttachItems:
         assert item.image_captions is None
         assert "not delivered" in item.payload
 
-    def test_legacy_single_caption_block_has_no_image_captions(self, tmp_path: Path):
+    def test_legacy_single_caption_block_has_no_image_captions(
+        self, tmp_path: Path, *, model_catalog: ModelCatalog
+    ):
         # Pre-interleave attach messages stored ONE caption text block followed
         # by the image blocks; per-image pairing cannot be recovered there, so
         # image_captions stays None and the frontend falls back to the legacy
@@ -108,6 +118,7 @@ class TestAttachItems:
                     "image_url": {"url": "data:image/png;base64,QUJDRA=="},
                 },
             ],
+            model_catalog=model_catalog,
         )
         items, _ = build_timeline_items([msg], [])
         assert len(items) == 1
@@ -116,7 +127,9 @@ class TestAttachItems:
         assert item.images == ["data:image/png;base64,QUJDRA=="]
         assert item.image_captions is None
 
-    def test_multiple_images_carry_aligned_image_captions(self, tmp_path: Path):
+    def test_multiple_images_carry_aligned_image_captions(
+        self, tmp_path: Path, *, model_catalog: ModelCatalog
+    ):
         # Two delivered images with interleaved blocks: image_captions must be
         # the two per-file caption lines in image order, and skipped entries
         # must not shift the alignment.
@@ -139,6 +152,7 @@ class TestAttachItems:
                     "image_url": {"url": "data:image/png;base64,U0VDT05E"},
                 },
             ],
+            model_catalog=model_catalog,
         )
         items, _ = build_timeline_items([msg], [])
         assert len(items) == 1
@@ -156,7 +170,9 @@ class TestAttachItems:
             '- [3] second.png (image/png, 2 B) — "two"'
         )
 
-    def test_non_image_media_blocks_never_leak_into_payload_or_images(self, tmp_path: Path):
+    def test_non_image_media_blocks_never_leak_into_payload_or_images(
+        self, tmp_path: Path, *, model_catalog: ModelCatalog
+    ):
         # pdf document blocks + media blocks are not thumbnailable; they must be
         # ignored for images AND their bytes must not leak into the payload.
         msg = self._attach_message(
@@ -173,6 +189,7 @@ class TestAttachItems:
                 },
                 {"type": "media", "mime_type": "video/mp4", "data": b"video-bytes"},
             ],
+            model_catalog=model_catalog,
         )
         items, _ = build_timeline_items([msg], [])
         assert len(items) == 1
@@ -183,7 +200,9 @@ class TestAttachItems:
         assert "cGVuZGluZw==" not in item.payload
         assert "video-bytes" not in item.payload
 
-    def test_attach_position_in_mixed_conversation(self, tmp_path: Path):
+    def test_attach_position_in_mixed_conversation(
+        self, tmp_path: Path, *, model_catalog: ModelCatalog
+    ):
         # The attach message lands right after the exec-output ToolMessage in
         # state.messages (exec-node drain, user ruling 2026-08-26); item ids
         # must keep absolute msg_idx alignment.
@@ -205,7 +224,7 @@ class TestAttachItems:
         output = exec_output_message(
             content="ok", tool_call_id="tc-1", status=ExecStatus.COMPLETED, body_start=0
         )
-        attach = self._attach_message(tmp_path)
+        attach = self._attach_message(tmp_path, model_catalog=model_catalog)
         items, count = build_timeline_items([tool_call, output, attach], [])
         assert count == 3
         kinds = [it.kind for it in items]
@@ -510,6 +529,8 @@ def test_item_sort_key_is_numeric_not_lexical() -> None:
         db_conn: psycopg.Connection,
         test_client: TestClient,
         tmp_path: Path,
+        *,
+        model_catalog: ModelCatalog,
     ) -> None:
         """End-to-end: an attach HumanMessage in the checkpoint must come back
         as a single kind=attach item with caption-only payload + image data
@@ -525,6 +546,7 @@ def test_item_sort_key_is_numeric_not_lexical() -> None:
         pack = pack_attachments(
             "glm-5.3-flash",
             [AttachEntry(path=str(image.resolve()), label="brand")],
+            catalog=model_catalog,
         )
         assert pack is not None
         from datetime import UTC, datetime

@@ -302,7 +302,7 @@ class _SdkReminderAgentReplyHook(Hook):
         # for the *next* agent inbound. Leave AGENT_REPLY_CATEGORY unmarked so a
         # future inbound still qualifies.
         agent = runtime.context.require_agent()
-        if auto_compact_will_fire(state, agent):
+        if auto_compact_will_fire(state, agent, catalog=runtime.context.require_catalog()):
             logger.info(
                 "[sdk-reminder] defer: auto-compact predicted, skipping agent-inbound hint this turn"
             )

@@ -25,6 +25,7 @@ from base.agents.history.hierarchy.group import (
 )
 from base.clock import Clock
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 
 
 @pytest.fixture(autouse=True)
@@ -141,7 +142,7 @@ class _Llm:
 
 
 def _run(
-    llm: _Llm, nodes: list[OpenNode], *, corrections: int = 2
+    llm: _Llm, nodes: list[OpenNode], *, model_catalog: ModelCatalog, corrections: int = 2
 ) -> tuple[list[Group], list[GroupCall]]:
     calls: list[GroupCall] = []
     groups = generate_groups(
@@ -153,21 +154,22 @@ def _run(
         clock=Clock.from_settings(),
         retry_attempts=0,
         on_call=calls.append,
+        catalog=model_catalog,
     )
     return groups, calls
 
 
-def test_a_valid_reply_is_one_call_without_tools() -> None:
+def test_a_valid_reply_is_one_call_without_tools(model_catalog: ModelCatalog) -> None:
     llm = _Llm(_reply((100, 102)))
-    groups, calls = _run(llm, _nodes(5))
+    groups, calls = _run(llm, _nodes(5), model_catalog=model_catalog)
     assert groups == [Group(100, 102, "s100")]
     assert [(c.round, c.problem) for c in calls] == [(0, None)]
     assert len(llm.seen) == 1 and "[id 104]" in llm.seen[0][0].content
 
 
-def test_a_refused_reply_is_corrected_in_the_same_conversation() -> None:
+def test_a_refused_reply_is_corrected_in_the_same_conversation(model_catalog: ModelCatalog) -> None:
     llm = _Llm(_reply((101, 102)), _reply((100, 102)))
-    groups, calls = _run(llm, _nodes(5))
+    groups, calls = _run(llm, _nodes(5), model_catalog=model_catalog)
     assert groups == [Group(100, 102, "s100")]
     assert [(c.round, c.problem is None) for c in calls] == [(0, False), (1, True)]
     assert "should start at id 100" in (calls[0].problem or "")
@@ -180,7 +182,9 @@ def test_a_refused_reply_is_corrected_in_the_same_conversation() -> None:
     assert calls[1].request.startswith("Your reply cannot be used")
 
 
-def test_corrections_run_out_into_a_failure_with_every_call_recorded() -> None:
+def test_corrections_run_out_into_a_failure_with_every_call_recorded(
+    model_catalog: ModelCatalog,
+) -> None:
     llm = _Llm(_reply((101, 102)), _reply((101, 102)), _reply((101, 102)))
     calls: list[GroupCall] = []
     with pytest.raises(GenerateError, match="after 2 correction"):
@@ -193,16 +197,17 @@ def test_corrections_run_out_into_a_failure_with_every_call_recorded() -> None:
             clock=Clock.from_settings(),
             retry_attempts=0,
             on_call=calls.append,
+            catalog=model_catalog,
         )
     assert len(calls) == 3 and all(c.problem for c in calls)
 
 
-def test_zero_corrections_fail_on_the_first_refusal() -> None:
+def test_zero_corrections_fail_on_the_first_refusal(model_catalog: ModelCatalog) -> None:
     with pytest.raises(GenerateError):
-        _run(_Llm(_reply((101, 102))), _nodes(5), corrections=0)
+        _run(_Llm(_reply((101, 102))), _nodes(5), corrections=0, model_catalog=model_catalog)
 
 
-def test_must_close_is_passed_to_the_prompt_and_the_check() -> None:
+def test_must_close_is_passed_to_the_prompt_and_the_check(model_catalog: ModelCatalog) -> None:
     llm = _Llm("", _reply((100, 102)))
     calls: list[GroupCall] = []
     groups = generate_groups(
@@ -215,13 +220,14 @@ def test_must_close_is_passed_to_the_prompt_and_the_check() -> None:
         must_close=True,
         retry_attempts=0,
         on_call=calls.append,
+        catalog=model_catalog,
     )
     assert groups == [Group(100, 102, "s100")]
     assert "must be closed" in llm.seen[0][0].content
     assert "at least one group must be closed" in (calls[0].problem or "")
 
 
-def test_a_provider_error_is_recorded_and_raised() -> None:
+def test_a_provider_error_is_recorded_and_raised(model_catalog: ModelCatalog) -> None:
     llm = _Llm(ModelAPIError("boom"))
     calls: list[GroupCall] = []
     with pytest.raises(GenerateError):
@@ -234,12 +240,15 @@ def test_a_provider_error_is_recorded_and_raised() -> None:
             clock=Clock.from_settings(),
             retry_attempts=0,
             on_call=calls.append,
+            catalog=model_catalog,
         )
     assert len(calls) == 1 and calls[0].response is None and "boom" in (calls[0].error or "")
 
 
 @pytest.mark.parametrize("error", [TypeError("bad code"), ValueError("bad input")])
-def test_unknown_group_invocation_error_is_recorded_once_and_preserved(error: Exception) -> None:
+def test_unknown_group_invocation_error_is_recorded_once_and_preserved(
+    model_catalog: ModelCatalog, error: Exception
+) -> None:
     llm = _Llm(error)
     calls: list[GroupCall] = []
     with pytest.raises(type(error)) as raised:
@@ -252,6 +261,7 @@ def test_unknown_group_invocation_error_is_recorded_once_and_preserved(error: Ex
             clock=Clock.from_settings(),
             retry_attempts=2,
             on_call=calls.append,
+            catalog=model_catalog,
         )
     assert raised.value is error
     assert len(llm.seen) == len(calls) == 1
@@ -270,12 +280,14 @@ def test_an_unclosed_group_tag_is_refused_not_merged() -> None:
         )
 
 
-def test_a_refused_malformed_reply_is_corrected_in_the_same_conversation() -> None:
+def test_a_refused_malformed_reply_is_corrected_in_the_same_conversation(
+    model_catalog: ModelCatalog,
+) -> None:
     llm = _Llm(
         '<group first="100" last="101">a <group first="102" last="103">b</group>',
         _reply((100, 102)),
     )
-    groups, calls = _run(llm, _nodes(6))
+    groups, calls = _run(llm, _nodes(6), model_catalog=model_catalog)
     assert groups == [Group(100, 102, "s100")]
     assert "opens 2 <group> tags" in (calls[0].problem or "") and calls[1].problem is None
 
@@ -331,9 +343,9 @@ def test_a_trailing_single_group_stays_open_and_the_others_close_in_order() -> N
 
 
 def test_group_calls_log_their_usage_under_the_job_agent(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: list[dict[str, Any]], *, model_catalog: ModelCatalog
 ) -> None:
-    _run(_Llm(_reply((100, 102))), _nodes(5))
+    _run(_Llm(_reply((100, 102))), _nodes(5), model_catalog=model_catalog)
     [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
     extra = record["extra"]
     assert extra["agent_id"] == 7

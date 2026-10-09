@@ -289,7 +289,11 @@ async def _handle_compact_request(
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
             summary = await compact.generate_summary(
-                state.messages, ctx.llm, ctx.require_agent(), binding=ctx.llm_binding
+                state.messages,
+                ctx.llm,
+                ctx.require_agent(),
+                binding=ctx.llm_binding,
+                catalog=ctx.require_catalog(),
             )
             break
         except Exception as e:

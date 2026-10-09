@@ -239,10 +239,12 @@ def send_message(
     import httpx
 
     from ava.sdk_surface import agent_identity
+    from ava.sdk_surface import settings as sdk_settings
     from base.agents.messages import delivery_outbox
     from base.agents.messages.delivery_retry import retryable_response
 
     origin_agent_id = agent_identity.agent_id()
+    sender = sdk_settings.delivery_sender_config()
 
     body = {
         "content": content,
@@ -250,6 +252,7 @@ def send_message(
         **({"completion_notice": completion_notice} if completion_notice else {}),
     }
     key = delivery_outbox.logical_key(
+        sender=sender,
         agent_id=agent_id,
         source=source,
         content=content,
@@ -264,6 +267,7 @@ def send_message(
         )
     except GatewayUnavailable:
         delivery_outbox.record_failed_send(
+            authority=sender.authority,
             agent_id=agent_id,
             origin_agent_id=origin_agent_id,
             source=source,
@@ -274,6 +278,7 @@ def send_message(
         raise
     if retryable_response(resp):
         delivery_outbox.record_failed_send(
+            authority=sender.authority,
             agent_id=agent_id,
             origin_agent_id=origin_agent_id,
             source=source,

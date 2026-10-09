@@ -29,7 +29,8 @@ from urllib3.poolmanager import PoolManager
 
 from base.host.env.runtime_config import read_env_aliases
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
-from base.lm.plugin_providers import model_catalog
+from base.lm.plugin_providers import build_model_catalog
+from base.lm.registry import ModelSpec
 from base.paths import ava_home
 
 _USER_AGENT = "Ava model-update tracker"
@@ -640,13 +641,16 @@ def _record_status(entry: dict[str, object], status: str) -> bool:
 
 
 def check_sources(
-    file_aliases: Mapping[str, str], state: dict[str, dict[str, dict[str, object]]]
+    file_aliases: Mapping[str, str],
+    state: dict[str, dict[str, dict[str, object]]],
+    *,
+    models: Mapping[str, ModelSpec],
 ) -> dict[str, ProviderReport]:
     # The comparison consults the registered models twice over — a registered id is
     # skipped, a same-series older id is suppressed against registered versions — so it
     # compares against the catalog the enabled provider plugins build. Comparing against
     # nothing would re-report every registered id as new (deduped only by its own state file).
-    registry = model_catalog().models
+    registry = models
     reports: dict[str, ProviderReport] = {}
     providers = state["providers"]
     for provider, source in SOURCES.items():
@@ -756,7 +760,9 @@ def main(argv: list[str] | None = None) -> int:
     state_path = _state_path(args.state_dir)
     try:
         state = _load_state(state_path)
-        reports = check_sources(_read_env_file(args.env_file), state)
+        reports = check_sources(
+            _read_env_file(args.env_file), state, models=build_model_catalog().models
+        )
         _save_state(state_path, state)
     except Exception as exc:
         print(f"model update tracker failed before provider reporting: {exc}")

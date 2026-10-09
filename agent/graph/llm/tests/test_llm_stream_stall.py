@@ -38,6 +38,8 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.lm.registry import ModelSpec
 from tests.fixtures.model_catalog import AddModels
 
@@ -62,7 +64,7 @@ async def _one_try(
     )
 
 
-def _make_runtime(llm: MagicMock) -> Runtime[AvaContext]:
+def _make_runtime(llm: MagicMock, *, model_catalog: ModelCatalog) -> Runtime[AvaContext]:
     """Same pattern as test_cancel.py: fake llm returns itself via bind_tools (chain method)."""
     llm.bind_tools.return_value = llm
     ctx = AvaContext(
@@ -72,6 +74,7 @@ def _make_runtime(llm: MagicMock) -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     return Runtime(context=ctx)
 
@@ -79,6 +82,8 @@ def _make_runtime(llm: MagicMock) -> Runtime[AvaContext]:
 async def test_stall_at_ttft_raises_with_ttft_marker(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Server completely unresponsive (zero bytes emitted) → raise LLMStreamStallTimeoutError containing 'TTFT'."""
 
@@ -102,12 +107,14 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await _one_try(state, _make_runtime(fake_llm))
+        await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
 
 
 async def test_stall_mid_stream_raises_with_chunk_count(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Emits N chunks then hangs → raise LLMStreamStallTimeoutError containing
     'mid-stream after N chunks'. Triage split: TTFT = server never connected,
@@ -133,12 +140,14 @@ async def test_stall_mid_stream_raises_with_chunk_count(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await _one_try(state, _make_runtime(fake_llm))
+        await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
 
 
 async def test_normal_stream_completes_no_stall_timeout(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Normal stream completes within timeout → no raise, llm_node finishes and
     returns Command. Locks the "chunk interval < timeout" path against accidental regression."""
@@ -164,12 +173,13 @@ async def test_normal_stream_completes_no_stall_timeout(
     # No raise — normal stream completed. The specific return value is handled by
     # llm_node's existing path (BEFORE_EXEC); this test only locks "not falsely
     # killed by stall timeout"
-    result = await _one_try(state, _make_runtime(fake_llm))
+    result = await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
     assert result is not None
 
 
 async def test_total_timeout_falls_back_while_chunks_keep_arriving(
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A drip-fed stream cannot evade the per-attempt total-duration ceiling."""
     import agent.graph.llm._stream as stream_module
@@ -205,7 +215,12 @@ async def test_total_timeout_falls_back_while_chunks_keep_arriving(
     chunks: list[AIMessageChunk] = []
 
     await _consume_llm(
-        fake_llm, [], chunks=chunks, handler=MagicMock(), agent=AgentSlices.resolve()
+        fake_llm,
+        [],
+        chunks=chunks,
+        handler=MagicMock(),
+        agent=AgentSlices.resolve(),
+        catalog=model_catalog,
     )
 
     assert fallback_called
@@ -281,6 +296,8 @@ async def test_none_disables_stream_total_timeout(monkeypatch: pytest.MonkeyPatc
 async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The post-stall fallback is bounded by the SAME key/value as its stream
     segment — a hanging fallback with a tiny segment bound must be cut at that
@@ -303,7 +320,7 @@ async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
 
     started = time.monotonic()
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await _one_try(state, _make_runtime(fake_llm))
+        await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
     elapsed = time.monotonic() - started
     # ~2 x 0.1s; the 600s fallback ceiling would make this test hang for 20min.
     assert elapsed < 5.0
@@ -324,6 +341,8 @@ class _FakeOverloadedError(openai.RateLimitError):
 async def test_overload_fallback_timeout_is_not_a_stall_pair(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The pair contract covers stalls only: an overload-triggered fallback
     that times out keeps its own (long) ceiling and propagates as the plain
@@ -344,7 +363,7 @@ async def test_overload_fallback_timeout_is_not_a_stall_pair(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(TimeoutError) as exc_info:
-        await _one_try(state, _make_runtime(fake_llm))
+        await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
     assert not isinstance(exc_info.value, LLMStreamStallPairError)
 
 
@@ -353,6 +372,8 @@ async def test_stall_events_carry_provider_health_fields(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
     add_models: AddModels,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The stall + pair events carry vendor/model/stage (the 09-14/15 wave was
     100% api.deepseek.com yet nothing in the telemetry said so) plus the
@@ -375,12 +396,14 @@ async def test_stall_events_carry_provider_health_fields(
 
     # This synthetic provider now crosses the LLM node's compaction gate too;
     # declare its context budget instead of depending on an installed plugin.
-    add_models({"deepseek-v4-flash": ModelSpec(provider="deepseek", context_window=128_000)})
+    model_catalog = add_models(
+        model_catalog, {"deepseek-v4-flash": ModelSpec(provider="deepseek", context_window=128_000)}
+    )
     original = settings.lm.llm_model
     try:
         settings.lm.llm_model = "deepseek-v4-flash"
         with pytest.raises(LLMStreamStallPairError):
-            await _one_try(state, _make_runtime(fake_llm))
+            await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
     finally:
         settings.lm.llm_model = original
 
@@ -401,7 +424,7 @@ async def test_stall_events_carry_provider_health_fields(
 
 
 async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
-    fake_cancel_event: asyncio.Event,
+    fake_cancel_event: asyncio.Event, *, model_catalog: ModelCatalog
 ) -> None:
     """The transient wall-clock budget must not end a delayed stall sequence at
     node entry (its own streak bounds it); without an active streak the same
@@ -423,7 +446,7 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     ledger.record_stall_pair_streak("7", 1)
     result = await _one_try(
         state,
-        _make_runtime(fake_llm),
+        _make_runtime(fake_llm, model_catalog=model_catalog),
         attempt=2,
         started_ago=spent,
         ledger=ledger,
@@ -435,7 +458,7 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     with pytest.raises(LLMRetryBudgetExceededError):
         await _one_try(
             state,
-            _make_runtime(fake_llm),
+            _make_runtime(fake_llm, model_catalog=model_catalog),
             attempt=2,
             started_ago=spent,
         )
@@ -461,7 +484,9 @@ async def _stream_bounds(
         return AIMessage(content="ok")
 
     monkeypatch.setattr(stream_module, "_consume_stream_with_stall_timeout", _capture)
-    await _consume_llm(MagicMock(), [], chunks=[], handler=MagicMock(), agent=agent)
+    await _consume_llm(
+        MagicMock(), [], chunks=[], handler=MagicMock(), agent=agent, catalog=build_model_catalog()
+    )
     return seen
 
 

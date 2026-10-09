@@ -9,6 +9,7 @@ endpoint smoke tests live in tests/components/gateway/test_cluster_endpoints.py.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
@@ -16,6 +17,7 @@ import pytest
 from base.db import Database
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
+from base.lm.plugin_providers import build_model_catalog
 from ops import lifecycle
 from ops.rpc_schemas import (
     LaunchAgentRequest,
@@ -35,7 +37,7 @@ def stub_pool() -> object:
 
 
 async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     """Hosted force-terminate: no process to SIGKILL — the DB fence runs with
     kill_process=False and the turn-cancel acceleration fires after the
@@ -85,7 +87,7 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
 @pytest.mark.asyncio
 async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     """A runner rejection is reported by the gateway; it never terminates creation."""
 
@@ -111,5 +113,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
         config={"reasoning_effort": "max"},
     )
     with pytest.raises(RuntimeError, match="bad model config"):
-        await lifecycle.launch_agent_op(database, event_bus, body, stub_pool)  # type: ignore[arg-type]
+        await lifecycle.launch_agent_op(
+            database, event_bus, body, stub_pool, catalog=build_model_catalog()
+        )  # type: ignore[arg-type]
     assert reclaimed == []

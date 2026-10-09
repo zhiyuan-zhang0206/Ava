@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from langchain_core.messages import AIMessage, BaseMessage
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from base.lm.registry import resolve_setting
 
 
@@ -79,7 +79,9 @@ class ContextBudget:
     hard_compact_tokens: int  # force-compact ceiling
 
 
-def resolve_context_budget(model: str, overrides: ModelOverrides | None = None) -> ContextBudget:
+def resolve_context_budget(
+    model: str, overrides: ModelOverrides, *, catalog: ModelCatalog
+) -> ContextBudget:
     """The context budget for ``model``: its window, plus the hard threshold
     ``min(auto_compact_fraction * window, auto_compact_ceiling_tokens)`` and the
     soft threshold scaled by the same factor the ceiling applied.
@@ -97,7 +99,7 @@ def resolve_context_budget(model: str, overrides: ModelOverrides | None = None) 
         RuntimeError: no provider plugin is enabled — the loader's fail-loud
             startup error, surfaced here when this call triggers the load.
     """
-    spec = model_catalog().models.get(model)
+    spec = catalog.models.get(model)
     if spec is None or spec.context_window is None:
         raise UnknownModelWindowError(
             f"model {model!r} has no context_window in the model registry — add "
@@ -106,12 +108,23 @@ def resolve_context_budget(model: str, overrides: ModelOverrides | None = None) 
         )
     window = spec.context_window
     soft_fraction: float = resolve_setting(
-        "compact_reminder_fraction", model=model, overrides=overrides
+        "compact_reminder_fraction",
+        model=model,
+        models=catalog.models,
+        explicit=overrides.compact_reminder_fraction,
     )
     hard_fraction: float = resolve_setting(
-        "auto_compact_fraction", model=model, overrides=overrides
+        "auto_compact_fraction",
+        model=model,
+        models=catalog.models,
+        explicit=overrides.auto_compact_fraction,
     )
-    ceiling: int = resolve_setting("auto_compact_ceiling_tokens", model=model, overrides=overrides)
+    ceiling: int = resolve_setting(
+        "auto_compact_ceiling_tokens",
+        model=model,
+        models=catalog.models,
+        explicit=overrides.auto_compact_ceiling_tokens,
+    )
     hard_tokens = round(hard_fraction * window)
     soft_tokens = round(soft_fraction * window)
     if 0 < ceiling < hard_tokens:

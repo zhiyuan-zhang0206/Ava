@@ -28,6 +28,9 @@ verbs keep deferring everything until first attribute access (`skip` wins over
 `eager`), so metadata-only repair code can load model declarations without
 reading a broken local `.env` or fetching runner configuration.
 
+[[base/docs/configuration/authority.ava.okf.md]] owns the explicit reader and
+consumer refresh contracts.
+
 Configuration readers use their owning helpers directly: bootstrap host projection
 uses `base.config.domains.storage.data_plane.self_machine_host`, and URL operations
 use `base.host.net.predicates` and `base.host.net.url_secret`. The config facade
@@ -48,7 +51,7 @@ touches is no longer validated at import (the accepted semantic change of task
 configured runner still fetches bootstrap at the same point, and the
 equivalence windows plus first-error parity with the eager path are pinned by
 tests (`tests/base/test_config_lite_*.py`); the design record is
-[2026-09-16-config-boot-lite](../../docs/decisions/runtime/config/2026-09-16-config-boot-lite.md).
+[2026-09-16-config-boot-lite](../../../docs/decisions/runtime/config/2026-09-16-config-boot-lite.md).
 
 `base/host/env/config_registry.py` is the single projection of field aliases,
 annotations, editor types, choices, and `json_schema_extra` metadata. Both the

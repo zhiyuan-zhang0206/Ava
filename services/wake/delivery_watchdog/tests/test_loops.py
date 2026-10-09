@@ -10,9 +10,11 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.cluster.rpc import worst_case_dispatch_seconds
 from services.wake.delivery_watchdog import attempts, daemon, rounds
 
@@ -30,16 +32,19 @@ def _progress() -> LoopProgress:
     return LoopProgress("test", rounds.loop_liveness_timeout_s())
 
 
-def _agent(db: psycopg.Connection) -> int:
+def _agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     from tests.fixtures.units import spawn_agent
 
-    return spawn_agent(spawner="user")
+    return spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
 
 
 def _patch_loops(
     monkeypatch: pytest.MonkeyPatch,
     *,
     crashing: str | None,
+    config_authority: ConfigAuthority,
     cancelled: list[str],
     registered: list[str] | None = None,
 ) -> None:
@@ -63,19 +68,33 @@ def _patch_loops(
     monkeypatch.setattr(daemon.resurrect_retry, "resurrect_loop", stand_in("resurrect"))
     monkeypatch.setattr(daemon.stall_recovery, "stall_recovery_loop", stand_in("harvest"))
     monkeypatch.setattr(daemon.turn_liveness, "hosted_turn_recovery_loop", stand_in("hosted_turn"))
-    monkeypatch.setattr(daemon.turn_liveness, "hosted_turn_threshold_seconds", lambda: 2400.0)
+
+    def threshold(authority: ConfigAuthority) -> float:
+        assert authority is config_authority
+        return 2400.0
+
+    monkeypatch.setattr(daemon.turn_liveness, "hosted_turn_threshold_seconds", threshold)
 
 
 @pytest.mark.parametrize("crashing", ["scan", "resurrect", "harvest", "hosted_turn"])
 async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, crashing: str
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    crashing: str,
+    config_authority: ConfigAuthority,
 ) -> None:
     cancelled: list[str] = []
-    _patch_loops(monkeypatch, crashing=crashing, cancelled=cancelled)
+    _patch_loops(
+        monkeypatch, crashing=crashing, cancelled=cancelled, config_authority=config_authority
+    )
 
     with pytest.raises(ExceptionGroup) as raised:
         await daemon._run_loops(
-            pool, Database.from_settings(), EventBus.from_settings(), LivenessGroup()
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            LivenessGroup(),
+            authority=config_authority,
         )
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
@@ -83,21 +102,31 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
 
 
 async def test_each_loop_reports_its_own_progress(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
 ) -> None:
     liveness = LivenessGroup()
-    _patch_loops(monkeypatch, crashing="scan", cancelled=[])
+    _patch_loops(monkeypatch, crashing="scan", cancelled=[], config_authority=config_authority)
 
     with pytest.raises(ExceptionGroup):
-        await daemon._run_loops(pool, Database.from_settings(), EventBus.from_settings(), liveness)
+        await daemon._run_loops(
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            liveness,
+            authority=config_authority,
+        )
 
     assert set(liveness.snapshot()) == {"scan", "resurrect", "harvest", "hosted_turn"}
 
 
 def test_claim_hands_an_agent_out_once_per_cooldown(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    aid = _agent(db_conn)
+    aid = _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
 
     assert attempts.claim_attempts(pool, attempts.HARVEST, [aid], 60.0) == ([aid], 0)
     assert attempts.claim_attempts(pool, attempts.HARVEST, [aid], 60.0) == ([], 0)
@@ -114,9 +143,17 @@ def test_claim_hands_an_agent_out_once_per_cooldown(
 
 
 def test_claim_limit_defers_the_ready_agents_it_leaves(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    first, second, third = _agent(db_conn), _agent(db_conn), _agent(db_conn)
+    first, second, third = (
+        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
+        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
+        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
+    )
     assert attempts.claim_attempts(pool, attempts.RESURRECT, [first], 60.0) == ([first], 0)
 
     claimed, deferred = attempts.claim_attempts(
@@ -132,9 +169,13 @@ def test_claim_never_hands_out_an_unknown_agent(pool: ConnectionPool) -> None:
 
 
 def test_finish_restarts_the_cooldown_clock(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    aid = _agent(db_conn)
+    aid = _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
     attempts.claim_attempts(pool, attempts.HOSTED_TURN, [aid], 600.0)
     db_conn.execute(
         "UPDATE delivery_watchdog_attempts SET last_attempt_at = now() - interval '1 hour' "

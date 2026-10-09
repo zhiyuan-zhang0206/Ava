@@ -10,6 +10,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _make_runtime
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 
@@ -82,7 +84,12 @@ def test_render_restart_completed_marker_external_source_unchanged():
 
 
 async def test_claim_node_idle_enter_publishes_full_window_snapshot(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Turn-end fallback: when claim is about to idle (no conversation yet),
     the wrapper must pass full_window=True so the enter snapshot is the full
@@ -95,7 +102,7 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     from agent.graph.claim import node as claim_node_mod
     from agent.graph.claim.node import claim_node
 
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
 
     # stub the body: we only exercise the wrapper + node_lifecycle enter path
     async def _stub_impl(_state, _runtime, _config):

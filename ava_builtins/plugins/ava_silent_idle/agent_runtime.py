@@ -53,7 +53,9 @@ class _SilentIdleContinueHook(Hook):
         if not _tail_is_silent_idle(state.messages):
             return None
 
-        if auto_compact_will_fire(state, runtime.context.require_agent()):
+        if auto_compact_will_fire(
+            state, runtime.context.require_agent(), catalog=runtime.context.require_catalog()
+        ):
             logger.info(
                 "[{label}] {body}",
                 label="silent-idle",

@@ -19,17 +19,28 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.agents.spawn import create_agent_row
 from ops.agents.wake import resurrect_agent
 
 
 async def _resurrected(
-    db: psycopg.Connection, pool: AsyncConnectionPool
+    db: psycopg.Connection,
+    pool: AsyncConnectionPool,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> tuple[int, int, UUID, IncarnationResources]:
     aid, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner="user",
+        machine=machine_name(),
+        authority=config_authority,
+        catalog=model_catalog,
     )
     db.execute(
         "UPDATE agents_meta SET status='idling',incarnation_resources=%s WHERE id=%s",
@@ -77,9 +88,17 @@ async def _resurrected(
 
 @pytest.mark.parametrize("missing", ["applied", "observed", "resource_closure"])
 async def test_same_host_cannot_skip_missing_predecessor_evidence(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, missing: str, database: Database
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    missing: str,
+    database: Database,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
-    aid, command, owner, resources = await _resurrected(db_conn, aops_pool)
+    aid, command, owner, resources = await _resurrected(
+        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+    )
     if missing == "resource_closure":
         request = uuid4()
         allocation = ExecAllocation(
@@ -123,10 +142,15 @@ async def test_same_pid_different_birth_requires_exact_predecessor_exit(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     from base.agents.incarnation import exec_owner_recovery
 
-    aid, _command, owner, resources = await _resurrected(db_conn, aops_pool)
+    aid, _command, owner, resources = await _resurrected(
+        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+    )
     assert resources.host_process is not None
     prior_process = resources.host_process.model_copy(
         update={"starttime": resources.host_process.starttime + 1}

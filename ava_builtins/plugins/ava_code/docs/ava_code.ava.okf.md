@@ -14,19 +14,18 @@ tags:
 
 `ava_code` is Ava's built-in coding convention plugin. It injects two system prompt sections and an after_exec hook, enabling the agent to automatically follow project coding conventions (AGENTS.md/worktree/PR workflow) and automatically perceive project context files (delivered in-memory inside the exec turn — see below).
 
-## Registered hooks
+## Declared hooks
 
 ### System prompt injection (×2)
 
 ```python
-# declared in `contribute()` (agent_runtime.py), not registered
-def _coding_tools_section(slices: AgentSlices) -> str:
+def _coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     # cwd / ava.files / ava.shell stub descriptions + coding convention preamble
     # (fail fast, don't reinvent, worktree + PR workflow, AGENTS.md/CLAUDE.md role)
 ```
 
 ```python
-def _engineering_workflow_section(slices: AgentSlices) -> str:
+def _engineering_workflow_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     # Loose debug / bug-fix workflow advice (reproduce → root cause → fix)
     # Gated by "ava_code_workflow" ∈ settings.agent.system_prompt_extra
     # (env AVA_SYSTEM_PROMPT_EXTRA), **default empty = not injected by default**

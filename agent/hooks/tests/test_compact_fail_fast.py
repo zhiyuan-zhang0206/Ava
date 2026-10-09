@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from agent.hooks import compact
 from base.host.env.agent_slices import AgentSlices
 from base.lm.call import ProviderCallBinding
+from base.lm.plugin_providers import build_model_catalog
 
 
 @pytest.mark.parametrize("emergency", [False, True])
@@ -42,10 +43,16 @@ async def test_compaction_programming_error_stops_once_without_history_change(
     monkeypatch.setattr(compact, "generate_summary", broken_summary)
     with pytest.raises(TypeError) as raised:
         if emergency:
-            await compact.emergency_compact_summary(messages, llm, AgentSlices.resolve())
+            await compact.emergency_compact_summary(
+                messages, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+            )
         else:
             await compact._auto_compact_summary(
-                messages, llm, content_count=1, slices=AgentSlices.resolve()
+                messages,
+                llm,
+                content_count=1,
+                slices=AgentSlices.resolve(),
+                catalog=build_model_catalog(),
             )
     assert raised.value is error
     assert len(calls) == 1
@@ -69,9 +76,13 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
     llm = cast(BaseChatModel, MagicMock())
     slices = AgentSlices.resolve()
     if emergency:
-        result = await compact.emergency_compact_summary(messages, llm, slices)
+        result = await compact.emergency_compact_summary(
+            messages, llm, slices, catalog=build_model_catalog()
+        )
     else:
-        result = await compact._auto_compact_summary(messages, llm, 1, slices)
+        result = await compact._auto_compact_summary(
+            messages, llm, 1, slices, catalog=build_model_catalog()
+        )
     assert result == expected
     assert invocation.await_count == 2
     assert messages == [HumanMessage(content="Original history")]

@@ -12,7 +12,51 @@ from collections.abc import Mapping
 from typing import Any
 
 from base.agents.context.clients import DatabaseHandle
+from base.agents.messages.delivery_outbox import DeliverySenderConfig
 from base.config import settings
+from base.config.service_read import ConfigAuthority
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
+
+
+def model_catalog() -> ModelCatalog:
+    """Provider facts explicitly retained by this process's SDK installation."""
+    from ava.sdk_surface.install import installed
+
+    installation = installed()
+    if installation is None or installation.catalog is None:
+        raise RuntimeError("the SDK installation carries no ModelCatalog")
+    return installation.catalog
+
+
+def config_authority() -> ConfigAuthority:
+    """Fresh configuration authority retained by this process's SDK installation."""
+    from ava.sdk_surface.install import installed
+
+    installation = installed()
+    if installation is None or installation.authority is None:
+        raise RuntimeError("the SDK installation carries no ConfigAuthority")
+    return installation.authority
+
+
+def delivery_sender_config() -> DeliverySenderConfig:
+    """The SDK installation's explicit first-send cache, without constructing a new owner."""
+    from ava.sdk_surface.install import installed
+
+    installation = installed()
+    if installation is None or installation.delivery_sender is None:
+        raise RuntimeError("the SDK installation carries no DeliverySenderConfig")
+    return installation.delivery_sender
+
+
+def model_overrides() -> ModelOverrides:
+    """Explicit model tuning of this SDK process, including its delivered pins."""
+    from dataclasses import fields
+
+    return ModelOverrides.from_pins(
+        {item.name: agent_setting(item.name) for item in fields(ModelOverrides)}
+    )
+
 
 # DB_URL / REDIS_URL / GATEWAY_URL are exposed via module __getattr__ (PEP
 # 562) so each access reads the current `settings.X` value rather than a

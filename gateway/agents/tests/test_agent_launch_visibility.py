@@ -8,8 +8,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
 from gateway.tests.test_agents_endpoints import _inbound_rows
 
@@ -150,6 +152,8 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.cluster.machine import machine_name
     from ops.agents import birth_transaction, spawn
@@ -164,7 +168,13 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     monkeypatch.setattr(birth_transaction, "insert_spawn_prompt_in_transaction", _fail_insert)
     with pytest.raises(RuntimeError, match="prompt insert refused"):
         spawn.create_agent_row(
-            database, event_bus, machine=machine_name(), prompt="Work", prompt_source="user"
+            database,
+            event_bus,
+            machine=machine_name(),
+            prompt="Work",
+            prompt_source="user",
+            catalog=build_model_catalog(),
+            authority=config_authority,
         )
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agents_meta")

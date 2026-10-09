@@ -138,7 +138,7 @@ SURFACES: tuple[Surface, ...] = (
         id="systemPromptSections",
         entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key="systemPromptSections",
-        protocol="section(slices: AgentSlices) -> str",
+        protocol="section(slices: AgentSlices, *, catalog: ModelCatalog) -> str",
         note=(
             "`system_prompt_sections` of what `contribute()` returns: appended to the system "
             "prompt after the framework's own; an empty return contributes nothing"

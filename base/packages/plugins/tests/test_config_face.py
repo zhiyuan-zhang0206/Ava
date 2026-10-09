@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins import config_face
 from base.packages.plugins.config_registration import (
     InvalidConfigOverlay,
@@ -28,7 +29,9 @@ _FACE = (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_paths(
+    model_catalog: ModelCatalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo = tmp_path / "repo_plugins"
     user = tmp_path / "user_plugins"
     repo.mkdir()
@@ -72,15 +75,17 @@ def test_a_config_face_rejects_other_contribution_surfaces(extra: str) -> None:
         config_face.declared_config_class("probe", _plugin("probe", body))
 
 
-def test_overlay_validation_recognizes_the_enabled_plugins_config() -> None:
+def test_overlay_validation_recognizes_the_enabled_plugins_config(
+    model_catalog: ModelCatalog,
+) -> None:
     _plugin("probe", _FACE)
     write_local({"plugins": {"probe": {"enabled": True}}})
 
     assert overlay_config_classes()["probe"].__name__ == "Config"
     assert resolve_overlay_targets({"marker": "x"}) == {"marker": ("probe", "marker")}
-    validate_config_overlay({"marker": "x"})
+    validate_config_overlay({"marker": "x"}, models=model_catalog.models)
     with pytest.raises(InvalidConfigOverlay, match="type validation"):
-        validate_config_overlay({"marker": 3})
+        validate_config_overlay({"marker": 3}, models=model_catalog.models)
     with pytest.raises(InvalidConfigOverlay, match="per_agent"):
         resolve_overlay_targets({"fixed": 2})
 

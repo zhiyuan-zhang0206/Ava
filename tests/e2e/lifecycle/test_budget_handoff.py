@@ -22,6 +22,7 @@ import pytest
 
 from base.config import settings
 from base.host.atomic_io import write_text_atomic
+from base.lm.catalog import ModelCatalog
 from base.lm.pricing import cost_usd
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
@@ -71,10 +72,10 @@ def _terminate(agent_id: int) -> None:
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.budget_handoff:build")
 @pytest.mark.parametrize("role", ["goal supervisor", "dynamic workflow orchestrator"])
 def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
-    spawned_agent: int, budget_world: Path, role: str
+    spawned_agent: int, budget_world: Path, role: str, *, model_catalog: ModelCatalog
 ) -> None:
     owner = spawned_agent
-    usd_limit = cost_usd(settings.lm.llm_model, 50, 25, 0)
+    usd_limit = cost_usd(settings.lm.llm_model, 50, 25, 0, prices=model_catalog.prices)
     assert usd_limit is not None and usd_limit > 0
     root = budget_world
     (root / "role").write_text(role)

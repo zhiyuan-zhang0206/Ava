@@ -1,7 +1,7 @@
 """cost_usd pricing-table regression lock.
 
 The dashboard / inspector / metrics costs all flow through cost_usd against
-MODEL_PRICING, so a wrong rate or a dropped model silently mis-bills every
+the supplied PriceBook, so a wrong rate or a dropped model silently mis-bills every
 view. These pin the priced models + the cache-read discount + the unknown-model
 contract (None, not a fabricated $0).
 """
@@ -17,7 +17,7 @@ from typing import Any, cast
 import pytest
 
 from base.lm import pricing
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from base.lm.pricing import (
     CostQuote,
     Rates,
@@ -27,14 +27,13 @@ from base.lm.pricing import (
     quote,
     rates_at,
 )
-from tests.fixtures.model_catalog import SetPrices
 
 _M = 1_000_000
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _load_provider_plugins() -> None:
-    model_catalog()
+@pytest.fixture
+def prices(model_catalog: ModelCatalog) -> pricing.PriceBook:
+    return model_catalog.prices
 
 
 def _pricing_catalog_raw() -> dict[str, Any]:
@@ -59,28 +58,28 @@ def _runtime_pricing_catalog_raw() -> dict[str, Any]:
     )
 
 
-def _plugin_rates(model: str, at: datetime) -> Rates:
-    selected = model_catalog().prices.plugin[model].rates_at(at, input_tokens=0)
+def _plugin_rates(model: str, at: datetime, *, model_catalog: ModelCatalog) -> Rates:
+    selected = model_catalog.prices.plugin[model].rates_at(at, input_tokens=0)
     assert selected is not None
     return selected
 
 
 @pytest.fixture
-def deepseek_archive_catalog(set_prices: SetPrices) -> None:
+def deepseek_archive_catalog() -> pricing.PriceBook:
     """Route explicit DeepSeek history checks through the archived periods."""
-    set_prices(pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {}))
+    return pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {})
 
 
 @pytest.fixture
-def gemini_archive_catalog(set_prices: SetPrices) -> None:
+def gemini_archive_catalog() -> pricing.PriceBook:
     """Route explicit Gemini period/tier history checks through the archive."""
-    set_prices(pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {}))
+    return pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {})
 
 
 @pytest.fixture
-def glm_archive_catalog(set_prices: SetPrices) -> None:
+def glm_archive_catalog() -> pricing.PriceBook:
     """Route explicit GLM period/tier history checks through the archive."""
-    set_prices(pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {}))
+    return pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {})
 
 
 def test_pricing_catalog_schema_v2_vendor_lock() -> None:
@@ -233,21 +232,23 @@ def test_mimo_catalog_entries_live_only_in_the_archive() -> None:
     assert expected <= archive_models.keys()
 
 
-def test_model_vendor_returns_catalog_vendor_or_none() -> None:
-    assert model_vendor("claude-sonnet-5") == "anthropic"
-    assert model_vendor("deepseek-v4-pro") == "deepseek"
-    assert model_vendor("gpt-5.6-sol") == "openai"
-    assert model_vendor("qwen3.8-flash") == "alibaba"
-    assert model_vendor("no-such-model") is None
+def test_model_vendor_returns_catalog_vendor_or_none(prices: pricing.PriceBook) -> None:
+    assert model_vendor("claude-sonnet-5", prices=prices) == "anthropic"
+    assert model_vendor("deepseek-v4-pro", prices=prices) == "deepseek"
+    assert model_vendor("gpt-5.6-sol", prices=prices) == "openai"
+    assert model_vendor("qwen3.8-flash", prices=prices) == "alibaba"
+    assert model_vendor("no-such-model", prices=prices) is None
 
 
-def test_gemini_embedding_2_pricing() -> None:
-    assert rates_at("gemini-embedding-2", datetime.now(UTC), 100) == Rates(0.20, 0.0, 0.0)
-    assert quote("gemini-embedding-2", _M, 0, 0) == CostQuote(
+def test_gemini_embedding_2_pricing(prices: pricing.PriceBook) -> None:
+    assert rates_at("gemini-embedding-2", datetime.now(UTC), 100, prices=prices) == Rates(
+        0.20, 0.0, 0.0
+    )
+    assert quote("gemini-embedding-2", _M, 0, 0, prices=prices) == CostQuote(
         cost_usd=0.20,
         rates=Rates(0.20, 0.0, 0.0),
     )
-    assert model_vendor("gemini-embedding-2") == "google"
+    assert model_vendor("gemini-embedding-2", prices=prices) == "google"
 
 
 @pytest.mark.parametrize("vendor", [None, "", "   "])
@@ -313,17 +314,19 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         ("mimo-v2.6-pro-ultraspeed", 4.35 + 8.70),
     ],
 )
-def test_cost_usd_priced_models(model: str, expected: float, gemini_archive_catalog: None) -> None:
-    assert cost_usd(model, _M, _M, 0) == pytest.approx(expected)  # pyright: ignore[reportUnknownMemberType]
+def test_cost_usd_priced_models(
+    model: str, expected: float, gemini_archive_catalog: pricing.PriceBook
+) -> None:
+    assert cost_usd(model, _M, _M, 0, prices=gemini_archive_catalog) == pytest.approx(expected)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_cost_usd_cache_read_discount() -> None:
+def test_cost_usd_cache_read_discount(prices: pricing.PriceBook) -> None:
     """A fully-cached input bills at the cache-read rate, not the miss rate:
     gpt-5.6-sol in=1M all cached, out=0 -> the 1M input selects the >272K
     tier, whose cached rate is 0.80/M -> $0.80 (promo tier2)."""
-    assert cost_usd("gpt-5.6-sol", _M, 0, _M) == pytest.approx(0.8)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("gpt-5.6-sol", _M, 0, _M, prices=prices) == pytest.approx(0.8)  # pyright: ignore[reportUnknownMemberType]
     # mimo-v2.5-pro: ~120x cheaper cache hit (0.0036/M) vs miss (0.435/M).
-    assert cost_usd("mimo-v2.5-pro", _M, 0, _M) == pytest.approx(0.0036)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("mimo-v2.5-pro", _M, 0, _M, prices=prices) == pytest.approx(0.0036)  # pyright: ignore[reportUnknownMemberType]
 
 
 @pytest.mark.parametrize(
@@ -333,53 +336,53 @@ def test_cost_usd_cache_read_discount() -> None:
         ("mimo-v2.6-pro-ultraspeed", Rates(4.35, 0.036, 8.70)),
     ],
 )
-def test_mimo_v2_6_published_rates(model: str, expected: Rates) -> None:
+def test_mimo_v2_6_published_rates(prices: pricing.PriceBook, model: str, expected: Rates) -> None:
     """Xiaomi's V2.6 price rows are per-1M cache-miss/cache-hit/output USD
     rates (https://mimo.mi.com/docs/price/pay-as-you-go, checked 2026-09-22)."""
-    assert rates_at(model, datetime(2026, 9, 22, tzinfo=UTC), _M) == expected
+    assert rates_at(model, datetime(2026, 9, 22, tzinfo=UTC), _M, prices=prices) == expected
 
 
-def test_qwen_implicit_cache_hit_is_the_registered_rate() -> None:
+def test_qwen_implicit_cache_hit_is_the_registered_rate(prices: pricing.PriceBook) -> None:
     """Ava never sends DashScope's explicit `cache_control` block, so every qwen
     cache hit is an IMPLICIT one — the catalog's cache_read must therefore be
     Alibaba's published implicit rate ($0.206/M for qwen3.8-max in Beijing), not
     the cheaper explicit-read rate ($0.137/M) the same page also lists. A fully
     cached 1M input bills 1M * 0.206/M."""
-    assert cost_usd("qwen3.8-max", _M, 0, _M) == pytest.approx(0.206)  # pyright: ignore[reportUnknownMemberType]
-    assert cost_usd("qwen3.8-max", _M, _M, 0) == pytest.approx(1.65 + 4.951)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-max", _M, 0, _M, prices=prices) == pytest.approx(0.206)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-max", _M, _M, 0, prices=prices) == pytest.approx(1.65 + 4.951)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_qwen_27b_uses_its_own_published_usd_not_a_derived_rate() -> None:
+def test_qwen_27b_uses_its_own_published_usd_not_a_derived_rate(prices: pricing.PriceBook) -> None:
     """Locks the published Beijing USD column, because the tempting shortcut is
     wrong. Alibaba prices per model rather than converting at one rate: 27b's
     CNY (3 / 0.6 / 12) at qwen3.8-max's implied ~7.2727 gives 0.4125 / 0.0825 /
     1.65, but the page publishes 0.424 / 0.085 / 1.696 — its own rate is ~7.08.
     A derived catalog would carry that ~3% error on every 27b cost row forever."""
-    assert cost_usd("qwen3.8-27b", _M, _M, 0) == pytest.approx(0.424 + 1.696)  # pyright: ignore[reportUnknownMemberType]
-    assert cost_usd("qwen3.8-27b", _M, 0, _M) == pytest.approx(0.085)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-27b", _M, _M, 0, prices=prices) == pytest.approx(0.424 + 1.696)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-27b", _M, 0, _M, prices=prices) == pytest.approx(0.085)  # pyright: ignore[reportUnknownMemberType]
     # and it is genuinely cheaper than the flagship, the reason it is registered
-    cheap = cost_usd("qwen3.8-27b", _M, _M, 0)
-    flagship = cost_usd("qwen3.8-max", _M, _M, 0)
+    cheap = cost_usd("qwen3.8-27b", _M, _M, 0, prices=prices)
+    flagship = cost_usd("qwen3.8-max", _M, _M, 0, prices=prices)
     assert cheap is not None and flagship is not None
     assert cheap < flagship
 
 
-def test_qwen3_8_flash_uses_published_beijing_usd() -> None:
+def test_qwen3_8_flash_uses_published_beijing_usd(prices: pricing.PriceBook) -> None:
     """Locks the Model Studio EN page's landed Beijing USD column ($0.113 /
     $0.014 / $0.382, checked 2026-09-02). It replaces QwenCloud's Singapore
     column figures ($0.16 / $0.016 / $0.47), which overstated Beijing cost;
     the no-conversion rule remains intact (see the module docstring)."""
-    assert cost_usd("qwen3.8-flash", _M, _M, 0) == pytest.approx(0.113 + 0.382)  # pyright: ignore[reportUnknownMemberType]
-    assert cost_usd("qwen3.8-flash", _M, 0, _M) == pytest.approx(0.014)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-flash", _M, _M, 0, prices=prices) == pytest.approx(0.113 + 0.382)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-flash", _M, 0, _M, prices=prices) == pytest.approx(0.014)  # pyright: ignore[reportUnknownMemberType]
     # The published Beijing rate remains cheaper than the registered flagship.
-    cheap = cost_usd("qwen3.8-flash", _M, _M, 0)
+    cheap = cost_usd("qwen3.8-flash", _M, _M, 0, prices=prices)
     assert cheap is not None and cheap < 1.65 + 4.951
 
 
-def test_cost_usd_unknown_model_is_none() -> None:
-    """A model absent from MODEL_PRICING returns None (unpriced), never a
+def test_cost_usd_unknown_model_is_none(prices: pricing.PriceBook) -> None:
+    """A model absent from the supplied PriceBook returns None (unpriced), never a
     fabricated $0 — the caller counts it as unpriced rather than free."""
-    assert cost_usd("no-such-model", 1000, 1000, 0) is None
+    assert cost_usd("no-such-model", 1000, 1000, 0, prices=prices) is None
 
 
 @pytest.mark.parametrize(
@@ -390,43 +393,53 @@ def test_cost_usd_unknown_model_is_none() -> None:
     ],
 )
 def test_claude_fable_versions_keep_their_published_cache_read_rates(
-    model: str, expected: Rates
+    prices: pricing.PriceBook, model: str, expected: Rates
 ) -> None:
     """Fable 5.1's cheaper cache reads must not rewrite the served legacy id."""
-    assert rates_at(model, datetime(2026, 9, 2, tzinfo=UTC), _M) == expected
+    assert rates_at(model, datetime(2026, 9, 2, tzinfo=UTC), _M, prices=prices) == expected
 
 
-def test_cost_usd_none_tokens_is_none() -> None:
-    assert cost_usd("gpt-5.6-sol", None, None, None) is None
+def test_cost_usd_none_tokens_is_none(prices: pricing.PriceBook) -> None:
+    assert cost_usd("gpt-5.6-sol", None, None, None, prices=prices) is None
 
 
-def test_deepseek_v4_effective_interval_boundary(deepseek_archive_catalog: None) -> None:
+def test_deepseek_v4_effective_interval_boundary(
+    deepseek_archive_catalog: pricing.PriceBook,
+) -> None:
     """The new schedule starts at one exact instant: [from, until)."""
     before = datetime(2026, 8, 16, 15, 59, 59, 999999, tzinfo=UTC)
     cutover = datetime(2026, 8, 16, 16, 0, tzinfo=UTC)
 
-    assert rates_at("deepseek-v4-pro", before, _M) == Rates(0.435, 0.003625, 0.87)
-    assert rates_at("deepseek-v4-pro", cutover, _M) == Rates(0.66, 0.022, 1.98)
+    assert rates_at("deepseek-v4-pro", before, _M, prices=deepseek_archive_catalog) == Rates(
+        0.435, 0.003625, 0.87
+    )
+    assert rates_at("deepseek-v4-pro", cutover, _M, prices=deepseek_archive_catalog) == Rates(
+        0.66, 0.022, 1.98
+    )
 
 
-def test_glm_5_pricing_effective_interval_boundary(glm_archive_catalog: None) -> None:
+def test_glm_5_pricing_effective_interval_boundary(glm_archive_catalog: pricing.PriceBook) -> None:
     """GLM-5.2 preserves its prior rate before the GLM-5.3 launch cutover."""
     before = datetime(2026, 8, 13, 9, 59, 59, 999999, tzinfo=UTC)
     cutover = datetime(2026, 8, 13, 10, 0, tzinfo=UTC)
 
-    assert rates_at("glm-5.2", before, _M) == Rates(1.10, 0.55, 3.86)
-    assert rates_at("glm-5.2", cutover, _M) == Rates(1.40, 0.26, 4.40)
-    assert rates_at("glm-5.3", cutover, _M) == Rates(1.40, 0.26, 4.40)
+    assert rates_at("glm-5.2", before, _M, prices=glm_archive_catalog) == Rates(1.10, 0.55, 3.86)
+    assert rates_at("glm-5.2", cutover, _M, prices=glm_archive_catalog) == Rates(1.40, 0.26, 4.40)
+    assert rates_at("glm-5.3", cutover, _M, prices=glm_archive_catalog) == Rates(1.40, 0.26, 4.40)
 
 
-def test_glm_5_3_flash_launch_discount_boundary(glm_archive_catalog: None) -> None:
+def test_glm_5_3_flash_launch_discount_boundary(glm_archive_catalog: pricing.PriceBook) -> None:
     """GLM-5.3-Flash ships at a 50% launch discount (docs.z.ai pricing page)
     ending 24:00 2026-09-09 UTC+8 = 2026-09-09T16:00:00Z; list rates follow."""
     before = datetime(2026, 9, 9, 15, 59, 59, 999999, tzinfo=UTC)
     cutover = datetime(2026, 9, 9, 16, 0, tzinfo=UTC)
 
-    assert rates_at("glm-5.3-flash", before, _M) == Rates(0.075, 0.015, 0.25)
-    assert rates_at("glm-5.3-flash", cutover, _M) == Rates(0.15, 0.03, 0.50)
+    assert rates_at("glm-5.3-flash", before, _M, prices=glm_archive_catalog) == Rates(
+        0.075, 0.015, 0.25
+    )
+    assert rates_at("glm-5.3-flash", cutover, _M, prices=glm_archive_catalog) == Rates(
+        0.15, 0.03, 0.50
+    )
 
 
 @pytest.mark.parametrize(
@@ -441,60 +454,77 @@ def test_glm_5_3_flash_launch_discount_boundary(glm_archive_catalog: None) -> No
     ],
 )
 def test_deepseek_v4_utc_peak_window_boundaries(
-    at: datetime, expected: Rates, deepseek_archive_catalog: None
+    at: datetime, expected: Rates, deepseek_archive_catalog: pricing.PriceBook
 ) -> None:
     """Daily peak windows are [01:00,04:00) and [06:00,10:00) UTC."""
-    assert rates_at("deepseek-v4-pro", at, _M) == expected
+    assert rates_at("deepseek-v4-pro", at, _M, prices=deepseek_archive_catalog) == expected
 
 
 def test_peak_windows_normalize_an_aware_non_utc_instant(
-    deepseek_archive_catalog: None,
+    deepseek_archive_catalog: pricing.PriceBook,
 ) -> None:
     utc_plus_8 = timezone(timedelta(hours=8))
     at = datetime(2026, 8, 17, 9, 0, tzinfo=utc_plus_8)
     # Keep the test's offset explicit without relying on the machine timezone:
     # 09:00+08:00 is the inclusive 01:00 UTC peak boundary.
     assert at.utcoffset() == timedelta(hours=8)
-    assert rates_at("deepseek-v4-flash", at, _M) == Rates(0.44, 0.014, 1.32)
+    assert rates_at("deepseek-v4-flash", at, _M, prices=deepseek_archive_catalog) == Rates(
+        0.44, 0.014, 1.32
+    )
 
 
-def test_input_token_tier_boundary_is_inclusive(gemini_archive_catalog: None) -> None:
+def test_input_token_tier_boundary_is_inclusive(gemini_archive_catalog: pricing.PriceBook) -> None:
     at = datetime(2026, 8, 18, tzinfo=UTC)
-    assert rates_at("gemini-3.1-pro-preview", at, 200_000) == Rates(2.0, 0.2, 12.0)
-    assert rates_at("gemini-3.1-pro-preview", at, 200_001) == Rates(4.0, 0.4, 18.0)
+    assert rates_at("gemini-3.1-pro-preview", at, 200_000, prices=gemini_archive_catalog) == Rates(
+        2.0, 0.2, 12.0
+    )
+    assert rates_at("gemini-3.1-pro-preview", at, 200_001, prices=gemini_archive_catalog) == Rates(
+        4.0, 0.4, 18.0
+    )
 
 
 @pytest.mark.parametrize("model", ("gemini-3.7-flash", "gemini-3.8-flash"))
 def test_gemini_flash_date_only_increase_uses_earliest_global_boundary(
-    model: str, gemini_archive_catalog: None
+    model: str, gemini_archive_catalog: pricing.PriceBook
 ) -> None:
     """The source omits a timezone, so UTC+14 prevents underestimating cost."""
     before = datetime(2026, 12, 31, 9, 59, 59, 999999, tzinfo=UTC)
     after = datetime(2026, 12, 31, 10, 0, tzinfo=UTC)
 
-    assert rates_at(model, before, _M) == Rates(0.75, 0.075, 3.75)
-    assert rates_at(model, after, _M) == Rates(1.5, 0.15, 7.5)
+    assert rates_at(model, before, _M, prices=gemini_archive_catalog) == Rates(0.75, 0.075, 3.75)
+    assert rates_at(model, after, _M, prices=gemini_archive_catalog) == Rates(1.5, 0.15, 7.5)
 
 
-def test_quote_returns_cost_and_the_exact_selected_rates(deepseek_archive_catalog: None) -> None:
+def test_quote_returns_cost_and_the_exact_selected_rates(
+    deepseek_archive_catalog: pricing.PriceBook,
+) -> None:
     at = datetime(2026, 8, 17, 1, 0, tzinfo=UTC)
-    result = quote("deepseek-v4-pro", _M, _M, _M, at=at)
+    result = quote("deepseek-v4-pro", _M, _M, _M, at=at, prices=deepseek_archive_catalog)
 
     assert result is not None
     assert result == CostQuote(cost_usd=4.004, rates=Rates(1.32, 0.044, 3.96))
-    assert cost_usd("deepseek-v4-pro", _M, _M, _M, at=at) == result.cost_usd
+    assert (
+        cost_usd("deepseek-v4-pro", _M, _M, _M, at=at, prices=deepseek_archive_catalog)
+        == result.cost_usd
+    )
 
 
-def test_rates_at_rejects_a_naive_instant() -> None:
+def test_rates_at_rejects_a_naive_instant(prices: pricing.PriceBook) -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
-        rates_at("deepseek-v4-pro", datetime.fromisoformat("2026-08-17T01:00:00"), _M)
+        rates_at(
+            "deepseek-v4-pro", datetime.fromisoformat("2026-08-17T01:00:00"), _M, prices=prices
+        )
 
 
-def test_deepseek_plugin_prices_equal_archive_current_base_tier() -> None:
-    model_catalog()
+def test_deepseek_plugin_prices_equal_archive_current_base_tier(
+    model_catalog: ModelCatalog, prices: pricing.PriceBook
+) -> None:
     model_ids = ("deepseek-flash",)
     outside_daily_override = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = {model: _plugin_rates(model, outside_daily_override) for model in model_ids}
+    plugin_rates = {
+        model: _plugin_rates(model, outside_daily_override, model_catalog=model_catalog)
+        for model in model_ids
+    }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
@@ -503,14 +533,15 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier() -> None:
         selected = archive_book.rates_at(model, outside_daily_override, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-        assert pricing.plugin_price_provenance(model) == (
+        assert pricing.plugin_price_provenance(model, prices=prices) == (
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )
 
 
-def test_gemini_plugin_prices_equal_archive_current_base_tier() -> None:
-    model_catalog()
+def test_gemini_plugin_prices_equal_archive_current_base_tier(
+    model_catalog: ModelCatalog, prices: pricing.PriceBook
+) -> None:
     model_ids = (
         "gemini-3.8-flash",
         "gemini-3.7-flash",
@@ -518,7 +549,10 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier() -> None:
         "gemini-3.1-pro-preview",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
+    plugin_rates = {
+        model: _plugin_rates(model, current_instant, model_catalog=model_catalog)
+        for model in model_ids
+    }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
@@ -527,13 +561,15 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier() -> None:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-        assert pricing.plugin_price_provenance(model) == (
+        assert pricing.plugin_price_provenance(model, prices=prices) == (
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )
 
 
-def test_anthropic_plugin_prices_equal_archive_current_base_tier() -> None:
+def test_anthropic_plugin_prices_equal_archive_current_base_tier(
+    model_catalog: ModelCatalog, prices: pricing.PriceBook
+) -> None:
     model_ids = (
         "claude-sonnet-5",
         "claude-haiku-4-5-20251001",
@@ -542,7 +578,10 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier() -> None:
         "claude-fable-5-1",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
+    plugin_rates = {
+        model: _plugin_rates(model, current_instant, model_catalog=model_catalog)
+        for model in model_ids
+    }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
@@ -551,20 +590,25 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier() -> None:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-        assert pricing.plugin_price_provenance(model) == (
+        assert pricing.plugin_price_provenance(model, prices=prices) == (
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )
 
 
-def test_openai_plugin_prices_equal_archive_current_base_tier() -> None:
+def test_openai_plugin_prices_equal_archive_current_base_tier(
+    model_catalog: ModelCatalog, prices: pricing.PriceBook
+) -> None:
     model_ids = (
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
+    plugin_rates = {
+        model: _plugin_rates(model, current_instant, model_catalog=model_catalog)
+        for model in model_ids
+    }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
@@ -573,20 +617,25 @@ def test_openai_plugin_prices_equal_archive_current_base_tier() -> None:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-        assert pricing.plugin_price_provenance(model) == (
+        assert pricing.plugin_price_provenance(model, prices=prices) == (
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )
 
 
-def test_qwen_plugin_prices_equal_archive_current_base_tier() -> None:
+def test_qwen_plugin_prices_equal_archive_current_base_tier(
+    model_catalog: ModelCatalog, prices: pricing.PriceBook
+) -> None:
     model_ids = (
         "qwen3.8-max",
         "qwen3.8-27b",
         "qwen3.8-flash",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
+    plugin_rates = {
+        model: _plugin_rates(model, current_instant, model_catalog=model_catalog)
+        for model in model_ids
+    }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
@@ -595,13 +644,15 @@ def test_qwen_plugin_prices_equal_archive_current_base_tier() -> None:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-        assert pricing.plugin_price_provenance(model) == (
+        assert pricing.plugin_price_provenance(model, prices=prices) == (
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )
 
 
-def test_glm_plugin_prices_equal_archive_current_base_tier() -> None:
+def test_glm_plugin_prices_equal_archive_current_base_tier(
+    model_catalog: ModelCatalog, prices: pricing.PriceBook
+) -> None:
     model_ids = (
         "glm-5.2",
         "glm-5.3",
@@ -609,7 +660,10 @@ def test_glm_plugin_prices_equal_archive_current_base_tier() -> None:
         "glm-5.3-flashx",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
+    plugin_rates = {
+        model: _plugin_rates(model, current_instant, model_catalog=model_catalog)
+        for model in model_ids
+    }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
@@ -618,16 +672,18 @@ def test_glm_plugin_prices_equal_archive_current_base_tier() -> None:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-        assert pricing.plugin_price_provenance(model) == (
+        assert pricing.plugin_price_provenance(model, prices=prices) == (
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )
 
 
-def test_kimi_plugin_prices_equal_archive_current_base_tier() -> None:
+def test_kimi_plugin_prices_equal_archive_current_base_tier(
+    model_catalog: ModelCatalog, prices: pricing.PriceBook
+) -> None:
     model = "kimi-k3"
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = _plugin_rates(model, current_instant)
+    plugin_rates = _plugin_rates(model, current_instant, model_catalog=model_catalog)
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
@@ -635,20 +691,25 @@ def test_kimi_plugin_prices_equal_archive_current_base_tier() -> None:
     selected = archive_book.rates_at(model, current_instant, input_tokens=0)
     assert selected is not None
     assert plugin_rates.as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-    assert pricing.plugin_price_provenance(model) == (
+    assert pricing.plugin_price_provenance(model, prices=prices) == (
         archive_models[model]["source_url"],
         archive_models[model]["source_checked_at"],
     )
 
 
-def test_mimo_plugin_prices_equal_archive_current_base_tier() -> None:
+def test_mimo_plugin_prices_equal_archive_current_base_tier(
+    model_catalog: ModelCatalog, prices: pricing.PriceBook
+) -> None:
     model_ids = (
         "mimo-v2.5-pro",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
+    plugin_rates = {
+        model: _plugin_rates(model, current_instant, model_catalog=model_catalog)
+        for model in model_ids
+    }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
@@ -657,7 +718,7 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier() -> None:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-        assert pricing.plugin_price_provenance(model) == (
+        assert pricing.plugin_price_provenance(model, prices=prices) == (
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )
@@ -667,14 +728,16 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier() -> None:
     ("tok_in", "tok_out", "tok_cached"),
     [(-1, 0, 0), (0, -1, 0), (0, 0, -1), (10, 0, 11)],
 )
-def test_quote_rejects_impossible_token_usage(tok_in: int, tok_out: int, tok_cached: int) -> None:
+def test_quote_rejects_impossible_token_usage(
+    prices: pricing.PriceBook, tok_in: int, tok_out: int, tok_cached: int
+) -> None:
     with pytest.raises(ValueError, match="token"):
-        quote("gpt-5.6-sol", tok_in, tok_out, tok_cached)
+        quote("gpt-5.6-sol", tok_in, tok_out, tok_cached, prices=prices)
 
 
-def test_rates_at_rejects_a_negative_tier_input() -> None:
+def test_rates_at_rejects_a_negative_tier_input(prices: pricing.PriceBook) -> None:
     with pytest.raises(ValueError, match="input_tokens"):
-        rates_at("gemini-3.1-pro-preview", input_tokens=-1)
+        rates_at("gemini-3.1-pro-preview", input_tokens=-1, prices=prices)
 
 
 @pytest.mark.parametrize(
@@ -687,13 +750,16 @@ def test_rates_at_rejects_a_negative_tier_input() -> None:
     ],
 )
 def test_gpt_272k_tier_boundary(
-    model: str, tier1: tuple[float, float, float], tier2: tuple[float, float, float]
+    prices: pricing.PriceBook,
+    model: str,
+    tier1: tuple[float, float, float],
+    tier2: tuple[float, float, float],
 ) -> None:
     """Official gpt >272K rule: 2x input and cache, 1.5x output, full request —
     the boundary is the documented decimal 272K (272,000), like the gemini
     200K precedent."""
-    base = rates_at(model, input_tokens=272_000)
-    over = rates_at(model, input_tokens=272_001)
+    base = rates_at(model, input_tokens=272_000, prices=prices)
+    over = rates_at(model, input_tokens=272_001, prices=prices)
     assert base is not None and over is not None
     assert base.as_tuple() == pytest.approx(tier1)  # pyright: ignore[reportUnknownMemberType]
     assert over.as_tuple() == pytest.approx(tier2)  # pyright: ignore[reportUnknownMemberType]

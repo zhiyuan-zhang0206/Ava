@@ -17,7 +17,7 @@ the standing non-goal in
 
 The extension surface enforces that boundary:
 
-- Registration happens once per process, outside the turn loop.
+- A composition root builds its catalog at startup, outside the turn loop.
 - `build(ctx)` receives construction inputs, not the caller, agent, error
   history, budget, or a list of fallback candidates.
 - The prefix map is flat. Duplicate or nested prefixes fail at registration;
@@ -53,10 +53,11 @@ Core owns only the extension and normalization mechanisms:
 - `provider_api.py` defines `ProviderBinding`, `BuildContext`, `AttachPolicy`,
   `PriceRates`, and the fail-fast registration contract.
 - `plugin_providers.py` discovers enabled plugins and imports their
-  `provider.py` modules under a process-wide lock.
+  `provider.py` modules into a fresh builder for each explicit catalog.
+  An Installation or service root retains that immutable result.
 - `registry.py`, `factory.py`, `effort.py`, and `stop.py` assemble plugin data
-  into provider-agnostic views and behavior. Their provider-owned tables start
-  empty.
+  into provider-agnostic views and behavior using the supplied catalog.
+  They do not retain a module-wide provider image.
 - `pricing.py` selects plugin runtime prices or catalog-only archive prices and
   preserves the retired-model ledger.
 
@@ -87,31 +88,22 @@ separately loaded base-layer module. It may import `base` and installed
 LangChain packages, never `ava` or `agent`, because gateway, labeler, and eval
 processes load it without an agent runtime.
 
-`model_catalog()` reuses `discover_plugins()` and
-`load_for_runtime()`, imports enabled `provider.py` files in sorted-name order,
-and fills the process's catalog slot only after the build succeeds. The default config
-enables every discovered plugin, including the exact eight `lm_*` plugins
-above. A deployment that disables or loses every provider raises:
+`build_model_catalog()` reuses `discover_plugins()` and `load_for_runtime()`,
+imports enabled provider faces in sorted-name order, and returns a complete
+immutable value. It retains no process catalog slot. The default configuration
+enables all discovered providers, including the eight repository `lm_*` plugins.
+Zero bindings raises before boot completes; correcting configuration and calling
+the builder again starts a clean attempt.
 
-```text
-no provider plugins enabled — enable at least one provider plugin (the repo ships the lm_* default set; check the plugin enable config)
-```
-
-That failure occurs before the catalog is set, so a corrected enable
-configuration is retryable. Gateway lifespan calls the loader directly during
-startup, outside best-effort blocks; a zero-provider deployment therefore
-fails boot rather than serving an empty model list. Other consumers retain the
-same loader guard at their first registry read.
-
-Installation fills a `CatalogBuilder`; `build()` validates the whole model graph and
-freezes it into an immutable `ModelCatalog` (`base/lm/catalog.py`) with the derived
-`supported_models`, `context_windows`, `knowledge_cutoffs` and `identities` views.
-A failed installation discards the builder, so a retry starts clean. Every reader
-takes the catalog from `model_catalog()`.
+Gateway, service, CLI and SDK installation roots retain that value and pass its
+views to their consumers. Model resolution, pricing, media selection and DTO
+admission never reconstruct an owner. Known declaration errors preserve typed
+registration failures; unexpected Python errors retain their original object
+and traceback. No failed attempt publishes a partial catalog.
 
 ## Provider contract
 
-A `provider.py` declares one `ProviderContribution(binding, models, pricing)` (returned from `contribute()`) and the loader installs it once:
+A `provider.py` declares one `ProviderContribution(binding, models, pricing)` (returned from `contribute()`) and each catalog construction installs it into its own builder:
 
 - `ProviderBinding` declares the dispatch prefix, display name, `.env` key,
   builder, provider-wide effort ladder, vision fallback, optional attachment

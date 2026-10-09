@@ -18,10 +18,12 @@ from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import daemon, db_recovery
 from services.agent_runner.agent_host.dispatcher import (
     InboundWakeDispatcher,
@@ -164,8 +166,12 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
     force: bool,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
 
     async def never(_state: Any) -> dict[str, Any]:
@@ -179,6 +185,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
         machine=machine_name(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     host._owner = incarnation.owner
     _mark_agent_stale_with_pending_cause(
@@ -243,8 +250,12 @@ async def test_gateway_exemption_requires_current_db_identity_and_finite_fresh_p
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     proof_kind: str,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     db_conn.execute(
         "UPDATE agents_meta SET last_active_at=now()-interval '100s' WHERE id=%s", (agent,)
@@ -294,8 +305,12 @@ async def test_gateway_exemption_requires_current_db_identity_and_finite_fresh_p
 async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     clock = TurnProgress()
     clock._marks[agent] = [time.monotonic() - 100]
@@ -331,9 +346,14 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
 
 
 async def test_success_handoff_clears_on_actual_node_progress(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     clock = TurnProgress()
     clock._marks[agent] = [time.monotonic() - 100]

@@ -314,8 +314,9 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
             search exceeded its deadline (wire 503)
     """
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
+    from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
-    provider = _embedding_factory.get_provider()
+    provider = _embedding_factory.get_provider(catalog=request.app.state.catalog)
 
     # Both phases are native async I/O — httpx.AsyncClient for the embed,
     # the backend's async client for the search — so a slow backend
@@ -342,18 +343,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
                 # The gate was busy (`_bounded_semaphore`'s fast-fail) — a
                 # modelled state, not a backend failure; do not re-wrap it.
                 raise
-            except Exception as exc:
-                # Symmetric with the backend phase below, and with what this
-                # endpoint documents raising. Catching only EmbeddingAPIError
-                # left every other embed failure to escape as a bare 500 whose
-                # body carries no wire `reason` -- which the SDK cannot map back
-                # to IndexerUnavailable, so callers saw an unmodelled error
-                # instead of the outage this is. On 2026-08-07 the gateway was
-                # running out of a deleted worktree's venv and the embed call's
-                # httpx client raised FileNotFoundError building its SSL context
-                # (missing certifi cacert); the 500 that produced killed agent
-                # 405. Either backend failing means the same thing to a caller:
-                # the index cannot answer.
+            except EmbeddingAPIError as exc:
                 raise IndexerUnavailable(f"embed query failed: {exc}") from exc
 
             try:

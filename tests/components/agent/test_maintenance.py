@@ -9,9 +9,11 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.agents.spawn import create_agent_row
 from tests.factories.maintenance import WHEN
 from tests.factories.maintenance import isolate as isolate
@@ -19,9 +21,21 @@ from tests.factories.maintenance import maintenance_agent as _agent
 
 
 def test_maintenance_parks_a_never_admitted_birth_without_consuming_its_marker(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
-    agent, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
+    agent, _, _, _ = create_agent_row(
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_name(),
+        authority=config_authority,
+        catalog=model_catalog,
+    )
     query = "SELECT incarnation_resources FROM agents_meta WHERE id=%s"
     marker = db_conn.execute(query, (agent,)).fetchone()
     assert marker is not None and marker[0]["state"] == "unadmitted"

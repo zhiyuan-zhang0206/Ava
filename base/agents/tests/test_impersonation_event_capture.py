@@ -34,6 +34,7 @@ from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -67,8 +68,8 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
 
 
 @pytest.fixture
-def lease(owner: RuntimeIncarnation) -> dict[str, Any]:
-    return history_cases.start(owner)
+def lease(owner: RuntimeIncarnation, *, config_authority: ConfigAuthority) -> dict[str, Any]:
+    return history_cases.start(owner, authority=config_authority)
 
 
 def _sdk_event(agent_id: int, marker: str) -> Event:
@@ -129,10 +130,14 @@ def _rows(db_conn: psycopg.Connection[Any], lease_id: object, source_key: str) -
 
 
 def test_central_events_belong_to_the_asserted_actor_not_the_recipient(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     recipient = _owner(db_conn)
-    recipient_lease = history_cases.start(recipient)
+    recipient_lease = history_cases.start(recipient, authority=config_authority)
     tagged = record_central_event(db_conn, _send_event(owner.agent_id, recipient.agent_id))
     assert tagged.attributes["impersonation_session"] == f"{owner.agent_id}:0"
     assert _rows(db_conn, lease["id"], capture.CENTRAL_SOURCE) == 1
@@ -208,6 +213,8 @@ def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(
     owner: RuntimeIncarnation,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     manual = leases.request(
         database,
@@ -218,6 +225,7 @@ def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(
         relay_thread_id="manual-capture-thread",
         process_metadata=recorded_tree(),
         automatic=False,
+        authority=config_authority,
     )
     assert manual["id"] is not None
     row = db_conn.execute(

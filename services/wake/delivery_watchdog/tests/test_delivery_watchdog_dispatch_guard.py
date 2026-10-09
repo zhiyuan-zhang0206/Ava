@@ -20,8 +20,10 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog.daemon import (
     dispatch_wakes,
     select_pending_for_dispatch,
@@ -42,13 +44,15 @@ def pool():
         p.close()
 
 
-def _make_idling_agent(db: psycopg.Connection) -> int:
+def _make_idling_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     """spawn_agent creates the agents_meta row (create_agent does not — that
     is the spawn path's job); the dispatch filter reads owner status, so tests
     spawn then park the agent 'idling'."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (aid,))
     db.commit()
@@ -105,11 +109,18 @@ def _set_host_verdict(
 
 class TestSelectPendingForDispatch:
     def test_returns_pending_of_idling_owners_older_than_threshold(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """All kinds count (a lost wake strands terminate/restart too), any
         kind of stale pending of an idling owner is dispatched."""
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         old_chat = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -137,12 +148,19 @@ class TestSelectPendingForDispatch:
         assert all(r[1] == aid for r in rows)
 
     def test_fresh_rows_and_non_idling_owners_not_dispatched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Fresh rows (still within the dispatch threshold) and owners not in
         'idling' (running = mid-turn queue, terminated = its own controller)
         are left alone."""
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S - 0.3)  # fresh
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
@@ -164,9 +182,16 @@ class TestSelectPendingForDispatch:
         )
 
     def test_wake_suppression_excludes_until_expiry(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -232,8 +257,13 @@ class TestSelectPendingForDispatch:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         publishes: list[tuple[int, str]] = []
 
@@ -262,12 +292,17 @@ class TestSelectPendingForDispatch:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Real writer shape for a lone failed probe — online=false,
         consecutive_failures=1, agent_host_online NULL (a failed probe nulls
         the host verdict; services/wake/heartbeat/liveness.py) — stays inside the
         one-failure grace window, so the wake is dispatched."""
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         publishes: list[tuple[int, str]] = []
 
@@ -284,28 +319,47 @@ class TestSelectPendingForDispatch:
         self,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A NULL host verdict with no failed probe yet (cf=0) sits outside
         the grace window: an absent verdict freezes."""
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         _set_host_verdict(db_conn, agent_host=None)
         assert self._select(pool) == []
 
     def test_hostless_machine_freezes_dispatch(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         _set_host_verdict(db_conn, agent_host=False)
         assert self._select(pool) == []
 
     def test_stale_and_missing_verdicts_freeze_dispatch(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from base.cluster.machine import machine_name
 
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         _set_host_verdict(db_conn, age_s=_HOST_STALENESS_S + 1)
         assert self._select(pool) == []
@@ -321,13 +375,18 @@ class TestSelectPendingForDispatch:
         self,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         import json
         from datetime import UTC, datetime
 
         from base.paths import logs_dir
 
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         with db_conn.cursor() as cur:
             cur.execute(

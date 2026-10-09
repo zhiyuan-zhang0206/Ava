@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact import execute as compact_execute
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -22,6 +22,7 @@ async def test_commit_response_lost_before_provider_call_is_unknown_without_retr
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
+    model_catalog: ModelCatalog,
 ) -> None:
     models: list[SummaryModel] = []
 
@@ -30,9 +31,11 @@ async def test_commit_response_lost_before_provider_call_is_unknown_without_retr
         models.append(model)
         return model
 
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings({"gpt-": replace(binding, build_single_attempt=build)})
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog, {"gpt-": replace(binding, build_single_attempt=build)}
+    )
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     original = compact_execute.claim_attempt
     claimed: list[str] = []
 

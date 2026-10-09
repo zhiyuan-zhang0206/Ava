@@ -34,7 +34,7 @@ Agent context window management — how message history is compressed as it appr
 - [[agent/graph/docs/context-notes/context-notes.ava.okf.md]] — the standing head the compaction re-establishes
 - [[system-prompt.ava.okf.md]] — the system prompt is the most stable part of the context
 - [[agent/graph/docs/graph.ava.okf.md]] — `init_context` is a graph node ahead of claim; `memory_recall.py` fires as a before_llm hook
-- [[base/lm/docs/lm.ava.okf.md]] — `ModelSpec.context_window` + `context_budget.py` are the single source of truth for soft/hard thresholds
+- [[base/lm/docs/lm/lm.ava.okf.md]] — `ModelSpec.context_window` + `context_budget.py` are the single source of truth for soft/hard thresholds
 - [[routers.ava.okf.md]] — token-usage / context-breakdown display endpoints
 
 ## Entry Points

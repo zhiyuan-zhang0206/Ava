@@ -37,9 +37,9 @@ from agent.graph.llm_errors import (
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import model_catalog
+from base.lm.plugin_providers import build_model_catalog
 
-model_catalog()
+build_model_catalog()
 
 
 def test_validate_passes_on_end_turn() -> None:
@@ -47,7 +47,7 @@ def test_validate_passes_on_end_turn() -> None:
     msg = AIMessage(
         content="ok", response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"}
     )
-    _validate_stop_reason(msg)
+    _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_raises_on_max_tokens() -> None:
@@ -61,7 +61,7 @@ def test_validate_raises_on_max_tokens() -> None:
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "max_tokens"}
     )
     with pytest.raises(LLMStreamTruncatedError, match=r"max_tokens.*output_tokens=0") as exc_info:
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
     assert exc_info.value.stop_reason == "max_tokens"
     assert exc_info.value.output_tokens == 0
 
@@ -76,7 +76,7 @@ def test_validate_raises_includes_output_tokens_for_diagnosis() -> None:
         usage_metadata={"input_tokens": 1000, "output_tokens": 4096, "total_tokens": 5096},
     )
     with pytest.raises(LLMStreamTruncatedError, match=r"output_tokens=4096"):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_raises_on_missing_stop_reason() -> None:
@@ -87,12 +87,12 @@ def test_validate_raises_on_missing_stop_reason() -> None:
     fail-fast in the validator is better than letting the upstream path misjudge."""
     msg_empty = AIMessage(content="ok", response_metadata={"model_provider": "anthropic"})
     with pytest.raises(LLMStreamCorruptedError):
-        _validate_stop_reason(msg_empty)
+        _validate_stop_reason(msg_empty, catalog=build_model_catalog())
     msg_missing = AIMessage(
         content="ok", response_metadata={"model_provider": "anthropic", "stop_reason": None}
     )
     with pytest.raises(LLMStreamCorruptedError):
-        _validate_stop_reason(msg_missing)
+        _validate_stop_reason(msg_missing, catalog=build_model_catalog())
 
 
 def test_validate_raises_on_pause_turn() -> None:
@@ -102,7 +102,7 @@ def test_validate_raises_on_pause_turn() -> None:
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "pause_turn"}
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError, match=r"pause_turn"):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_passes_on_refusal() -> None:
@@ -114,7 +114,7 @@ def test_validate_passes_on_refusal() -> None:
         content="I'm sorry, I can't help with that.",
         response_metadata={"model_provider": "anthropic", "stop_reason": "refusal"},
     )
-    _validate_stop_reason(msg)
+    _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_raises_on_tool_use_without_tool_calls() -> None:
@@ -125,7 +125,7 @@ def test_validate_raises_on_tool_use_without_tool_calls() -> None:
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"}
     )
     with pytest.raises(LLMStreamCorruptedError, match=r"tool_use.*tool_calls"):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_raises_on_openai_tool_calls_without_tool_calls() -> None:
@@ -135,7 +135,7 @@ def test_validate_raises_on_openai_tool_calls_without_tool_calls() -> None:
         content="", response_metadata={"model_provider": "openai", "finish_reason": "tool_calls"}
     )
     with pytest.raises(LLMStreamCorruptedError, match=r"tool_calls.*empty"):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_passes_on_openai_tool_calls_with_tool_calls() -> None:
@@ -145,7 +145,7 @@ def test_validate_passes_on_openai_tool_calls_with_tool_calls() -> None:
         response_metadata={"model_provider": "openai", "finish_reason": "tool_calls"},
         tool_calls=[{"name": "execute_code", "args": {"code": "x"}, "id": "call_1"}],
     )
-    _validate_stop_reason(msg)
+    _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_passes_on_tool_use_with_tool_calls() -> None:
@@ -155,7 +155,7 @@ def test_validate_passes_on_tool_use_with_tool_calls() -> None:
         response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
         tool_calls=[{"name": "execute_code", "args": {"code": "x"}, "id": "call_1"}],
     )
-    _validate_stop_reason(msg)
+    _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_raises_on_stop_sequence() -> None:
@@ -165,7 +165,7 @@ def test_validate_raises_on_stop_sequence() -> None:
         response_metadata={"model_provider": "anthropic", "stop_reason": "stop_sequence"},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError, match=r"stop_sequence"):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_raises_on_model_context_window_exceeded() -> None:
@@ -180,7 +180,7 @@ def test_validate_raises_on_model_context_window_exceeded() -> None:
         },
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError, match=r"model_context_window_exceeded"):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_validate_raises_on_unknown_stop_reason() -> None:
@@ -191,7 +191,7 @@ def test_validate_raises_on_unknown_stop_reason() -> None:
         response_metadata={"model_provider": "anthropic", "stop_reason": "future_value_xyz"},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError, match=r"future_value_xyz"):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 # --- New cross-provider tests (gemini + openai) ---
@@ -204,7 +204,7 @@ def test_gemini_stop_passes() -> None:
         response_metadata={"model_provider": "google_genai", "finish_reason": "STOP"},
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
-    _validate_stop_reason(msg)
+    _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_openai_stop_passes() -> None:
@@ -214,7 +214,7 @@ def test_openai_stop_passes() -> None:
         response_metadata={"model_provider": "openai", "finish_reason": "stop"},
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
-    _validate_stop_reason(msg)
+    _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_anthropic_end_turn_passes() -> None:
@@ -224,7 +224,7 @@ def test_anthropic_end_turn_passes() -> None:
         response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
-    _validate_stop_reason(msg)
+    _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_gemini_max_tokens_truncated() -> None:
@@ -235,7 +235,7 @@ def test_gemini_max_tokens_truncated() -> None:
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
     with pytest.raises(LLMStreamTruncatedError):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_gemini_missing_corrupted() -> None:
@@ -246,7 +246,7 @@ def test_gemini_missing_corrupted() -> None:
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
     with pytest.raises(LLMStreamCorruptedError):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 def test_gemini_safety_unexpected() -> None:
@@ -257,7 +257,7 @@ def test_gemini_safety_unexpected() -> None:
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
 
 
 async def test_llm_node_validator_wired(
@@ -304,6 +304,7 @@ async def test_llm_node_validator_wired(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     runtime: Runtime[AvaContext] = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -337,6 +338,6 @@ def test_exception_hierarchy() -> None:
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "max_tokens"}
     )
     with pytest.raises(LLMStreamError):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
     with pytest.raises(LLMStreamUnexpectedStopReasonError):
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())

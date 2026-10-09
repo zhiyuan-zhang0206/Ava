@@ -14,11 +14,13 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
+from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.page_server import daemon, dead_pages
 from services.agent_runner.page_server.tests.slices import page_server_config
 from tests.fixtures.units import spawn_agent
@@ -103,9 +105,13 @@ async def _round(pool: ConnectionPool) -> None:
 
 
 def test_only_open_show_pages_of_this_host_are_selected(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent = spawn_agent(spawner="user")
+    agent = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     _page(db_conn, agent, "show-open", 18101)
     _page(db_conn, agent, "serve-open", 18102, serve_dir="/data/site")
     _page(db_conn, agent, "elsewhere", 18103, host="10.9.9.9")
@@ -120,9 +126,14 @@ def test_only_open_show_pages_of_this_host_are_selected(
 
 
 async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
-    db_conn: psycopg.Connection, pool: ConnectionPool, published: dict[str, list[Any]]
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    published: dict[str, list[Any]],
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent = spawn_agent(spawner="user")
+    agent = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     _page(db_conn, agent, "dead-one", _free_port())
     _page(db_conn, agent, "dead-two", _free_port())
 
@@ -137,9 +148,14 @@ async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
 
 
 async def test_the_owner_is_not_told_again_within_the_dedupe_window(
-    db_conn: psycopg.Connection, pool: ConnectionPool, published: dict[str, list[Any]]
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    published: dict[str, list[Any]],
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent = spawn_agent(spawner="user")
+    agent = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     _page(db_conn, agent, "first", _free_port())
     await _round(pool)
     _page(db_conn, agent, "second", _free_port())
@@ -156,10 +172,13 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
     pool: ConnectionPool,
     published: dict[str, list[Any]],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A live show() server is kept; a serve() page is the daemon's own to relaunch,
     so a dead one is neither probed nor closed here."""
-    agent = spawn_agent(spawner="user")
+    agent = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     alive_port = _free_port()
     _page(db_conn, agent, "alive", alive_port)
     _page(db_conn, agent, "serve-dead", _free_port(), serve_dir="/data/site")
@@ -183,8 +202,11 @@ async def test_a_quiesced_unit_skips_the_round(
     pool: ConnectionPool,
     published: dict[str, list[Any]],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent = spawn_agent(spawner="user")
+    agent = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     _page(db_conn, agent, "dead", _free_port())
     monkeypatch.setattr(admission, "quiesced", lambda: True)
 
@@ -198,10 +220,13 @@ async def test_a_failed_close_rolls_back_the_close_and_the_notice(
     pool: ConnectionPool,
     published: dict[str, list[Any]],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Close and notice are one transaction: when the notice cannot be written the row
     stays open for the next round, so the agent is never told about an open row."""
-    agent = spawn_agent(spawner="user")
+    agent = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     _page(db_conn, agent, "dead", _free_port())
     monkeypatch.setattr(
         dead_pages.page_recovery, "NOTICE_INSERT_SQL", "INSERT INTO nowhere VALUES (%s, %s)"

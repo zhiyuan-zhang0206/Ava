@@ -29,6 +29,7 @@ from base.agents.history.hierarchy.group_store import (
 )
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 
 AGENT = 7
 
@@ -75,7 +76,7 @@ def _small_step(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
     seen: dict = {"asked": [], "emitted": [], "reply": lambda _nodes: []}
     monkeypatch.setattr(
-        gc, "_group_model", lambda *_a: ("deepseek-flash", ModelOverrides.from_pins(None))
+        gc, "_group_model", lambda *_a, **_k: ("deepseek-flash", ModelOverrides.from_pins(None))
     )
 
     def generate(
@@ -242,18 +243,22 @@ async def test_a_crash_inside_a_check_frees_the_lease(
     assert await claim_check(aops_pool, AGENT, 1)  # the lease was released
 
 
-def test_the_configured_group_model_wins_over_the_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_configured_group_model_wins_over_the_agents(
+    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings.agent, "understanding_group_model", "other-model")
-    model, _overrides = gc._group_model(MagicMock(), 1)
+    model, _overrides = gc._group_model(MagicMock(), 1, catalog=model_catalog)
     assert model == "other-model"
 
 
-def test_without_a_configured_model_the_agents_own_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_without_a_configured_model_the_agents_own_is_used(
+    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings.agent, "understanding_group_model", "")
     monkeypatch.setattr(
         gc, "agent_model_target", lambda *_a, **_k: ("agent-model", ModelOverrides.from_pins(None))
     )
-    assert gc._group_model(MagicMock(), 1)[0] == "agent-model"
+    assert gc._group_model(MagicMock(), 1, catalog=model_catalog)[0] == "agent-model"
 
 
 def test_standalone_groupings_hand_the_reasoning_setting_to_the_model(
