@@ -29,7 +29,7 @@ class RegisterNamespaceError(Exception):
 
 
 class InvalidNamespaceNameError(RegisterNamespaceError):
-    """name is not a valid identifier or starts with underscore (that's the framework / private namespace convention)."""
+    """A namespace/member name or expansion path has an invalid or private identifier."""
 
 
 class InvalidNamespaceModuleError(RegisterNamespaceError):
@@ -195,11 +195,11 @@ def check_expansion(path: str) -> None:
     """Refuse a dotted SDK path that cannot be promoted into the expanded SDK reference.
 
     Raises:
-        ValueError: the path is empty or has an invalid / underscore segment.
+        InvalidNamespaceNameError: the path is empty or has an invalid / underscore segment.
     """
     segments = path.split(".")
     if not path or not all(s.isidentifier() and not s.startswith("_") for s in segments):
-        raise ValueError(
+        raise InvalidNamespaceNameError(
             f"sdk expansion path {path!r} is invalid — dotted identifiers "
             "without underscore prefixes (e.g. 'cwd', 'shell.sessions')."
         )
