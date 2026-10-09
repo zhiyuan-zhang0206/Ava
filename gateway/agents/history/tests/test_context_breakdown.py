@@ -61,9 +61,9 @@ def _note(content: str, tag: NoteTag) -> HumanMessage:
 def _sample_messages() -> list[BaseMessage]:
     return [
         SystemMessage(content="intro paragraph\n\n# Tools\ntool stuff\n\n# Skills\nskill stuff"),
-        inbound_message(content="hello there", source="user", inbound_id=1),
-        inbound_message(content="peer agent says hi", source="agent:5", inbound_id=2),
-        inbound_message(content="watcher woke you", source="watcher:3", inbound_id=3),
+        inbound_message(content="hello there", source="user", inbound_id=1, body_start=0),
+        inbound_message(content="peer agent says hi", source="agent:5", inbound_id=2, body_start=0),
+        inbound_message(content="watcher woke you", source="watcher:3", inbound_id=3, body_start=0),
         _note("cluster memory pointer", NoteTag.MEMORY),
         _note("per-agent memory", NoteTag.AGENT_MEMORY),
         _note("your agent id is 5", NoteTag.AGENT_ID),
@@ -166,14 +166,14 @@ def test_inbound_split_by_source() -> None:
     (`watcher:` / `shell:` / `schedule:` / `system[:*]`) -> automation; a human
     turn (`user` / `ui:page:*`) and a legacy inbound with no source -> user_input."""
     msgs = [
-        inbound_message(content="human", source="user", inbound_id=1),
-        inbound_message(content="page", source="ui:page:dash", inbound_id=2),
-        inbound_message(content="peer", source="agent:7", inbound_id=3),
-        inbound_message(content="wake", source="watcher:2", inbound_id=4),
-        inbound_message(content="shell done", source="shell:9", inbound_id=5),
-        inbound_message(content="sched", source="schedule:4", inbound_id=6),
-        inbound_message(content="sys", source="system", inbound_id=7),
-        inbound_message(content="sys sub", source="system:reconcile", inbound_id=8),
+        inbound_message(content="human", source="user", inbound_id=1, body_start=0),
+        inbound_message(content="page", source="ui:page:dash", inbound_id=2, body_start=0),
+        inbound_message(content="peer", source="agent:7", inbound_id=3, body_start=0),
+        inbound_message(content="wake", source="watcher:2", inbound_id=4, body_start=0),
+        inbound_message(content="shell done", source="shell:9", inbound_id=5, body_start=0),
+        inbound_message(content="sched", source="schedule:4", inbound_id=6, body_start=0),
+        inbound_message(content="sys", source="system", inbound_id=7, body_start=0),
+        inbound_message(content="sys sub", source="system:reconcile", inbound_id=8, body_start=0),
         # legacy inbound with no ava_source -> defaults to user_input.
         HumanMessage(content="legacy", additional_kwargs={"ava_msg_type": "inbound"}),
     ]

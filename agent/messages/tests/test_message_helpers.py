@@ -17,27 +17,28 @@ class TestInboundMessageMetadata:
     lock down the metadata."""
 
     def test_returns_humanmessage(self):
-        msg = inbound_message(content="hi", source="user", inbound_id=1)
+        msg = inbound_message(content="hi", source="user", inbound_id=1, body_start=0)
         assert isinstance(msg, HumanMessage)
 
     def test_content_passes_through(self):
-        msg = inbound_message(content="hello world", source="user", inbound_id=2)
+        msg = inbound_message(content="hello world", source="user", inbound_id=2, body_start=0)
         assert msg.content == "hello world"  # pyright: ignore[reportUnknownMemberType]
 
     def test_additional_kwargs_exact_shape(self):
         """Full metadata shape — locks key names / value casing / source + inbound_id passthrough."""
-        msg = inbound_message(content="x", source="agent:42", inbound_id=3)
+        msg = inbound_message(content="x", source="agent:42", inbound_id=3, body_start=0)
         assert msg.additional_kwargs == {  # pyright: ignore[reportUnknownMemberType]
             "ava_msg_type": "inbound",
             "ava_source": "agent:42",
             "ava_inbound_id": 3,
+            "ava_inbound_body_start": 0,
             "ava_picked_up_at": msg.additional_kwargs["ava_picked_up_at"],  # pyright: ignore[reportUnknownMemberType]
         }
 
     def test_source_value_propagates_distinct_inputs(self):
         """Different sources go into the same helper, all accurately reflected (guards against hardcoded source bugs)."""
         for src in ("user", "agent:5", "system", "watcher:3"):
-            msg = inbound_message(content="x", source=src, inbound_id=1)
+            msg = inbound_message(content="x", source=src, inbound_id=1, body_start=0)
             assert msg.additional_kwargs["ava_source"] == src  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -52,11 +53,13 @@ class TestMessageCreatedAtStamp:
         from datetime import UTC, datetime
 
         dt = datetime(2026, 6, 19, 15, 30, tzinfo=UTC)
-        msg = inbound_message(content="hi", source="user", inbound_id=1, created_at=dt)
+        msg = inbound_message(
+            content="hi", source="user", inbound_id=1, created_at=dt, body_start=0
+        )
         assert msg.additional_kwargs["ava_created_at"] == "2026-06-19T15:30:00+00:00"  # pyright: ignore[reportUnknownMemberType]
 
     def test_inbound_message_omits_when_absent(self):
-        msg = inbound_message(content="hi", source="user", inbound_id=1)
+        msg = inbound_message(content="hi", source="user", inbound_id=1, body_start=0)
         assert "ava_created_at" not in msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
 
     def test_exec_output_message_stamps_when_given(self):
@@ -134,7 +137,7 @@ def test_has_conversation_true_once_an_inbound_lands() -> None:
     msgs: list[AnyMessage] = [
         SystemMessage(content="<prompt>"),
         system_note_message(content="your id", tag=NoteTag.AGENT_ID),
-        inbound_message(content="hello", source="user", inbound_id=1),
+        inbound_message(content="hello", source="user", inbound_id=1, body_start=0),
     ]
     assert has_conversation(msgs) is True
 
@@ -178,7 +181,9 @@ class TestPickedUpAtStamp:
 
         arrival = datetime(2026, 6, 19, 15, 30, tzinfo=UTC)
         before = datetime.now(UTC)
-        msg = inbound_message(content="hi", source="user", inbound_id=1, created_at=arrival)
+        msg = inbound_message(
+            content="hi", source="user", inbound_id=1, created_at=arrival, body_start=0
+        )
         kw = msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
         assert kw["ava_created_at"] == arrival.isoformat()
         assert datetime.fromisoformat(kw["ava_picked_up_at"]) >= before
@@ -195,7 +200,11 @@ class TestPickedUpAtStamp:
         note = system_note_message(content="n", tag=NoteTag.MEMORY, created_at=now)
         attach = attach_message(blocks=[], text="a", created_at=now)
         inbound = inbound_message(
-            content="x", source="user", inbound_id=1, created_at=datetime(2020, 1, 1, tzinfo=UTC)
+            content="x",
+            source="user",
+            inbound_id=1,
+            created_at=datetime(2020, 1, 1, tzinfo=UTC),
+            body_start=0,
         )
         stamps = [
             datetime.fromisoformat(m.additional_kwargs["ava_picked_up_at"])  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
