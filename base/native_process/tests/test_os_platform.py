@@ -32,6 +32,12 @@ def test_cold_import_does_not_probe_uname() -> None:
             "-c",
             """
 import platform
+import sys
+import uuid
+
+# Linux's stdlib UUID initialization probes the OS independently of Ava.
+assert "base.native_process" not in sys.modules
+assert "base.native_process.os_platform" not in sys.modules
 
 def refuse_probe():
     raise AssertionError("platform import must not probe uname")
