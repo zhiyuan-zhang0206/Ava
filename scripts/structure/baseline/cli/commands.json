@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "cli/commands/agents/impersonation_relay.py::asyncio-task:cmd_relay.run": 1,
     "cli/commands/lifecycle/root_driver.py::global-rebind:_direct_root_child": 1
   }
 }

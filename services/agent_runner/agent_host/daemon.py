@@ -55,8 +55,11 @@ from typing import cast
 import psycopg
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from pydantic import BaseModel
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import NoPermissionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
@@ -85,13 +88,14 @@ from base.events.live.bus import EventBus
 from base.log import init_gateway_process, logger
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.sessions.helper_chain_guard import parent_chain_intact
-from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
-from services.agent_runner.agent_host.force_termination import kill_terminating_agent_shells
-from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.pooled_checkpoint import PooledPostgresSaver
-from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
-from services.agent_runner.agent_host.stdout_log import _rotate_stdout_log_forever
-from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+
+from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from .dispatcher import InboundWakeDispatcher, TurnScheduler
+from .force_termination import kill_terminating_agent_shells
+from .host import AgentHost
+from .pooled_checkpoint import PooledPostgresSaver
+from .pools import build_control_pool, build_shared_pool
+from .stdout_log import _rotate_stdout_log_forever
 
 _log = logging.getLogger("services.agent_runner.agent_host.daemon")
 
@@ -209,8 +213,8 @@ async def _publish_turn_progress_heartbeat(
             _TURN_PROGRESS_PUBLISH_TIMEOUT_S,
         )
         return False
-    except Exception:
-        # A Redis outage must not stall renewal, so it is reported, not raised.
+    except (RedisConnectionError, RedisTimeoutError, NoPermissionError, OSError):
+        # A known Redis outage must not stall renewal; defects reach the owner.
         _log.warning(
             "[agent-host] turn-progress heartbeat publish failed — the gateway's "
             "breaker sees stale progress until it recovers",
@@ -266,7 +270,7 @@ async def _beat_forever(
                 await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
             except TimeoutError:
                 _log.warning("[agent-host] ownership renewal timed out")
-            except Exception:
+            except (psycopg.OperationalError, PoolTimeout):
                 _log.exception("[agent-host] ownership renewal failed — retrying next beat")
         published = await _publish_turn_progress_heartbeat(
             bus, machine, scheduler.active_agents, host.database_waits, host.turn_progress
@@ -278,17 +282,59 @@ async def _beat_forever(
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
 
-async def _stop_ownership_beat(beat: asyncio.Task[None] | None) -> None:
+async def _ownership_beat_completion(
+    liveness: Liveness, host: AgentHost, scheduler: TurnScheduler, machine: str, bus: EventBus
+) -> Exception | None:
+    """Retain a failed heartbeat for the service's stop/join boundary.
+
+    A heartbeat failure must not cancel boot settlement, dispatch or turn drain.
+    Its owning task retains the original exception; shutdown raises it after join.
+    """
+    try:
+        await _beat_forever(liveness, host, scheduler, machine, bus)
+    except Exception as error:
+        return error
+    return None
+
+
+async def _start_ownership_beat(
+    liveness: Liveness, host: AgentHost, scheduler: TurnScheduler, machine: str, bus: EventBus
+) -> tuple[asyncio.TaskGroup, asyncio.Task[Exception | None]]:
+    """Enter the service-owned heartbeat group before boot settlement starts."""
+    tasks = asyncio.TaskGroup()
+    await tasks.__aenter__()
+    beat = tasks.create_task(
+        _ownership_beat_completion(liveness, host, scheduler, machine, bus),
+        name="host-ownership-heartbeat",
+    )
+    return tasks, beat
+
+
+async def _stop_ownership_beat(beat: asyncio.Task[Exception | None] | None) -> None:
     if beat is not None:
         beat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await beat
+            error = await beat
+            if error is not None:
+                raise error
+
+
+async def _close_ownership_beat(
+    beat: asyncio.Task[Exception | None] | None, tasks: asyncio.TaskGroup | None
+) -> None:
+    """Join the heartbeat and close its group without wrapping its retained error."""
+    try:
+        await _stop_ownership_beat(beat)
+    finally:
+        if tasks is not None:
+            await tasks.__aexit__(None, None, None)
 
 
 async def _close_host_runtime(
     host: AgentHost,
     scheduler: TurnScheduler,
-    beat: asyncio.Task[None] | None,
+    beat: asyncio.Task[Exception | None] | None,
+    beat_tasks: asyncio.TaskGroup,
 ) -> None:
     """Drain turns and release settled ownership even if a stage fails.
 
@@ -299,7 +345,7 @@ async def _close_host_runtime(
     """
     async with contextlib.AsyncExitStack() as cleanup:
         cleanup.push_async_callback(host.aclose)
-        cleanup.push_async_callback(_stop_ownership_beat, beat)
+        cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
         cleanup.push_async_callback(scheduler.aclose)
 
 
@@ -309,7 +355,8 @@ async def _exec_memory_guard_forever() -> None:
     Where the OS reports no pressure state (Linux), the guard does not run.
     """
     from base.host.memory_pressure import host_memory_source
-    from services.agent_runner.agent_host.exec_memory_guard import (
+
+    from .exec_memory_guard import (
         ExecMemoryGuard,
         find_exec_domains,
     )
@@ -446,6 +493,39 @@ def _boot_handles() -> tuple[
     return build_shared_pool(db), build_control_pool(db), EventBus.from_settings(), db
 
 
+async def _dispatch_host(
+    host: AgentHost,
+    scheduler: TurnScheduler,
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    db: Database,
+    bus: EventBus,
+    local_machine: str,
+) -> None:
+    """Run dispatcher siblings, joined before the owned heartbeat and turn drain."""
+    async with asyncio.TaskGroup() as background:
+        background.create_task(
+            run_notice_delivery(db, local_machine), name="impersonation_terminal_notices"
+        )
+        for name, loop in _background_loops(control_pool, db).items():
+            background.create_task(loop, name=name)
+        await InboundWakeDispatcher(
+            bus,
+            scheduler,
+            pending_scan=host.pending_inbound_wakes,
+            database_waits=host.database_waits,
+            turn_progress=host.turn_progress,
+            turn_admission=host.admission,
+            stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
+            recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
+            recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
+            scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
+            subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
+        ).run()
+        # The dispatcher runs until cancelled; a return would leave the
+        # group waiting on loops that never end, hanging the stop.
+        raise RuntimeError("wake dispatcher exited without cancellation")
+
+
 async def run() -> None:
     """Boot the host and serve wakes until cancelled. See the module docstring
     for why the order is what it is."""
@@ -471,7 +551,8 @@ async def run() -> None:
     land_cluster_extensions(db)
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    beat: asyncio.Task[None] | None = None
+    beat: asyncio.Task[Exception | None] | None = None
+    beat_tasks: asyncio.TaskGroup | None = None
     health = None
     try:
         local_machine = machine_name()
@@ -500,7 +581,11 @@ async def run() -> None:
             activity_clock=host.last_active_at,
             config_fingerprint=host.turn_fingerprints.get,
         )
-        beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine, bus))
+        # The service owns the group across boot settle and turn drain. The
+        # heartbeat's retained completion is raised only at the existing join.
+        beat_tasks, beat = await _start_ownership_beat(
+            liveness, host, scheduler, local_machine, bus
+        )
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
@@ -528,41 +613,22 @@ async def run() -> None:
         # leaves `run` so the process exits for `ava-root` to restart it. The
         # group exits, every loop joined, before the runtime drains turns.
         try:
-            async with asyncio.TaskGroup() as background:
-                background.create_task(
-                    run_notice_delivery(db, local_machine), name="impersonation_terminal_notices"
-                )
-                for name, loop in _background_loops(control_pool, db).items():
-                    background.create_task(loop, name=name)
-                await InboundWakeDispatcher(
-                    bus,
-                    scheduler,
-                    pending_scan=host.pending_inbound_wakes,
-                    database_waits=host.database_waits,
-                    turn_progress=host.turn_progress,
-                    turn_admission=host.admission,
-                    stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
-                    recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
-                    recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
-                    scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
-                    subscription_read_timeout_s=float(
-                        settings.agent.db_notify_wait_timeout_seconds
-                    ),
-                ).run()
-                # The dispatcher runs until cancelled; a return would leave the
-                # group waiting on loops that never end, hanging the stop.
-                raise RuntimeError("wake dispatcher exited without cancellation")
+            await _dispatch_host(host, scheduler, control_pool, db, bus, local_machine)
         finally:
             try:
-                await _close_host_runtime(host, scheduler, beat)
+                await _close_host_runtime(host, scheduler, beat, beat_tasks)
             finally:
                 beat = None  # Runtime cleanup attempted its join even when another stage failed.
+                beat_tasks = None
     finally:
-        await _stop_ownership_beat(beat)
-        if health is not None:
-            await stop_health_server(health)
-        await _close_host_pools(workload_pool, control_pool)
-        remove_pidfile(_pidfile())
+        # A retained heartbeat failure during boot must still close pools and
+        # remove the pidfile, just as one raised after dispatch/drain does.
+        async with contextlib.AsyncExitStack() as cleanup:
+            cleanup.callback(remove_pidfile, _pidfile())
+            cleanup.push_async_callback(_close_host_pools, workload_pool, control_pool)
+            if health is not None:
+                cleanup.push_async_callback(stop_health_server, health)
+            cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
         _log.info("[agent-host] daemon stopped")
 
 

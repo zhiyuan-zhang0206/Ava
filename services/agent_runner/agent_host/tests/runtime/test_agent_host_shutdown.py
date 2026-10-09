@@ -45,10 +45,38 @@ def _describe(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+async def _beat_for_shutdown(events: list[str], failure: str, *_args: object) -> None:
+    try:
+        events.append("beat_started")
+        if failure in {"heartbeat", "heartbeat_boot"}:
+            events.append("beat_failed")
+            raise RuntimeError("heartbeat defect")
+        await asyncio.Event().wait()
+    finally:
+        events.append("beat_stopped")
+
+
+async def _dispatch_for_shutdown(events: list[str], failure: str) -> None:
+    if failure == "heartbeat":
+        for _ in range(4):
+            await asyncio.sleep(0)
+        events.append("dispatcher_continued")
+        raise ValueError("dispatcher stopped independently")
+    if failure == "dispatcher_returns":
+        await asyncio.sleep(0.01)  # let the sibling loop start before the return
+        return
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        events.append("dispatcher_cancelled")
+        raise
+
+
 def _exercise_shutdown(failure: str) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     from agent import graph, process_boot
-    from services.agent_runner.agent_host import daemon
+
+    from ... import daemon
 
     events: list[str] = []
 
@@ -56,11 +84,7 @@ def _exercise_shutdown(failure: str) -> None:
         await asyncio.sleep(0)
         events.append(name)
 
-    async def beat(*_args: object) -> None:
-        try:
-            await asyncio.Event().wait()
-        finally:
-            events.append("beat_stopped")
+    beat = partial(_beat_for_shutdown, events, failure)
 
     async def background(*_args: object) -> None:
         try:
@@ -74,22 +98,25 @@ def _exercise_shutdown(failure: str) -> None:
             signal.raise_signal(signal.SIGTERM)
         raise ValueError("background failed")
 
-    async def dispatch() -> None:
-        if failure == "dispatcher_returns":
-            await asyncio.sleep(0.01)  # let the sibling loop start before the return
-            return
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            events.append("dispatcher_cancelled")
-            raise
+    dispatch = partial(_dispatch_for_shutdown, events, failure)
+
+    async def settle(*_args: object, **_kwargs: object) -> list[int]:
+        if failure == "heartbeat_boot":
+            for _ in range(4):
+                await asyncio.sleep(0)
+            events.append("boot_continued")
+            raise ValueError("boot settlement stopped independently")
+        await asyncio.sleep(0)
+        assert "beat_started" in events
+        events.append("boot_settled")
+        return []
 
     original_loops = daemon._background_loops
 
     def loops(*args: Any) -> dict[str, Any]:
         if failure == "plugin":
             return original_loops(*args)
-        failing = {} if failure == "dispatcher_returns" else {"failed": fail()}
+        failing = {} if failure in {"dispatcher_returns", "heartbeat"} else {"failed": fail()}
         return {**failing, "sibling": background()}
 
     host = MagicMock(aclose=partial(record, "owner_released"))
@@ -122,7 +149,7 @@ def _exercise_shutdown(failure: str) -> None:
             AgentHost=MagicMock(return_value=host),
             TurnScheduler=MagicMock(return_value=scheduler),
             _beat_forever=beat,
-            settle_stale_running_rows=AsyncMock(return_value=[]),
+            settle_stale_running_rows=settle,
             start_health_server=AsyncMock(return_value=object()),
             stop_health_server=close_health,
             _background_loops=loops,
@@ -135,9 +162,19 @@ def _exercise_shutdown(failure: str) -> None:
         daemon.install_graceful_shutdown("agent_host_test")
         try:
             asyncio.run(daemon.run())
-        except (KeyboardInterrupt, asyncio.CancelledError, ExceptionGroup) as exc:
+        except (KeyboardInterrupt, asyncio.CancelledError, ExceptionGroup, RuntimeError) as exc:
             events.append(_describe(exc))
     print(json.dumps(events))  # noqa: T201 -- child result protocol
+
+
+def _assert_heartbeat_order(events: list[str], failure: str) -> None:
+    assert events.index("beat_started") < events.index("boot_settled")
+    assert events.index("beat_stopped") < events.index("owner_released")
+    if failure in {"exception", "dispatcher_returns"}:
+        assert events.index("turns_drained") < events.index("beat_stopped")
+    if failure == "heartbeat":
+        assert events.index("beat_failed") < events.index("dispatcher_continued")
+        assert events.index("dispatcher_continued") < events.index("turns_drained")
 
 
 @pytest.mark.parametrize(
@@ -147,6 +184,7 @@ def _exercise_shutdown(failure: str) -> None:
         ("signal", "KeyboardInterrupt"),
         ("exception", "ExceptionGroup[ValueError]"),
         ("dispatcher_returns", "ExceptionGroup[RuntimeError]"),
+        ("heartbeat", "RuntimeError"),
     ],
 )
 def test_failed_background_still_drains_and_releases(failure: str, exception: str) -> None:
@@ -179,10 +217,19 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
     assert [
         event
         for event in events
-        if event not in {"background_joined", "beat_stopped", "dispatcher_cancelled"}
+        if event
+        not in {
+            "background_joined",
+            "beat_stopped",
+            "dispatcher_cancelled",
+            "beat_failed",
+            "beat_started",
+            "boot_settled",
+            "dispatcher_continued",
+        }
     ] == ordered
     assert events.index("background_joined") < events.index("turns_drained")
-    assert events.index("beat_stopped") < events.index("owner_released")
+    _assert_heartbeat_order(events, failure)
     if failure == "exception":
         # The crashed loop took the dispatcher down with it, before any drain.
         assert events.index("dispatcher_cancelled") < events.index("turns_drained")
@@ -228,7 +275,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
     out the control pool's 30 s acquire timeout, so ava-root's 10 s TERM window
     expired first and root retained custody of the still-exiting agent-host."""
-    from services.agent_runner.agent_host import host as host_mod
+    from ... import host as host_mod
 
     monkeypatch.setattr(host_mod, "_RELEASE_OWNER_TIMEOUT_S", 0.05)
     host = host_mod.AgentHost(
@@ -243,3 +290,28 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     with pytest.raises(TimeoutError, match="ownership release"):
         await asyncio.wait_for(host.aclose(), timeout=2.0)
     assert time.monotonic() - started < 1.0
+
+
+def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from services.agent_runner.agent_host.tests.runtime.test_agent_host_shutdown import _exercise_shutdown; "
+            "_exercise_shutdown('heartbeat_boot')",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1]) == [
+        "beat_started",
+        "beat_failed",
+        "beat_stopped",
+        "boot_continued",
+        "pools_closed",
+        "pidfile_removed",
+        "RuntimeError",
+    ]
