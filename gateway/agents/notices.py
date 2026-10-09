@@ -38,7 +38,6 @@ from base.db import NOTICE_FYI_TTL_DAYS, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
-from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.notice_operations.receipts import (
     existing_receipt,
@@ -288,15 +287,16 @@ async def get_notices_feed(
     )
 
 
-@router.post("/api/agents/{agent_id}/notices/{notice_id}/resolve", status_code=201)
+@router.post(
+    "/api/agents/{agent_id}/notices/{notice_id}/resolve",
+    status_code=201,
+)
 async def post_notice_resolve(
     agent_id: int,
     notice_id: int,
     body: ResolveNoticeIn,
     request: Request,
-    idempotency_key: str | None = Header(
-        None, alias="Idempotency-Key", min_length=1, max_length=128
-    ),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
     """Resolve one open notice and (when a reply is given) wake the agent with it.
 
@@ -388,65 +388,50 @@ async def post_notice_resolve(
     # (base/agents/messages/envelope.py), so no User-role message is consumed and nothing is
     # shaped like a reply request; read-without-reply still delivers nothing.
     deliver_source = "system:notice-reply" if reply is not None else "system:notice-dismiss"
-    if idempotency_key is not None:
-        receipt = await asyncio.to_thread(
-            resolve_once,
-            request.app.state.db_pool,
-            request.url.path,
-            idempotency_key,
-            body.model_dump(mode="json"),
-            agent_id,
-            deliver_source,
-            _resolve,
-            request_inbound_provenance(request),
-        )
-        inbound_id = receipt["inbound_id"]
-        if inbound_id is not None:
-            if not isinstance(inbound_id, int):
-                raise TypeError("notice inbound receipt must be an integer")
-            await asyncio.to_thread(
-                publish_inbound_wake,
-                request.app.state.db,
-                request.app.state.bus,
-                agent_id,
-                str(inbound_id),
-            )
-            content = receipt["content"]
-            if not isinstance(content, str):
-                raise TypeError("notice inbound content must be a string")
-            await _ops.publish_inbound_arrived(
-                request.app.state.bus,
-                agent_id,
-                inbound_id,
-                "chat",
-                deliver_source,
-                content,
-            )
-            status = await _ops.resurrect_if_terminated(
-                request.app.state.db,
-                request.app.state.bus,
-                agent_id,
-                trigger_inbound_id=inbound_id,
-                trigger_inbound_kind=InboundKind.CHAT,
-            )
-        else:
-            status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
-        await _ops.publish_notice_resolved(request.app.state.bus, agent_id, notice_id)
-        return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
-    delivery = await deliver_chat_inbound(
+    receipt = await asyncio.to_thread(
+        resolve_once,
         request.app.state.db_pool,
-        request.app.state.db,
-        request.app.state.bus,
+        request.url.path,
+        idempotency_key,
+        body.model_dump(mode="json"),
         agent_id,
-        prepare=_resolve,
-        source=deliver_source,
-        refresh_badge=True,
-        provenance=request_inbound_provenance(request),
+        deliver_source,
+        _resolve,
+        request_inbound_provenance(request),
     )
-    # Drop the row from the FYI feed (no-op by id for a require_response notice,
-    # which lives on the snapshot, not the feed).
+    inbound_id = receipt["inbound_id"]
+    if inbound_id is not None:
+        if not isinstance(inbound_id, int):
+            raise TypeError("notice inbound receipt must be an integer")
+        await asyncio.to_thread(
+            publish_inbound_wake,
+            request.app.state.db,
+            request.app.state.bus,
+            agent_id,
+            str(inbound_id),
+        )
+        content = receipt["content"]
+        if not isinstance(content, str):
+            raise TypeError("notice inbound content must be a string")
+        await _ops.publish_inbound_arrived(
+            request.app.state.bus,
+            agent_id,
+            inbound_id,
+            "chat",
+            deliver_source,
+            content,
+        )
+        status = await _ops.resurrect_if_terminated(
+            request.app.state.db,
+            request.app.state.bus,
+            agent_id,
+            trigger_inbound_id=inbound_id,
+            trigger_inbound_kind=InboundKind.CHAT,
+        )
+    else:
+        status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     await _ops.publish_notice_resolved(request.app.state.bus, agent_id, notice_id)
-    return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
+    return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 
 # ── unified notice write API (R3 door ④) ─────────────────────────────────
@@ -467,9 +452,7 @@ async def post_notice_create(
     agent_id: int,
     body: NoticeCreateIn,
     request: Request,
-    idempotency_key: str | None = Header(
-        None, alias="Idempotency-Key", min_length=1, max_length=128
-    ),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> dict:
     """Post a notice at one of the three obligation rungs (FYI /
     response-required / blocking), atomically superseding the agent's
@@ -492,17 +475,16 @@ async def post_notice_create(
         pool: ConnectionPool,
     ) -> tuple[int, int, list[int], list[int], list[dict[str, object]], bool]:
         with write_transaction(pool) as conn, conn.cursor() as cur:
-            if idempotency_key is not None:
-                previous = existing_receipt(conn, request.url.path, idempotency_key, request_body)
-                if previous is not None:
-                    return (
-                        int(cast(int, previous["global_id"])),
-                        int(cast(int, previous["id"])),
-                        cast(list[int], previous["superseded_global"]),
-                        cast(list[int], previous["superseded"]),
-                        cast(list[dict[str, object]], previous["pending_notices"]),
-                        True,
-                    )
+            previous = existing_receipt(conn, request.url.path, idempotency_key, request_body)
+            if previous is not None:
+                return (
+                    int(cast(int, previous["global_id"])),
+                    int(cast(int, previous["id"])),
+                    cast(list[int], previous["superseded_global"]),
+                    cast(list[int], previous["superseded"]),
+                    cast(list[dict[str, object]], previous["pending_notices"]),
+                    True,
+                )
             validate_creation_state(conn, body)
             # Serialize all creations for an agent, including different keys:
             # no-open-notice races must not allocate the same local id.
@@ -577,20 +559,19 @@ async def post_notice_create(
                 {"id": int(r[0]), "title": r[1], "created_at": r[2].isoformat(), "priority": r[3]}
                 for r in cur.fetchall()
             ]
-            if idempotency_key is not None:
-                save_receipt(
-                    conn,
-                    request.url.path,
-                    idempotency_key,
-                    request_body,
-                    {
-                        "global_id": notice_global_id,
-                        "id": notice_local_id,
-                        "superseded_global": superseded_global,
-                        "superseded": superseded_local,
-                        "pending_notices": pending,
-                    },
-                )
+            save_receipt(
+                conn,
+                request.url.path,
+                idempotency_key,
+                request_body,
+                {
+                    "global_id": notice_global_id,
+                    "id": notice_local_id,
+                    "superseded_global": superseded_global,
+                    "superseded": superseded_local,
+                    "pending_notices": pending,
+                },
+            )
             # Publish only after the durable rows are visible to the snapshot
             # query; a pre-commit AgentUpdated would preserve the stale view.
             conn.commit()

@@ -6,10 +6,10 @@ description: Standalone SDK creation returns an immutable accepted Task snapshot
 
 # Standalone SDK task creation receipts
 
-`ava.tasks.create(..., operation_key="...")` accepts a caller-chosen key of
+`ava.tasks.create(..., operation_key="...")` requires a caller-chosen key of
 1–128 characters. Retain the same key and inputs when the response is lost.
-Keyless calls preserve their existing behavior. This contract covers standalone
-creation. Compound creation has its own explicit opt-in contract in
+Missing or invalid keys fail before mutation. This covers standalone creation.
+Compound creation has its own required key and atomic acceptance contract in
 [[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md]].
 It does not protect retries of an entire `execute_code` script.
 
@@ -36,7 +36,6 @@ The SDK transaction takes a creation-key advisory lock, checks a retained
 receipt, then uses the existing parent lock, open-title uniqueness checks and
 task writer for fresh creation. Task insert, creation audit, owner notification
 intent and immutable receipt commit together. Failure rolls them all back.
-Keyless creation retains parent and title checks without a receipt.
 The task writer and shared snapshot model are native
 [[base/agents/tasks/docs/creation-transactions.ava.okf.md|creation transaction primitives]];
 the SDK remains the receipt admission and post-commit owner.
@@ -63,6 +62,5 @@ objects. It has no foreign keys to mutable task/agent rows and no automatic TTL.
 Receipt retention must preserve tombstones: deleting a receipt silently enables
 execution of the same operation again. This change introduces no cleanup owner.
 
-Keyless `create_and_assign` retains its separate spawn/create recipe; explicit
-strong mode uses one server-owned compound receipt. Standalone task keys are not
-child-step keys for that recipe.
+`create_and_assign` uses one server-owned compound receipt. Standalone task keys
+do not make a multi-step script atomic.

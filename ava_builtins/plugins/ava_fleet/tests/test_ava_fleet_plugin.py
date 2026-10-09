@@ -17,6 +17,7 @@ import inspect
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -371,12 +372,14 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     # require_response defaults False -> these are FYI notices.
-    nid = ava.ui.notify("migration done", content="14k rows", priority="P1")  # type: ignore[attr-defined]
+    nid = ava.ui.notify(
+        "migration done", content="14k rows", priority="P1", idempotency_key=str(uuid4())
+    )  # type: ignore[attr-defined]
     assert isinstance(nid, int)  # Notice is an int subclass — backward compatible
     _assert_first_notice_is_sole_pending_fyi(nid)
 
     # Posting a second notice auto-resolves the first (at most one).
-    nid2 = ava.ui.notify("hit a rate limit")  # type: ignore[attr-defined]
+    nid2 = ava.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     _assert_second_notice_supersedes_first(nid, nid2)
 
     db_conn.rollback()  # notify() committed via its own cursor; refresh our view
@@ -406,9 +409,10 @@ def test_notify_require_response_rides_awaiting_worklist(
         priority="P0",
         require_response=True,
         blocking=True,
+        idempotency_key=str(uuid4()),
     )
     # Posting a second require_response notice auto-resolves the first.
-    nid2 = ava.ui.notify("Name the branch?", require_response=True)  # type: ignore[attr-defined]
+    nid2 = ava.ui.notify("Name the branch?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert nid2.superseded != []  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
     db_conn.rollback()
@@ -454,7 +458,9 @@ def test_notify_records_task_id_and_rides_snapshot(
     agent_id = _seed_agent(db_conn)
     tid = _seed_task(db_conn, agent_id)
     pin_agent(agent_id)
-    ava.ui.notify("stalled on a decision", require_response=True, task=tid)  # type: ignore[attr-defined]
+    ava.ui.notify(
+        "stalled on a decision", require_response=True, task=tid, idempotency_key=str(uuid4())
+    )  # type: ignore[attr-defined]
     db_conn.rollback()  # notify committed via its own cursor; refresh our view
     assert _notice_task_id(db_conn, agent_id) == tid
     snap = select_one(db_conn, agent_id)
@@ -467,7 +473,7 @@ def test_notify_without_task_leaves_task_id_null(
 ):
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("fyi, no task")  # type: ignore[attr-defined]
+    ava.ui.notify("fyi, no task", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     db_conn.rollback()
     assert _notice_task_id(db_conn, agent_id) is None
 
@@ -476,23 +482,25 @@ def test_notify_nonexistent_task_raises(_load_activity_plugin: None, db_conn: ps
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="task 999999 does not exist"):
-        ava.ui.notify("names a ghost task", task=999999)  # type: ignore[attr-defined]
+        ava.ui.notify("names a ghost task", task=999999, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
 
 
 def test_notify_validates_title_priority_and_blocking(_load_activity_plugin: None):
     with pytest.raises(ValueError, match="title"):
-        ava.ui.notify("   ")  # type: ignore[attr-defined]
+        ava.ui.notify("   ", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     with pytest.raises(ValueError, match="priority"):
-        ava.ui.notify("ok", priority="P9")  # type: ignore[attr-defined]
+        ava.ui.notify("ok", priority="P9", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     # blocking is a strict subset of require_response: an FYI can never stall you.
     with pytest.raises(ValueError, match="require_response"):
-        ava.ui.notify("ok", blocking=True)  # type: ignore[attr-defined]
+        ava.ui.notify("ok", blocking=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
 
 
 def test_edit_notice_partial_update(_load_activity_plugin: None, db_conn: psycopg.Connection):
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    nid = ava.ui.notify("draft title", content="old body", priority="P2")  # type: ignore[attr-defined]
+    nid = ava.ui.notify(
+        "draft title", content="old body", priority="P2", idempotency_key=str(uuid4())
+    )  # type: ignore[attr-defined]
     # change only title + priority; content is left as-is (omitted != cleared).
     ava.ui.edit_notice(title="new title", priority="P0")  # type: ignore[attr-defined]
 
@@ -554,6 +562,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
         priority="P1",
         require_response=True,
         blocking=True,
+        idempotency_key=str(uuid4()),
     )
     for revision in range(1, 11):
         content = f"revision {revision}"
@@ -579,7 +588,7 @@ def test_edit_notice_validation_and_guards(
 ):
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("fyi notice")  # type: ignore[attr-defined]
+    ava.ui.notify("fyi notice", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
 
     # nothing passed -> nothing to change.
     with pytest.raises(ValueError, match="at least one field"):
@@ -598,7 +607,7 @@ def test_edit_notice_validation_and_guards(
 def test_dismiss_notice_withdraws(_load_activity_plugin: None, db_conn: psycopg.Connection):
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    nid = ava.ui.notify("stale fyi")  # type: ignore[attr-defined]
+    nid = ava.ui.notify("stale fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     ava.ui.dismiss_notice()  # type: ignore[attr-defined]
 
     db_conn.rollback()
@@ -644,11 +653,11 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
 
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("Q1?", require_response=True)  # type: ignore[attr-defined]
+    ava.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert resolved == []  # the first post resolves nothing
     # A second require_response notice supersedes the first — must publish even
     # though the superseded notice needed a response.
-    ava.ui.notify("Q2?", require_response=True)  # type: ignore[attr-defined]
+    ava.ui.notify("Q2?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert len(resolved) == 1
     # Withdrawing the surviving require_response notice publishes too.
     ava.ui.dismiss_notice()  # type: ignore[attr-defined]

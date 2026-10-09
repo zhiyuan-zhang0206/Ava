@@ -7,12 +7,12 @@ tags: [gateway, notices]
 
 # Notice Operation Receipts
 
-Notice creation and resolution accept optional `Idempotency-Key` headers.
+Notice creation and resolution require `Idempotency-Key` headers.
 `notice_operation_receipts` owns each normalized request and its immutable
 result, scoped by concrete HTTP path and the credential-aware key. The receipt
 and all notice/reply mutations commit together. Concurrent retries serialize
-in Postgres; changed inputs conflict (409). Keyless legacy calls keep their
-existing semantics, including distinct later read-with-reply operations.
+in Postgres; changed inputs conflict (409). Missing keys fail before mutation. A deliberate later read with a reply uses
+a new key, while replay of the same key returns its original inbound.
 
 A resolution receipt holds its original optional inbound id. Retry repairs
 its wake tail, with the exact pending-row resurrection guard preventing revival
@@ -28,15 +28,15 @@ All creations for an agent lock its row to serialize local id allocation.
 
 Receipts have no TTL pruning: expiration cannot turn a known operation into a
 new side effect. Any future retention design needs explicit expired-key
-semantics. The SDK `notify(idempotency_key=...)` supports explicit recovery;
+semantics. The SDK `notify` requires an explicit key for recovery;
 relative expiration inputs require their normalized absolute deadline to be
 reused. The mixed-version rollout gate sends new keys while withholding
 ambiguous automatic retries when gateway support is unproven.
 
 Browser resolution allocates an operation id per invocation and optionally
 accepts one from its caller. It does not persist or automatically retry requests.
-CLI and IM bridge resolution remain keyless single attempts; this PR does not
-add ambiguous-failure retries to those callers.
+CLI and IM bridge resolution allocate one key per invocation and remain single
+attempts. They do not add automatic ambiguous-failure retries.
 
 ## Guarded current-notice mutations
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -79,7 +80,7 @@ class TestAgentsEntries:
             lambda *_a, **_kw: seen.update(_kw) or 1,  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
 
-        agents.send_system_note(7, ("note",), tag=("task",))  # pyright: ignore[reportArgumentType]
+        agents.send_system_note(7, ("note",), tag=("task",), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
         assert seen["content"] == "note"
         assert seen["note_tag"] == "task"
 
@@ -125,7 +126,7 @@ class TestAgentsEntries:
                 id="send_message-id",
             ),  # pyright: ignore[reportArgumentType]
             pytest.param(
-                lambda: agents.send_system_note(("7",), "hi"),  # pyright: ignore[reportArgumentType]
+                lambda: agents.send_system_note(("7",), "hi", idempotency_key=str(uuid4())),  # pyright: ignore[reportArgumentType]
                 "agent_id must be int",
                 id="send_system_note-id",
             ),  # pyright: ignore[reportArgumentType]

@@ -12,7 +12,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, LiteralString, cast, overload
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
@@ -31,7 +31,7 @@ from base.agents.tasks.rules import first_open_child, is_closed, open_title_hold
 from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.http.auth.request_principal import PrincipalScopeError, optional_request_key
+from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
 from gateway.schemas.tasks import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
 from ops import lifecycle as _ops
@@ -291,7 +291,7 @@ def _patch_task_blocking(
     pool: ConnectionPool[Any],
     task_id: int,
     body: TaskUpdateRequest,
-    operation_key: str | None = None,
+    operation_key: str,
     operation_path: str | None = None,
 ) -> tuple[TaskRow, list[TaskNoteReceipt]]:
     """Commit the task and its owner-change inbounds in the same transaction.
@@ -302,10 +302,9 @@ def _patch_task_blocking(
     path = operation_path if operation_path is not None else f"/api/tasks/{task_id}"
     request_body = body.model_dump(mode="json", exclude_unset=True)
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        if operation_key is not None:
-            previous = existing_task_receipt(cur, path, operation_key, request_body)
-            if previous is not None:
-                return previous, []
+        previous = existing_task_receipt(cur, path, operation_key, request_body)
+        if previous is not None:
+            return previous, []
         sets, params = _patch_fields(body)
         # The system root task is immutable (the task-tree anchor / default
         # parent) — reject any edit before writing, same rule as the SDK
@@ -381,14 +380,18 @@ def _patch_task_blocking(
                 ),
                 "user",
             )
-        if operation_key is not None:
-            save_task_receipt(cur, path, operation_key, request_body, task)
+        save_task_receipt(cur, path, operation_key, request_body, task)
     emit_task_note_events(receipts)
     return task, receipts
 
 
 @router.patch("/api/tasks/{task_id}")
-async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskRow:
+async def patch_task(
+    task_id: int,
+    body: TaskUpdateRequest,
+    request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+) -> TaskRow:
     """Partially update a task; omitted fields stay unchanged.
 
     status, priority, title, description, and results are taken when non-null
@@ -405,7 +408,7 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
     reassigned, completed, cancelled, or otherwise edited.
 
-    An optional Idempotency-Key commits an immutable response with the write.
+    A required Idempotency-Key commits an immutable response with the write.
     Reusing that key with different fields returns 409; replay returns the original
     task snapshot without another update or wake, even if the task later changes.
 
@@ -413,7 +416,7 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     child remains in progress. Close or cancel those children first.
     """
     try:
-        operation_key = optional_request_key(request)
+        operation_key = request_key(request, idempotency_key, method="PATCH", path=request.url.path)
     except PrincipalScopeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     task, notes = await asyncio.to_thread(

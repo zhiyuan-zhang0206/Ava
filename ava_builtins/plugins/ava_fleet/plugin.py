@@ -138,7 +138,7 @@ def notify(
     priority: str = "P2",
     task: int | None = None,
     expire_at: datetime | timedelta | str | None = None,
-    idempotency_key: str | None = None,
+    idempotency_key: str,
 ) -> "Notice":
     """Post one notice, replacing any previous open notice.
 
@@ -192,9 +192,9 @@ def notify(
             )
         expire_at_iso = due_at.isoformat()
 
-    idempotency_key = coerce_str(idempotency_key, "idempotency_key", allow_none=True)
-    if idempotency_key is not None and not 1 <= len(idempotency_key) <= 128:
-        raise ValueError("idempotency_key must contain 1 to 128 characters")
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    idempotency_key = validate_idempotency_key(idempotency_key)
     aid = ava.sdk_surface.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway performs the whole
