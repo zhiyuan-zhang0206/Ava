@@ -56,7 +56,9 @@ performing one, including platform actions such as increment, decrement,
 confirm, cancel or expand when that element offers them. A window root that
 reports `AXRaise` can be raised through this same path; `focus` sets
 `AXFocused` and does not promise to raise a window. All tree modes show
-reported actions on kept nodes; interactive mode includes nodes with actions
+reported actions on kept nodes. The action result includes `native_action` for
+the audit row to identify the performed platform action; interactive mode
+includes nodes with actions
 other than context-menu-only `AXShowMenu`.
 
 `select_text` requires a nonempty `text` substring of the element's freshly read
