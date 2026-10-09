@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "schedules/adversarial-eval-weekly-schedule.py::thread:start_scenario_server": 1,
     "schedules/catchup.py::contextvar:_claimed_slot": 1
   }
 }
