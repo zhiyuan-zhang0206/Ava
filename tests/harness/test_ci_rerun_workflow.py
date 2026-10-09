@@ -7,6 +7,7 @@ file skips with a clear reason when only an older one exists on macOS (see
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -208,18 +209,45 @@ def test_api_failure_is_not_permission_to_retry(tmp_path: Path) -> None:
     assert not any("POST" in call for call in calls)
 
 
-def test_cross_sha_guard_race_cannot_share_native_concurrency_group() -> None:
+def _ci_concurrency_group(event_name: str, ref: str, sha: str) -> str:
+    """Evaluate ci.yml's concurrency group for one event.
+
+    Handles exactly `<event_name == 'pull_request'> && format(..) || format(..)`
+    over `github.ref` / `github.sha`; any other shape fails loudly so a changed
+    expression forces this contract to be revisited."""
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-    group = workflow["concurrency"]["group"]
-    expression = "${{ github.sha }}"
-    assert group == "ci-${{ github.ref }}-" + expression
+    expression = workflow["concurrency"]["group"]
+    assert expression.startswith("${{ ") and expression.endswith(" }}"), expression
+    condition, rest = expression[len("${{ ") : -len(" }}")].split(" && ")
+    assert condition == "github.event_name == 'pull_request'", condition
+    pull_request_format, other_format = rest.split(" || ")
+    chosen = pull_request_format if event_name == "pull_request" else other_format
+    match = re.fullmatch(r"format\('([^']*)'((?:, github\.(?:ref|sha))+)\)", chosen)
+    assert match is not None, chosen
+    values = {"github.ref": ref, "github.sha": sha}
+    arguments = [values[name.strip()] for name in match.group(2).split(",")[1:]]
+    return match.group(1).format(*arguments)
+
+
+def test_pr_runs_share_one_group_across_shas_and_other_events_stay_per_sha() -> None:
+    """A new PR push must land in the same group as the superseded run so
+    cancel-in-progress cancels it. Push/dispatch runs keep the SHA: a group
+    holds one pending run and a newer one replaces it, which would skip the
+    intermediate main runs that refresh-test-durations.yml relies on."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    assert workflow["concurrency"]["cancel-in-progress"] == (
+        "${{ github.event_name == 'pull_request' }}"
+    )
     ref = "refs/pull/42/merge"
-    old = group.replace("${{ github.ref }}", ref).replace(expression, SHA)
-    new = group.replace("${{ github.ref }}", ref).replace(expression, OTHER_SHA)
-    # Native Actions cancellation/replacement only applies inside one group.
-    # This remains different if PR synchronization happens after the GET guard.
-    assert old != new
-    assert old == group.replace("${{ github.ref }}", ref).replace(expression, SHA)
+    old = _ci_concurrency_group("pull_request", ref, SHA)
+    new = _ci_concurrency_group("pull_request", ref, OTHER_SHA)
+    assert old == new == "ci-refs/pull/42/merge"
+    assert old != _ci_concurrency_group("pull_request", "refs/pull/43/merge", SHA)
+    for event in ("push", "workflow_dispatch"):
+        first = _ci_concurrency_group(event, "refs/heads/main", SHA)
+        second = _ci_concurrency_group(event, "refs/heads/main", OTHER_SHA)
+        assert first == f"ci-refs/heads/main-{SHA}"
+        assert second == f"ci-refs/heads/main-{OTHER_SHA}"
 
 
 def test_ci_flow_never_queries_job_conclusions(tmp_path: Path) -> None:

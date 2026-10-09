@@ -88,9 +88,14 @@ env:
   UV_FROZEN: "1"
 
 concurrency:
-  # Reruns retain the original ref/SHA. Isolate immutable heads so a stale
-  # retry cannot evict a newer running OR pending run, even after a guard race.
-  group: ci-${{ github.ref }}-${{ github.sha }}
+  # PRs group by ref only, so a new push cancels the superseded run. Every
+  # other event keeps the SHA in the group: a group holds one pending run and
+  # a newer one replaces it, so a ref-only group would skip intermediate main
+  # commits that refresh-test-durations.yml relies on.
+  # Residual race (a stale ci-rerun admitted just after a push cancels the new
+  # head): the cancelled run is retried by ci-rerun.yml. See
+  # docs/conventions/engineering/ci-rerun-safety.md.
+  group: ${{ github.event_name == 'pull_request' && format('ci-{0}', github.ref) || format('ci-{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
