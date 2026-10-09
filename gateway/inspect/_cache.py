@@ -189,22 +189,27 @@ class InspectQueryCache[K, V]:
         now: Callable[[], float],
     ) -> V:
         try:
-            value = loader()
-            current = now()
-            self._store(key, value, current=current, expires_at=current + ttl_s)
-            future.set_result(value)
-            return value
+            try:
+                value = loader()
+                current = now()
+                self._store(key, value, current=current, expires_at=current + ttl_s)
+            finally:
+                # Retire admission before publishing completion: a follower
+                # can immediately ask for a fresh zero-TTL load on either key.
+                with self._lock:
+                    if self._inflight.get(key) is future:
+                        del self._inflight[key]
+                    if release_load_slot:
+                        if self._load_slots is None:
+                            raise RuntimeError(
+                                "load claim cannot release an unconfigured admission slot"
+                            )
+                        self._load_slots.release()
         except BaseException as exc:
             future.set_exception(exc)
             raise
-        finally:
-            with self._lock:
-                if self._inflight.get(key) is future:
-                    del self._inflight[key]
-            if release_load_slot:
-                if self._load_slots is None:
-                    raise RuntimeError("load claim cannot release an unconfigured admission slot")
-                self._load_slots.release()
+        future.set_result(value)
+        return value
 
     def _store(self, key: K, value: V, *, current: float, expires_at: float) -> None:
         with self._lock:
