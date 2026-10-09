@@ -31,7 +31,8 @@ from base.agents.impersonation.terminal_notices import notice_text
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from cli.commands.agents.impersonation_adapters import resolve_adapter
+
+from .impersonation_adapters import resolve_adapter
 
 _CATCHUP_SECONDS = 30.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
@@ -526,6 +527,15 @@ async def _heartbeat_loop(
             return
 
 
+async def _heartbeat_completion(db: Database, lease_id: UUID, token: str) -> Exception | None:
+    """Retain the original heartbeat failure until the relay stops and joins it."""
+    try:
+        await _heartbeat_loop(db, lease_id, token)
+    except Exception as error:
+        return error
+    return None
+
+
 def cmd_relay(args: argparse.Namespace) -> int:
     """Run a native relay until lease release/expiry, failure, or interruption.
 
@@ -533,7 +543,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
     runtime's readiness gate observes a live relay immediately. The relay
     never renews the lease; its credential reads, reserves delivery, and beats.
     """
-    from cli.commands.agents import impersonation
+    from . import impersonation
 
     try:
         from base.agents.impersonation import relay_get
@@ -566,7 +576,11 @@ def cmd_relay(args: argparse.Namespace) -> int:
                 if adapter.notify_terminal:
                     _ended(await read_inbox(), args.agent_id, session_id, adapter.send)
                 return
-            heartbeat = asyncio.create_task(_heartbeat_loop(db, lease_id, token))
+            heartbeat_tasks = asyncio.TaskGroup()
+            await heartbeat_tasks.__aenter__()
+            heartbeat = heartbeat_tasks.create_task(
+                _heartbeat_completion(db, lease_id, token), name="impersonation-relay-heartbeat"
+            )
             try:
                 listener = base.events.live.redis_listener.RedisInboundListener(
                     settings.data_plane.redis_url, args.agent_id
@@ -584,8 +598,15 @@ def cmd_relay(args: argparse.Namespace) -> int:
                 )
             finally:
                 heartbeat.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await heartbeat
+                try:
+                    with contextlib.suppress(asyncio.CancelledError):
+                        error = await heartbeat
+                        if error is not None:
+                            raise error
+                finally:
+                    # Closing without a body exception preserves the CLI's
+                    # original exception type and exit-code boundary.
+                    await heartbeat_tasks.__aexit__(None, None, None)
 
         asyncio.run(run())
     except KeyboardInterrupt:
