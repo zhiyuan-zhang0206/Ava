@@ -41,7 +41,7 @@ include:
 
 > **Model ids come from the registry, not from memory.** `llm_model` values must
 > be ids on the current roster — list them with `GET /api/models` or read
-> `base/lm/catalog.py` (`ModelCatalog.models` / `supported_models`); a name copied from an
+> `base/lm/catalog/__init__.py` (`ModelCatalog.models` / `supported_models`); a name copied from an
 > old doc or spawn may be stale or unregistered (see the
 > [models sub-skill](../../models/SKILL.md)).
 
