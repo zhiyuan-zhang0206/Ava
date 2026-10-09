@@ -53,7 +53,7 @@ import sys
 import threading
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
@@ -366,19 +366,20 @@ def _run_code(code: str, payload: Any) -> None:
         "__name__": "__agent_code__",
         "__builtins__": builtins_map,
     }
-    tally: dict[str, int] = {}
+    import ava
+
+    tally = sdk_usage_telemetry.SdkCallTally()
+    execution_context = ava.context
+    ava.bind_context(replace(execution_context, sdk_calls=tally))
     try:
         # From here on the agent-authored code has run (or is about to) — the
         # envelope flag the parent uses to tell "the code never executed" from
         # "it executed and printed nothing" (P0 #2100).
         payload.code_reached = True
-        # `recording()` arms SDK-usage metering for exactly this agent-authored
-        # code, so framework-internal ava.* calls are never counted (same
-        # contract as the old in-process worker had). It yields the block's full
-        # runtime tally — the block's real SDK-call counts, not a scan of its
-        # text. Read in the finally so a crash keeps what already ran.
-        with sdk_usage_telemetry.recording() as tally:
-            exec(compile(code, "<agent_code>", "exec"), fresh_globals)
+        # Each child owns one execution tally. Its context shares that owner with
+        # all public SDK entries, including ordinary threads; boot calls occurred
+        # before this binding and do not enter the execution's result.
+        exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
         from base.agents.lifecycle import LifecycleExit
 
@@ -402,7 +403,8 @@ def _run_code(code: str, payload: Any) -> None:
         sys.stdout.write(format_agent_traceback(exc))
         sys.stdout.flush()
     finally:
-        payload.sdk_calls = sdk_usage_telemetry.tally_entries(tally)
+        payload.sdk_calls = sdk_usage_telemetry.tally_entries(tally.snapshot())
+        ava.bind_context(execution_context)
 
 
 def _finalize_telemetry() -> None:
