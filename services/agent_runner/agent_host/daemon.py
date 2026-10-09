@@ -63,6 +63,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
+from ava.sdk_surface.process_context import process_clients
 from base import paths
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.impersonation.terminal_notices import run_notice_delivery
@@ -571,6 +572,7 @@ async def run() -> None:
             machine=local_machine,
             bus=bus,
             db=db,
+            clients=process_clients(database=lambda: db),
             extensions=extensions,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
