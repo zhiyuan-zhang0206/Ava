@@ -73,14 +73,21 @@ def _mock_service(
     trackers: list[LivenessGroup],
     closed: list[str],
 ) -> None:
-    async def health(_name: str, _port: int, *, liveness: LivenessGroup, **_kw: object) -> object:
+    async def health(
+        _name: str,
+        _port: int,
+        *,
+        liveness: LivenessGroup,
+        components: Callable[[], list[dict[str, object]]],
+    ) -> object:
         trackers.append(liveness)
         return object()
 
     async def stop_health(_server: object) -> None:
         closed.append("health")
 
-    async def sibling(*_args: object, **_kw: object) -> None:
+    # Shared by group-injected resolution and the registry gauge's plain call.
+    async def sibling(*_args: object, tasks: asyncio.TaskGroup | None = None) -> None:
         await asyncio.Event().wait()
 
     class Pool:
