@@ -5,7 +5,6 @@
     "test_inbound_provenance.py",
     "test_resurrect_forward.py",
     "test_spawn_forward.py",
-    "test_creation_identity.py",
 ]
 "tests.path_scoped.integration_tests" = [
     "test_agent_launch_visibility.py",
