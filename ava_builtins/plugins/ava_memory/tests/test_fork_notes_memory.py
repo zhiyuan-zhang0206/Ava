@@ -24,7 +24,7 @@ from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_sn
 from agent.messages import NoteTag
 from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
-from base.agents.context.clients import ClientSet
+from ava.sdk_surface.process_context import process_clients
 from base.db import Database
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from tests.fixtures.units import spawn_agent
@@ -98,7 +98,7 @@ async def test_fork_end_to_end_single_copy_each_note(
         _tagged(NoteTag.MEMORY, "shared pool index", "note-cluster-index"),
     ]
 
-    with closing(ClientSet(database=Database.from_settings)) as clients:
+    with closing(process_clients(database=Database.from_settings)) as clients:
         runtime = _make_runtime(
             ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid
         )
@@ -163,7 +163,7 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
         _fake_note(NoteTag.PRELOADED_SKILLS, "source's preloaded skills", "note-old-preload"),
         HumanMessage(content="conversation tail"),
     ]
-    with closing(ClientSet(database=Database.from_settings)) as clients:
+    with closing(process_clients(database=Database.from_settings)) as clients:
         runtime = _make_runtime(
             ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid
         )
