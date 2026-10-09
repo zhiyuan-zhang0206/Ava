@@ -10,7 +10,6 @@
     "base/agents/sdk/call_policy.py::ambient-instance:_cache": 1,
     "base/agents/sdk/call_policy.py::thread:_PolicyCache.read": 1,
     "base/agents/sdk/telemetry.py::contextvar:_frames": 1,
-    "base/agents/sdk/telemetry.py::contextvar:_identity": 1,
     "base/agents/sdk/telemetry.py::contextvar:_tally": 1
   }
 }
