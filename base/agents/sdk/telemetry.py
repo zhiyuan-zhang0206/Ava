@@ -1,9 +1,8 @@
 """SDK-call events and optional per-execution tallies.
 
-Every outermost wrapped SDK call emits by default, including external Python and
-framework callers. Live sampling policy affects events only. ``recording()``
-collects a full tally for an execute_code result; it never gates instrumentation.
-Semantic details come from real calls via ``annotate()``, never source scanning.
+Every wrapped public SDK entry emits by default, including nested, external Python
+and framework calls. Live sampling policy affects events only. The execution owner
+passes its optional full tally explicitly; it never gates instrumentation.
 Each call retains the explicit caller-identity snapshot its recorder supplied.
 """
 
@@ -12,8 +11,6 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
-from contextvars import ContextVar
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -27,43 +24,10 @@ if TYPE_CHECKING:
 
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.agents.sdk.call_policy import SamplingPolicy
+from base.agents.sdk.tally import SdkCallTally
 
-# Event name written to events for one top-level SDK call.
+# Event name written to events for each public SDK entry.
 SDK_CALL_EVENT = "sdk_call"
-
-
-@dataclass
-class _CallFrame:
-    fn: str
-    detail: dict[str, Any] = field(default_factory=dict[str, Any])
-
-
-_frames: ContextVar[tuple[_CallFrame, ...]] = ContextVar("sdk_frames", default=())
-_tally: ContextVar[dict[str, int] | None] = ContextVar("sdk_tally", default=None)
-
-
-@contextlib.contextmanager
-def recording() -> Generator[dict[str, int], None, None]:
-    """Collect full top-level counts for an execution block, independently of events."""
-    tally: dict[str, int] = {}
-    token = _tally.set(tally)
-    try:
-        yield tally
-    finally:
-        _tally.reset(token)
-
-
-def annotate(**detail: Any) -> None:
-    """Merge semantic key/values into the current SDK call's event ``detail``.
-
-    Called by an SDK function's own body to enrich *its* ``sdk_call`` event with facts
-    about this specific invocation (drawn from the real arguments) — e.g. a shell helper
-    recording the sub-command it dispatched. Targets the innermost active call frame, so
-    a nested SDK call annotates its own (discarded) frame, never the outer event. A no-op
-    outside any metered call. Pure side channel: never changes the call's result."""
-    frames = _frames.get()
-    if frames:
-        frames[-1].detail.update(detail)
 
 
 def emit(
@@ -115,46 +79,41 @@ def _event_capture_admission() -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def _measure(fn: str, identity: Mapping[str, Any]) -> Generator[None, None, None]:
-    frames = _frames.get()
-    # Reinstalled recorders around plugin layers share one public call frame.
-    # Keep semantic annotations from the original function, without duplicate rows.
-    if frames and frames[-1].fn == fn:
-        yield
-        return
+def _measure(
+    fn: str, identity: Mapping[str, Any], tally: SdkCallTally | None
+) -> Generator[None, None, None]:
     from base.agents.sdk.call_policy import policy
 
-    snapshot = policy() if not frames else None
+    snapshot = policy()
     caller_identity = dict(identity)
-    # A controller may close while this call is in its body.  Admit before
-    # entering it, then retain that admission through the `finally` emission
-    # so the local receipt cannot seal between the call and its sdk_call row.
+    # Retain this call's original gate until its event is captured. Attachment
+    # close can reject new entries but cannot seal this receipt before drain.
     with _event_capture_admission():
-        frame = _CallFrame(fn)
-        token = _frames.set((*frames, frame))
         t0 = time.monotonic()
         try:
             yield
         finally:
-            _frames.reset(token)
-            if not frames:
-                tally = _tally.get()
-                if tally is not None:
-                    tally[fn] = tally.get(fn, 0) + 1
-                emit(
-                    fn,
-                    frame.detail,
-                    duration=time.monotonic() - t0,
-                    identity=caller_identity,
-                    sampling_policy=snapshot,
-                )
+            if tally is not None:
+                tally.add(fn)
+            emit(
+                fn,
+                duration=time.monotonic() - t0,
+                identity=caller_identity,
+                sampling_policy=snapshot,
+            )
 
 
 def run_metered(
-    fn: str, original: Callable[..., Any], args: Any, kwargs: Any, *, identity: Mapping[str, Any]
+    fn: str,
+    original: Callable[..., Any],
+    args: Any,
+    kwargs: Any,
+    *,
+    identity: Mapping[str, Any],
+    tally: SdkCallTally | None = None,
 ) -> Any:
-    """Validate policy before execution, then preserve the invocation's outcome."""
-    with _measure(fn, identity):
+    """Validate each public entry before execution and retain its call-local snapshots."""
+    with _measure(fn, identity, tally):
         return original(*args, **kwargs)
 
 
@@ -165,9 +124,10 @@ async def run_metered_async(
     kwargs: Any,
     *,
     identity: Mapping[str, Any],
+    tally: SdkCallTally | None = None,
 ) -> Any:
-    """Validate policy when awaited, preserving cancellation and the call's outcome."""
-    with _measure(fn, identity):
+    """Validate when awaited, preserving cancellation and the call's own admission."""
+    with _measure(fn, identity, tally):
         return await original(*args, **kwargs)
 
 
