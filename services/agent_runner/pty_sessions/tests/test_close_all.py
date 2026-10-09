@@ -99,18 +99,27 @@ def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Pat
     assert outcome.survivors == ()
 
 
-def test_an_untracked_nohup_job_may_outlive_a_closed_pty(unit_home: Path) -> None:
-    """Best effort closes the terminal without discovering background jobs."""
+@pytest.mark.parametrize("background_exited", [False, True])
+def test_an_untracked_nohup_job_does_not_block_terminal_closure(
+    unit_home: Path, *, background_exited: bool
+) -> None:
+    """Close the known terminal whether an untracked background job lives or exits."""
     name = "ava-agent-987-shell-2049-nohup"
     new(name, unit_home)
+    shell = support.shell_process(name)
     marker = unit_home / "nohup.pid"
     type_line(name, f"nohup sleep 300 > /dev/null 2>&1 & echo $! > {marker}")
     member = jobs.wait_for_file(marker, "the nohup job")
-    assert wait_for(lambda: support.screen(name).rstrip().endswith(("$", "#")))
     try:
+        assert wait_for_job(shell, ["sleep", "300"]).pid == member
+        wait_for_foreground(shell)
+        if background_exited:
+            jobs.kill_quietly(member)
+            assert wait_for(lambda: not psutil.pid_exists(member)), "the test job must exit"
         outcome = client.close_all(grace_s=1.0, kill_s=3.0)
+        assert jobs.wait_exit(shell.pid), "the known shell must close"
         assert client.list_sessions() == [], "the master must close despite a leftover job"
-        assert psutil.pid_exists(member), "an untracked background job is outside cleanup"
+        # The shell/OS may also end an untracked job; its survival is not promised.
         assert outcome.survivors == (), "untracked jobs are not certified or reported"
     finally:
         jobs.kill_quietly(member)
