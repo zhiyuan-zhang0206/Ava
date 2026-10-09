@@ -16500,6 +16500,63 @@
         "title": "RunTimelineMessage",
         "description": "One raw message of the stitched history, split into its parts.\n\n`context_tokens` is what the message occupies in the context (None while no request has read it),\n`estimated` whether that is a share rather than the provider's own number (None with it)."
       },
+      "RunTimelineMessageBar": {
+        "properties": {
+          "idx": {
+            "type": "integer",
+            "title": "Idx"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "session": {
+            "type": "integer",
+            "title": "Session"
+          },
+          "context_tokens": {
+            "type": "integer",
+            "title": "Context Tokens"
+          },
+          "estimated": {
+            "type": "boolean",
+            "title": "Estimated"
+          },
+          "context_total": {
+            "type": "integer",
+            "title": "Context Total"
+          },
+          "request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunTimelineUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "idx",
+          "start",
+          "end",
+          "session",
+          "context_tokens",
+          "estimated",
+          "context_total",
+          "request"
+        ],
+        "title": "RunTimelineMessageBar",
+        "description": "One message the Messages row shows, weighed for the two context rows (one bar per message).\n\n`start` / `end` are the extent of the block(s) that show the message, so its bars sit exactly\nunder them. `context_tokens` is what the message itself occupies in the context and `estimated`\nwhether that is a share rather than the provider's own number; `context_total` is the context\nthrough this message: its session's head and every message up to it, at the weight each was\nread with (before an AIMessage, the `input_tokens` of the request that produced it). `session`\nis the zero-based compaction segment (the total starts over in each). `request` is the usage of\nthe LLM request this AIMessage was (input, output, cache, cost), None for any other message.\nOnly messages a request has read are served."
+      },
       "RunTimelineMessagePart": {
         "properties": {
           "kind": {
@@ -16666,61 +16723,6 @@
         "title": "RunTimelineNode",
         "description": "One understanding-tree node.\n\n`level` is the engine level, stable across windows: 1 is the finest (leaves),\neach level up groups the one below. `span_start`..`span_end` is the inclusive\nmessage-index span in the stitched history, the indices the raw-message route\nreads. `generation` is None for a node with no understanding-call record.\n`context_tokens` is the sum of the context tokens of the messages the span covers (None while\nno request has read any of them), `estimated` whether any of that was a share rather than the\nprovider's own number (None with `context_tokens`)."
       },
-      "RunTimelineRequest": {
-        "properties": {
-          "idx": {
-            "type": "integer",
-            "title": "Idx"
-          },
-          "ts": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Ts"
-          },
-          "session": {
-            "type": "integer",
-            "title": "Session"
-          },
-          "input_tokens": {
-            "type": "integer",
-            "title": "Input Tokens"
-          },
-          "output_tokens": {
-            "type": "integer",
-            "title": "Output Tokens"
-          },
-          "added_tokens": {
-            "type": "integer",
-            "title": "Added Tokens"
-          },
-          "added_estimated": {
-            "type": "boolean",
-            "title": "Added Estimated"
-          },
-          "added_from": {
-            "type": "integer",
-            "title": "Added From"
-          },
-          "added_to": {
-            "type": "integer",
-            "title": "Added To"
-          }
-        },
-        "type": "object",
-        "required": [
-          "idx",
-          "ts",
-          "session",
-          "input_tokens",
-          "output_tokens",
-          "added_tokens",
-          "added_estimated",
-          "added_from",
-          "added_to"
-        ],
-        "title": "RunTimelineRequest",
-        "description": "One LLM request of the agent: an AIMessage carrying `usage_metadata`.\n\n`idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent\n(the read time of the message before it, the start of the turn's thinking block);\n`session` the zero-based compaction segment it was sent in; `input_tokens` the provider's\ntotal input tokens of that request, the size of its context, and `output_tokens` what it\ngenerated (both the provider's own numbers, never estimated).\n\n`added_tokens` is what newly entered the context for this request: the token sum of the\nmessages first read by it, i.e. those from the previous request's AIMessage (its output is\nre-sent) up to the message before this one; for a session's first request, from the session's\nfirst message. The segment head (system prompt) is not counted. `added_estimated` is True when\nany of those counts is a share rather than the provider's own number. `added_from` / `added_to`\nare that message range as indices into the stitched history, half-open (`added_to` is the\nrequest's own `idx`); the two are equal when the request read nothing new."
-      },
       "RunTimelineResponse": {
         "properties": {
           "agent_id": {
@@ -16761,12 +16763,12 @@
             "type": "array",
             "title": "Events"
           },
-          "requests": {
+          "messages": {
             "items": {
-              "$ref": "#/components/schemas/RunTimelineRequest"
+              "$ref": "#/components/schemas/RunTimelineMessageBar"
             },
             "type": "array",
-            "title": "Requests"
+            "title": "Messages"
           }
         },
         "type": "object",
@@ -16777,10 +16779,10 @@
           "nodes",
           "units",
           "events",
-          "requests"
+          "messages"
         ],
         "title": "RunTimelineResponse",
-        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent. `requests` are the agent's LLM requests\nsent in the window (the context-size row)."
+        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent. `messages` are the weighed messages whose\nblocks intersect the window (the two context rows)."
       },
       "RunTimelineUnit": {
         "properties": {

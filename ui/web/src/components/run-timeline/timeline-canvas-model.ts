@@ -3,10 +3,9 @@
 // No React, no canvas, no I/O.
 
 import {
-  barBox,
   layoutSpans,
-  maxAdded,
-  maxInput,
+  maxContextTokens,
+  maxContextTotal,
   NARROW_DRAW_PX,
   type AxisMap,
   type Viewport,
@@ -151,42 +150,46 @@ function layoutOf(
   return { wide, cells, items: new Map(items.map((item) => [selectionKey(item.selection), item])), boxes, values };
 }
 
-/** The layout of a level or Messages row: blocks placed on the axis as the DOM rows were (a body never reaches the next block's start). */
-export function blockLayout(row: string, data: NavData, axis: Placer, viewU: Viewport, trackPx: number): RowLayout {
-  const items = navItems(row, data, axis);
+/** The layout of a row: items placed on the axis (see `layoutSpans`), the weight of each deciding which of several narrow ones stands for a pixel column. */
+function spanLayout(
+  items: readonly NavItem[],
+  viewU: Viewport,
+  trackPx: number,
+  values?: ReadonlyMap<string, number>,
+): RowLayout {
   const keyed = items.map((item) => ({ key: selectionKey(item.selection), u0: item.u0, u1: item.u1 }));
   const places = layoutSpans(keyed, viewU, trackPx).map((place) => ({
     key: place.key,
     x0: place.left,
     x1: place.left + place.width,
-    weight: 0,
+    weight: values?.get(place.key) ?? 0,
   }));
-  return layoutOf(places, items);
-}
-
-/** What a request bar's height is, and the largest of it over the requests (what the row scales to). */
-export function barValue(row: string, request: { input_tokens: number; added_tokens: number }): number {
-  return row === ADDED_ROW ? Math.sqrt(request.added_tokens) : request.input_tokens;
-}
-
-export function barTop(row: string, data: NavData): number {
-  return row === ADDED_ROW ? Math.sqrt(maxAdded(data.requests)) : maxInput(data.requests);
-}
-
-/** The layout of a context row: one bar per request, the tallest standing for a crowded column. */
-export function barLayout(row: string, data: NavData, axis: Placer, viewU: Viewport, trackPx: number): RowLayout {
-  const items = navItems(row, data, axis).filter((item) => item.request !== undefined);
-  const values = new Map<string, number>();
-  const places: Place[] = [];
-  for (const item of items) {
-    const box = barBox({ u0: item.u0, u1: item.u1 }, viewU, trackPx);
-    if (box.left + box.width < 0 || box.left > trackPx || item.request === undefined) continue;
-    const key = selectionKey(item.selection);
-    const value = barValue(row, item.request);
-    values.set(key, value);
-    places.push({ key, x0: box.left, x1: box.left + box.width, weight: value });
-  }
   return layoutOf(places, items, values);
+}
+
+/** The layout of a level or Messages row. */
+export function blockLayout(row: string, data: NavData, axis: Placer, viewU: Viewport, trackPx: number): RowLayout {
+  return spanLayout(navItems(row, data, axis), viewU, trackPx);
+}
+
+/** What a message bar's height is: the context through it (Context size) or its own weight, by square root (Added context). */
+export function barValue(row: string, message: { context_tokens: number; context_total: number }): number {
+  return row === ADDED_ROW ? Math.sqrt(message.context_tokens) : message.context_total;
+}
+
+/** The value the row's tallest bar stands for. */
+export function barTop(row: string, data: NavData): number {
+  return row === ADDED_ROW ? Math.sqrt(maxContextTokens(data.messages)) : maxContextTotal(data.messages);
+}
+
+/** The layout of a context row: one bar per message, exactly under the block(s) that show it in the Messages row, the tallest standing for a crowded column. */
+export function barLayout(row: string, data: NavData, axis: Placer, viewU: Viewport, trackPx: number): RowLayout {
+  const items = navItems(row, data, axis).filter((item) => item.message !== undefined);
+  const values = new Map<string, number>();
+  for (const item of items) {
+    if (item.message !== undefined) values.set(selectionKey(item.selection), barValue(row, item.message));
+  }
+  return spanLayout(items, viewU, trackPx, values);
 }
 
 /** The layout of any row of the page by its id. */
@@ -196,30 +199,51 @@ export function rowLayout(row: string, data: NavData, axis: Placer, viewU: Viewp
     : blockLayout(row, data, axis, viewU, trackPx);
 }
 
-let cache: { data: NavData; axis: Placer; from: number; to: number; trackPx: number; layouts: Map<string, RowLayout> } | null = null;
+interface CachedLayouts {
+  axis: Placer;
+  from: number;
+  to: number;
+  trackPx: number;
+  rows: string;
+  layouts: Map<string, RowLayout>;
+}
+
+const cache = new WeakMap<NavData, CachedLayouts>();
 
 /**
- * The layout of every row for one view, remembered until the data, axis, view or track width changes:
- * hovering, selecting and highlighting repaint over it without laying anything out again.
+ * The layout of the given rows for one view, remembered per agent's data until the axis, view, rows or
+ * track width changes: hovering, selecting and highlighting repaint over it without laying anything out again.
  */
-export function layoutsFor(data: NavData, axis: Placer, view: Viewport, trackPx: number): Map<string, RowLayout> {
-  const hit = cache;
-  if (hit !== null && hit.data === data && hit.axis === axis && hit.from === view.from && hit.to === view.to && hit.trackPx === trackPx) {
+export function layoutsFor(
+  data: NavData,
+  axis: Placer,
+  view: Viewport,
+  trackPx: number,
+  rows: readonly string[] = navRowIds(data),
+): Map<string, RowLayout> {
+  const hit = cache.get(data);
+  const rowsKey = rows.join("|");
+  if (
+    hit?.axis === axis &&
+    hit.from === view.from &&
+    hit.to === view.to &&
+    hit.trackPx === trackPx &&
+    hit.rows === rowsKey
+  ) {
     return hit.layouts;
   }
-  const layouts = new Map(navRowIds(data).map((row) => [row, rowLayout(row, data, axis, view, trackPx)]));
-  cache = { data, axis, from: view.from, to: view.to, trackPx, layouts };
+  const layouts = new Map(rows.map((row) => [row, rowLayout(row, data, axis, view, trackPx)]));
+  cache.set(data, { axis, from: view.from, to: view.to, trackPx, rows: rowsKey, layouts });
   return layouts;
 }
 
 /**
  * The frame around a set of items of a row: the union of the parts of their boxes that lie on the
- * track (an item running past an edge is framed only where it is visible), at least `minPx` wide
- * (centred on them) and kept inside the track. Null when none of them is on the track.
+ * track (an item running past an edge is framed only where it is visible). Null when none of them is
+ * on the track.
  */
 export function frameOf(
   boxes: readonly { x0: number; x1: number }[],
-  minPx: number,
   trackPx: number,
 ): { left: number; width: number } | null {
   let x0 = Infinity;
@@ -230,7 +254,5 @@ export function frameOf(
     x1 = Math.max(x1, Math.min(box.x1, trackPx));
   }
   if (x0 > x1) return null;
-  const width = Math.min(Math.max(x1 - x0, minPx), trackPx);
-  const left = Math.min(Math.max((x0 + x1) / 2 - width / 2, 0), trackPx - width);
-  return { left, width };
+  return { left: x0, width: x1 - x0 };
 }
