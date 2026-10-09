@@ -19,6 +19,7 @@ from tests.components.base.test_runner_role import (
     _assert_alert_writes_denied,
     _exercise_impersonation_entry_grants,
     _exercise_pause_grants,
+    _exercise_task_receipt_grants,
     _exercise_understanding_node_grants,
     _exercise_understanding_queue_grants,
     _grant_runner,
@@ -111,6 +112,12 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # creation failed with InsufficientPrivilege on
         # agent_impersonation_entries)
         _exercise_impersonation_entry_grants(conn, agent_id)
+        # the task-receipt tombstones ava.tasks.update/log/create append in
+        # their own transaction (operation-key admission and replay) —
+        # regression for the 2026-10-10 task-write outage, where the tables
+        # shipped without a runner grant and every receipt INSERT failed with
+        # InsufficientPrivilege
+        _exercise_task_receipt_grants(conn, agent_id)
         # the understanding-layer build (INSERT + UPDATE + SELECT; the manual
         # first-run / ad-hoc regeneration path runs from the runner side —
         # task #3704)
