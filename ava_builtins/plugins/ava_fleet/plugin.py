@@ -18,7 +18,7 @@ are for when the user is not in a live conversation with the agent. In a live
 dialog the user reads your replies as you write them, so answer directly and
 do not post a notice.
 
-2. **Post** `ava.ui.notify(title, content, require_response=..., blocking=...,
+2. **Post** `ava.ui.notify(title, content, idempotency_key=notice_key, require_response=..., blocking=...,
    priority=...)` — post one notice. `require_response=False` is an FYI the user
    may glance at or ignore; `require_response=True` needs an answer (and
    `blocking=True` if you are stalled until it arrives).
