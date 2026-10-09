@@ -121,7 +121,7 @@ def test_unexpected_owner_failure_keeps_original_exception_and_bytes(
     consumer: Literal["gateway", "host"],
     error_type: type[Exception],
 ) -> None:
-    from gateway.routers import config as config_router
+    from gateway.routers.configuration import runtime as config_router
     from ops import host_config
 
     saved = owned_image.read_bytes()

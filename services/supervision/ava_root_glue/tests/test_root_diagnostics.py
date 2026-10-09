@@ -252,11 +252,11 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
 
 
 def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(probes, "IS_MACOS", False)
+    monkeypatch.setattr(probes, "is_macos", lambda: False)
     monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
     names = {check.name for check in probes.build_diagnostics(set())}
     assert names == {"venv"}
-    monkeypatch.setattr(probes, "IS_MACOS", True)
+    monkeypatch.setattr(probes, "is_macos", lambda: True)
     monkeypatch.setattr(
         probes,
         "settings",
@@ -314,7 +314,7 @@ def test_redis_acl_uses_runtime_ping_without_native_custody(
 def test_each_root_roster_owns_its_helper_episode_reporter(
     monkeypatch: pytest.MonkeyPatch, events: list[dict[str, object]]
 ) -> None:
-    monkeypatch.setattr(probes, "IS_MACOS", True)
+    monkeypatch.setattr(probes, "is_macos", lambda: True)
     monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
     first = next(
         check for check in probes.build_diagnostics(set()) if check.name == "permissions-helper"

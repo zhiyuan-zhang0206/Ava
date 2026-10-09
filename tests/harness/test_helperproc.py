@@ -250,7 +250,7 @@ def test_backend_route_matrix(
     from base.config import settings
     from base.sessions import backend as session_backend
 
-    monkeypatch.setattr(session_backend, "IS_MACOS", is_macos)
+    monkeypatch.setattr(session_backend, "is_macos", lambda: is_macos)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(settings.services, "permissions_helper_spawn", spawn)
 
@@ -271,7 +271,7 @@ def test_backend_route_fails_closed_when_settings_are_unreadable(
         def services(self) -> object:
             raise RuntimeError("unreadable")
 
-    monkeypatch.setattr(session_backend, "IS_MACOS", True)
+    monkeypatch.setattr(session_backend, "is_macos", lambda: True)
     monkeypatch.setattr(base.config, "settings", BrokenSettings())
 
     assert type(session_backend.get_backend()).__name__ == "PosixProcSessionBackend"

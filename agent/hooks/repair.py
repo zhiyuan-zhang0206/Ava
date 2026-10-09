@@ -70,6 +70,7 @@ from agent import state as _state
 from agent.hooks._registry import Hook
 from agent.messages import exec_output_message
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.messages.kwargs import ExecStatus
 from base.log import logger
 
 _INTERRUPTED_TOOL_RESULT = (
@@ -160,6 +161,8 @@ def _synthetic_tool_result(tool_call_id: str) -> ToolMessage:
     return exec_output_message(
         content=_INTERRUPTED_TOOL_RESULT,
         tool_call_id=tool_call_id,
+        status=ExecStatus.NOT_RUN,
+        body_start=0,
         created_at=datetime.now(UTC),
     )
 

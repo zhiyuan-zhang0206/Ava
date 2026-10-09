@@ -111,15 +111,15 @@ its own script (`scripts/lint/patch_targets.py`).
   decision only once its owner exists: an entry in `DECISIONS` with its owning
   module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
 
-Rules 4, 5 and 6 reject every measured site directly. Their retired
-`private_imports`, `owner_bypasses` and `path_imports` baseline fields may not
+Rules 4, 5, 6 and 8 reject every measured site directly. Their retired
+`private_imports`, `owner_bypasses`, `path_imports` and `patch_targets` baseline fields may not
 be reintroduced, even empty. Historical comparison revisions may carry empty
-retired fields; nonempty historical fields are invalid too.
+retired fields; nonempty historical locality/path-import fields are invalid too.
+Historical patch-target fields are parsed and discarded without granting any allowance.
 
-Rule 8 and ambient-state sites retain exact `path::target -> site count` maps
-in their baseline shards until the remaining debt is cleared. Their guards
-remain shrink-only, including when a rule version changes; see the patch-target
-and ambient-state lint owners.
+Only ambient-state sites retain exact `path::target -> site count` maps in their
+baseline shards until the remaining debt is cleared. Their guards remain shrink-only,
+including when a rule version changes; see the ambient-state lint owner.
 
 A test in the top-level `tests/` has no baseline section to be frozen in: it must stay by design
 or be listed in `scripts/structure/tests_location_allowed.py` as `contract` or `integration`
