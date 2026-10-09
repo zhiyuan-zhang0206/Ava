@@ -14,7 +14,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.host.env import audit, runtime_config
 from gateway.app import app
-from gateway.routers import config as config_router
+from gateway.routers.configuration import runtime as config_router
 from gateway.routers.tests.test_config_api import REMOTE, _seed_machine
 from gateway.routers.tests.test_config_api import (
     _clean_overrides as _clean_overrides,
@@ -177,7 +177,7 @@ def test_request_actor_reads_only_middleware_state() -> None:
     """The write-audit actor comes from verified request state, not caller JSON."""
     from types import SimpleNamespace
 
-    from gateway.routers.config import _request_actor
+    from gateway.routers.configuration.runtime import _request_actor
 
     anon = cast("Any", SimpleNamespace(state=SimpleNamespace()))
     assert _request_actor(anon) == (None, None)
