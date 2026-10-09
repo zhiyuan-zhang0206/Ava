@@ -552,6 +552,7 @@ async def test_release_agent_page_keeps_slot_when_upstream_down() -> None:
     still open and the reaper needs to find it after the reconnect."""
     d = _new_daemon(DeadUpstream())
     d.pages.set_agent_page(7, 1, d.generation)
+    d.pages.register_created_page(1, d.generation)
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await page_lifecycle.release_agent_page(d, 7)
     assert d.pages.get_agent_page(7, d.generation) == 1  # slot survives for the reaper
