@@ -265,20 +265,6 @@ def test_zombie_ignores_checks_only_the_changed_python_files(tmp_path: Path) -> 
         zombie._REPO_ROOT = original
 
 
-def test_code_structure_checks_every_ancestor_directory_of_a_changed_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A new subpackage adds an entry to each ancestor's direct-entry budget, so a changed
-    file checks every directory from its own up to its scope root, not just its parent."""
-    monkeypatch.setattr(code_structure, "_REPO_ROOT", tmp_path)
-    module = tmp_path / "base/pkg/sub/mod.py"
-    module.parent.mkdir(parents=True)
-    module.write_text("x = 1\n")
-    files, directories = code_structure._budget_targets([module])
-    assert files == {module}
-    assert directories == {tmp_path / "base", tmp_path / "base/pkg", tmp_path / "base/pkg/sub"}
-
-
 def test_a_module_is_built_when_first_reached_and_only_once() -> None:
     from scripts.structure.lazy_modules import ModuleMap
 

@@ -20,7 +20,7 @@ desktop:
 - Phase 2: screen ownership is coordinated (holder + renewable lease + FIFO
   queue + release_control + operator kick — `services/desktop/computer/session.py`);
   `snapshot(include_ocr=true)` adds Vision OCR text boxes
-  (`services/desktop/computer/ocr.py`); task_id calls get a computer_session_start/end
+  (`services/desktop/computer/ocr/__init__.py`); task_id calls get a computer_session_start/end
   envelope (`services/desktop/computer/task_sessions.py`).
 - OCR text tools (task #2401): `find_text` locates recognized text and
   returns its physical-pixel boxes; `click_text` OCRs, locates, and clicks in

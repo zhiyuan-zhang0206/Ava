@@ -1,4 +1,4 @@
-"""Unit tests for services/desktop/computer/ocr.py — the Vision-based screen OCR.
+"""Unit tests for services/desktop/computer/ocr/__init__.py — the Vision-based screen OCR.
 
 Covers the TSV parsing, coordinate passthrough (the Swift binary already
 emits physical pixels, top-left origin), soft-failure surface (OcrError on
