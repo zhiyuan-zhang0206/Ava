@@ -46,8 +46,8 @@ PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint-full", "frontend-vitest"}
 # per-file patch-target lint (a production import change moves the home of tests
 # it never passes) and the full tests-location check (a deleted test is never passed
 # to a commit hook). Unlike PREPUSH, CI does not run these by name -- it already
-# covers the same ground unconditionally via backend-structure's /
-# merged-tree-structure's own `--all-files` runs of the underlying (filtered)
+# covers the same ground via backend-structure's unconditional scan and the
+# merged-tree preview when main contributes code, using `--all-files` on (filtered)
 # hooks, so no CI job needs a matching direct invocation the way `uv run
 # pyright` mirrors the pyright hook.
 PREPUSH_LOCAL_ONLY = {
