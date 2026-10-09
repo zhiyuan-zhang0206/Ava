@@ -8,11 +8,10 @@ the memory graph.
 
 ## How it talks to the backend
 
-- **SSE, not polling**: two persistent EventSource connections to the
-  FastAPI gateway — `/api/system` (global low-frequency broadcast) and
-  `/api/system/all` (throttled, batched, every agent's events). The fold owner
-  (`src/lib/fold/`) coordinates Query read-model updates and invalidation;
-  authoritative snapshot reads repair lifecycle state. Hooks read their keys.
+- SSE keeps Query read models live for visible pages, with a global stream,
+  selected-agent subscriptions and a separate alerts stream. HTTPS can share
+  transports across pages; authoritative snapshots repair lifecycle state.
+  See [frontend data flow](src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md).
 - No Next rewrites proxy for `/api` — the frontend connects to the gateway
   directly (`API_BASE` resolution in `src/lib/api.ts`); same-origin reverse
   proxy in prod.

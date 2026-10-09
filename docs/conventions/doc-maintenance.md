@@ -125,8 +125,9 @@ not to the node it was split from.
 The **index layer** uses the same documentation placement: the apex is
 `docs/index.ava.okf.md`, and the cross-domain plugin, skill and MCP concept
 systems live beneath `docs/`. They have no single code directory to own them.
-Design alternatives and unimplemented plans belong to decisions or `future/`
-as ordinary Markdown, so they do not appear as current-system graph nodes.
+Chosen alternatives and their rationale belong in `docs/decisions/`;
+unimplemented proposals and plans belong in `future/`. Both use ordinary
+Markdown, so they do not appear as current-system graph nodes.
 `compute_parent` uses the root only when no ancestor overview exists — so the
 tree has exactly one root and no dangling edges.
 
