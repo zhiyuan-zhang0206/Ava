@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -20,7 +21,9 @@ from tests.fixtures.pin_agent import pin_agent
 def _setup(db: psycopg.Connection, root: int) -> tuple[int, int, int]:
     actor, owner = _seed_agent(db), _seed_agent(db)
     pin_agent(actor)
-    task = task_registry.create("receipt task", "work", parent=root, owner=owner)
+    task = task_registry.create(
+        "receipt task", "work", parent=root, owner=owner, operation_key=str(uuid4())
+    )
     return actor, owner, task.id
 
 
@@ -79,7 +82,7 @@ def test_post_commit_failure_replay_preserves_intervening_state(
         task_registry.log(tid, "committed", operation_key="lost")
     monkeypatch.setattr(telemetry, "emit_prepared", real_emit)
     current = _seed_agent(db_conn)
-    task_registry.update(tid, owner=current)
+    task_registry.update(tid, owner=current, operation_key=str(uuid4()))
     db_conn.execute(
         "UPDATE agent_tasks SET reminder_count=4, escalated_at=now() WHERE id=%s", (tid,)
     )
@@ -140,7 +143,7 @@ def test_actor_and_task_scopes_are_independent(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     actor, owner, tid = _setup(db_conn, root_task_id)
-    second = task_registry.create("other", "work", parent=root_task_id)
+    second = task_registry.create("other", "work", parent=root_task_id, operation_key=str(uuid4()))
     for who, target in ((actor, tid), (actor, second.id), (owner, tid)):
         pin_agent(who)
         task_registry.log(target, "separate", operation_key="same raw key")

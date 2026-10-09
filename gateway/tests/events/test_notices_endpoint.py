@@ -20,6 +20,8 @@ require_response, carries the whole agent->user queue. Covers:
     via ava.ui.notify(), any previous open notice is auto-resolved as 'superseded'.
 """
 
+from uuid import uuid4
+
 import psycopg
 from fastapi.testclient import TestClient
 
@@ -483,6 +485,7 @@ def test_answer_marks_and_delivers_inbound(db_conn: psycopg.Connection) -> None:
         resp = client.post(
             f"/api/agents/{a}/notices/{nid}/resolve",
             json={"action": "answer", "reply": "yes, send it"},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 201
     assert "status" in resp.json()
@@ -518,7 +521,11 @@ def test_answer_without_reply_422(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "q?", require_response=True)
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "answer"})
+        resp = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "answer"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
     assert resp.status_code == 422
     # not resolved, not delivered
     snap = select_one(db_conn, a)
@@ -532,7 +539,9 @@ def test_answer_empty_reply_422(db_conn: psycopg.Connection) -> None:
     nid = _insert_notice(db_conn, a, "q?", require_response=True)
     with TestClient(app) as client:
         resp = client.post(
-            f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "answer", "reply": "   "}
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "answer", "reply": "   "},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 422  # UserContent strips -> empty -> rejected
     snap = select_one(db_conn, a)
@@ -551,6 +560,7 @@ def test_answer_on_fyi_marks_and_delivers_inbound(db_conn: psycopg.Connection) -
         resp = client.post(
             f"/api/agents/{a}/notices/{nid}/resolve",
             json={"action": "answer", "reply": "thanks!"},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 201
     assert "status" in resp.json()
@@ -586,7 +596,11 @@ def test_dismiss_require_response_delivers_system_note(db_conn: psycopg.Connecti
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "name the branch?", require_response=True, blocking=True)
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "dismiss"})
+        resp = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "dismiss"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
     assert resp.status_code == 201
 
     with db_conn.cursor() as cur:
@@ -609,6 +623,10 @@ def test_dismiss_on_fyi_is_409(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "fyi")  # require_response False
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "dismiss"})
+        resp = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "dismiss"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
     assert resp.status_code == 409
     assert _pending_rows(db_conn, a) == []
