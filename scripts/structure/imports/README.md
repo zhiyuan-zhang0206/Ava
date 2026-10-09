@@ -32,6 +32,8 @@ Imports inside one repository top-level Python package use explicit relative
 syntax, including nested sibling packages. Cross-package, stdlib and third-party
 imports use absolute syntax. The rule consumes the normalized clause and the
 original AST level, so style does not change architectural dependency targets.
+Ruff keeps its banned-import checks and no longer selects TID252's preference
+for absolute parent imports, which conflicts with this package boundary.
 
 The rule is not connected to an active hook or CI gate. Enforcement must ship
 with the consumer migration, without a baseline or package exception list.

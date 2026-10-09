@@ -6,7 +6,7 @@ import ast
 
 import pytest
 
-from scripts.structure.imports import InvalidRelativeImportError, normalize, style
+from .. import InvalidRelativeImportError, normalize, style
 
 
 @pytest.mark.parametrize(
