@@ -25,6 +25,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.invocation.native_work import settle_native_invocation
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
@@ -92,6 +93,7 @@ async def test_real_model_watcher_discards_partial_then_claim_attributes_origina
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
+    model_catalog: ModelCatalog,
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool)
@@ -112,6 +114,7 @@ async def test_real_model_watcher_discards_partial_then_claim_attributes_origina
     ctx = replace(
         ctx,
         llm=model,
+        catalog=model_catalog,
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
