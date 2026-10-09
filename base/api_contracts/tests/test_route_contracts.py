@@ -100,9 +100,10 @@ def test_keyed_effect_contracts_require_business_transaction_ownership() -> None
     [
         ("PATCH", "/api/agents/7/notices/current/guarded-v1"),
         ("POST", "/api/agents/7/notices/current/dismiss/guarded-v1"),
+        ("POST", "/api/keyed/v1/agents/7/notices/11/resolve"),
     ],
 )
-def test_guarded_notice_contract_remains_server_only(method: str, path: str) -> None:
+def test_guarded_notice_contract_excludes_legacy_retry(method: str, path: str) -> None:
     contract = contracts.contract_for(method, path)
     assert contract is not None
     assert contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
