@@ -25,10 +25,8 @@ loguru single logger instance + `extra` dict for contextual fields.
 `base.log.sinks` owns stdlib interception and local file-sink mechanics;
 this module re-exports those helpers while retaining process initialization.
 Each entry-point process calls init_* once at startup, binding
-process-level fields (`agent_id` is deferred — `TurnScopedAgentId` — so
-the agent host, one process serving many agents' turns, attributes each
-record to the turn that wrote it; the exec subprocess binds its own
-agent id outright). All
+process-level fields. The exec subprocess binds its agent id outright;
+shared services use the `-` sentinel unless a caller supplies an agent. All
 subsequent `from base.log import logger` calls get a logger that
 auto-carries those fields — callers do not repeat them per line.
 
@@ -37,8 +35,7 @@ auto-carries those fields — callers do not repeat them per line.
 Every log line carries at least:
 - `level`  (loguru built-in)
 - `time`   (loguru built-in)
-- `agent_id`  the turn's agent if one is bound (`TurnScopedAgentId`),
-  else `-`
+- `agent_id`  the explicit caller or process identity, else `-`
 
 More granular fields (`turn_id` / `node` / `tool_name`) are added
 as-needed later; not strictly required on every line.
@@ -99,10 +96,6 @@ from base.log.sinks import (
     add_sink,
 )
 from base.native_process import loaded_commit
-from base.native_process.turn_identity import (
-    TURN_SCOPED_AGENT_ID,
-    TurnScopedAgentId,
-)
 
 # `base.cluster.machine` / `base.paths` are imported inside the init functions that
 # use them, never at module top: both pull the pydantic Settings chain (+~30 MB
@@ -141,13 +134,8 @@ logger.remove()
 # extra defaults. format string references {extra[...]}; missing keys
 # raise KeyError, so pre-fill.
 #
-# The deferred binding rather than a bare "-": a process that binds no turn
-# still resolves to "-", so gateway / daemon / CLI attribution is unchanged —
-# but a process that binds a TURN gets that turn's agent. That is the hosted
-# agent-runner (`future/infra/lifecycle/agent-runner-as-server.md`), which inits through
-# `init_gateway_process` and would otherwise stamp every hosted agent's records
-# with the `-` sentinel, throwing away the attribution the turn contextvar knows.
-logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
+# Shared services have no default agent; callers name agent-owned events explicitly.
+logger.configure(extra={"agent_id": "-"})
 
 # The one host-stall companion whose EVENT level is rewritten: psycopg logs
 # its own `query cancellation failed: ...` WARNING when a `_try_cancel`
@@ -185,10 +173,8 @@ def _message_to_params(
     bind this key via `logger.configure(extra={...})` (default `"-"`
     sentinel = no agent, stored NULL). Logger calls pass
     `agent_id=N` to override the default. Missing key fast-raises
-    KeyError (means init_* did not run, framework bug). The default
-    binding is a `TurnScopedAgentId` rather than a fixed id, so a
-    process hosting several agents' turns attributes each record to
-    the turn that wrote it.
+    KeyError (means init_* did not run, framework bug). Shared services
+    default to no agent; a disposable exec process binds its own identity.
 
     `source` comes from record.extra["source"] (default "system") —
     the unified event stream's `source` field; callers that represent
@@ -202,9 +188,6 @@ def _message_to_params(
     record = message.record
     extra = dict(record["extra"])
     agent_id_raw = extra.pop("agent_id")  # required — init_* bound it; KeyError fast
-    if isinstance(agent_id_raw, TurnScopedAgentId):
-        # Deferred binding: the turn's agent, else the `-` sentinel (see the class).
-        agent_id_raw = agent_id_raw.resolve()
     event_explicit = extra.pop("event", None)
     if event_explicit == "":
         raise ValueError(f"empty event= passed to logger: {record['message']!r}")
@@ -464,14 +447,7 @@ def init_gateway_process(name: str = "gateway") -> None:
     if _init_done:
         return
     _configure_windows_event_loop_policy()
-    # Bind the deferred agent id explicitly rather than inheriting the
-    # module-level default: `init_subprocess_logger` also calls
-    # `logger.configure`, which REPLACES the whole extra dict, so the default is
-    # not something a long-lived daemon can rely on still holding. With no turn
-    # and no process agent this resolves to the `-` sentinel exactly as before;
-    # in the hosted agent-runner — which inits through THIS function — it is
-    # what lets each record carry the turn's agent instead of `-`.
-    logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
+    logger.configure(extra={"agent_id": "-"})
     _add_stderr_sink_before_settings()
     from base.paths import logs_dir
 
