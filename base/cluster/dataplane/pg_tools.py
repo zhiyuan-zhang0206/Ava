@@ -38,7 +38,7 @@ from base.cluster.dataplane.pg_foreground import (
 from base.cluster.dataplane.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
 from base.log import logger
 from base.native_process.child_env import daemon_process_env
-from base.native_process.os_platform import IS_WINDOWS, is_macos
+from base.native_process.os_platform import is_macos, is_windows
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
@@ -293,7 +293,7 @@ def _register_throwaway(instance_dir: Path, port: int) -> _Registration | None:
     flock this process already holds. That is the invariant the sweep's whole
     judgment rests on (`flock acquirable => owner dead`): it can never open a
     created-but-unlocked `owner.lock` and reap a claim in flight (#3629)."""
-    if IS_WINDOWS:
+    if is_windows():
         return None
     import fcntl
 
@@ -403,7 +403,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
     observable — `owner.lock` is published only already-locked (see
     `_register_throwaway`). On a shared tmpfs another user's instance dirs are
     `0700`, so the glob simply does not see them. No-op on Windows."""
-    if IS_WINDOWS:
+    if is_windows():
         return 0
     import fcntl
 
@@ -494,7 +494,7 @@ def _allocate_port(instance_dir: Path) -> tuple[int, _Registration | None]:
     visible to every other worker before ours is released. Windows has no flock:
     the plain probe is used there, and the retry in `throwaway_postgres` is the
     only protection."""
-    if IS_WINDOWS:
+    if is_windows():
         port = _free_port()
         return port, _register_throwaway(instance_dir, port)
     import fcntl

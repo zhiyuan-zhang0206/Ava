@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.sessions.backend import get_shell_backend
 from base.sessions.pty import client
 from gateway.schedules import session_control
@@ -32,7 +32,7 @@ from tests.path_scoped.pty_service import PtyServiceProcess
 REPO = Path(__file__).resolve().parents[4]
 
 pytestmark = [
-    pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"),
+    pytest.mark.skipif(is_windows(), reason="pty sessions are POSIX-only"),
     pytest.mark.usefixtures("_pty_home"),
 ]
 
