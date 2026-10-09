@@ -15,10 +15,8 @@ from gateway.agents.schemas import NoticeCreateIn
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 
 
-def notice_key(request: Request, key: str | None) -> str | None:
+def notice_key(request: Request, key: str) -> str:
     """Use the same credential scope as other gateway keyed operations."""
-    if not isinstance(key, str):
-        return None
     try:
         return request_key(request, key, method="POST", path=request.url.path)
     except PrincipalScopeError as exc:

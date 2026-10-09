@@ -13,7 +13,6 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db import (
     Database,
-    insert_inbound_message,
     insert_inbound_message_in_transaction,
     publish_inbound_wake,
 )
@@ -32,7 +31,7 @@ def _system_note_blocking(
     task_id: int | None,
     provenance: InboundProvenance | None = None,
     *,
-    client_message_id: str | None = None,
+    client_message_id: str,
     resurrect: bool = True,
 ) -> int:
     """Sync system-note INSERT — via to_thread (pool work off the event loop)."""
@@ -40,61 +39,33 @@ def _system_note_blocking(
         "note_tag": note_tag,
         **({"task_id": task_id} if task_id is not None else {}),
     }
-    if client_message_id is not None:
-        # Delivery policy is part of immutable identity, even though claim
-        # does not consume it. Keyless legacy payloads remain unchanged.
-        payload["delivery_resurrect"] = resurrect
+    # Freeze the delivery policy with the inbound receipt.
+    payload["delivery_resurrect"] = resurrect
     prepared_event = None
     with write_transaction(pool) as conn:
-        inbound_id = (
-            _existing_receipt(
-                conn,
-                client_message_id,
-                agent_id,
-                content,
-                source,
-                payload,
-            )
-            if client_message_id is not None
-            else None
-        )
-        if inbound_id is None and task_id is not None:
-            _validate_task_owner(conn, task_id, agent_id)
-        if client_message_id is not None:
-            if inbound_id is None:
-                try:
-                    with conn.transaction(), conn.cursor() as cur:
-                        inbound_id, prepared_event = insert_inbound_message_in_transaction(
-                            cur,
-                            agent_id,
-                            content,
-                            source,
-                            kind=InboundKind.SYSTEM_NOTE.value,
-                            payload=payload,
-                            provenance=provenance,
-                        )
-                        cur.execute(
-                            "UPDATE inbound_messages SET client_message_id = %s WHERE id = %s",
-                            (client_message_id, inbound_id),
-                        )
-                except UniqueViolation as exc:
-                    raise HTTPException(
-                        status_code=409, detail="idempotency key already identifies another inbound"
-                    ) from exc
-        else:
-            # No `provenance` keyword at all when there is none (the insert's own default applies).
-            extra = {} if provenance is None else {"provenance": provenance}
-            return insert_inbound_message(
-                conn,
-                agent_id,
-                content=content,
-                source=source,
-                kind=InboundKind.SYSTEM_NOTE.value,
-                payload=payload,
-                database=db,
-                bus=bus,
-                **extra,
-            )
+        inbound_id = _existing_receipt(conn, client_message_id, agent_id, content, source, payload)
+        if inbound_id is None:
+            if task_id is not None:
+                _validate_task_owner(conn, task_id, agent_id)
+            try:
+                with conn.transaction(), conn.cursor() as cur:
+                    inbound_id, prepared_event = insert_inbound_message_in_transaction(
+                        cur,
+                        agent_id,
+                        content,
+                        source,
+                        kind=InboundKind.SYSTEM_NOTE.value,
+                        payload=payload,
+                        provenance=provenance,
+                    )
+                    cur.execute(
+                        "UPDATE inbound_messages SET client_message_id = %s WHERE id = %s",
+                        (client_message_id, inbound_id),
+                    )
+            except UniqueViolation as exc:
+                raise HTTPException(
+                    status_code=409, detail="idempotency key already identifies another inbound"
+                ) from exc
 
     if prepared_event is not None:
         telemetry.emit_prepared(prepared_event)

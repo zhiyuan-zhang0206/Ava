@@ -368,7 +368,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         transactional_idempotency=True,
-        note="notice resolution and reply share a durable keyed receipt; keyless legacy reads with reply remain distinct",
+        note="notice resolution and reply require a key and share one durable receipt",
     ),
     ("POST", "/api/agents/{agent_id}/notices"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
@@ -527,7 +527,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         transactional_idempotency=True,
-        note="keyed task patch and immutable result share the notification transaction",
+        note="task patch requires a key; immutable result shares the notification transaction",
     ),
     # ── gateway/agents/history/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),

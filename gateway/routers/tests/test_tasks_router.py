@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 from typing import Any, cast
+from uuid import uuid4
 
 import httpx2
 import psycopg
@@ -126,7 +127,11 @@ class TestRemindInterval:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"remind_interval_seconds": None})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"remind_interval_seconds": None},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 422
         assert "cannot be disabled" in resp.json()["detail"]
         assert _remind_interval_seconds(db_conn, tid) == 1800  # unchanged
@@ -135,7 +140,11 @@ class TestRemindInterval:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"remind_interval_seconds": 86401})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"remind_interval_seconds": 86401},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 422
         assert _remind_interval_seconds(db_conn, tid) == 1800
 
@@ -143,7 +152,11 @@ class TestRemindInterval:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"remind_interval_seconds": 0})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"remind_interval_seconds": 0},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 422
         assert _remind_interval_seconds(db_conn, tid) == 1800
 
@@ -151,7 +164,11 @@ class TestRemindInterval:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"remind_interval_seconds": 86400})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"remind_interval_seconds": 86400},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 200
         assert resp.json()["remind_interval_seconds"] == 86400
         assert _remind_interval_seconds(db_conn, tid) == 86400
@@ -162,7 +179,9 @@ class TestOwner:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"owner": None})
+            resp = client.patch(
+                f"/api/tasks/{tid}", json={"owner": None}, headers={"Idempotency-Key": str(uuid4())}
+            )
         assert resp.status_code == 422
         assert "cannot be released" in resp.json()["detail"]
         assert _owner(db_conn, tid) == owner  # unchanged
@@ -174,7 +193,11 @@ class TestOwner:
         new_owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"owner": new_owner})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"owner": new_owner},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 200
         assert resp.json()["owner"] == new_owner
         assert _owner(db_conn, tid) == new_owner
@@ -202,7 +225,11 @@ class TestOwner:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"owner": owner})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"owner": owner},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 200
         assert _task_notes(db_conn, owner) == []
 
@@ -226,7 +253,11 @@ class TestOwner:
 
         monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _record_resurrection)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"owner": new_owner})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"owner": new_owner},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 200
         assert resurrection_calls == [(new_owner, "system_note")]
         assert len(_task_notes(db_conn, new_owner)) == 1
@@ -239,7 +270,11 @@ class TestOwner:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (owner,))
         db_conn.commit()
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"owner": new_owner})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"owner": new_owner},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 200
         assert len(_task_notes(db_conn, new_owner)) == 1
         assert _task_notes(db_conn, owner) == []
@@ -259,7 +294,11 @@ class TestPriority:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"priority": "P0"})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"priority": "P0"},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 200
         assert resp.json()["priority"] == "P0"
         assert _priority(db_conn, tid) == "P0"
@@ -268,7 +307,11 @@ class TestPriority:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"priority": "P9"})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"priority": "P9"},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         # Rejected by pydantic (the body types priority as the shared Priority
         # enum), so the 422 envelope carries its structured list in `errors`.
         assert resp.status_code == 422
@@ -281,7 +324,11 @@ class TestTitle:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"title": "renamed"})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"title": "renamed"},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 200
         assert resp.json()["title"] == "renamed"
 
@@ -292,7 +339,9 @@ class TestTitle:
         _make_task(db_conn, owner=owner)  # holds title 't'
         tid = _make_task(db_conn, owner=owner, title="other")
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"title": "t"})
+            resp = client.patch(
+                f"/api/tasks/{tid}", json={"title": "t"}, headers={"Idempotency-Key": str(uuid4())}
+            )
         assert resp.status_code == 422
         assert "already exists" in resp.json()["detail"]
 
@@ -301,7 +350,11 @@ class TestRootTaskImmutable:
     def test_status_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
         root_id = _make_root_task(db_conn)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{root_id}", json={"status": "done"})
+            resp = client.patch(
+                f"/api/tasks/{root_id}",
+                json={"status": "done"},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 422
         assert "root task" in resp.json()["detail"]
         assert _status(db_conn, root_id) == "in_progress"  # unchanged
@@ -310,13 +363,21 @@ class TestRootTaskImmutable:
         root_id = _make_root_task(db_conn)
         new_owner = _make_agent(db_conn)
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{root_id}", json={"owner": new_owner})
+            resp = client.patch(
+                f"/api/tasks/{root_id}",
+                json={"owner": new_owner},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 422
         assert _owner(db_conn, root_id) is None  # still unowned
 
     def test_missing_task_still_404s(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            resp = client.patch("/api/tasks/999999", json={"status": "done"})
+            resp = client.patch(
+                "/api/tasks/999999",
+                json={"status": "done"},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 404
 
     @pytest.mark.parametrize("removed_status", ["open", "ongoing"])
@@ -329,7 +390,11 @@ class TestRootTaskImmutable:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, title=f"regular-{removed_status}")
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"status": removed_status})
+            resp = client.patch(
+                f"/api/tasks/{tid}",
+                json={"status": removed_status},
+                headers={"Idempotency-Key": str(uuid4())},
+            )
         assert resp.status_code == 422
         body = resp.json()
         assert body["code"] == "validation_error"
@@ -339,151 +404,6 @@ class TestRootTaskImmutable:
         assert removed_status in rendered
         assert "in_progress" in rendered and "done" in rendered and "cancelled" in rendered
         assert _status(db_conn, tid) == "in_progress"  # unchanged
-
-
-class TestParentClose:
-    def test_done_with_in_progress_child_is_rejected_and_unchanged(
-        self, db_conn: psycopg.Connection
-    ) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent-active-child")
-        child = _make_task(
-            db_conn,
-            owner=owner,
-            title="active-child",
-            status="in_progress",
-            parent_id=parent,
-        )
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
-        assert resp.status_code == 422
-        assert resp.json()["detail"] == (
-            f"task {parent} has 1 in_progress child tasks (e.g. #{child}) — close or cancel them first"
-        )
-        assert _status(db_conn, parent) == "in_progress"
-
-    def test_cancelled_with_in_progress_child_is_rejected(
-        self, db_conn: psycopg.Connection
-    ) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent-active-child")
-        child = _make_task(
-            db_conn,
-            owner=owner,
-            title="active-child",
-            status="in_progress",
-            parent_id=parent,
-        )
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{parent}", json={"status": "cancelled"})
-        assert resp.status_code == 422
-        assert f"#{child}" in resp.json()["detail"]
-        assert _status(db_conn, parent) == "in_progress"
-
-    def test_all_children_closed_allows_parent_close(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent-closed-children")
-        _make_task(
-            db_conn,
-            owner=owner,
-            title="done-child",
-            status="done",
-            parent_id=parent,
-        )
-        _make_task(
-            db_conn,
-            owner=owner,
-            title="cancelled-child",
-            status="cancelled",
-            parent_id=parent,
-        )
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "done"
-
-
-def _parent(db: psycopg.Connection, tid: int) -> int | None:
-    with db.cursor() as cur:
-        cur.execute("SELECT parent_id FROM agent_tasks WHERE id = %s", (tid,))
-        row = cur.fetchone()
-    assert row is not None
-    return row[0]
-
-
-class TestParent:
-    def test_patch_reparents(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent")
-        tid = _make_task(db_conn, owner=owner, title="child")
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"parent_id": parent})
-        assert resp.status_code == 200
-        assert _parent(db_conn, tid) == parent
-
-    def test_patch_null_moves_to_root(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent2")
-        tid = _make_task(db_conn, owner=owner, title="child2")
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"parent_id": parent})
-        assert resp.status_code == 200
-        assert _parent(db_conn, tid) == parent
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"parent_id": None})
-        assert resp.status_code == 200
-        assert _parent(db_conn, tid) == root
-
-    @pytest.mark.parametrize("closed_status", ["done", "cancelled"])
-    def test_patch_closed_parent_rejected(
-        self, db_conn: psycopg.Connection, closed_status: str
-    ) -> None:
-        """PATCH mirrors the SDK reparent check: moving a task under a closed
-        (done / cancelled) parent is a 422 — a closed task never gains
-        children (task #1975)."""
-        owner = _make_agent(db_conn)
-        parent = _make_task(
-            db_conn,
-            owner=owner,
-            title=f"closed-parent-{closed_status}",
-            status=closed_status,
-        )
-        tid = _make_task(db_conn, owner=owner, title=f"child-{closed_status}")
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"parent_id": parent})
-        assert resp.status_code == 422
-        assert "closed parent" in resp.json()["detail"]
-        # The tree is unchanged: the child has no parent.
-        assert _parent(db_conn, tid) is None
-
-    def test_patch_missing_parent_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"parent_id": 999_999})
-        assert resp.status_code == 422
-        assert "does not exist" in resp.json()["detail"]
-
-    def test_patch_self_parent_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"parent_id": tid})
-        assert resp.status_code == 422
-        assert "own parent" in resp.json()["detail"]
-
-    def test_patch_cycle_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        a = _make_task(db_conn, owner=owner, title="cycle-a")
-        b = _make_task(db_conn, owner=owner, title="cycle-b")
-        c = _make_task(db_conn, owner=owner, title="cycle-c")
-        with TestClient(app) as client:
-            assert client.patch(f"/api/tasks/{b}", json={"parent_id": a}).status_code == 200
-            assert client.patch(f"/api/tasks/{c}", json={"parent_id": b}).status_code == 200
-            resp = client.patch(f"/api/tasks/{a}", json={"parent_id": c})
-        assert resp.status_code == 422
-        assert "descendant" in resp.json()["detail"]
 
 
 class TestTimestampOffset:

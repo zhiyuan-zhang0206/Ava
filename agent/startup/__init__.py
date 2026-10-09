@@ -30,6 +30,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from langchain_core.runnables import RunnableConfig
@@ -530,6 +531,7 @@ async def notify_desktop_permissions_at_startup() -> None:
             title=title,
             content=content,
             priority="P1",
+            idempotency_key=str(uuid4()),
         )
     except Exception:
         logger.opt(exception=True).warning(
