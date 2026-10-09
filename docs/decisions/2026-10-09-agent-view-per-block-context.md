@@ -3,7 +3,7 @@
 Decision (2026-10-09, later that day): the Context size row draws one bar per block
 (thinking, text, call, output, inbound, note), not per message, and the Added context
 row is gone. A block's own tokens set its height in the Messages row (square root,
-bottom-aligned, a minimum so small blocks show; "equal" is a setting). The Context size
+bottom-aligned, a 6 px floor plus the rest of the row by that square root so small blocks show and stay apart; "equal" is a setting). The Context size
 row is a setting too (on by default). Estimated counts read "~190 tokens", exact ones
 carry no prefix.
 
