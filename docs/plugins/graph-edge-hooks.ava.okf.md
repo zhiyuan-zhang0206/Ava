@@ -32,4 +32,4 @@ def contribute() -> PluginContributions:
 The signature is inherited and checked by pyright strict's `reportIncompatibleMethodOverride`—narrowing parameter types / widening return value / missing parameters are caught at type-checking time, no longer just a convention described in a Protocol. The four hook points share the same `Hook` base class (same signature); the only difference is which `PluginContributions` field (edge) they are declared in. Instances can carry per-hook state in `__init__`. Returning a dict can modify state; returning None is a no-op. When two hooks write the same key in the same round, the merge is **reducer-aware** (`agent/hooks/_registry.py:202-229`): keys with reducers (e.g., `messages`→`add_messages`) merge both values; **only keys without reducers raise RuntimeError** (avoiding silent overwrites).
 
 
-Parent: [[okf/plugins/plugins.ava.okf.md|Plugin System]].
+Parent: [[docs/plugins/plugins.ava.okf.md|Plugin System]].

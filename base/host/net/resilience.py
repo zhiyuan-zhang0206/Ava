@@ -1,28 +1,19 @@
-"""Shared retry primitives — the single retry-loop implementation (R2-D).
+"""Shared retry primitives for explicitly classified transient failures.
 
-R2 convergence point D (design-concept.md §4.4 + evaluation-record #14):
-- ``Policy`` — immutable retry parameters: max_attempts x exponential backoff
-  x jitter (per-process deterministic phase + random ±span, de-phasing the
-  whole fleet) x classify x idempotent gate x Retry-After respect.
-- ``retry(policy)(fn)`` / ``aretry(policy)(fn)`` — thin executors, agnostic to
-  the HTTP client: ``fn`` is any zero-argument callable (urllib / httpx /
-  aiohttp / provider SDKs). This module is the DESIGNATED convergence target
-  for retry loops (design invariant D1), not yet the only one: dedicated
-  loops still live in ``base/lm/call.py`` (invoke_text, its own
-  exponential backoff + jittered), ``base/host/env/bootstrap.py``
-  (fetch_bootstrap_config, linear backoff without jitter) and
-  ``base/events/live/redis_listener.py`` (connect retry, backoff without jitter). The
-  R2-D migration folds them in; until then every NEW retry loop must be
-  built on this module (grep-able).
-- ``http_classifier`` — the one error-classification semantics (D2); call
-  sites compose local overrides via ``with_(permanent=...)`` /
-  ``with_(transient=...)`` instead of re-implementing classification
-  (only-override, never-rewrite).
-- ``jittered`` / ``extract_retry_after`` — the shared sleep-spread and
-  Retry-After helpers every migrated call site uses.
-- ``retry_sleep`` / ``retry_asleep`` — the wait hooks (see "Wait hooks").
+``Policy`` declares immutable retry parameters: attempts, backoff, jitter,
+classification, idempotency and Retry-After handling. ``retry`` / ``aretry``
+execute zero-argument callables without depending on their HTTP client.
+Bootstrap fetches already use this owner; ``base/lm/call.py`` and
+``base/events/live/redis_listener.py`` still have dedicated loops with their
+own consumer semantics. Remaining verification is recorded in
+``future/infra/engineering/retry-consumer-contracts.md``.
 
-Idempotency gate (D3): with ``idempotent=False`` the call runs exactly once
+``http_classifier`` provides common HTTP classification; callers compose
+local overrides through ``with_(permanent=...)`` / ``with_(transient=...)``.
+``jittered`` and ``extract_retry_after`` supply the shared wait calculations.
+``retry_sleep`` / ``retry_asleep`` are the wait hooks described below.
+
+Idempotency gate: with ``idempotent=False`` the call runs exactly once
 and a final failure MUST be made visible — ``on_final_failure`` compensation
 hook (alert / queue / raise) or the raised exception itself; silent loss is
 structurally impossible.
@@ -32,9 +23,7 @@ Wait hooks: ``retry()`` sleeps through ``retry_sleep`` and ``aretry()`` awaits
 when the retry is built, so a test observes or skips the waits through the
 ``retry_waits`` fixture without patching ``time`` / ``asyncio`` globally.
 
-``with_`` carries a trailing underscore because ``with`` is a Python keyword
-— the design's ``http_classifier.with(permanent=...)`` spelling is not a
-legal method name.
+``with_`` carries a trailing underscore because ``with`` is a Python keyword.
 """
 
 from __future__ import annotations
