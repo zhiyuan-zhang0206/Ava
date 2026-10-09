@@ -20,7 +20,6 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
-from base.config import settings
 from base.events.live.projection import ExecOutputChunk
 from base.events.live.publisher import AgentEventPublisher
 
@@ -83,10 +82,8 @@ class StreamingTextIO(io.TextIOBase):
     `cap()` for the envelope layer to learn the true produced length.
     """
 
-    def __init__(self, max_chars: int | None = None) -> None:
+    def __init__(self, max_chars: int) -> None:
         super().__init__()
-        if max_chars is None:
-            max_chars = settings.sandbox.exec_output_accumulation_max_chars
         self._budget = max_chars
         self._head_budget = max_chars // 2
         self._tail_budget = max_chars - self._head_budget

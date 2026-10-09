@@ -27,21 +27,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from agent.graph.exec._result import (
-    ExecChildError,
-    _construct_exec_result,
-    _ExecCrashed,
-    _ExecResult,
-    lifecycle_exception_from_name,
-)
-from agent.graph.exec._stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
-from agent.graph.exec.protocol import (
-    ResultPayload,
-    make_request_path,
-    make_result_path,
-    read_result,
-    write_request,
-)
 from base.agents.context import AvaContext
 from base.db import Database
 from base.deploy.release import editable_install
@@ -53,6 +38,21 @@ from base.native_process.turn_identity import current_hosted_resources
 from base.paths import exec_run_dir
 
 from . import _process
+from ._result import (
+    ExecChildError,
+    _construct_exec_result,
+    _ExecCrashed,
+    _ExecResult,
+    lifecycle_exception_from_name,
+)
+from ._stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
+from .protocol import (
+    ResultPayload,
+    make_request_path,
+    make_result_path,
+    read_result,
+    write_request,
+)
 
 # Same cadence as the old worker-thread poll loop: near-free, and cancel /
 # timeout response latency stays <= 50ms + signal delivery.
@@ -394,6 +394,7 @@ async def _run_in_subprocess(
     timeout: float,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
     *,
+    accumulation_max_chars: int,
     state: dict[str, Any] | None = None,
     exec_dir: Path | None = None,
     config_overlay: dict[str, object] | None = None,
@@ -404,7 +405,7 @@ async def _run_in_subprocess(
     guard_failure = _editable_guard_failure(editable_guard)
     if guard_failure is not None:
         return guard_failure, None
-    from agent.graph.exec._owned_run import managed_target, run_owned
+    from ._owned_run import managed_target, run_owned
 
     target = await asyncio.to_thread(managed_target, db, context.require_identity().agent_id)
     if target is not None:
@@ -416,6 +417,7 @@ async def _run_in_subprocess(
             cancel_event,
             timeout,
             chunk_publisher,
+            accumulation_max_chars=accumulation_max_chars,
             state=state,
             exec_dir=exec_dir,
             config_overlay=config_overlay,
@@ -427,6 +429,7 @@ async def _run_in_subprocess(
         cancel_event,
         timeout,
         chunk_publisher,
+        accumulation_max_chars=accumulation_max_chars,
         state=state,
         exec_dir=exec_dir,
         config_overlay=config_overlay,
@@ -441,6 +444,7 @@ async def _run_legacy_subprocess(
     timeout: float,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
     *,
+    accumulation_max_chars: int,
     state: dict[str, Any] | None = None,
     exec_dir: Path | None = None,
     config_overlay: dict[str, object] | None = None,
@@ -467,7 +471,7 @@ async def _run_legacy_subprocess(
     if request_error is not None:
         return request_error, None
 
-    stream = StreamingTextIO()
+    stream = StreamingTextIO(max_chars=accumulation_max_chars)
     domain: ExecProcessDomain | None = None
     reader: threading.Thread | None = None
     root_exit_task: asyncio.Task[None] | None = None
