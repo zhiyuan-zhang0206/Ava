@@ -1,20 +1,27 @@
 ---
 type: doc
-title: Explicit Strong Agent Creation
-description: Opt-in plain creation with fixed principal-scoped identity and no legacy fallback.
+title: Keyed Agent Creation
+description: Required caller-owned identity and immutable recovery for agent creation and forks.
 ---
 
-# Explicit Strong Agent Creation
+# Keyed Agent Creation
 
-`ava.agents.spawn(..., idempotency_key="intent", require_idempotency=True)`
-opts into guarded plain creation. Keep the same caller key and effective inputs
-when the response is lost. Strong mode requires an explicit 1–128 character key
-and rejects `fork_from` before HTTP. The flag must be a boolean. The fleet
-plugin's `label` wrapper forwards the same contract.
+`ava.agents.spawn(..., idempotency_key="intent")` requires an explicit
+1–128 character key for creation or fork. Reuse the same key, effective inputs
+and verified principal to recover the original agent after a lost response.
+Use a new key for a deliberate new agent. The Fleet `label` wrapper follows the
+same contract. Missing or invalid keys and the retired `require_idempotency`
+flag fail before HTTP.
+
+A fork resolves the source checkpoint during its first acceptance and copies
+that chain, the fork marker and its first prompt in the birth transaction.
+The immutable receipt commits in that transaction too. Replay returns that
+child before mutable source/config/checkpoint validation: a later source
+checkpoint, removed source checkpoint or changed defaults cannot replace it.
 
 ## Fixed admission
 
-Strong calls always use `POST /api/keyed/v1/agents` with `Idempotency-Key` and
+All calls use `POST /api/keyed/v1/agents` with `Idempotency-Key` and
 `Idempotency-Scope: principal-v1`. Every connection retry and caller retry uses
 that path, key and body. There is no capability GET, cached generation selection
 or fallback to `/api/agents`, including after 404/405, 409, 422, 5xx or an
@@ -30,8 +37,8 @@ explicitly. This change does not activate automatic ambiguous retries.
 ## Scope and result
 
 The server records birth identity using the verified authorization principal,
-POST method, guarded logical path and raw key. Legacy and guarded paths have
-different receipt namespaces: do not switch modes while retrying one intent.
+POST method, guarded logical path and raw key. Other operation paths have different receipt namespaces; keep the same path
+while recovering one intent.
 A changed body within the same namespace returns 409. A different verified
 principal identifies a different namespace, not the old receipt. SDK provenance
 labels such as `spawner` do not choose the authorization principal.
@@ -60,18 +67,9 @@ its native process is ready or work executed. Existing launch failure handling
 and observed-attempt `retry_launch` remain separate recovery operations; see
 [[launch-retry.ava.okf.md]].
 
-## Compatibility and remaining scope
+## Compound operations
 
-The default `require_idempotency=False` keeps `/api/agents` and its existing
-headers, key behavior and retry gate. It does not promise recovery when an old
-server ignores the key. Existing scripts, schedules and task compound creation
-are not silently upgraded. `create_and_assign` has a separate explicit
-[[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|guarded compound acceptance]]
-mode with its own receipt; standalone spawn keys do not make a script atomic. Fork strong admission
-and automatic ambiguous retry activation remain separate work.
-
-A gateway generation that already implements this fixed path may still have
-the older mutable attempt lookup. Fixed routing does not negotiate immutable
-recovery with that generation. Stop or drain older gateway writers before
-relying on the new recovery behavior; no client fallback or automatic ambiguous
-retry is added.
+`ava.tasks.create_and_assign` has its own required operation key and atomic
+[[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|compound acceptance]].
+A standalone spawn key does not make an entire script or workflow atomic.
+The SDK has one creation path and does not select behavior using a mode flag.

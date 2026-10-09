@@ -28,6 +28,7 @@ import ast
 import inspect
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -163,6 +164,6 @@ def test_send_system_note_rejects_unknown_notetag_before_gateway(
 
     monkeypatch.setattr(agents._client, "send_system_note", unexpected_gateway_call)
     with pytest.raises(ValueError) as exc_info:
-        agents.send_system_note(7, "note", tag="unrecognized")
+        agents.send_system_note(7, "note", tag="unrecognized", idempotency_key=str(uuid4()))
     assert "task" in str(exc_info.value)
     assert "heartbeat_pause" in str(exc_info.value)

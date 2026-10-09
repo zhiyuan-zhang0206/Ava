@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -34,34 +35,52 @@ class TestTasksEntries:
 
         monkeypatch.setattr(announce, "publish_task_created_sync", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
-        task = task_registry.create(title=("My Task",), description="d", parent=root_id)  # pyright: ignore[reportArgumentType, reportUnknownArgumentType]
+        inputs: dict[str, Any] = {
+            "title": ("My Task",),
+            "description": "d",
+            "parent": root_id,
+            "operation_key": str(uuid4()),
+        }
+        task = task_registry.create(**inputs)
         assert task.title == "My Task"
 
     def test_create_multi_element_title_type_errors(self) -> None:
         from ava_builtins.plugins.ava_fleet import task_registry
 
         with pytest.raises(TypeError, match="title must be a string"):
-            task_registry.create(title=("a", "b"), description="d", parent=1)  # pyright: ignore[reportArgumentType]
+            inputs: dict[str, Any] = {
+                "title": ("a", "b"),
+                "description": "d",
+                "parent": 1,
+                "operation_key": str(uuid4()),
+            }
+            task_registry.create(**inputs)
 
     def test_create_parent_never_unwraps(self) -> None:
         from ava_builtins.plugins.ava_fleet import task_registry
 
         with pytest.raises(TypeError, match="parent must be int"):
-            task_registry.create(title="t", description="d", parent=(1,))  # pyright: ignore[reportArgumentType]
+            inputs: dict[str, Any] = {
+                "title": "t",
+                "description": "d",
+                "parent": (1,),
+                "operation_key": str(uuid4()),
+            }
+            task_registry.create(**inputs)
 
     def test_log_message_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava_builtins.plugins.ava_fleet import task_registry
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(task_registry, "update", lambda *_a, **_kw: seen.update(_kw))  # pyright: ignore[reportUnknownArgumentType]
-        task_registry.log(7, ("note",))  # pyright: ignore[reportArgumentType]
+        task_registry.log(7, ("note",), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
         assert seen["note"] == "note"
 
     def test_log_multi_element_type_errors(self) -> None:
         from ava_builtins.plugins.ava_fleet import task_registry
 
         with pytest.raises(TypeError, match="message must be a string"):
-            task_registry.log(7, ("a", "b"))  # pyright: ignore[reportArgumentType]
+            task_registry.log(7, ("a", "b"), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     def test_update_status_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava_builtins.plugins.ava_fleet import task_registry
@@ -69,13 +88,13 @@ class TestTasksEntries:
         # Coercion fires before the DB write: a status tuple unwraps, then the
         # status-value validation runs on the string.
         with pytest.raises(ValueError, match="status must be one of"):
-            task_registry.update(7, status=("not-a-status",))  # pyright: ignore[reportArgumentType]
+            task_registry.update(7, status=("not-a-status",), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     def test_update_owner_never_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava_builtins.plugins.ava_fleet import task_registry
 
         with pytest.raises(TypeError, match="owner must be int"):
-            task_registry.update(7, owner=(5,))  # pyright: ignore[reportArgumentType]
+            task_registry.update(7, owner=(5,), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
 
 class TestNoticeEntries:
@@ -92,7 +111,13 @@ class TestNoticeEntries:
         monkeypatch.setattr(gateway_client, "raise_from_response", lambda _resp: None)  # pyright: ignore[reportUnknownArgumentType]
         pin_agent(900001)
 
-        notice = fleet_plugin.notify(("Hi",), ("detail",), priority=("P2",))  # pyright: ignore[reportArgumentType]
+        inputs: dict[str, Any] = {
+            "title": ("Hi",),
+            "content": ("detail",),
+            "priority": ("P2",),
+            "idempotency_key": str(uuid4()),
+        }
+        notice = fleet_plugin.notify(**inputs)
         body = seen["body"]
         assert body["title"] == "Hi"
         assert body["content"] == "detail"
@@ -103,13 +128,13 @@ class TestNoticeEntries:
         from ava_builtins.plugins.ava_fleet import plugin as fleet_plugin
 
         with pytest.raises(TypeError, match="title must be a string"):
-            fleet_plugin.notify(("a", "b"))  # pyright: ignore[reportArgumentType]
+            fleet_plugin.notify(("a", "b"), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     def test_notify_task_never_unwraps(self) -> None:
         from ava_builtins.plugins.ava_fleet import plugin as fleet_plugin
 
         with pytest.raises(TypeError, match="task must be int"):
-            fleet_plugin.notify("hi", task=("5",))  # pyright: ignore[reportArgumentType]
+            fleet_plugin.notify("hi", task=("5",), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
 
 class _FakeResp:

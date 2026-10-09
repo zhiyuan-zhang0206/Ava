@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -64,7 +65,14 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
         assert recorded is not None
         original = recorded[0]
         monkeypatch.setattr(tasks, "publish_inbound_wake", real_wake)
-        assert client.patch(f"/api/tasks/{tid}", json={"owner": current}).status_code == 200
+        assert (
+            client.patch(
+                f"/api/tasks/{tid}",
+                json={"owner": current},
+                headers={"Idempotency-Key": str(uuid4())},
+            ).status_code
+            == 200
+        )
         db_conn.execute(
             "UPDATE agent_tasks SET reminder_count=4, last_reminded_at=now(), escalated_at=now() WHERE id=%s",
             (tid,),
@@ -184,3 +192,12 @@ def test_distinct_task_paths_and_principals_are_independent(db_conn: psycopg.Con
                 app.state.db_pool, first, TaskUpdateRequest(priority=Priority.P2), key
             )
     assert _count(db_conn, "task_patch_receipts") == 4
+
+
+def test_missing_key_cannot_change_task(db_conn: psycopg.Connection) -> None:
+    owner = _make_agent(db_conn)
+    tid = _make_task(db_conn, owner=owner)
+    with TestClient(app) as client:
+        assert client.patch(f"/api/tasks/{tid}", json={"title": "changed"}).status_code == 422
+    assert db_conn.execute("SELECT title FROM agent_tasks WHERE id=%s", (tid,)).fetchone() == ("t",)
+    assert _count(db_conn, "task_patch_receipts") == 0

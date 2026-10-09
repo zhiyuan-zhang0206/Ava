@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -22,6 +23,7 @@ def test_read_with_reply_marks_and_delivers_inbound(db_conn: psycopg.Connection)
         resp = client.post(
             f"/api/agents/{a}/notices/{nid}/resolve",
             json={"action": "read", "reply": "nice, thanks"},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 201
 
@@ -56,7 +58,11 @@ def test_read_without_reply_marks_no_inbound(db_conn: psycopg.Connection) -> Non
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "fyi")
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
+        resp = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "read"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
     assert resp.status_code == 201
 
     with db_conn.cursor() as cur:
@@ -74,8 +80,16 @@ def test_read_twice_second_is_silent_201(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "fyi")
     with TestClient(app) as client:
-        first = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
-        second = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
+        first = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "read"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
+        second = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "read"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
     assert first.status_code == 201
     assert second.status_code == 201
     with db_conn.cursor() as cur:
@@ -97,10 +111,15 @@ def test_read_with_reply_on_already_resolved_delivers_note(
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "migration done")
     with TestClient(app) as client:
-        first = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
+        first = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "read"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
         second = client.post(
             f"/api/agents/{a}/notices/{nid}/resolve",
             json={"action": "read", "reply": "noted"},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert first.status_code == 201
     assert second.status_code == 201
@@ -125,7 +144,11 @@ def test_read_on_require_response_is_409(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "needs answer", require_response=True)
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "read"})
+        resp = client.post(
+            f"/api/agents/{a}/notices/{nid}/resolve",
+            json={"action": "read"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
     assert resp.status_code == 409
     snap = select_one(db_conn, a)
     assert snap is not None
@@ -139,7 +162,11 @@ def test_read_on_require_response_is_409(db_conn: psycopg.Connection) -> None:
 def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{a}/notices/999999/resolve", json={"action": "read"})
+        resp = client.post(
+            f"/api/agents/{a}/notices/999999/resolve",
+            json={"action": "read"},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
     assert resp.status_code == 409
     assert _pending_rows(db_conn, a) == []
 
@@ -151,10 +178,12 @@ def test_resolve_twice_second_is_409_and_delivers_once(db_conn: psycopg.Connecti
         first = client.post(
             f"/api/agents/{a}/notices/{nid}/resolve",
             json={"action": "answer", "reply": "one"},
+            headers={"Idempotency-Key": str(uuid4())},
         )
         second = client.post(
             f"/api/agents/{a}/notices/{nid}/resolve",
             json={"action": "answer", "reply": "two"},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert first.status_code == 201
     assert second.status_code == 409
@@ -169,6 +198,7 @@ def test_resolve_cross_agent_path_409(db_conn: psycopg.Connection) -> None:
         resp = client.post(
             f"/api/agents/{b}/notices/{nid}/resolve",
             json={"action": "answer", "reply": "x"},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 409
     # a's notice is untouched
@@ -449,6 +479,7 @@ def test_supersede_publishes_global_notice_id(
         resp = client.post(
             f"/api/agents/{agent_id}/notices",
             json={"title": "new notice", "content": None},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 201, resp.text
     body = resp.json()
@@ -471,6 +502,7 @@ def test_post_notice_sets_default_expire_at(db_conn: psycopg.Connection) -> None
         resp = client.post(
             f"/api/agents/{aid}/notices",
             json={"title": "default expiry notice", "content": "detail"},
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 201
     after = datetime.now(UTC)
@@ -499,6 +531,7 @@ def test_post_notice_with_explicit_expire_at(db_conn: psycopg.Connection) -> Non
                 "title": "explicit expiry notice",
                 "expire_at": target.isoformat(),
             },
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 201
 
@@ -522,6 +555,7 @@ def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Conn
                 "title": "exceeding expiry notice",
                 "expire_at": target.isoformat(),
             },
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 201
 
@@ -545,6 +579,7 @@ def test_post_notice_past_expire_at_is_422(db_conn: psycopg.Connection) -> None:
                 "title": "past expiry notice",
                 "expire_at": past.isoformat(),
             },
+            headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 422
     assert "expire_at is in the past" in resp.json()["detail"]

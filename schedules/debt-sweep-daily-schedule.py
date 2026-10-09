@@ -9,6 +9,8 @@ intentional at-most-once loss that the P0 lead must recover manually.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import argparse
 import json
 import os
@@ -123,7 +125,10 @@ def ensure_worker(label: str, prompt: str) -> WorkerDispatch:
             break
         before_id = page.next_cursor
     return WorkerDispatch(
-        agent_id=cast(int, ava.agents.spawn(prompt=prompt, label=label)),  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
+        agent_id=cast(
+            int,
+            ava.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4())),  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
+        ),
         action="spawned",
     )
 

@@ -60,7 +60,9 @@ def build_spawn(model: str, *, agent_id: int | None) -> RecordingModel:
     if _is_peer(agent_id):
         return RecordingModel(agent_id=agent_id, script=(say(CHILD_REPLY),))
     code = (
-        f"import ava\nchild = ava.agents.spawn(prompt={CHILD_PROMPT!r})\nprint('child-id', child)"
+        "import ava\nfrom uuid import uuid4\n"
+        f"child = ava.agents.spawn(prompt={CHILD_PROMPT!r}, idempotency_key=str(uuid4()))\n"
+        "print('child-id', child)"
     )
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
 

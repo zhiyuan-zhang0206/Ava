@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -121,7 +122,16 @@ def _sdk_via_inprocess_gateway(
     ):
         monkeypatch.setattr(_settings.lm, _attr, SecretStr("sk-test"))
 
-    with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
+    monkeypatch.setattr(_settings.data_plane, "cluster_secret", "sdk-test-secret")
+    monkeypatch.setattr(_settings.gateway, "auth_middleware_enabled", True)
+    with (
+        TestClient(
+            app,
+            base_url="http://test-gateway",
+            headers={"Authorization": "Bearer sdk-test-secret"},
+        ) as tc,
+        use_client(tc),
+    ):
         monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
         monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
         monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
@@ -165,7 +175,7 @@ class TestSpawn:
         """ava.agents.spawn() without prompt — only starts lifecycle, no inbound posted."""
         pin_agent(_spawn_agent())  # self identity
 
-        child_id = ava.agents.spawn()
+        child_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         assert _agent_spawner(db_conn, child_id) == f"agent:{ava.self.AGENT_ID}"
         assert _inbound_rows(db_conn, child_id) == []
@@ -176,7 +186,7 @@ class TestSpawn:
         """spawn(prompt=...) together INSERT chat inbound (source='agent:{ava.self.AGENT_ID}')."""
         pin_agent(_spawn_agent())  # self identity
 
-        child_id = ava.agents.spawn(prompt="\u53bb\u67e5 X")
+        child_id = ava.agents.spawn(prompt="\u53bb\u67e5 X", idempotency_key=str(uuid4()))
 
         assert _inbound_rows(db_conn, child_id) == [
             ("\u53bb\u67e5 X", "chat", f"agent:{ava.self.AGENT_ID}"),
@@ -204,7 +214,7 @@ class TestSpawn:
 
         monkeypatch.setattr(ava.gateway_client, "spawn", _fake_spawn)
 
-        assert ava.agents.spawn() == 999
+        assert ava.agents.spawn(idempotency_key=str(uuid4())) == 999
         assert captured["machine"] == machine_name()
 
     def test_spawn_explicit_machine_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -212,7 +222,7 @@ class TestSpawn:
         captured: dict[str, Any] = {}
         monkeypatch.setattr(ava.gateway_client, "spawn", lambda **kw: captured.update(kw) or 7)  # pyright: ignore[reportUnknownArgumentType]
 
-        assert ava.agents.spawn(machine="other-host") == 7
+        assert ava.agents.spawn(machine="other-host", idempotency_key=str(uuid4())) == 7
         assert captured["machine"] == "other-host"
 
     @pytest.mark.parametrize(
@@ -235,7 +245,7 @@ class TestSpawn:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
 
-        assert agents.spawn(prompt=prompt) == 3  # pyright: ignore[reportArgumentType]
+        assert agents.spawn(prompt=prompt, idempotency_key=str(uuid4())) == 3  # pyright: ignore[reportArgumentType]
         assert seen["prompt"] == expected
 
     def test_spawn_rejects_non_string_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,7 +257,7 @@ class TestSpawn:
             TypeError,
             match="prompt must be a string, got int",
         ):
-            agents.spawn(prompt=42)  # pyright: ignore[reportArgumentType]
+            agents.spawn(prompt=42, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     @pytest.mark.parametrize(
         "prompt",
@@ -265,7 +275,7 @@ class TestSpawn:
 
         monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="prompt must be a string"):
-            agents.spawn(prompt=prompt)  # pyright: ignore[reportArgumentType]
+            agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
 
 class TestSpawnFork:
@@ -273,7 +283,7 @@ class TestSpawnFork:
         """ava.agents.spawn(fork_from=N) internally resolves latest checkpoint
         (done by gateway, SDK unaware of ckpt id)."""
         pin_agent(_spawn_agent())  # self identity
-        source = ava.agents.spawn()
+        source = ava.agents.spawn(idempotency_key=str(uuid4()))
         # construct chain a < b < c (lex order corresponds to time order)
         with db_conn.cursor() as cur:
             for ckpt, parent in [("ck-a", None), ("ck-b", "ck-a"), ("ck-c", "ck-b")]:
@@ -284,7 +294,7 @@ class TestSpawnFork:
                 )
         db_conn.commit()
 
-        new_id = ava.agents.spawn(fork_from=source)
+        new_id = ava.agents.spawn(fork_from=source, idempotency_key=str(uuid4()))
 
         # fork_source_checkpoint_id should be set to latest = "ck-c"
         with db_conn.cursor() as cur:
@@ -303,11 +313,11 @@ class TestSpawnFork:
         `raise_from_response` reverse lookup rebuild.
         """
         pin_agent(_spawn_agent())  # self identity
-        empty_source = ava.agents.spawn()  # spawn without checkpoint
+        empty_source = ava.agents.spawn(idempotency_key=str(uuid4()))  # spawn without checkpoint
         _ = db_conn  # truncate side-effect via fixture
 
         with pytest.raises(ForkSourceEmpty, match="has no checkpoint"):
-            ava.agents.spawn(fork_from=empty_source)
+            ava.agents.spawn(fork_from=empty_source, idempotency_key=str(uuid4()))
 
     def test_fork_with_prompt_inserts_fork_identity_then_chat_inbound(
         self, db_conn: psycopg.Connection
@@ -316,7 +326,7 @@ class TestSpawnFork:
         (kind='fork', source=f"agent:{source}"), then prompt's chat inbound —
         claim side first dispatches identity marker to fix "who am I", then processes prompt."""
         pin_agent(_spawn_agent())  # self identity
-        source = ava.agents.spawn()
+        source = ava.agents.spawn(idempotency_key=str(uuid4()))
         # give source a checkpoint
         with db_conn.cursor() as cur:
             cur.execute(
@@ -326,7 +336,9 @@ class TestSpawnFork:
             )
         db_conn.commit()
 
-        new_id = ava.agents.spawn(prompt="\u7ee7\u7eed\u5427", fork_from=source)
+        new_id = ava.agents.spawn(
+            prompt="\u7ee7\u7eed\u5427", fork_from=source, idempotency_key=str(uuid4())
+        )
 
         # fork first posts an identity inbound (kind='fork', source=fork source agent) in spawn transaction, then prompt's chat inbound —
         # claim side dispatches identity marker first to fix "who am I", then processes prompt.
@@ -341,7 +353,7 @@ class TestTerminate:
         self, db_conn: psycopg.Connection
     ) -> None:
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         result = ava.agents.terminate(peer_id, message="record the partial result")
 
@@ -361,7 +373,7 @@ class TestTerminate:
     ) -> None:
         """On a live peer the graceful terminate records the kill for its exit."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         result = ava.agents.terminate(peer_id, kill_all_shell_sessions=True)
         assert result.shell_sessions == ava.agents.ShellSessionsKill(
             when=ShellSessionKillTiming.AT_EXIT, killed=[]
@@ -377,7 +389,7 @@ class TestTerminate:
         """`open_tasks` rides the SDK result: the agent's open tasks (newest
         first), truncated to five rows plus `more`; done/cancelled excluded."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_tasks (title, description, status, created_by, owner) "
@@ -477,7 +489,7 @@ class TestSendMessage:
     ) -> None:
         """send_message purely INSERT inbound — no status check, no wait, no SendResult return."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         result = ava.agents.send_message(peer_id, "you got mail")
         assert result is None
@@ -490,7 +502,7 @@ class TestSendMessage:
         """send_message to terminated agent also INSERT inbound.
         SDK doesn't care about target state — purely send message, auto-resurrect is gateway-side detail."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
         db_conn.commit()
@@ -513,7 +525,7 @@ class TestSendMessage:
     ) -> None:
         """send_message only INSERT inbound, doesn't modify agents.status."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         ava.agents.send_message(peer_id, "hi")
 
     @pytest.mark.parametrize(
@@ -603,7 +615,7 @@ class TestSendMessage:
         """End-to-end: the trailing-comma tuple lands as the string it wraps,
         never as a JSON array (which the gateway would reject 422)."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         # Runtime value of `("you got " "mail",)`: implicit concatenation plus
         # trailing comma — the exact LLM shape that 422'd before (2026-08-28).
@@ -622,10 +634,12 @@ class TestSendSystemNote:
         """send_system_note posts a kind='system_note' inbound (agent source +
         task note tag) — never a peer chat row."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         inbound_id = ava.agents.send_system_note(
-            peer_id, 'Task #1 "t" is now assigned to you (by agent #1).'
+            peer_id,
+            'Task #1 "t" is now assigned to you (by agent #1).',
+            idempotency_key=str(uuid4()),
         )
         assert isinstance(inbound_id, int)
 
@@ -644,7 +658,7 @@ class TestSendSystemNote:
 
     def test_send_system_note_preserves_explicit_task_id(self, db_conn: psycopg.Connection) -> None:
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_tasks (title, description, created_by, owner) "
@@ -657,7 +671,10 @@ class TestSendSystemNote:
         db_conn.commit()
 
         ava.agents.send_system_note(
-            peer_id, 'Task #42 "t" is now assigned to you.', task_id=task_id
+            peer_id,
+            'Task #42 "t" is now assigned to you.',
+            task_id=task_id,
+            idempotency_key=str(uuid4()),
         )
 
         with db_conn.cursor() as cur:
@@ -671,12 +688,14 @@ class TestSendSystemNote:
         agent — auto-resurrect is the gateway delivery detail, the SDK just
         posts the note and returns its id."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
         db_conn.commit()
 
-        inbound_id = ava.agents.send_system_note(peer_id, 'Task #1 "t" is now assigned to you.')
+        inbound_id = ava.agents.send_system_note(
+            peer_id, 'Task #1 "t" is now assigned to you.', idempotency_key=str(uuid4())
+        )
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
             cur.execute("SELECT kind FROM inbound_messages WHERE agent_id = %s", (peer_id,))
@@ -687,12 +706,12 @@ class TestSendSystemNote:
         """Same trailing-comma class as send_message — a one-element tuple
         unwraps to the note text instead of 422ing the gateway."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
         # concatenation plus trailing comma.
         content: object = ("Task #1 is now assigned to you.",)
-        inbound_id = ava.agents.send_system_note(peer_id, content)  # pyright: ignore[reportArgumentType]
+        inbound_id = ava.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
             cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (peer_id,))
@@ -705,13 +724,13 @@ class TestSendSystemNote:
     ) -> None:
         """A multi-element tuple is a coding mistake — TypeError, never joined."""
         pin_agent(_spawn_agent())
-        peer_id = ava.agents.spawn()
+        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         content: object = ("Task #1 is now ", "assigned to you.")
         with pytest.raises(TypeError, match="content must be a string"):
-            ava.agents.send_system_note(peer_id, content)  # pyright: ignore[reportArgumentType]
+            ava.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     def test_send_system_note_to_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         pin_agent(_spawn_agent())
         with pytest.raises(AgentNotFound):
-            ava.agents.send_system_note(9999, "ghost")
+            ava.agents.send_system_note(9999, "ghost", idempotency_key=str(uuid4()))
