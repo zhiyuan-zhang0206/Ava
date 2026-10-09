@@ -18,7 +18,7 @@ def state_file(agent_id: int) -> str:
 def _prepare_code(role: str, agent_id: int) -> str:
     root = str(scratch_root("budget"))
     code = (
-        "import json\nimport ava\nfrom pathlib import Path\n"
+        "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
         "from base.host.atomic_io import write_text_atomic\n"
         f"root = Path({root!r})\n"
         "aid = ava.self.AGENT_ID\n"
@@ -30,12 +30,12 @@ def _prepare_code(role: str, agent_id: int) -> str:
     )
     if role == "dynamic workflow orchestrator":
         dispatch = (
-            "import json\nimport ava\nfrom pathlib import Path\n"
+            "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
             "from base.host.atomic_io import write_text_atomic\n"
             f"path = Path({state_file(agent_id)!r})\n"
             "state = json.loads(path.read_text())\n"
             "if state['status'] == 'running':\n"
-            "    peer = ava.agents.spawn(prompt=state['remaining'].pop(0))\n"
+            "    peer = ava.agents.spawn(prompt=state['remaining'].pop(0), idempotency_key=str(uuid4()))\n"
             "    state['peers'].append(peer)\n"
             "    write_text_atomic(path, json.dumps(state))\n"
         )
@@ -50,7 +50,7 @@ def _prepare_code(role: str, agent_id: int) -> str:
     else:
         code += (
             "if aid == int((root / 'owner').read_text()):\n"
-            "    state['peers'] = [ava.agents.spawn(prompt='Preserve a partial result and wait.')]\n"
+            "    state['peers'] = [ava.agents.spawn(prompt='Preserve a partial result and wait.', idempotency_key=str(uuid4()))]\n"
             "    write_text_atomic(root / f'{aid}.json', json.dumps(state))\n"
         )
     return code
@@ -59,7 +59,7 @@ def _prepare_code(role: str, agent_id: int) -> str:
 def _pause_code(owner: int, agent_id: int) -> str:
     path = state_file(agent_id)
     return (
-        "import json\nimport ava\nfrom pathlib import Path\n"
+        "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
         "from base.host.atomic_io import write_text_atomic\n"
         f"path = Path({path!r})\n"
         "state = json.loads(path.read_text())\n"
@@ -76,7 +76,7 @@ def _pause_code(owner: int, agent_id: int) -> str:
 def _recover_code(role: str, agent_id: int) -> str:
     path = state_file(agent_id)
     code = (
-        "import json\nimport ava\nfrom pathlib import Path\n"
+        "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
         f"path = Path({path!r})\n"
         "state = json.loads(path.read_text())\n"
     )

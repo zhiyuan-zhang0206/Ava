@@ -8,7 +8,9 @@ description: "Selects registered LLMs and config overlays for Ava workers. Use w
 You pick a worker's model at spawn time:
 
 ```python
-ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"})
+from uuid import uuid4
+
+ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4()))
 ```
 
 Omitting the overlay is a valid choice — the child inherits the cluster default.

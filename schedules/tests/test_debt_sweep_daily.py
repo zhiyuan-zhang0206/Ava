@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 
@@ -108,9 +109,10 @@ def test_ensure_worker_reuses_or_spawns_by_status(
         assert prompt == "clear debt"
         calls.append(("message", agent_id))
 
-    def spawn(*, prompt: str, label: str) -> int:
+    def spawn(*, prompt: str, label: str, idempotency_key: str) -> int:
         assert prompt == "clear debt"
         assert label == "debt-sweep-daily"
+        assert str(UUID(idempotency_key)) == idempotency_key
         calls.append(("spawn", label))
         return 14
 
@@ -276,13 +278,15 @@ def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted(
         return pages[len(seen_before_ids) - 1]
 
     spawn = Mock(return_value=400)
+    key = UUID("0eb49ad1-0b9b-4bde-b783-d0c3e4359c33")
+    monkeypatch.setattr(module, "uuid4", lambda: key)
     monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)
     monkeypatch.setattr(module.ava.agents, "spawn", spawn)
 
     dispatch = module.ensure_worker("missing", "clear debt")
 
     assert dispatch == module.WorkerDispatch(agent_id=400, action="spawned")
-    spawn.assert_called_once_with(prompt="clear debt", label="missing")
+    spawn.assert_called_once_with(prompt="clear debt", label="missing", idempotency_key=str(key))
     assert seen_before_ids == [None, 300]
 
 
