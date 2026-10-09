@@ -25,6 +25,7 @@ import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import PoolTimeout
@@ -147,7 +148,9 @@ class NoticeBridge:
 
     async def _post(self, path: str, body: dict[str, Any]) -> None:
         g = self.core.gateway
-        resp = await (await g._http()).post(path, json=body, headers=g._headers())
+        resp = await (await g._http()).post(
+            path, json=body, headers={**g._headers(), "Idempotency-Key": str(uuid4())}
+        )
         resp.raise_for_status()
 
     # -- polling -----------------------------------------------------------
@@ -456,7 +459,7 @@ class NoticeBridge:
         response = await (await g._http()).post(
             f"/api/agents/{agent_id}/notices/{notice_id}/resolve",
             json={"action": "answer", "reply": text},
-            headers=g._headers(),
+            headers={**g._headers(), "Idempotency-Key": str(uuid4())},
         )
         response.raise_for_status()
         result: dict[str, Any] = response.json()

@@ -99,3 +99,11 @@ def test_replay_survives_reassignment_and_checks_content(
                 client_message_id="assignment-note",
             )
         assert caught.value.status_code == 409
+
+
+def test_missing_key_cannot_insert_system_note(db_conn: psycopg.Connection) -> None:
+    with TestClient(app) as client:
+        agent = client.post("/api/agents", json={}).json()["id"]
+        response = client.post(f"/api/agents/{agent}/system-note", json={"content": "once"})
+    assert response.status_code == 422
+    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)
