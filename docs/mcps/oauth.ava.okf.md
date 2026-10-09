@@ -39,5 +39,5 @@ Token files are created 0600 from the start via `os.open` mode (umask can only r
 
 ## Key Dependencies
 - [[configuration.ava.okf.md]] — the `.mcp.json` auth modes this flow implements
-- [[okf/mcps/mcps.ava.okf.md]] — the outbound MCP domain node
+- [[docs/mcps/mcps.ava.okf.md]] — the outbound MCP domain node
 - SDK `mcp.client.auth` — `OAuthClientProvider` (discovery / DCR / token exchange), token + client-metadata models

@@ -22,7 +22,7 @@ Skills can be nested — displayed as `ava.skills.ava-memory:consolidation` (loa
 
 
 ## See Also
-- [[okf/plugins/plugins.ava.okf.md|Plugin System]] — skills vs plugins distinction
+- [[docs/plugins/plugins.ava.okf.md|Plugin System]] — skills vs plugins distinction
 
 # ava.skills — Skill Registry
 
