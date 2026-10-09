@@ -5,14 +5,14 @@ or a session backend: OS platform flags (`os_platform`), native birth facts
 (PID plus kernel start ticks in an explicit boot scope), the commit a
 *running* process actually loaded (`loaded_commit`, as opposed to what the
 checkout is at right now) and the ordered code version derived from it
-(`code_version`), turn- and incarnation-scoped agent identity
+(`code_version`), native admission and resource ownership scopes
 (`turn_identity`, `runtime_incarnation`), one bounded POSIX command's process
 group (`posix_command`, `group_closure`), managed-exec-domain ownership without the agent graph
 (`exec_domain`), child-process environment primitives (`child_env`), strict
 process-observation value types (`evidence`), and the root supervisor's local
 control contract (`root_control`). Moving the commit, platform and identity
 primitives here — rather than leaving them beside the sessions that use them —
-is what lets `log` (which stamps commit and agent id on every record) and
+is what lets `log` (which stamps the loaded commit and explicit/process identity) and
 every native session host sit above this package without import cycles.
 
 Linux birth identity is PID plus kernel start ticks in an explicit boot scope.

@@ -28,7 +28,7 @@ their processes or shell variables. Data and profile directories remain on disk.
 
 ## Identity and environment
 
-The agent host binds identity through `base/native_process/turn_identity.py` for each turn.
+The agent host supplies identity through `Runtime[AvaContext]`. `base/native_process/turn_identity.py` retains original native admission/resource scopes; it does not attribute ordinary logs or select SDK identity.
 It does not set process-wide agent identity. Disposable execute children carry
 an explicit per-agent request (its `AvaContext` description); watcher/schedule
 children derive their context from `AVA_AGENT_ID`, and a gateway-hosted schedule
