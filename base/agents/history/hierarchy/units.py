@@ -283,14 +283,13 @@ def _inbound_content(msg: BaseMessage) -> str:
 
 def _result_body(msg: ToolMessage) -> str:
     """A tool result's output without its envelope header, cut where the writer recorded
-    the body to start. A result written before that field existed is rejected, not parsed."""
+    the body to start (`ava_exec_body_start`).
+
+    Legacy boundary: results written before that field existed carry no offset, and the
+    header is not parsed out of their text; they show whole, header line included. Every
+    new exec result records the offset, so this branch only ever sees historical messages."""
     start = read_ava_kwargs(msg).get("ava_exec_body_start")
-    if start is None:
-        raise ValueError(
-            f"tool result {msg.tool_call_id!r} has no ava_exec_body_start; "
-            "it predates structured exec results and cannot be split from its header"
-        )
-    return msg.text[start:]
+    return msg.text if start is None else msg.text[start:]
 
 
 def _output_part(messages: Sequence[BaseMessage], unit: MessageUnit) -> str | None:
