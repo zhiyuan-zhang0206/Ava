@@ -26,6 +26,8 @@ from dataclasses import dataclass, field, fields
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
+from pydantic import BaseModel
+
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
 Cadence = Literal["once_per_compaction", "every_time"]
@@ -182,6 +184,8 @@ class AgentSlices:
         cls,
         pins: Mapping[str, Any] | None = None,
         plugin_pins: Mapping[str, Mapping[str, Any]] | None = None,
+        *,
+        plugin_configs: Mapping[str, BaseModel] | None = None,
     ) -> AgentSlices:
         """The slices of an agent holding `pins` (`resolve_agent_config_pins`) and `plugin_pins`
         (`resolve_agent_plugin_pins`); no pins reads the cluster defaults as they are now."""
@@ -201,7 +205,7 @@ class AgentSlices:
             kernel=AgentKernel(**_kwargs(AgentKernel, pins)),
             pins=MappingProxyType(dict(pins)),
             plugin_pins=MappingProxyType({p: dict(f) for p, f in plugin_pins.items()}),
-            _plugin_view=PluginConfigView(plugin_pins),
+            _plugin_view=PluginConfigView(plugin_configs or {}, plugin_pins),
         )
 
     def read(self, domain: str, field: str) -> Any:
@@ -213,15 +217,12 @@ class AgentSlices:
         return getattr(getattr(settings, domain), field)
 
     def plugin_config(self, plugin: str) -> Any:
-        """This agent's config instance of `plugin`: the process-global one with the agent's plugin
-        pins over it."""
+        """This agent's config: the supplied boot image with its own plugin pins."""
         return self._plugin_view.config_for(plugin)
 
     def plugin_configs(self) -> dict[str, Any]:
         """`plugin_config` of every registered plugin."""
-        from base.packages.plugins.config_registration import registered_plugin_config_names
-
-        return {name: self.plugin_config(name) for name in registered_plugin_config_names()}
+        return self._plugin_view.configs()
 
     def overlay(self) -> dict[str, Any]:
         """The agent's pins as the flat overlay an exec child boots with (framework and plugin)."""

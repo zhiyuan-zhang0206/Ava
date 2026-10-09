@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 import ava
 from agent import state as state_module
 from ava import external
+from ava.sdk_surface.install import Installation
 from base.db import Database
+from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.pin_agent import pin_agent
 
 # A bounded handshake allows close telemetry to drain on a loaded runner.
@@ -62,6 +64,18 @@ def attached_runtime(
     pin_agent(None, owns_loop=True)
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)
+
+    installation = Installation(
+        registry=EMPTY,
+        expansions=(),
+        wrap_layers={},
+        skill_providers=(),
+        metered=(),
+        disabled=frozenset(),
+        faces=True,
+        undo=(),
+    )
+    monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
 
     def loader_stub(**_kwargs: object) -> None:
         """Accept the `surface` kwarg attach passes (ignored)."""

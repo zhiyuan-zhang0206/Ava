@@ -15,9 +15,8 @@ birth/overlay fingerprint changes. LLM retry follows each agent's own schedule
 (`agent/graph/llm/_retry.py`).
 
 Cold admission repairs claimed inbound/checkpoint disagreements and dangling tool
-pairs, and establishes the workspace. A watcher (`ava.watcher.at/cron/launch`) is
-just a shell session running a generated script — nothing here tracks or restarts
-one (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md). No per-agent process or global identity is created.
+pairs, and establishes the workspace. Watchers are shell sessions, with no host tracking or
+restart; see `docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md`.
 
 Native restart/terminate flushes the final checkpoint and applies its exact-owner
 command before releasing single-flight. Normal maintenance waits for continuation
@@ -25,12 +24,10 @@ and managed-resource settlement. Explicit force cancellation stays fenced until
 those resources close. Database outages retain the original task; recovery checks
 its ownership before repairing and continuing, without creating a new inbound.
 
-Each completed invocation flushes its checkpoint before linking it to the current trace.
-Expected provider/compaction failures persist halted state, and their
-settled abort reconciles the turn's claimed inbounds at once
-(`host_abort_reconcile_enabled`), so no row waits for a next boot; unexpected
-errors remain visible and propagate. Configuration rejection leaves pending work
-durable for a subsequent scan after the configuration is corrected.
+Completed invocations flush their checkpoint before linking the current trace.
+Provider/compaction failures halt; settled abort immediately reconciles claimed inbounds
+(`host_abort_reconcile_enabled`). Unexpected errors propagate. Configuration rejection
+keeps pending work durable until a later scan with corrected configuration.
 """
 
 from __future__ import annotations
@@ -39,6 +36,7 @@ import asyncio
 import secrets
 import time
 from collections import OrderedDict
+from collections.abc import Mapping
 from datetime import datetime
 from uuid import uuid4
 
@@ -47,6 +45,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
+from pydantic import BaseModel
 
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.node_log import flush_node_exit_aggregate
@@ -169,12 +168,14 @@ class AgentHost:
         db: Database,
         clients: ClientSet | None = None,
         extensions: ExtensionRegistry = EMPTY,
+        plugin_configs: Mapping[str, BaseModel] | None = None,
     ) -> None:
         self._bus = bus
         self._db = db
         # Shared clients are passed through each turn's explicit `AvaContext`.
         self._clients = clients if clients is not None else ClientSet(database=lambda: db)
         self._extensions = extensions
+        self._plugin_configs = plugin_configs or {}
         self._pool = pool
         self._control_pool = control_pool if control_pool is not None else pool
         self._checkpointer = checkpointer
@@ -187,10 +188,7 @@ class AgentHost:
         self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
         self._rejected_configs: dict[int, str] = {}
         self._normalized_configs: dict[int, str] = {}
-        # Agents with a turn in flight right now. Eviction skips them: a running
-        # turn holds its own reference, so dropping the entry would not break it
-        # — it would just throw the work away and make that agent's NEXT turn
-        # pay a cold build, which is the opposite of what a cache is for.
+        # Eviction preserves in-flight runtimes so the next turn can reuse the same build.
         self._in_flight: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         # Each agent's latest turn's config fingerprint (scheduler crash report); cleared per turn.
@@ -334,7 +332,7 @@ class AgentHost:
 
         async with self.admission.admit(agent_id):
             pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
-            plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
+            plugin_pins = resolve_agent_plugin_pins(stored.config_overlay, self._plugin_configs)
             # The stored model configuration is admitted before ANY turn work,
             # the status flip included: a wake whose model cannot build is
             # consumed without a turn (#2344), and a pin the registry has
@@ -387,7 +385,9 @@ class AgentHost:
                     recovery_reconstruction_scope(self._checkpointer, str(agent_id)),
                 ):
                     await publish_agent_updated(self._bus, agent_id)
-                    slices = AgentSlices.resolve(pins, plugin_pins)
+                    slices = AgentSlices.resolve(
+                        pins, plugin_pins, plugin_configs=self._plugin_configs
+                    )
                     from base.agents.compaction.startup import resumable_compact
 
                     compact_continuation = await resumable_compact(self._control_pool, incarnation)
