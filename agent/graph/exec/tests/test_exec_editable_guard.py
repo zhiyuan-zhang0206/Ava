@@ -32,6 +32,7 @@ async def _run(
         30.0,
         exec_dir=tmp_path / "exec",
         editable_guard=editable_guard,
+        accumulation_max_chars=1_000_000,
     )
     return result
 

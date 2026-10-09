@@ -230,7 +230,7 @@ async def test_stall_guard_survives_redirected_stderr(monkeypatch: pytest.Monkey
     from agent.graph.exec._stream import StreamingTextIO
 
     monkeypatch.setattr(settings.agent, "node_stall_dump_seconds", 12.0)
-    monkeypatch.setattr(sys, "stderr", StreamingTextIO())  # the leaked redirect
+    monkeypatch.setattr(sys, "stderr", StreamingTextIO(max_chars=1_000_000))  # the leaked redirect
 
     armed: list = []
 

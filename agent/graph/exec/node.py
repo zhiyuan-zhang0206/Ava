@@ -49,6 +49,7 @@ import time
 from collections.abc import Awaitable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
@@ -69,6 +70,7 @@ from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
+from base.clock import Clock
 from base.config import settings
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.log import logger
@@ -189,6 +191,7 @@ async def _run_agent_code(
                 cancel_event,
                 settings.sandbox.exec_timeout_seconds,
                 chunk_publisher,
+                accumulation_max_chars=settings.sandbox.exec_output_accumulation_max_chars,
                 state=state.model_dump(),
                 config_overlay=config_overlay,
             ),
@@ -227,6 +230,7 @@ def _dispatch_exec_result(
     ctx: AvaContext,
     agent_id: int,
     *,
+    timestamp: str | None = None,
     referenced_messages: Sequence[AnyMessage] = (),
 ) -> tuple[bool, str]:
     """Map the `_ExecResult` sum type to (halted, result_text).
@@ -239,6 +243,16 @@ def _dispatch_exec_result(
     # Present on every variant (see the sum-type definitions): when the
     # accumulation budget dropped the middle mid-run, the envelope needs it to
     # report the true produced length and to stop calling the archive complete.
+    sandbox = settings.sandbox
+    clock = Clock.from_settings()
+    wrap = partial(
+        wrap_code_output,
+        crop_config=sandbox,
+        clock=clock,
+        timestamp=timestamp,
+        timeout_seconds=sandbox.exec_timeout_seconds,
+        max_chars=sandbox.exec_output_max_chars,
+    )
     stream_cap = result.stream_cap
     match result:
         case _ExecLifecycle(output=output, exc=SystemHalt()):
@@ -247,7 +261,7 @@ def _dispatch_exec_result(
             halted = True
             extra = "[system halt] You just called ava.self.compact; your context has been compacted and you will continue as the same agent\n"
             output = (output if not output or output.endswith("\n") else output + "\n") + extra
-            result_text = wrap_code_output(
+            result_text = wrap(
                 output,
                 agent_id=agent_id,
                 stream_cap=stream_cap,
@@ -262,7 +276,7 @@ def _dispatch_exec_result(
             # records consent in its lease. Their drivers resume after exec
             # cleanup, without adding a duplicate "[halt]" annotation here.
             halted = True
-            result_text = wrap_code_output(
+            result_text = wrap(
                 output,
                 agent_id=agent_id,
                 stream_cap=stream_cap,
@@ -285,7 +299,7 @@ def _dispatch_exec_result(
             )
         case _ExecCancelled(output=output, reason=reason):
             halted = True
-            result_text = wrap_code_output(
+            result_text = wrap(
                 output,
                 agent_id=agent_id,
                 cancelled=True,
@@ -304,7 +318,7 @@ def _dispatch_exec_result(
             # Timeout is ordinary feedback, not a stop-turn signal: the envelope
             # hints at long-running primitives; the next LLM round adapts.
             halted = False
-            result_text = wrap_code_output(
+            result_text = wrap(
                 output,
                 agent_id=agent_id,
                 timed_out=True,
@@ -334,7 +348,7 @@ def _dispatch_exec_result(
             halted = False
             if not output:
                 output = crashed_no_output_body(exc, code_reached=code_reached)
-            result_text = wrap_code_output(
+            result_text = wrap(
                 output,
                 agent_id=agent_id,
                 stream_cap=stream_cap,
@@ -356,7 +370,7 @@ def _dispatch_exec_result(
                 _emit_exec_boot_failed(agent_id, exc)
         case _ExecDone(output=output):
             halted = False
-            result_text = wrap_code_output(
+            result_text = wrap(
                 output,
                 agent_id=agent_id,
                 stream_cap=stream_cap,
@@ -430,8 +444,10 @@ async def _exec_single_call(
         code_from_args(call["args"], source=f"tool_call {call['id']!r}"),
         chunk_publisher,
     )
+    clock = Clock.from_settings()
+    timestamp = clock.now_timestamp() if settings.general.message_timestamps else None
     halted, result_text = _dispatch_exec_result(
-        result, ctx, agent_id, referenced_messages=state.messages
+        result, ctx, agent_id, timestamp=timestamp, referenced_messages=state.messages
     )
 
     # Pop the plugin's messages delta out of the state update — merged below

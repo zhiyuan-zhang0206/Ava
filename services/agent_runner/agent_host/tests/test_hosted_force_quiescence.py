@@ -19,8 +19,9 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import has_pending_interrupt
-from agent.ownership.hosted import admit_hosted_runtime
-from agent.tests.claim.test_inbound_ownership import _agent, _insert
+from agent.graph.exec._subprocess import _run_in_subprocess
+from agent.ownership import hosted
+from agent.tests.claim.test_inbound_ownership import _admit, _agent, _insert
 from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.exec_request_evidence import Verdict
 from base.agents.incarnation.hosted_force import original_host_force, recover_orphaned_hosted_forces
@@ -40,14 +41,12 @@ def _allow_model_config(
     *, model: str | None = None, config: dict[str, object] | None = None
 ) -> str:
     """Return the model name unchanged; fake-host tests carry no provider keys."""
-
     return model or "deepseek-v4-flash-vision-exp"
 
 
 @pytest.fixture(autouse=True)
 def _host_wakes_need_no_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep fake-host wakes independent of installed provider credentials."""
-
     monkeypatch.setattr(
         "services.agent_runner.agent_host.runtime.validate_model_config", _allow_model_config
     )
@@ -120,7 +119,7 @@ async def _assert_pending_force(
     with pytest.raises(ResurrectSettlementDeferredError):
         await asyncio.to_thread(resurrect_agent, *handles, agent_id, resurrected_by="user")
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             pool, agent_id, "claim-test", uuid4(), expected_from="terminated", db=handles[0]
         )
         is None
@@ -195,8 +194,6 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
         elif work_kind == "thread":
             await asyncio.to_thread(_blocking_work, entered, release)
         else:
-            from agent.graph.exec._subprocess import _run_in_subprocess
-
             await _run_in_subprocess(
                 database,
                 "from pathlib import Path\nimport time\n"
@@ -210,6 +207,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
                 asyncio.Event(),
                 20,
                 exec_dir=tmp_path,
+                accumulation_max_chars=1_000_000,
             )
         return {"exit_requested": False, "restart_requested": False, "turn_idle": True}
 
@@ -273,7 +271,7 @@ async def test_idle_force_only_original_live_host_can_observe(
         db=Database.from_settings(),
     )
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", host._owner, expected_from="idling", db=database
         )
         is not None
@@ -310,7 +308,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
         db=Database.from_settings(),
     )
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
@@ -354,7 +352,7 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
         db=Database.from_settings(),
     )
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
@@ -417,7 +415,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
         db=Database.from_settings(),
     )
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
@@ -487,7 +485,7 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
         db=Database.from_settings(),
     )
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
@@ -564,7 +562,7 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
         db=Database.from_settings(),
     )
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
@@ -621,7 +619,7 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
         db=Database.from_settings(),
     )
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
@@ -667,7 +665,7 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
         db=Database.from_settings(),
     )
     assert (
-        await admit_hosted_runtime(
+        await hosted.admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
@@ -722,9 +720,6 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     event_bus: EventBus,
 ) -> None:
     from agent.graph.exec._result import _ExecCrashed
-    from agent.graph.exec._subprocess import _run_in_subprocess
-    from agent.ownership.hosted import apply_hosted_lifecycle, settle_hosted_runtime
-    from agent.tests.claim.test_inbound_ownership import _admit
     from base.native_process.exec_domain import ExecProcessDomain
     from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 
@@ -741,7 +736,13 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     with bind_hosted_resources(scope):
         ctx = ctx_of(agent_id)
         outcome, _ = await _run_in_subprocess(
-            database, "print('resource-proof')", ctx, asyncio.Event(), 10, exec_dir=tmp_path
+            database,
+            "print('resource-proof')",
+            ctx,
+            asyncio.Event(),
+            10,
+            exec_dir=tmp_path,
+            accumulation_max_chars=1_000_000,
         )
         assert isinstance(outcome, _ExecCrashed)
         assert "teardown failure" in outcome.output
@@ -752,8 +753,8 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         assert scope.unresolved[path] is domain
         assert domain.proc.returncode is None  # unresolved closure must not reap
         # A formatted tool failure cannot become a positive lifecycle barrier.
-        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) is None
-        assert not await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
+        assert await hosted.apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) is None
+        assert not await hosted.settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
     assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
     original_close(domain, time.monotonic() + 5)
     domain.proc.wait(timeout=5)

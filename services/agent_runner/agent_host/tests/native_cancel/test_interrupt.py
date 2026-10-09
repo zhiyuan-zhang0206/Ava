@@ -61,6 +61,7 @@ async def test_real_managed_exec_abort_closes_resources_before_original_ack(
                     interrupted,
                     30,
                     exec_dir=tmp_path,
+                    accumulation_max_chars=1_000_000,
                 )
             )
             try:
