@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from base.agents.messages.envelope import validate_source, wrap_inbound
+from base.agents.messages.envelope import inbound_head, validate_source, wrap_inbound
 from base.clock import Clock
 from base.clock.tests.fakes import fix_now_timestamp
 
@@ -373,3 +373,13 @@ class TestWeekdayFlag:
                 wrap_inbound("hi", "user", created_at=datetime.now(UTC)),
             ):
                 assert re.match(shape, out.split("\n")[0]), out
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["user", "ui:page:dash", "agent:5", "watcher:3", "shell:9", "schedule:4", "system", "system:x"],
+)
+def test_inbound_head_is_exactly_what_precedes_the_content(source: str) -> None:
+    at = datetime(2026, 10, 4, 3, 0, 0, tzinfo=UTC)
+    head = inbound_head(source, created_at=at)
+    assert wrap_inbound("BODY", source, created_at=at) == head + "BODY"
