@@ -229,7 +229,9 @@ def test_explicit_force_can_finish_a_retained_drain(
     custodian, pooled, direct = native_pooler
     with contextlib.closing(psycopg.connect(pooled)) as client:
         client.execute("INSERT INTO pooler_stop_receipt VALUES (99)")
-        assert not custodian.stop(deadline=time.monotonic() + 0.2)
+        # Allow native listener validation and the durable intent write during setup.
+        # The transaction retains the drain; the force budget below is under test.
+        assert not custodian.stop(deadline=time.monotonic() + 2)
         assert custodian.identity.live()
         assert custodian.stop(deadline=time.monotonic() + force_budget, force=True)
         with pytest.raises(psycopg.OperationalError):
