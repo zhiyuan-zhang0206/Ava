@@ -33,10 +33,10 @@ agent process ←─Unix socket─→ shared MCP daemon (per machine) ←─stdi
 - Tool schema docstrings render in `ava.help(ava.mcps.<server>)`
 
 ## Configuration Sources (four layers merged, later overrides earlier)
-The four `.mcp.json` layers, `~/.ava/mcp_enabled.json` enable control, `requires` preconditions, and remote-server auth (headers / OAuth 2.1) are documented in [[okf/mcps/configuration.ava.okf.md]]; the flow itself (discovery → browser → callback → token storage) in [[okf/mcps/oauth.ava.okf.md]].
+The four `.mcp.json` layers, `~/.ava/mcp_enabled.json` enable control, `requires` preconditions, and remote-server auth (headers / OAuth 2.1) are documented in [[docs/mcps/configuration.ava.okf.md]]; the flow itself (discovery → browser → callback → token storage) in [[docs/mcps/oauth.ava.okf.md]].
 
 ## Installation & Startup Form
-Native vs installed (mirroring skills), the relative-path `.mcp.json` startup form, per-layer `server_cwd`, and why not `uv run`: [[okf/mcps/installation-startup.ava.okf.md]].
+Native vs installed (mirroring skills), the relative-path `.mcp.json` startup form, per-layer `server_cwd`, and why not `uv run`: [[docs/mcps/installation-startup.ava.okf.md]].
 
 ## Key Dependencies
 - [[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md]] — the inbound direction: this cluster AS an MCP server (gateway `/mcp`)

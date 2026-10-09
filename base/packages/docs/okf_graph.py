@@ -71,7 +71,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 def find_root(all_paths: Iterable[str]) -> str | None:
     """The bundle's single root node — the `index.ava.okf.md` closest to the top.
 
-    In this repo the apex lives in the index layer (`okf/index.ava.okf.md`),
+    In this repo the apex lives in the index layer (`docs/index.ava.okf.md`),
     which holds only cross-domain nodes — the domain overviews live with their
     code, in the `docs/` layer of the directory they describe
     (`agent/docs/agent.ava.okf.md`, logical path `agent/agent.ava.okf.md`,
@@ -118,7 +118,7 @@ def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | No
     with `a/b/b.ava.okf.md` and then `a/a.ava.okf.md`. An overview skips itself
     and searches above its directory. Either node may sit in a `docs/` layer.
     Nodes with no ancestor overview fall back to `root` (the apex,
-    `okf/index.ava.okf.md`), including top-level cross-domain index nodes.
+    `docs/index.ava.okf.md`), including top-level cross-domain index nodes.
 
     The result is the **physical** path of the parent, looked up among
     `all_paths`. Every returned parent is a path that exists, which is what
