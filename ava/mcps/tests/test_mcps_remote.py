@@ -26,6 +26,7 @@ class _FakeSocket:
 
     def __init__(self) -> None:
         self.timeout: float | None = None
+        self.timeouts: list[float] = []
         self.connected_to: str | None = None
         self.sent: list[bytes] = []
         self.recv_queue: list[bytes | BaseException] = []
@@ -33,6 +34,7 @@ class _FakeSocket:
 
     def settimeout(self, s: float) -> None:
         self.timeout = s
+        self.timeouts.append(s)
 
     def connect(self, path: str) -> None:
         self.connected_to = path
@@ -57,6 +59,63 @@ def _patch_socket(monkeypatch: pytest.MonkeyPatch, sock: _FakeSocket) -> None:
     monkeypatch.setattr(socket, "socket", lambda *_a, **_kw: sock)  # pyright: ignore[reportUnknownArgumentType]
 
 
+@pytest.mark.parametrize("method", ["list_tools", "call_tool"])
+def test_remote_client_uses_request_timeout_for_dial_and_response(
+    monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    result: list[dict[str, Any]] | dict[str, Any] = (
+        [] if method == "list_tools" else {"content": [], "isError": False}
+    )
+    sock = _FakeSocket()
+    sock.recv_queue = [json.dumps({"id": 1, "ok": True, "result": result}).encode() + b"\n"]
+    _patch_socket(monkeypatch, sock)
+    monkeypatch.setattr(remote_mod.time, "time", lambda: 100.0)
+    client = remote_mod.connect_remote("fake-socket-path")
+
+    if method == "list_tools":
+        assert client.list_tools("srv", timeout_seconds=7.5) == result
+    else:
+        assert client.call_tool("srv", "t", {}, timeout_seconds=7.5) == result
+
+    assert sock.timeouts == [7.5, 7.5]
+
+
+def test_remote_client_reuses_socket_with_each_requests_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sock = _FakeSocket()
+    sock.recv_queue = [
+        json.dumps({"id": 1, "ok": True, "result": []}).encode() + b"\n",
+        json.dumps({"id": 2, "ok": True, "result": []}).encode() + b"\n",
+    ]
+    _patch_socket(monkeypatch, sock)
+    monkeypatch.setattr(remote_mod.time, "time", lambda: 100.0)
+    client = remote_mod.connect_remote("fake-socket-path")
+
+    assert client.list_tools("srv", timeout_seconds=7.5) == []
+    assert client.list_tools("srv", timeout_seconds=2.0) == []
+
+    assert sock.timeouts == [7.5, 7.5, 2.0]
+    assert sock.closed is False
+
+
+def test_remote_client_foreign_responses_do_not_reset_request_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sock = _FakeSocket()
+    sock.recv_queue = [json.dumps({"id": 9, "ok": True, "result": []}).encode() + b"\n"]
+    _patch_socket(monkeypatch, sock)
+    clock = iter([100.0, 100.0, 102.0])
+    monkeypatch.setattr(remote_mod.time, "time", lambda: next(clock))
+    client = remote_mod.connect_remote("fake-socket-path")
+
+    with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
+        client.list_tools("srv", timeout_seconds=2.0)
+
+    assert sock.timeouts == [2.0, 2.0]
+    assert sock.closed is True
+
+
 def test_remote_client_list_tools_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
     sock = _FakeSocket()
     sock.recv_queue = [
@@ -72,7 +131,7 @@ def test_remote_client_list_tools_roundtrip(monkeypatch: pytest.MonkeyPatch) -> 
     _patch_socket(monkeypatch, sock)
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
-    tools = client.list_tools("srv")
+    tools = client.list_tools("srv", timeout_seconds=5.0)
 
     assert tools == [{"name": "t1", "description": "d1", "input_schema": {"type": "object"}}]
     assert sock.connected_to == "fake-socket-path"
@@ -97,7 +156,7 @@ def test_remote_client_call_tool_roundtrip(monkeypatch: pytest.MonkeyPatch) -> N
     _patch_socket(monkeypatch, sock)
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
-    out = client.call_tool("srv", "tool_x", {"k": "v"})
+    out = client.call_tool("srv", "tool_x", {"k": "v"}, timeout_seconds=5.0)
 
     assert out == {"content": [], "isError": False, "structuredContent": None}
     sent_req = json.loads(sock.sent[0].decode().rstrip())
@@ -115,7 +174,7 @@ def test_remote_client_raises_on_error_response(monkeypatch: pytest.MonkeyPatch)
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPCallError, match="permission denied"):
-        client.list_tools("srv")
+        client.list_tools("srv", timeout_seconds=5.0)
 
 
 def test_remote_client_raises_when_connection_closed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,7 +185,7 @@ def test_remote_client_raises_when_connection_closed(monkeypatch: pytest.MonkeyP
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="connection closed"):
-        client.list_tools("srv")
+        client.list_tools("srv", timeout_seconds=5.0)
 
 
 def test_remote_client_raises_on_recv_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,7 +196,7 @@ def test_remote_client_raises_on_recv_timeout(monkeypatch: pytest.MonkeyPatch) -
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
-        client.list_tools("srv")
+        client.list_tools("srv", timeout_seconds=5.0)
 
 
 def test_remote_client_accumulates_chunked_response(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -148,7 +207,7 @@ def test_remote_client_accumulates_chunked_response(monkeypatch: pytest.MonkeyPa
     _patch_socket(monkeypatch, sock)
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
-    assert client.list_tools("srv") == []
+    assert client.list_tools("srv", timeout_seconds=5.0) == []
 
 
 def test_remote_client_request_ids_increment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,8 +220,8 @@ def test_remote_client_request_ids_increment(monkeypatch: pytest.MonkeyPatch) ->
     _patch_socket(monkeypatch, sock)
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
-    client.list_tools("srv")
-    client.list_tools("srv")
+    client.list_tools("srv", timeout_seconds=5.0)
+    client.list_tools("srv", timeout_seconds=5.0)
     id1 = json.loads(sock.sent[0].decode().rstrip())["id"]
     id2 = json.loads(sock.sent[-1].decode().rstrip())["id"]
     assert (id1, id2) == (1, 2)
@@ -192,7 +251,7 @@ def test_remote_client_skips_stale_response_with_foreign_id(
     # consumed and its late response is what sits at the head of the buffer.
     client._req_id = 1
     # this call sends id=2; it must NOT consume the id=1 stale line
-    assert client.call_tool("srv", "t", {}) == "fresh"
+    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0) == "fresh"
     # the stale line was consumed and discarded, stream stays aligned
     assert sock.closed is False
 
@@ -208,7 +267,7 @@ def test_remote_client_skips_notification_line(monkeypatch: pytest.MonkeyPatch) 
     _patch_socket(monkeypatch, sock)
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
-    assert client.call_tool("srv", "t", {}) == "ok"
+    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0) == "ok"
 
 
 def test_remote_client_skips_stale_and_notification_then_matches(
@@ -225,7 +284,7 @@ def test_remote_client_skips_stale_and_notification_then_matches(
     _patch_socket(monkeypatch, sock)
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
-    assert client.call_tool("srv", "t", {}) == "mine"
+    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0) == "mine"
 
 
 def test_remote_client_closes_socket_on_recv_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -239,7 +298,7 @@ def test_remote_client_closes_socket_on_recv_timeout(monkeypatch: pytest.MonkeyP
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
-        client.list_tools("srv")
+        client.list_tools("srv", timeout_seconds=5.0)
     assert sock.closed is True
     assert client._sock is None, "next request must reconnect fresh"
 
@@ -254,7 +313,7 @@ def test_remote_client_closes_socket_when_connection_closed(
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="connection closed"):
-        client.list_tools("srv")
+        client.list_tools("srv", timeout_seconds=5.0)
     assert sock.closed is True
     assert client._sock is None
 
@@ -269,7 +328,7 @@ def test_remote_client_raises_on_malformed_response_line(monkeypatch: pytest.Mon
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="malformed"):
-        client.list_tools("srv")
+        client.list_tools("srv", timeout_seconds=5.0)
     assert sock.closed is True
     assert client._sock is None
 
@@ -283,7 +342,7 @@ def test_remote_client_error_response_keeps_socket_open(monkeypatch: pytest.Monk
 
     client = mcps_mod._RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPCallError, match="nope"):
-        client.list_tools("srv")
+        client.list_tools("srv", timeout_seconds=5.0)
     assert sock.closed is False
     assert client._sock is sock
 
@@ -297,9 +356,13 @@ def test_list_tools_uses_remote_when_available(monkeypatch: pytest.MonkeyPatch) 
     fake_remote.list_tools.return_value = [{"name": "t1", "description": "d", "input_schema": {}}]
     monkeypatch.setattr(mcps_mod, "_get_remote_client", lambda: fake_remote)
 
-    tools = mcps_mod._list_tools("srv")
-    assert tools == [{"name": "t1", "description": "d", "input_schema": {}}]
-    fake_remote.list_tools.assert_called_once_with("srv")
+    for timeout in (7.5, 2.0):
+        monkeypatch.setattr(settings.sandbox, "mcp_connect_timeout_seconds", timeout)
+        tools = mcps_mod._list_tools("srv")
+        assert tools == [{"name": "t1", "description": "d", "input_schema": {}}]
+        assert fake_remote.list_tools.call_args.args == ("srv",)
+        assert fake_remote.list_tools.call_args.kwargs == {"timeout_seconds": timeout}
+    assert fake_remote.list_tools.call_count == 2
 
 
 def test_list_tools_falls_back_to_cache_when_remote_fails(
@@ -328,9 +391,13 @@ def test_call_raw_uses_remote_when_available(monkeypatch: pytest.MonkeyPatch) ->
     }
     monkeypatch.setattr(mcps_mod, "_get_remote_client", lambda: fake_remote)
 
-    out = mcps_mod._call_raw("srv", "tool_x", arg="v")
-    assert out["content"][0]["text"] == "ok"
-    fake_remote.call_tool.assert_called_once_with("srv", "tool_x", {"arg": "v"})
+    for timeout in (7.5, 2.0):
+        monkeypatch.setattr(settings.sandbox, "mcp_connect_timeout_seconds", timeout)
+        out = mcps_mod._call_raw("srv", "tool_x", arg="v")
+        assert out["content"][0]["text"] == "ok"
+        assert fake_remote.call_tool.call_args.args == ("srv", "tool_x", {"arg": "v"})
+        assert fake_remote.call_tool.call_args.kwargs == {"timeout_seconds": timeout}
+    assert fake_remote.call_tool.call_count == 2
 
 
 def test_call_raw_falls_back_to_local_when_remote_fails(

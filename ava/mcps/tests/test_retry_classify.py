@@ -6,6 +6,7 @@ import asyncio
 import builtins
 import errno
 import json
+import socket
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -116,7 +117,7 @@ def test_daemon_reply_lost_does_not_fall_back_locally(monkeypatch: pytest.Monkey
     sock = MagicMock()
     sock.recv.return_value = b""  # daemon may have executed the tool
     client = mcps._RemoteMCPClient("unused")
-    monkeypatch.setattr(client, "_ensure_connected", lambda: sock)
+    monkeypatch.setattr(socket, "socket", MagicMock(return_value=sock))
     monkeypatch.setattr(mcps, "_get_remote_client", lambda: client)
 
     def forbid_local(coro: Any) -> None:
