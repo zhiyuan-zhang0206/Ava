@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from langchain_core.exceptions import ModelRateLimitError
 from pydantic import SecretStr
 
 import ava
@@ -69,6 +70,7 @@ class _FakeLLM:
         self._captured = captured
 
     def invoke(self, messages: list[Any]) -> _FakeLLMResponse:
+        self._captured["invoke_calls"] = self._captured.get("invoke_calls", 0) + 1
         for msg in messages:
             if hasattr(msg, "content") and isinstance(msg.content, list):
                 for block in msg.content:  # pyright: ignore[reportUnknownMemberType]
@@ -188,16 +190,42 @@ def test_fetch_no_truncation_note_when_under_limit(
 
 
 def test_fetch_wraps_llm_error(monkeypatch: pytest.MonkeyPatch, mock_llm: dict[str, Any]) -> None:
-    """LLM invoke raising (rate limit, empty response, etc.) surfaces as
-    FetchError carrying the reason — never a silent failure."""
+    """An exhausted typed provider failure preserves its cause in FetchError."""
     monkeypatch.setattr(settings.web, "jina_api_key", None)
-    mock_llm["error"] = RuntimeError("rate limit exceeded")
+    monkeypatch.setattr(settings.lm, "llm_invoke_retry_attempts", 0)
+    error = ModelRateLimitError("rate limit exceeded")
+    mock_llm["error"] = error
     payload = _make_jina_response(content="ok")
     with (
         patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload)),
-        pytest.raises(FetchError, match="rate limit"),
+        pytest.raises(FetchError, match="rate limit") as raised,
     ):
         ava.web.fetch([("https://example.com", "summarize")])
+    assert raised.value.__cause__ is error
+    assert mock_llm["invoke_calls"] == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("invalid callback input"),
+        ValueError("invalid response"),
+        RuntimeError("rate limit"),
+    ],
+)
+def test_fetch_unknown_model_error_preserves_identity_without_retry(
+    monkeypatch: pytest.MonkeyPatch, mock_llm: dict[str, Any], error: Exception
+) -> None:
+    monkeypatch.setattr(settings.web, "jina_api_key", None)
+    mock_llm["error"] = error
+    payload = _make_jina_response(content="ok")
+    with (
+        patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload)),
+        pytest.raises(type(error)) as raised,
+    ):
+        ava.web.fetch([("https://example.com", "summarize")])
+    assert raised.value is error
+    assert mock_llm["invoke_calls"] == 1
 
 
 def test_fetch_uses_jina_api_key_when_set(

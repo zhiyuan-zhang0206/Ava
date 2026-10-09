@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+import httpx2
+import openai
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -200,9 +203,8 @@ def test_invoke_text_empty_response_raises_error_type() -> None:
 def test_invoke_text_upstream_error_wrapped_in_error_type(loguru_records) -> None:
     class _Boom:
         def invoke(self, messages: list[Any]) -> Any:
-            exc = RuntimeError("rate limit exceeded")
-            exc.status_code = 429  # type: ignore[attr-defined]
-            raise exc
+            response = httpx2.Response(429, request=httpx2.Request("POST", "https://audit.invalid"))
+            raise openai.RateLimitError("rate limit exceeded", response=response, body=None)
 
     with pytest.raises(KeyError, match="rate limit"):
         invoke_text(
@@ -301,7 +303,6 @@ def test_invoke_text_retries_transient_then_succeeds(
 ) -> None:
     """A TRANSIENT provider failure (transport class) is retried when
     `retry_attempts` allows, and a later success returns normally."""
-    import httpx
 
     monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
@@ -331,7 +332,6 @@ def test_invoke_text_retry_exhausted_raises_error_type(
 ) -> None:
     """A failure that persists past the retry budget raises the caller's
     error type with the attempt count in the message."""
-    import httpx
 
     monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
@@ -356,7 +356,6 @@ def test_invoke_text_retry_uses_exponential_backoff(
 ) -> None:
     """Retry waits double per attempt (base 2 → 4 → 8…) capped at
     retry_max_delay_seconds, plus jitter; the base itself is not re-added."""
-    import httpx
 
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
@@ -381,7 +380,6 @@ def test_invoke_text_retry_uses_exponential_backoff(
 
 def test_invoke_text_retry_backoff_capped(monkeypatch: pytest.MonkeyPatch) -> None:
     """The exponential sequence stops growing at retry_max_delay_seconds."""
-    import httpx
 
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
@@ -404,14 +402,6 @@ def test_invoke_text_retry_backoff_capped(monkeypatch: pytest.MonkeyPatch) -> No
     assert sleeps == [2.0, 4.0, 5.0, 5.0]
 
 
-class _RetryAfterHeaders:
-    def __init__(self, **values: str) -> None:
-        self._v = {k.lower(): v for k, v in values.items()}
-
-    def get(self, key: str) -> str | None:
-        return self._v.get(key.lower())
-
-
 class _RetryAfterLLM:
     """An llm whose invoke always raises a 429-shaped TRANSIENT error carrying
     a Retry-After response header — the provider-SDK error shape."""
@@ -420,13 +410,12 @@ class _RetryAfterLLM:
         self._header = header
 
     def invoke(self, messages: list[Any]) -> Any:
-        import httpx
-
-        exc = httpx.ConnectError("429 rate limited")
-        exc.response = type(  # type: ignore[attr-defined]
-            "R", (), {"headers": _RetryAfterHeaders(**{self._header[0]: self._header[1]})}
-        )()
-        raise exc
+        response = httpx2.Response(
+            429,
+            request=httpx2.Request("POST", "https://audit.invalid"),
+            headers={self._header[0]: self._header[1]},
+        )
+        raise openai.RateLimitError("429 rate limited", response=response, body=None)
 
 
 def test_invoke_text_retry_respects_retry_after(
@@ -500,9 +489,8 @@ def test_invoke_text_does_not_retry_permanent() -> None:
     class _Auth:
         def invoke(self, messages: list[Any]) -> Any:
             calls["n"] += 1
-            exc = RuntimeError("401 unauthorized")
-            exc.status_code = 401  # type: ignore[attr-defined]
-            raise exc
+            response = httpx2.Response(401, request=httpx2.Request("POST", "https://audit.invalid"))
+            raise openai.AuthenticationError("401 unauthorized", response=response, body=None)
 
     with pytest.raises(ValueError, match="401"):
         invoke_text(

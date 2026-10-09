@@ -6,7 +6,7 @@ returned another chunk; the default anthropic SDK 600s overall timeout was the o
 safety net, leaving the agent silently stuck for 4-10 minutes; turn_end ok=False never
 even fired, so the frontend saw neither a stream nor an error.
 
-Fix: wrap `__anext__` on `_stream` with `asyncio.wait_for`,
+Fix: bound the model's `__anext__` with an owned `asyncio.timeout`,
 `settings.lm.llm_stream_ttft_timeout_seconds` and `settings.lm.llm_stream_inter_chunk_timeout_seconds`
 raise `LLMStreamStallTimeoutError`. Together with PR #60's finally `logger.opt(exception=
 True).warning`, events.payload automatically carries traceback / exception_type.
@@ -20,6 +20,8 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import httpx2
+import openai
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -312,12 +314,16 @@ async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
     assert elapsed < 5.0
 
 
-class _FakeOverloadedError(Exception):
+class _FakeOverloadedError(openai.RateLimitError):
     """A provider error carrying `engine_overloaded_error` in its SDK body."""
 
     def __init__(self) -> None:
-        super().__init__("engine overloaded")
-        self.body = {"error": {"type": "engine_overloaded_error"}}
+        response = httpx2.Response(429, request=httpx2.Request("POST", "https://audit.invalid"))
+        super().__init__(
+            "engine overloaded",
+            response=response,
+            body={"error": {"type": "engine_overloaded_error"}},
+        )
 
 
 async def test_overload_fallback_timeout_is_not_a_stall_pair(

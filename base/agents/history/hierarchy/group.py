@@ -213,6 +213,7 @@ def generate_groups(
     Raises:
         GenerateError: the provider call failed after retries, or the reply was
             still refused after the last correction.
+        Exception: an unknown model invocation error, unchanged and without retry.
     """
     request = build_group_prompt(nodes, clock=clock, must_close=must_close)
     messages: list[Any] = [HumanMessage(content=request)]
@@ -228,7 +229,7 @@ def generate_groups(
                 model=model,
                 usage_source="hierarchy.group",
             )
-        except GenerateError as exc:
+        except Exception as exc:
             _record(
                 on_call, GroupCall(round_no, model, request, None, _ms(started), None, str(exc))
             )
