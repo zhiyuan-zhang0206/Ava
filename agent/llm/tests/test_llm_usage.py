@@ -39,7 +39,7 @@ def test_deepseek_shape_logs(loguru_records):
             "output_token_details": {"reasoning": 70},
         },
     )
-    log_llm_usage(msg, model="deepseek-v4-pro")
+    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro")
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=1000 cached=800" in out
     assert "(80%)" in out
@@ -49,6 +49,7 @@ def test_deepseek_shape_logs(loguru_records):
     # dashboard 24h cost groups/prices by it. If the field name drifts, this test goes red.
     assert loguru_records[0]["extra"]["model"] == "deepseek-v4-pro"
     assert loguru_records[0]["extra"]["usage_kind"] == "agent"
+    assert loguru_records[0]["extra"]["agent_id"] == 7
 
 
 def test_anthropic_shape_logs(loguru_records):
@@ -65,7 +66,7 @@ def test_anthropic_shape_logs(loguru_records):
             # no output_token_details
         },
     )
-    log_llm_usage(msg, model="claude-opus-4-7")
+    log_llm_usage(msg, agent_id=7, model="claude-opus-4-7")
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=2000 cached=1500" in out
     assert "out=50 reason=0" in out
@@ -80,7 +81,7 @@ def test_zero_input_no_pct(loguru_records):
             "total_tokens": 0,
         },
     )
-    log_llm_usage(msg, model="claude-opus-4-7")
+    log_llm_usage(msg, agent_id=7, model="claude-opus-4-7")
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=0" in out
     assert "%" not in out
@@ -93,13 +94,13 @@ def test_latency_ms_rides_payload(loguru_records):
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
-    log_llm_usage(msg, model="deepseek-v4-pro", latency_ms=1234.5)
+    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro", latency_ms=1234.5)
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=100" in out
     assert "latency" not in out  # never in the human-readable line
     assert loguru_records[0]["extra"]["latency_ms"] == 1234.5
     loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
-    log_llm_usage(msg, model="deepseek-v4-pro")
+    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro")
     assert loguru_records[0]["extra"]["latency_ms"] is None
 
 
@@ -111,14 +112,14 @@ def test_decode_ms_rides_payload(loguru_records):
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
-    log_llm_usage(msg, model="deepseek-v4-pro", latency_ms=1234.5, decode_ms=800.0)
+    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro", latency_ms=1234.5, decode_ms=800.0)
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=100" in out
     assert "decode" not in out  # never in the human-readable line
     assert loguru_records[0]["extra"]["decode_ms"] == 800.0
     assert loguru_records[0]["extra"]["latency_ms"] == 1234.5
     loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
-    log_llm_usage(msg, model="deepseek-v4-pro", latency_ms=1234.5)
+    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro", latency_ms=1234.5)
     assert loguru_records[0]["extra"]["decode_ms"] is None
 
 
@@ -127,13 +128,13 @@ def test_usage_has_no_task_attribution(loguru_records) -> None:
     msg = AIMessage(
         content="", usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}
     )
-    log_llm_usage(msg, model="deepseek-v4-pro")
+    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro")
     assert "task_id" not in loguru_records[0]["extra"]
 
 
 def test_no_usage_metadata_silent(loguru_records):
     msg = AIMessage(content="")
-    log_llm_usage(msg, model="claude-opus-4-7")
+    log_llm_usage(msg, agent_id=7, model="claude-opus-4-7")
     assert loguru_records == []
 
 
@@ -154,6 +155,7 @@ def test_price_snapshot_rides_payload(loguru_records):
     )
     log_llm_usage(
         msg,
+        agent_id=7,
         model="deepseek-v4-pro",
         priced_at=datetime(2026, 8, 17, 0, 0, tzinfo=UTC),
     )
@@ -220,6 +222,7 @@ def test_log_llm_usage_emits_agent_billing_span(
 
     log_llm_usage(
         message,
+        agent_id=7,
         model="deepseek-v4-pro",
         latency_ms=1_234.5,
         priced_at=priced_at,
@@ -275,7 +278,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
     )
     object.__setattr__(message, "usage_metadata", {"input_tokens": 100, "total_tokens": 100})
 
-    log_llm_usage(message, model="deepseek-v4-pro")
+    log_llm_usage(message, agent_id=7, model="deepseek-v4-pro")
 
     assert tracer.spans == []
 
@@ -292,7 +295,7 @@ def test_price_snapshot_absent_for_unpriced_model(
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
-    log_llm_usage(msg, model="no-such-model")
+    log_llm_usage(msg, agent_id=7, model="no-such-model")
     usage_record = next(
         record for record in loguru_records if record["extra"].get("event") == "llm_usage"
     )
@@ -323,6 +326,7 @@ def test_gemini_explicit_cache_provenance_labels(loguru_records: list[dict[str, 
     )
     log_llm_usage(
         msg,
+        agent_id=7,
         model="gemini-3.8-flash",
         cache_mechanism="mixed",
         cache_scope="explicit_block",
@@ -344,7 +348,7 @@ def test_no_provenance_labels_when_unknown(loguru_records: list[dict[str, Any]])
             "input_token_details": {"cache_read": 200},
         },
     )
-    log_llm_usage(msg, model="gemini-3.8-flash")
+    log_llm_usage(msg, agent_id=7, model="gemini-3.8-flash")
     assert "cache_mechanism" not in loguru_records[0]["extra"]
     assert "cache_scope" not in loguru_records[0]["extra"]
 
@@ -381,7 +385,7 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
             "output_token_details": {"reasoning": 20},
         },
     )
-    log_llm_usage(msg, model="claude-opus-4-7")
+    log_llm_usage(msg, agent_id=7, model="claude-opus-4-7")
     event = cast("dict[str, Any]", loguru_records[0]["extra"])  # pyright: ignore[reportUnknownArgumentType]
     stamped: dict[str, Any] = msg.additional_kwargs["ava_usage"]
     assert stamped["cost_usd"] > 0
@@ -400,3 +404,13 @@ def test_non_agent_logging_does_not_stamp(loguru_records):
     )
     log_usage_from_message(msg, "claude-opus-4-7", usage_kind="label")
     assert "ava_usage" not in msg.additional_kwargs
+
+
+def test_main_conversation_usage_refuses_missing_identity() -> None:
+    msg = AIMessage(
+        content="", usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+    )
+    with pytest.raises(TypeError, match="agent_id"):
+        cast(Any, log_llm_usage)(msg, model="deepseek-v4-pro")
+    with pytest.raises(ValueError, match="explicit agent id"):
+        cast(Any, log_llm_usage)(msg, model="deepseek-v4-pro", agent_id=None)
