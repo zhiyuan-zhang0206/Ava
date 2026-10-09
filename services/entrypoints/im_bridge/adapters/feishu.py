@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import json
-import threading
 from collections import deque
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -58,7 +57,7 @@ class FeishuAdapter(IMAdapter):
     """Bridge enterprise bot p2p text through WS events and polling fallback.
 
     The lark WS SDK binds an event loop at its first import and blocks in
-    Client.start(). Import it lazily in the dedicated WS thread so its
+    Client.start(). Import it lazily in a service-owned executor job so its
     run_until_complete never touches the daemon loop; SDK reconnect stays
     automatic. Outbound uses a separate REST client via asyncio.to_thread.
     """
@@ -73,7 +72,8 @@ class FeishuAdapter(IMAdapter):
         self._app_secret = ""
         self._main_loop: asyncio.AbstractEventLoop | None = None
         self._ws_loop: asyncio.AbstractEventLoop | None = None
-        self._ws_thread: threading.Thread | None = None
+        self._ws_task: asyncio.Task[None] | None = None
+        self._ws_started: asyncio.Future[None] | None = None
         self._tasks: asyncio.TaskGroup | None = None
         self._ws_exit: asyncio.Future[None] | None = None
         self._accepting_events = False
@@ -121,17 +121,18 @@ class FeishuAdapter(IMAdapter):
         self._main_loop = asyncio.get_running_loop()
         self._tasks = tasks
         self._ws_exit = self._main_loop.create_future()
+        self._ws_started = self._main_loop.create_future()
         self._accepting_events = True
         tasks.create_task(self._observe_ws_exit(self._ws_exit))
-        self._ws_thread = threading.Thread(target=self._run_ws, name="feishu-ws", daemon=True)
-        self._ws_thread.start()
-        logger.info("FeishuAdapter: ws thread started")
+        self._ws_task = tasks.create_task(asyncio.to_thread(self._run_ws), name="feishu-ws")
+        await self._ws_started
+        logger.info("FeishuAdapter: ws worker started")
         self._start_poller(tasks)
 
     def _run_ws(self) -> None:
         """Connect the long-connection client; blocks for the process lifetime.
 
-        Runs in a dedicated daemon thread (see the class docstring for why every
+        Runs in the daemon's executor (see the class docstring for why every
         lark import lives here). The SDK owns its network reconnects.
         Unexpected exits and faults reach the active service task owner;
         after begin_shutdown, late thread outcomes are outside that owner wait.
@@ -139,6 +140,7 @@ class FeishuAdapter(IMAdapter):
         main_loop = self._main_loop
         if main_loop is None:
             raise RuntimeError("Feishu websocket thread has no service loop")
+        main_loop.call_soon_threadsafe(self._record_ws_started)
         try:
             self._ws_client = self._build_ws_client()
             import lark_oapi.ws.client as _ws_module  # pyright: ignore[reportUnknownVariableType]
@@ -180,8 +182,17 @@ class FeishuAdapter(IMAdapter):
         """Reject queued callbacks and end the owner wait; this does not stop the thread."""
         self._accepting_events = False
         self._tasks = None
+        if self._ws_task is not None:
+            self._ws_task.cancel()
+        if self._ws_started is not None and not self._ws_started.done():
+            self._ws_started.cancel()
         if self._ws_exit is not None and not self._ws_exit.done():
             self._ws_exit.cancel()
+
+    def _record_ws_started(self) -> None:
+        """Acknowledge worker entry, not a successful websocket connection."""
+        if self._accepting_events and self._ws_started is not None and not self._ws_started.done():
+            self._ws_started.set_result(None)
 
     async def _observe_ws_exit(self, future: asyncio.Future[None]) -> None:
         await future
@@ -203,8 +214,10 @@ class FeishuAdapter(IMAdapter):
 
     async def stop(self) -> None:
         """Close the ws connection (the SDK has no public stop; its private
-        ``_disconnect`` is scheduled on the SDK's own loop). The ws thread is a
-        daemon and lingers harmlessly until process exit."""
+        ``_disconnect`` is scheduled on the SDK's own loop). Cancelling the
+        service task does not interrupt its worker; daemon main exits without
+        joining the executor after its existing cleanup. This best-effort
+        request does not wait for the SDK loop to execute or finish it."""
         self.begin_shutdown()
         poll_task = self._poll_task
         self._poll_task = None
@@ -586,7 +599,13 @@ class FeishuAdapter(IMAdapter):
     def _check_send_ready(self) -> None:
         if not self._app_id or not self._app_secret:
             raise RuntimeError("feishu send failed: adapter not configured")
-        if self._ws_thread is None or not self._ws_thread.is_alive():
+        if (
+            self._ws_task is None
+            or self._ws_task.done()
+            or self._ws_started is None
+            or not self._ws_started.done()
+            or self._ws_started.cancelled()
+        ):
             raise RuntimeError("feishu send failed: adapter not started")
 
     async def send(

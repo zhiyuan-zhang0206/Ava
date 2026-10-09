@@ -40,11 +40,13 @@ class FakeCore:
 
 
 class BootAdapter(FeishuAdapter):
-    """Adapter with the ws thread and the poller stubbed out: ``start()``'s seed
+    """Adapter with the ws worker and the poller stubbed out: ``start()``'s seed
     is the only real work under test (no lark import, no network)."""
 
     def _run_ws(self) -> None:
-        pass
+        main_loop = self._main_loop
+        assert main_loop is not None
+        main_loop.call_soon_threadsafe(self._record_ws_started)
 
     def _start_poller(self, tasks: asyncio.TaskGroup) -> None:
         pass
@@ -81,7 +83,7 @@ async def test_start_seeds_owner_open_id_from_switch_state(
             core,
         )
 
-        await adapter.start(_owned_tasks)
+        await asyncio.wait_for(adapter.start(_owned_tasks), timeout=5)
 
         assert adapter._last_open_id == "ou_owner_1"
 
