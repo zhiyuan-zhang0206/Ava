@@ -5,9 +5,9 @@ import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 
 import { ContextBreakdownCard, type CategoryHighlight } from "@/components/inspector/context-breakdown";
-import { AgentViewToolbar } from "@/components/run-timeline/agent-view-toolbar";
-import { AgentPending } from "@/components/run-timeline/agent-view-group";
-import type { AgentSelection } from "@/components/run-timeline/agent-view-nav";
+import { AgentViewToolbar } from "@/components/run-timeline/agent-view/agent-view-toolbar";
+import { AgentPending } from "@/components/run-timeline/agent-view/agent-view-group";
+import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-view-nav";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { RunTimelineRows, type AgentEntry } from "@/components/run-timeline/run-timeline-rows";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
@@ -25,8 +25,8 @@ import {
   type Highlight,
   type Selection,
   type Viewport,
-} from "@/components/run-timeline/timeline-model";
-import type { ContextBars, RowOptions } from "@/components/run-timeline/timeline-nav";
+} from "@/components/run-timeline/model/timeline-model";
+import type { ContextBars, RowOptions } from "@/components/run-timeline/model/timeline-nav";
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
