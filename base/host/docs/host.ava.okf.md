@@ -18,5 +18,5 @@ Its component nodes describe the current contracts and implementation.
 `base/host/net/resilience.py` owns immutable `Policy` parameters and the shared
 `retry` / `aretry` executors, including backoff, jitter, classification and
 idempotency gates. Bootstrap fetches use this owner. Provider and Redis-listener
-loops still have dedicated contracts; their remaining audit is a
+loops still have dedicated contracts; the remaining Redis audit is a
 [future item](../../../future/infra/engineering/retry-consumer-contracts.md).
