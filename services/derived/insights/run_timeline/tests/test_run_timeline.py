@@ -57,7 +57,11 @@ def history_messages() -> list[BaseMessage]:
         ToolMessage(
             content="out",
             tool_call_id="t1",
-            additional_kwargs={"ava_msg_type": "exec_output", "ava_created_at": at(2)},
+            additional_kwargs={
+                "ava_msg_type": "exec_output",
+                "ava_exec_body_start": 0,
+                "ava_created_at": at(2),
+            },
         ),
         AIMessage(
             content="done",

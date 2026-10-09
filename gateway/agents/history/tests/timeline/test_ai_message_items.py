@@ -6,6 +6,7 @@ from base.agents.history.timeline import (
     _ai_message_items,
     build_timeline_items,
 )
+from base.agents.messages.kwargs import ExecStatus
 from gateway.agents.history.tests.test_timeline import (
     test_client as test_client,
 )
@@ -190,7 +191,13 @@ class TestAiMessageItems:
         the code_output item so the collapsed chip can read 'ran in Xs'."""
         from agent.messages import exec_output_message
 
-        msg = exec_output_message(content="hello", tool_call_id="t1", exec_ms=1300)
+        msg = exec_output_message(
+            content="hello",
+            tool_call_id="t1",
+            exec_ms=1300,
+            status=ExecStatus.COMPLETED,
+            body_start=0,
+        )
         items, _ = build_timeline_items([msg], [])
         assert len(items) == 1
         assert items[0].kind == "code_output"
