@@ -4,7 +4,7 @@
 
 import { firstLine, unitColor, unitKey, type Highlight, matchesHighlight } from "../model/timeline-model";
 import { snap, type Cell, type Place, type RowLayout } from "../model/timeline-canvas-model";
-import { messageLit, type Hover, type Selection } from "../model/timeline-model";
+import { type Hover, type Selection } from "../model/timeline-model";
 
 /** Resolves a CSS color (a variable, a `color-mix`) to an opaque canvas color. */
 export type Resolve = (css: string) => string;
@@ -43,6 +43,7 @@ const BAR_MIN_PX = 3;
 const BLOCK_RADIUS = 4;
 const UNIT_RADIUS = 2;
 const UNIT_INSET = 4;
+const UNIT_MIN_PX = 4;
 const TEXT_PAD = 4;
 const MIN_LABEL_PX = 28;
 const NODE_LABEL_CHARS = 80;
@@ -180,9 +181,17 @@ export function paintNodes(p: PaintCtx, layout: RowLayout, state: PaintState, de
   paintDeco(p, deco, top, bottom);
 }
 
-/** The Messages row: one colored block per message unit. */
-export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, deco: RowDeco) {
+/** How the Messages row draws a block's height: all alike, or by its tokens (square root, at least `UNIT_MIN_PX`). */
+export type UnitHeights = "equal" | "tokens";
+
+/** The Messages row: one colored block per message unit, bottom-aligned. `top` is the value of the tallest block. */
+export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, deco: RowDeco, heights: UnitHeights, top: number) {
   const y1 = p.height - UNIT_INSET;
+  const area = y1 - UNIT_INSET;
+  const heightOf = (key: string) =>
+    heights === "equal" || !(top > 0)
+      ? area
+      : Math.min(Math.max(((layout.values?.get(key) ?? 0) / top) * area, UNIT_MIN_PX), area);
   const stateOf = (key: string) => {
     const unit = layout.items.get(key)?.unit;
     if (unit === undefined) return null;
@@ -197,38 +206,41 @@ export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, de
   for (const place of layout.wide) {
     const s = stateOf(place.key);
     if (s === null) continue;
-    fillBox(p, place.x0, place.x1, UNIT_INSET, y1, tone(p, s, unitColor(s.unit)), UNIT_RADIUS);
-    if (s.hoverLight) outline(p, place.x0, place.x1, UNIT_INSET, y1, mix(ACCENT, 0.35, "var(--card)"), 1, UNIT_RADIUS);
+    const y0 = y1 - heightOf(place.key);
+    fillBox(p, place.x0, place.x1, y0, y1, tone(p, s, unitColor(s.unit)), UNIT_RADIUS);
+    if (s.hoverLight) outline(p, place.x0, place.x1, y0, y1, mix(ACCENT, 0.35, "var(--card)"), 1, UNIT_RADIUS);
   }
   for (const cell of layout.cells) {
     const s = stateOf(cell.key);
     if (s === null) continue;
     // A hairline lit by a hover is lifted toward the foreground a little.
-    fillBox(p, cell.x0, cell.x1, UNIT_INSET, y1, tone(p, s, s.hoverLight ? mix(FOREGROUND, 0.3, unitColor(s.unit)) : unitColor(s.unit)));
+    fillBox(p, cell.x0, cell.x1, y1 - heightOf(cell.key), y1, tone(p, s, s.hoverLight ? mix(FOREGROUND, 0.3, unitColor(s.unit)) : unitColor(s.unit)));
   }
-  paintDeco(p, deco, UNIT_INSET, y1);
+  // A frame reaches the top of the tallest block it surrounds, and no higher.
+  const topOf = (keys: ReadonlySet<string>) => y1 - Math.max(UNIT_MIN_PX, ...[...keys].map(heightOf));
+  paintDeco(p, deco, UNIT_INSET, y1, topOf);
 }
 
 const BLUE = "#3b82f6";
 const AMBER = "#f59e0b";
 
-/** A context row: one bar per message as tall as its value, sessions alternating in color. */
-export function paintBars(p: PaintCtx, layout: RowLayout, top: number, added: boolean, state: PaintState, deco: RowDeco) {
+/** The Context size row: one bar per block a request has read, as tall as the context through it, sessions alternating in color. */
+export function paintBars(p: PaintCtx, layout: RowLayout, top: number, state: PaintState, deco: RowDeco) {
   if (!(top > 0)) return;
   const area = p.height - 2 * BAR_ROOM_PX;
   const bottom = p.height - BAR_ROOM_PX;
   const heightOf = (key: string) => Math.max(((layout.values?.get(key) ?? 0) / top) * area, BAR_MIN_PX);
   const stateOf = (key: string) => {
-    const message = layout.items.get(key)?.message;
-    if (message === undefined) return null;
+    const unit = layout.items.get(key)?.unit;
+    if (unit === undefined) return null;
     const lifted = deco.primaryKey === key || deco.linkedKeys.has(key);
-    return { message, lifted, hovered: messageLit(message.idx, state.hover), height: heightOf(key) };
+    const hovered = state.hover?.kind === "unit" && state.hover.i0 === unit.i0 && state.hover.i1 === unit.i1 && state.hover.unitKind === unit.kind;
+    return { unit, lifted, hovered, height: heightOf(key) };
   };
   const colorOf = (s: NonNullable<ReturnType<typeof stateOf>>) => {
-    const hue = s.message.session % 2 === 0 ? BLUE : AMBER;
-    const solid = mix(hue, s.message.session % 2 === 0 ? 0.7 : 0.8, "var(--card)");
-    const own = added && s.message.estimated ? mix(solid, 0.6, p.trackBg) : solid;
-    return state.selection !== null && !s.lifted && !s.hovered ? mix(own, DIM_SHARE, p.trackBg) : own;
+    const hue = s.unit.session % 2 === 0 ? BLUE : AMBER;
+    const solid = mix(hue, s.unit.session % 2 === 0 ? 0.7 : 0.8, "var(--card)");
+    return state.selection !== null && !s.lifted && !s.hovered ? mix(solid, DIM_SHARE, p.trackBg) : solid;
   };
   const draw = (x0: number, x1: number, key: string, ring: boolean) => {
     const s = stateOf(key);
@@ -238,7 +250,7 @@ export function paintBars(p: PaintCtx, layout: RowLayout, top: number, added: bo
   };
   for (const place of layout.wide) draw(place.x0, place.x1, place.key, true);
   for (const cell of layout.cells as readonly Cell[]) draw(cell.x0, cell.x1, cell.key, false);
-  // The selected and linked bars go on top again, so a hairline of another message inside their range does not cut them.
+  // The selected and linked bars go on top again, so a hairline of another block inside their range does not cut them.
   for (const place of layout.wide) if (deco.primaryKey === place.key || deco.linkedKeys.has(place.key)) draw(place.x0, place.x1, place.key, true);
   // A frame reaches the top of the tallest bar it surrounds, and no higher.
   const topOf = (keys: ReadonlySet<string>) => bottom - Math.max(BAR_MIN_PX, ...[...keys].map(heightOf));
