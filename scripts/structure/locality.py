@@ -69,7 +69,7 @@ def _import_base(node: ast.ImportFrom, rel_path: str) -> str | None:
     if node.level == 0:
         return node.module or ""
     package = _package_of(rel_path)
-    if node.level - 1 > len(package):
+    if node.level > len(package):
         return None
     anchor = package[: len(package) - (node.level - 1)]
     return ".".join([*anchor, *([node.module] if node.module else [])])
