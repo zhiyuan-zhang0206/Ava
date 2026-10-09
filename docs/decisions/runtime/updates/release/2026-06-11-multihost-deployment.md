@@ -22,7 +22,7 @@
 > present (a single box simply sees one machine). Read it from
 > [`runbook.md`](../../../../conventions/runbook.md) /
 > [`dev-setup.md`](../../../../conventions/dev-setup.md), the OKF graph
-> ([`okf/index.ava.okf.md`](../../../../../okf/index.ava.okf.md)), and the per-field
+> ([`okf/index.ava.okf.md`](../../../../index.ava.okf.md)), and the per-field
 > `scope` metadata in `shared/config/`.
 
 ---
@@ -625,7 +625,7 @@ because it is the §2 principle made true in code.
 
 ## Related
 
-- [`okf/index.ava.okf.md`](../../../../../okf/index.ava.okf.md) — built process shape, the gateway/ops dial, keep-alive
+- [`okf/index.ava.okf.md`](../../../../index.ava.okf.md) — built process shape, the gateway/ops dial, keep-alive
 - `shared/config/` — the per-field `scope` model this builds on
 - [`runbook.md`](../../../../conventions/runbook.md) · [`dev-setup.md`](../../../../conventions/dev-setup.md) — concrete bring-up + roster
 - [`commit-pinned-cluster.md`](../../../../../future/infra/lifecycle/commit-pinned-cluster.md) — version-consistency foundation

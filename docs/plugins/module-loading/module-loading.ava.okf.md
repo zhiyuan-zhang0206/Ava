@@ -13,7 +13,7 @@ tags:
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
 path — at host boot, and in the plugin catalog. The
 agent-launched child enters through the same loader (`ava.ensure_plugins_loaded`);
-its stateless form loads surfaces only ([[okf/plugins/module-loading/two-faces.ava.okf.md]]).
+its stateless form loads surfaces only ([[docs/plugins/module-loading/two-faces.ava.okf.md]]).
 All drive the same primitives (`ava/sdk_surface/plugin_loader.py`), so a plugin sees the same
 module name, `__package__`, `sys.modules` identity, and containment whichever
 production path imports it (issue #2161 — before unification the boot loader
@@ -38,7 +38,7 @@ child's stateless boot loads surfaces only; the full form (graph build, host
 boot, a stateful child's first state use) adds the optional `agent_runtime.py` face
 carrying the agent-side registrations (state fields, hooks, prompt sections).
 Per-face containment, the face's dotted name, and the load forms in full:
-[[okf/plugins/module-loading/two-faces.ava.okf.md]].
+[[docs/plugins/module-loading/two-faces.ava.okf.md]].
 
 ## Disabled means never imported
 The enable set comes from the per-machine `plugins_config.json`, read by both
@@ -93,7 +93,7 @@ plugins' declared classes, reported fail-soft).
 Child `ava.ensure_plugins_loaded` enters the same loader. Module-import containment remains separate;
 escaping errors abort boot unchanged and are re-raised on later access, without retry. Faces are marked
 loaded only after success. The installer isolates only typed declaration refusals after successful
-rollback; see [[okf/plugins/declared-contributions.ava.okf.md]].
+rollback; see [[docs/plugins/declared-contributions.ava.okf.md]].
 
 ## Semantics boundary: what stays fail-closed
 Containment covers *code* that fails to load; inventory and contract conflicts
@@ -103,7 +103,7 @@ registration-contract violations, post-load revalidation) — and the release
 probe re-raises the contained failures of the faces it exercises (the
 `plugin.py` loader, dangling entries included; the `services.py` roster;
 provider registration). See
-[[okf/plugins/module-loading/fail-closed-boundaries.ava.okf.md]].
+[[docs/plugins/module-loading/fail-closed-boundaries.ava.okf.md]].
 
 ## Registration precedes execution
 The module object is placed in `sys.modules` **before** `exec_module` runs, not
@@ -117,9 +117,9 @@ entry there, the annotation stays a `ForwardRef`, and the later
 A repeat load re-executes the module object already registered for that file
 (`importlib.reload` semantics — module identity stays stable per process), and
 reload is not a lifecycle: the reset covers the framework registries only.
-In full: [[okf/plugins/module-loading/reload-semantics.ava.okf.md]].
+In full: [[docs/plugins/module-loading/reload-semantics.ava.okf.md]].
 
 ## Key Dependencies
-- [[okf/plugins/plugins.ava.okf.md]] — the injection surfaces the import registers into
+- [[docs/plugins/plugins.ava.okf.md]] — the injection surfaces the import registers into
 - [[agent/graph/docs/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent.extensions.load_extensions`) before wiring nodes
 - [[ava_builtins/docs/extensions.ava.okf.md]] — the `SdkWrap` layers a reload re-installs from a pristine core
