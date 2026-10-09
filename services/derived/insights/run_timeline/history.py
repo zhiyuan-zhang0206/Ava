@@ -44,9 +44,10 @@ _TTL_SECONDS = 5.0
 _REFRESH_SECONDS = 2.0
 # A view whose checkpoint id is unchanged is kept this long at most, however often it is re-validated.
 _MAX_AGE_SECONDS = 600.0
-# One agent's view is its whole history; the insights service is shared by concurrently
-# viewed agents, so only a few are kept.
-_MAX_ENTRIES = 6
+# One agent's view is its whole history, about 12 KB per message measured on the preview
+# (a 4.6k-message agent retains ~49 MB, a 200-message worker ~3 MB). The agent view puts
+# several agents on one screen, so one page load needs all of them cached at once.
+_MAX_ENTRIES = 16
 
 
 @dataclass(frozen=True)
