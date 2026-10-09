@@ -7,6 +7,19 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
+from functools import partial
+
+from opentelemetry.trace import Span, get_current_span, use_span
+
+
+def _load_with_span[V](span: Span, load: Callable[[], V]) -> V:
+    with use_span(
+        span,
+        end_on_exit=False,
+        record_exception=False,
+        set_status_on_exception=False,
+    ):
+        return load()
 
 
 class InspectCacheFullError(RuntimeError):
@@ -49,6 +62,8 @@ class InspectQueryCache[K, V]:
         self._values: dict[K, tuple[float, V]] = {}
         self._inflight: dict[K, Future[V]] = {}
         self._lock = threading.Lock()
+        self._loads: set[asyncio.Future[V]] = set()
+        self._closed = False
 
     def get_or_load(
         self,
@@ -91,11 +106,14 @@ class InspectQueryCache[K, V]:
             return claim.value
         if not claim.leader:
             return await asyncio.shield(asyncio.wrap_future(claim.future))
-        # Schedule before the next cancellation point, then shield it. A
-        # response timeout must not land between claiming leadership and
-        # starting the worker, which would leave the key permanently in-flight.
-        leader = asyncio.create_task(
-            asyncio.to_thread(
+        # Retain the native future: cancelling its HTTP waiter cannot stop SQL.
+        # Carry the existing tracing dependency explicitly, not arbitrary
+        # request ContextVars, and retain the existing default executor.
+        leader = asyncio.get_running_loop().run_in_executor(
+            None,
+            _load_with_span,
+            get_current_span(),
+            partial(
                 self._load_claim,
                 key,
                 claim.future,
@@ -103,16 +121,47 @@ class InspectQueryCache[K, V]:
                 release_load_slot=claim.load_slot_acquired,
                 ttl_s=ttl_s,
                 now=now,
-            )
+            ),
         )
-        # A timed-out caller stops awaiting this task; retrieve a possible late
-        # exception so asyncio does not emit an unobserved-task warning. The
-        # concurrent claim Future still delivers that exception to followers.
-        leader.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+        self._loads.add(leader)
+        leader.add_done_callback(partial(self._finished_load, key))
         return await asyncio.shield(leader)
+
+    def _finished_load(self, key: K, load: asyncio.Future[V]) -> None:
+        self._loads.discard(load)
+        if load.cancelled():
+            return
+        failure = load.exception()
+        if failure is not None and not isinstance(failure, asyncio.CancelledError):
+            # Keep a late error visible after every HTTP waiter has left. This
+            # reporting boundary does not retry or cancel other gateway work.
+            load.get_loop().call_exception_handler(
+                {
+                    "message": "Inspection shared query failed",
+                    "exception": failure,
+                    "future": load,
+                    "operation": "inspect_statistics",
+                    "key": key,
+                }
+            )
+
+    async def aclose(self) -> None:
+        """Stop admission and drain physical SQL before the owner closes its pool."""
+        with self._lock:
+            self._closed = True
+        cancelled = False
+        while self._loads:
+            try:
+                await asyncio.shield(asyncio.gather(*self._loads, return_exceptions=True))
+            except asyncio.CancelledError:
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError
 
     def _lookup_or_claim(self, key: K, current: float) -> _CacheHit[V] | _CacheClaim[V]:
         with self._lock:
+            if self._closed:
+                raise RuntimeError("inspection query owner is closed")
             hit = self._values.get(key)
             if hit is not None:
                 if hit[0] > current:
