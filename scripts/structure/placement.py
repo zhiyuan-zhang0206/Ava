@@ -96,7 +96,6 @@ _ARTIFACT_TOPS = (
     "migrations",
     ".github",
     "docs",
-    "okf",
     "future",
     ".agents",
     "assets",
