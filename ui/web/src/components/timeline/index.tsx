@@ -214,9 +214,12 @@ export function TimelineView({
   // saved under this history entry, read once at mount and held until the
   // restore effect lands it -- or a user-commanded force-scroll supersedes
   // it. Nothing renders from it, so it lives in a ref.
-  const pendingRestoreRef = useRef<SavedScroll | null>(
-    scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null,
-  );
+  const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
+  // The child layout pass precedes useTimeline's parent selection effect.
+  // Reserve a saved position until the mount's switch bump has been scheduled;
+  // its next commit (or the first ResizeObserver pass) restores before paint.
+  const initialRestorePassRef = useRef(true);
+  useLayoutEffect(() => () => { initialRestorePassRef.current = true; }, []);
   // Memory identity for the scroll handler (registered once with empty deps,
   // so it reads the latest props through a ref).
   const scrollMemoryRef = useRef<{ entryKey: string; contentKey: string } | null>(null);
@@ -510,7 +513,7 @@ export function TimelineView({
   const applyPendingRestore = useCallback(
     (viewport: HTMLElement | null) => {
       const saved = pendingRestoreRef.current;
-      if (!saved || !viewport) return;
+      if (initialRestorePassRef.current || !saved || !viewport) return;
       if (threadKey === undefined) return; // conversation not identified yet
       if (saved.contentKey !== threadKey) {
         pendingRestoreRef.current = null; // other content now -- position is stale
@@ -690,11 +693,10 @@ export function TimelineView({
   }, [scrollToBottomRequest, pinToBottom]);
 
   useLayoutEffect(() => {
-    applyPendingRestore(
-      viewportRef.current ??
-        wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
-        null,
-    );
+    const viewport = viewportRef.current ??
+      wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
+    applyPendingRestore(viewport);
+    initialRestorePassRef.current = false;
   });
 
   // Streamed-growth auto-scroll lives in the ResizeObserver above — any
