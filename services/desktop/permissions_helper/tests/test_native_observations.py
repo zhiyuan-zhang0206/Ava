@@ -28,6 +28,10 @@ def test_native_inventory_and_window_capture_identity(tmp_path: Path) -> None:
         "private func captureCallback"
         + source.split("private func captureCallback", 1)[1].split("/// Coerce a JSON number", 1)[0]
     )
+    region = (
+        "func screencaptureRegion("
+        + source.split("func screencaptureRegion(", 1)[1].split("/// Let AppKit", 1)[0]
+    )
     numbers = (
         "func inputNumber(" + source.split("func inputNumber(", 1)[1].split("func inputBool(", 1)[0]
     )
@@ -36,6 +40,15 @@ import Foundation
 import CoreGraphics
 import CoreFoundation
 enum OpError: Error { case bad(String) }
+var processCreated = 0
+class Process {
+    var executableURL: URL?
+    var arguments: [String]?
+    var terminationStatus: Int32 = 0
+    init() { processCreated += 1 }
+    func run() throws { fatalError("inert test must not spawn a process") }
+    func waitUntilExit() { }
+}
 var screenGranted = true
 func CGPreflightScreenCaptureAccess() -> Bool { screenGranted }
 class NSRunningApplication {
@@ -72,6 +85,8 @@ class SCWindow {
 }
 var contents: [[SCWindow]] = []
 var captureCalls = 0
+var mainCallbacks = false
+var lateContent = false
 class SCShareableContent {
     let windows: [SCWindow]
     init(_ rows: [SCWindow]) { windows = rows }
@@ -81,7 +96,13 @@ class SCShareableContent {
         captureCalls += 1
         let rows = contents.removeFirst()
         // Actually deliver on another queue: the production callback wait uses a lock and bounded run loop.
-        DispatchQueue.global().async { completionHandler(SCShareableContent(rows), nil) }
+        if lateContent {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5.1) { completionHandler(SCShareableContent(rows), nil) }
+        } else if mainCallbacks {
+            DispatchQueue.main.async { completionHandler(SCShareableContent(rows), nil) }
+        } else {
+            DispatchQueue.global().async { completionHandler(SCShareableContent(rows), nil) }
+        }
     }
 }
 class SCContentFilter {
@@ -103,7 +124,11 @@ class SCScreenshotManager {
                              completionHandler: @escaping (CGImage?, Error?) -> Void) {
         precondition(!configuration.showsCursor && configuration.ignoreShadowsSingleWindow)
         let image = CGImage(configuration.width, configuration.height)
-        DispatchQueue.global().async { completionHandler(image, nil) }
+        if mainCallbacks {
+            DispatchQueue.main.async { completionHandler(image, nil) }
+        } else {
+            DispatchQueue.global().async { completionHandler(image, nil) }
+        }
     }
 }
 class NSBitmapImageRep {
@@ -134,6 +159,16 @@ precondition(result["width"] as? Int == 200 && result["height"] as? Int == 100)
 precondition((result["origin"] as? [String: CGFloat])?["x"] == 30)
 precondition(FileManager.default.fileExists(atPath: path))
 try FileManager.default.removeItem(atPath: path)
+mainCallbacks = true; contents = [[window], [window]]
+_ = try capturedWindow(request)
+try FileManager.default.removeItem(atPath: path)
+mainCallbacks = false
+lateContent = true; contents = [[window]]
+do { _ = try capturedWindow(request); fatalError("late callback accepted") }
+catch OpError.bad(let message) { precondition(message == "window capture timed out") }
+Thread.sleep(forTimeInterval: 0.2)
+precondition(!FileManager.default.fileExists(atPath: path))
+lateContent = false
 for fresh in [SCWindow(42, 78, rect), SCWindow(42, 77, CGRect(x: 31, y: 40, width: 100, height: 50))] {
     contents = [[window], [fresh]]
     do { _ = try capturedWindow(request); fatalError("changed identity/geometry accepted") } catch OpError.bad { }
@@ -141,13 +176,19 @@ for fresh in [SCWindow(42, 78, rect), SCWindow(42, 77, CGRect(x: 31, y: 40, widt
 }
 contents = [[SCWindow(42, 78, rect)]]
 do { _ = try capturedWindow(request); fatalError("wrong owner accepted") } catch OpError.bad { }
+screenGranted = false; processCreated = 0
+do {
+    _ = try screencaptureRegion(["x": 0, "y": 0, "w": 100, "h": 50, "path": path])
+    fatalError("region capture permission ignored")
+} catch OpError.bad { }
+precondition(processCreated == 0)
 screenGranted = false; captureCalls = 0
 do { _ = try capturedWindow(request); fatalError("capture permission ignored") } catch OpError.bad { }
 precondition(captureCalls == 0)
 print("native observations contract passed")
 """
     program = tmp_path / "observations.swift"
-    program.write_text(harness + numbers + inventory + capture + checks)
+    program.write_text(harness + numbers + region + inventory + capture + checks)
     result = run_bounded(
         ["swift", str(program), str(tmp_path / "inert.png")],
         timeout=60,

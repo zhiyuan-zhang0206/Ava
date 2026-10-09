@@ -263,7 +263,7 @@ def _key_tool(args: dict[str, Any]) -> dict[str, Any]:
         raise ComputerUseError("unknown key name; use a supported name or integer keycode")
     options = request.model_dump(exclude_unset=True, exclude={"key", "keycode"})
     options.setdefault("cmd", False)
-    if request.key in {"shift", "ctrl", "alt", "cmd"}:
+    if request.key is not None and request.key.lower() in {"shift", "ctrl", "alt", "cmd"}:
         options.setdefault("modifiers", [])
     echoed = helper.key(code, **options)
     return {"pressed": echoed["key"], "cmd": echoed["cmd"]}
@@ -412,14 +412,14 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "snapshot",
         "description": (
-            "Capture the full screen, a logical region, or a PID/window_id target via the helper. "
-            "Region/window captures return an explicit frame; pass a region frame to pointer tools. "
-            "Window frame input is unsupported; explicitly focus_app and capture again. Returns the PNG "
-            "path (physical pixels), the logical screen size, and the measured backing "
-            "scale, divide physical pixel coordinates by scale for click coordinates. "
-            "include_ax adds the focused window's geometry in physical pixels (same "
-            "space as click); include_ocr adds recognized text with physical-pixel "
-            "boxes — OCR failure degrades to ocr:[] + ocr_error, never failing it."
+            "Capture the full main display, a main-display logical region={x,y,w,h}, "
+            "or target={pid,window_id}. Full-screen PNG coordinates go directly to "
+            "click/drag/move; the daemon converts their physical pixels to logical points. "
+            "Region captures return a frame: pass it unchanged with screenshot-local "
+            "pointer coordinates. Window frames refuse global pointer input; explicitly "
+            "focus_app and capture again. include_ax is available only for whole-screen "
+            "geometry; include_ocr returns boxes in this capture's pixel space. "
+            "OCR failure returns ocr:[] and ocr_error without failing the capture."
         ),
         "input_schema": {
             "type": "object",

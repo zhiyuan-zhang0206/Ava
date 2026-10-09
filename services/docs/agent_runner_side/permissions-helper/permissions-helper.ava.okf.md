@@ -24,7 +24,7 @@ The launchd-ownership and stable-signing constraint set moved to its own node: [
 
 The helper has two independent macOS TCC grants:
 
-- **Screen Recording** authorizes `screencapture_region`, `screencapture_window` and window metadata; without it, captures show wallpaper or black pixels.
+- **Screen Recording** authorizes `screencapture_region`, `screencapture_window` and window metadata; without it, the helper refuses captures before starting a child or SCK request.
 - **Accessibility** authorizes `click`, `drag`, `move`, `focus_app`, `type`, `key`, `scroll`, `ax_window_info`, `ax_tree`, and `ax_act`; without it, macOS silently drops synthetic input and denies accessibility-tree reads.
 
 `ping` reports both facts as `preflight_screen` and `ax_trusted`. The Swift dispatch gate refuses every Accessibility-gated operation with an explicit error when `ax_trusted=false`, and triggers the System Settings authorization prompt at most once per 30 seconds. The request never waits for a human response. Converge preflights both grants with `_ensure_screen_capture` and `_ensure_accessibility`, then agent startup reports either unavailable axis (or one combined notice when both fail).

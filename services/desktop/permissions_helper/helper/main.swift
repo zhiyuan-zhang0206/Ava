@@ -466,6 +466,9 @@ func screencaptureRegion(_ req: [String: Any]) throws -> [String: Any] {
           let path = req["path"] as? String
     else { throw OpError.bad("screencapture_region needs int x,y,w,h and string path") }
 
+    guard CGPreflightScreenCaptureAccess() else {
+        throw OpError.bad("Screen Recording grant missing for region capture")
+    }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
     p.arguments = ["-x", "-R\(x),\(y),\(w),\(h)", path]

@@ -339,11 +339,12 @@ async def test_derived_schemas_describe_options_and_reject_unknown_fields(deskto
         jsonschema.validate({"x": 1, "y": 2, "unknown": 1}, schemas["move"])
 
 
-async def test_named_modifier_hold_requires_current_helper(desktop: Desktop) -> None:
+@pytest.mark.parametrize("name", ["shift", "SHIFT"])
+async def test_named_modifier_hold_requires_current_helper(desktop: Desktop, name: str) -> None:
     desktop.capable = False
-    response = await desktop.call("key", {"key": "shift"})
+    response = await desktop.call("key", {"key": name})
     assert response["ok"] is False and "native_input_v1" in response["error"]
     assert not any(req["method"] == "key" for req in desktop.requests)
     desktop.capable = True
-    assert (await desktop.call("key", {"key": "shift", "duration_ms": 25}))["ok"] is True
+    assert (await desktop.call("key", {"key": name, "duration_ms": 25}))["ok"] is True
     assert desktop.action("key")["code"] == 56
