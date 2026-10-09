@@ -182,8 +182,8 @@ def _log_usage(
     record_out: dict[str, Any] | None = None,
 ) -> tuple[int, float]:
     """Emit one priced or explicitly unpriced usage event and billing span."""
-    from base.lm.billing import emit_billing_event, vendor_of_model
     from base.lm.pricing import quote
+    from base.lm.pricing.billing import emit_billing_event, vendor_of_model
 
     cache_pct = f" ({cache_read / in_total * 100:.0f}%)" if in_total else ""
     reason_pct = f" ({reasoning / out_total * 100:.0f}%)" if out_total else ""
