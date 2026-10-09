@@ -122,9 +122,8 @@ def _locate(target: str) -> tuple[Any, str]:
     """Resolve a dotted `ava` path to `(parent_object, attr_name)`.
 
     `"files.read"` -> `(ava.files, "read")`; `"understand"` -> `(ava, "understand")`.
-    Raises WrapTargetError for a malformed path; lets a genuine AttributeError
-    from a missing / AVA_SDK_DISABLE-disabled segment propagate (its message is
-    already legible).
+    Missing declared attributes are WrapTargetError. Errors raised by a real
+    attribute descriptor propagate unchanged.
     """
     segments = target.split(".")
     if not target or not all(s.isidentifier() and not s.startswith("_") for s in segments):
@@ -134,8 +133,16 @@ def _locate(target: str) -> tuple[Any, str]:
         )
     obj: Any = sys.modules["ava"]
     for seg in segments[:-1]:
-        obj = getattr(obj, seg)
+        obj = _target_member(obj, seg, target)
     return obj, segments[-1]
+
+
+def _target_member(parent: Any, attr: str, target: str) -> Any:
+    """Read a declared target without mistaking a descriptor's error for absence."""
+    missing = object()
+    if inspect.getattr_static(parent, attr, missing) is missing:
+        raise WrapTargetError(f"ava.{target} does not resolve: {attr!r} is not declared.")
+    return getattr(parent, attr)
 
 
 def _install_metadata(chained: Callable, wrapper: Callable, current: Callable) -> None:
@@ -215,7 +222,7 @@ def apply_wrap(
             does not resolve to a callable.
     """
     parent, attr = _locate(target)
-    current = getattr(parent, attr)
+    current = _target_member(parent, attr, target)
     if not callable(current):
         raise WrapTargetError(
             f"ava.{target} is {type(current).__name__}, not callable — wrap targets are functions."
