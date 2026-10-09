@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from cli.commands import _repo
 
 
@@ -43,7 +43,7 @@ def fake_npm_ci(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
         check: bool,
         shell: bool = False,
         env: dict[str, str] | None = None,
-    ):  # test stub mirrors subprocess.run signature (shell=IS_WINDOWS for npm.cmd)
+    ):  # test stub mirrors subprocess.run signature (shell=is_windows() for npm.cmd)
         del check, shell
         assert cmd == ["npm", "ci"]
         assert env is not None
@@ -62,7 +62,7 @@ def test_installs_when_node_modules_missing(tmp_path: Path, fake_npm_ci: list[Pa
     assert (repo / "ui" / "web" / "node_modules" / ".ava-lock-hash").is_file()
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX toolchain paths are injected only on POSIX")
+@pytest.mark.skipif(is_windows(), reason="POSIX toolchain paths are injected only on POSIX")
 def test_npm_ci_injects_toolchain_path_from_a_minimal_non_login_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

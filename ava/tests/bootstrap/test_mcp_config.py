@@ -441,7 +441,7 @@ def test_server_capability_reports_missing_unix_socket(monkeypatch: pytest.Monke
 
 
 def test_resolve_command_passthrough_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cfg_mod, "IS_WINDOWS", False)
+    monkeypatch.setattr(cfg_mod, "is_windows", lambda: False)
     assert cfg_mod.resolve_command(".venv/bin/python") == ".venv/bin/python"
 
 
@@ -449,7 +449,7 @@ def test_resolve_command_maps_venv_python_on_windows(monkeypatch: pytest.MonkeyP
     """`.mcp.json` is committed once and read on every platform, so the reader
     maps the repo's POSIX interpreter convention onto the local venv layout —
     the same substitution `base.sessions.backend` does for session commands."""
-    monkeypatch.setattr(cfg_mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(cfg_mod, "is_windows", lambda: True)
     assert cfg_mod.resolve_command(".venv/bin/python") == ".venv\\Scripts\\python.exe"
 
 
@@ -458,7 +458,7 @@ def test_resolve_command_leaves_third_party_commands_alone(
 ) -> None:
     """A plugin / machine entry carries its own argv — reinterpreting it would be
     guessing at someone else's command line."""
-    monkeypatch.setattr(cfg_mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(cfg_mod, "is_windows", lambda: True)
     assert cfg_mod.resolve_command("npx") == "npx"
     assert cfg_mod.resolve_command("/usr/local/bin/python3") == "/usr/local/bin/python3"
     assert cfg_mod.resolve_command(".venv/bin/python3.12") == ".venv/bin/python3.12"

@@ -16,7 +16,10 @@ import time
 from collections.abc import Generator
 from pathlib import Path
 
-IS_WINDOWS = sys.platform == "win32"
+
+def is_windows() -> bool:
+    """Whether this process runs on Windows, queried directly from Python."""
+    return sys.platform == "win32"
 
 
 def is_macos() -> bool:
