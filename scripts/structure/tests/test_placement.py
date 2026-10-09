@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from scripts.structure import locality, patch_targets, placement
+from scripts.structure import imports, locality, patch_points, patch_targets, placement
 from scripts.structure.tests.patch_repo import make_repo, write
 
 
@@ -65,6 +65,76 @@ def test_relative_imports_resolve_module_members_and_local_aliases(
 ) -> None:
     refs = placement.collect_references(ast.parse(text), placement.ModuleIndex(root), rel)
     assert [(ref.module, ref.names) for ref in refs] == [(module, (name,))]
+
+
+def test_members_of_one_module_have_one_dependency_with_all_aliases(root: pathlib.Path) -> None:
+    text = "from base.net.retry import backoff as call, _sleep as sleep\n"
+    refs = placement.collect_references(ast.parse(text), placement.ModuleIndex(root))
+    assert [(ref.module, ref.names) for ref in refs] == [("base.net.retry", ("call", "sleep"))]
+    write(root, "cli/commands/run.py", text)
+    graph = placement.unit_graph(root)
+    assert graph.empirical["cli", "base"] == 1
+
+
+def test_import_bindings_match_python_module_and_member_aliases(root: pathlib.Path) -> None:
+    text = (
+        "import base.net.retry\nimport base.net.retry as module\n"
+        "from base.net import retry as subject\n"
+        "from base.net.retry import backoff as call\n"
+    )
+    clauses = [
+        imports.normalize(node, "cli/commands/run.py")
+        for node in ast.parse(text).body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+    ]
+    assert [clause.origins for clause in clauses] == [
+        {"base": "base"},
+        {"module": "base.net.retry"},
+        {"subject": "base.net.retry"},
+        {"call": "base.net.retry.backoff"},
+    ]
+    refs = placement.collect_references(ast.parse(text), placement.ModuleIndex(root))
+    assert [ref.module for ref in refs] == ["base.net.retry"] * 4
+
+
+def test_reexported_member_keeps_its_import_door_as_dependency(root: pathlib.Path) -> None:
+    write(root, "base/net/__init__.py", "from .retry import backoff\n")
+    tree = ast.parse("from base.net import backoff as call\n")
+    refs = placement.collect_references(tree, placement.ModuleIndex(root), "cli/commands/run.py")
+    assert [(ref.module, ref.names) for ref in refs] == [("base.net", ("call",))]
+
+
+def test_relative_module_alias_is_shared_with_patch_and_private_collectors(
+    root: pathlib.Path,
+) -> None:
+    rel = "base/net/tests/test_relative.py"
+    text = "from .. import retry as subject\nsubject._sleep()\nmonkeypatch.setattr(subject, '_sleep', None)"
+    tree = ast.parse(text)
+    points = patch_points.extract_points(list(ast.walk(tree)), rel)
+    assert [point.dotted for point in points] == ["base.net.retry._sleep"]
+    assert locality.private_imports(tree, rel, ("base",), root) == {}
+    assert placement.collect_references(tree, placement.ModuleIndex(root), rel)[0].module == (
+        "base.net.retry"
+    )
+
+
+@pytest.mark.parametrize("rel", ["base/__init__.py", "standalone.py", ""])
+def test_invalid_relative_import_is_not_unrelated_or_subject_free(
+    root: pathlib.Path, rel: str
+) -> None:
+    tree = ast.parse("from ..base.net import retry\n")
+    index = placement.ModuleIndex(root)
+    with pytest.raises(imports.InvalidRelativeImportError, match=":1:"):
+        placement.collect_references(tree, index, rel)
+    with pytest.raises(imports.InvalidRelativeImportError, match=":1:"):
+        patch_points.extract_points(list(ast.walk(tree)), rel)
+    with pytest.raises(imports.InvalidRelativeImportError, match=":1:"):
+        locality.private_imports(tree, rel, ("base",), root)
+
+
+def test_invalid_source_sample_is_not_an_executed_import(root: pathlib.Path) -> None:
+    text = 'SAMPLE = "from ..base.net import retry"\n'
+    assert placement.collect_references(ast.parse(text), placement.ModuleIndex(root)) == []
 
 
 def test_home_is_the_nearest_common_ancestor_of_the_referenced_modules(
