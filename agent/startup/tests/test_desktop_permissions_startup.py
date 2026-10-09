@@ -54,6 +54,8 @@ class _FakeUI:
         self.calls: list[dict[str, object]] = []
 
     def notify(self, **kwargs: object) -> int:
+        key = kwargs.pop("idempotency_key")
+        assert isinstance(key, str) and 1 <= len(key) <= 128
         self.calls.append(kwargs)
         return 1
 

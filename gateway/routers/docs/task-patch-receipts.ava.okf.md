@@ -9,15 +9,15 @@ tags:
 
 # Task PATCH Operation Receipts
 
-`PATCH /api/tasks/{task_id}` accepts an optional `Idempotency-Key`. Keyless
-requests retain their existing behavior. A keyed request commits the task
+`PATCH /api/tasks/{task_id}` requires `Idempotency-Key`. Missing keys fail
+before mutation. Every accepted request commits the task
 mutation, its existing notification intents and the original `TaskRow` response
 in one transaction. A lost response can be replayed with the same key and body.
 Acceptance does not prove that an agent has processed a notification.
 
 ## Identity and immutable input
 
-The HTTP owner is `gateway.http.auth.request_principal.optional_request_key`.
+The HTTP owner is `gateway.http.auth.request_principal.request_key`.
 Legacy keys are scoped by the actual request path. Explicit `principal-v1`
 additionally scopes by verified principal, HTTP method and actual path; MCP
 credentials require that scope. A raw key reused for another task path or
@@ -62,6 +62,5 @@ failures retain the existing transport policy.
 
 The browser currently reads tasks; the gateway MCP server has no task write
 tool. Direct `ava.tasks.create/update/log` writes do not pass through this HTTP
-receipt owner. Their repeated notes, audit facts and reminder resets remain
-unprotected, and `create_and_assign` also spans agent creation and task creation.
-Those SDK and compound-operation contracts remain separate work in #4472.
+receipt owner. Those SDK writes require actor-scoped operation keys; `create_and_assign` uses
+one atomic compound receipt. These remain separate namespaces.

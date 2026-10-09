@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
+from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -26,6 +28,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" is now assigned to you.'},
+                headers={"Idempotency-Key": str(uuid4())},
             )
         assert resp.status_code == 201
         body = resp.json()
@@ -42,7 +45,7 @@ class TestSystemNote:
         assert kind == "system_note"
         assert source == "system"
         assert "assigned to you" in content
-        assert payload == {"note_tag": "task"}
+        assert payload == {"note_tag": "task", "delivery_resurrect": True}
         # No resurrect row for a live agent.
         assert all(r[1] != "resurrect" for r in rows)
 
@@ -56,6 +59,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" is now assigned to you.'},
+                headers={"Idempotency-Key": str(uuid4())},
             )
         assert resp.status_code == 201
         rows = _inbound_rows(db_conn, agent_id)
@@ -74,6 +78,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" was updated.', "resurrect": False},
+                headers={"Idempotency-Key": str(uuid4())},
             )
         assert resp.status_code == 201
         rows = _inbound_rows(db_conn, agent_id)
@@ -87,6 +92,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "note_tag": "not_a_tag"},
+                headers={"Idempotency-Key": str(uuid4())},
             )
         assert resp.status_code == 422
 
@@ -97,6 +103,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "note_tag": "heartbeat", "task_id": 42},
+                headers={"Idempotency-Key": str(uuid4())},
             )
         assert resp.status_code == 422
         assert "task_id requires note_tag='task'" in str(resp.json())
@@ -110,6 +117,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "task_id": 999_999},
+                headers={"Idempotency-Key": str(uuid4())},
             )
         assert resp.status_code == 422
         assert "task_id 999999 does not exist" in str(resp.json())
@@ -133,6 +141,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{recipient_id}/system-note",
                 json={"content": "x", "task_id": row[0]},
+                headers={"Idempotency-Key": str(uuid4())},
             )
         assert resp.status_code == 422
         assert "is not owned by agent" in str(resp.json())
@@ -156,19 +165,12 @@ class TestSystemNote:
         )
         errors: list[Exception] = []
 
-        def pause_enqueue(
-            db: psycopg.Connection,
-            agent_id: int,
-            content: str,
-            source: str,
-            kind: str = "chat",
-            payload: dict[str, object] | None = None,
-            **handles: object,
-        ) -> int:
-            del db, agent_id, content, source, kind, payload, handles
+        writer = system_note.insert_inbound_message_in_transaction
+
+        def pause_enqueue(*args: Any, **kwargs: Any):
             enqueue_entered.set()
             assert release_enqueue.wait(timeout=2)
-            return 1
+            return writer(*args, **kwargs)
 
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
@@ -182,7 +184,7 @@ class TestSystemNote:
             )
             task_id = _returned_id(cur)
         db_conn.commit()
-        monkeypatch.setattr(system_note, "insert_inbound_message", pause_enqueue)
+        monkeypatch.setattr(system_note, "insert_inbound_message_in_transaction", pause_enqueue)
 
         def enqueue(note_pool: ConnectionPool) -> None:
             try:
@@ -195,6 +197,7 @@ class TestSystemNote:
                     "system",
                     "task",
                     task_id,
+                    client_message_id="task-owner-fence",
                 )
             except Exception as exc:
                 errors.append(exc)
@@ -242,6 +245,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "source": "ui:web"},
+                headers={"Idempotency-Key": str(uuid4())},
             )
         assert resp.status_code == 422
 
