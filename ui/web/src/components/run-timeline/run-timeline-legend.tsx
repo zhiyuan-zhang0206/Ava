@@ -9,7 +9,7 @@ import { useTranslations } from "next-intl";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { BLOCK_CLASSES, classColor, type BlockClass, type Highlight } from "./timeline-model";
+import { BLOCK_CLASSES, classColor, type BlockClass, type Highlight } from "./model/timeline-model";
 
 export function RunTimelineLegend({
   highlight,

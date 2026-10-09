@@ -15,7 +15,7 @@ import { api } from "@/lib/transport/api";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { RunTimelineChartSkeleton } from "./run-timeline-skeleton";
+import { RunTimelineChartSkeleton } from "../run-timeline-skeleton";
 
 function useAgentLabel(agentId: number): string | undefined {
   const roster = useAgentRoster();
