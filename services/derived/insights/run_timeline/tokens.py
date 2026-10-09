@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from dataclasses import dataclass
-from datetime import datetime
 
 from langchain_core.messages import AIMessage
 
@@ -80,66 +79,80 @@ def span_tokens(view: HistoryView, span_start: int, span_end: int) -> BlockToken
 
 
 @dataclass(frozen=True)
-class MessageBar:
-    """One message as the context rows draw it: where it sits (the extent of its blocks) and its weights."""
+class BlockContext:
+    """Where a block sits in the context: its compaction segment, the context through it, and the LLM request it belongs to."""
 
-    idx: int
-    start: datetime
-    end: datetime
     session: int
-    context_tokens: int
-    estimated: bool
-    context_total: int
+    context_total: int | None
     request: Usage | None
 
 
-def _context_totals(view: HistoryView) -> dict[int, int]:
-    """For each message, the context a request would carry through it: its session's head and every
-    message up to it, each at the weight it was read with. Before an AIMessage this is the
-    `input_tokens` of the request that produced it. A message no request has read is absent."""
-    totals: dict[int, int] = {}
+_TURN_ORDER = ("thinking", "text", "call")
+
+
+def _context_totals(view: HistoryView) -> tuple[dict[int, int], dict[int, int]]:
+    """For each message a request has read: the context before it and through it, in its session
+    (the head and every message up to it, each at the weight it was read with). Before an AIMessage
+    this is the `input_tokens` of the request that produced it."""
+    before: dict[int, int] = {}
+    through: dict[int, int] = {}
     for session, segment in enumerate(view.segments):
         running = segment.head.context_tokens or 0 if segment.head is not None else 0
         start = view.history.segment_starts[session]
         for offset, record in enumerate(segment.messages):
             if record.context_tokens is None:
                 continue
+            before[start + offset] = running
             running += record.context_tokens
-            totals[start + offset] = running
-    return totals
+            through[start + offset] = running
+    return before, through
 
 
-def message_bars(view: HistoryView) -> list[MessageBar]:
-    """Every message a request has read, with the extent of the block(s) that show it.
+class BlockContexts:
+    """The context rows' view of a history: the context through each block, per block.
 
-    A turn block (thinking, text, call) shows its AIMessage; any other block its messages after the
-    AIMessage that opened it. A message's extent is the union of its blocks'. A message no request has
-    read has no count and no bar. `request` is the AIMessage's own LLM request (its usage), if any.
+    A message block (inbound, note, output) is the context through its last message. The blocks of
+    one AIMessage's turn (thinking, text, call, in time order) each add their share of the message
+    (`ai_message_parts`, the same split the block's own tokens use) to the context before the
+    message, so the first block starts from the request's `input_tokens` and the last one ends at
+    the context through the whole message.
     """
-    extent: dict[int, tuple[datetime, datetime]] = {}
-    for block in view.units:
-        first = block.i0 if block.kind in _TURN_PART else _first_message(view, block)
-        last = block.i0 if block.kind in _TURN_PART else block.i1
-        for idx in range(first, last + 1):
-            start, end = extent.get(idx, (block.start, block.end))
-            extent[idx] = (min(start, block.start), max(end, block.end))
-    totals = _context_totals(view)
-    starts = view.history.segment_starts
-    bars: list[MessageBar] = []
-    for idx in sorted(extent):
-        record = view.tokens[idx]
-        if record.context_tokens is None or idx not in totals:
-            continue
-        call = view.usage.span(idx, idx)
-        bars.append(
-            MessageBar(
-                idx,
-                *extent[idx],
-                max(bisect_right(starts, idx) - 1, 0),
-                record.context_tokens,
-                record.source == "estimated",
-                totals[idx],
-                call if call.calls else None,
+
+    def __init__(self, view: HistoryView) -> None:
+        self._view = view
+        self._before, self._through = _context_totals(view)
+        self._kinds: dict[int, set[str]] = {}
+        for block in view.units:
+            if block.kind in _TURN_PART:
+                self._kinds.setdefault(block.i0, set()).add(block.kind)
+        self._parts: dict[int, dict[str, int]] = {}
+
+    def _share(self, idx: int) -> dict[str, int]:
+        if idx not in self._parts:
+            msg = self._view.history.messages[idx]
+            if not isinstance(msg, AIMessage):
+                raise TypeError(f"turn block at message {idx} is not an AIMessage")
+            parts = ai_message_parts(msg, self._view.tokens[idx])
+            self._parts[idx] = {kind: part.tokens for kind, part in parts.items()}
+        return self._parts[idx]
+
+    def of(self, block: DisplayBlock) -> BlockContext:
+        """The context of `block`; its total is None while no request has read its messages."""
+        view = self._view
+        session = max(bisect_right(view.history.segment_starts, block.i0) - 1, 0)
+        if block.kind not in _TURN_PART:
+            return BlockContext(session, self._through.get(block.i1), None)
+        idx = block.i0
+        if idx not in self._through:
+            return BlockContext(session, None, None)
+        present = [kind for kind in _TURN_ORDER if kind in self._kinds[idx]]
+        if block.kind == present[-1]:
+            total = self._through[idx]
+        else:
+            share = self._share(idx)
+            upto = _TURN_ORDER.index(block.kind)
+            total = self._before[idx] + sum(
+                share.get(_TURN_PART[k], 0) for k in _TURN_ORDER[: upto + 1]
             )
-        )
-    return bars
+        usage = view.usage.span(idx, idx)
+        return BlockContext(session, total, usage if usage.calls else None)
