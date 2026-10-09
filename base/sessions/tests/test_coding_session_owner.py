@@ -14,7 +14,7 @@ from typing import Any, cast
 
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.sessions import coding_session_owner as owner
 from base.sessions import coding_session_owner_record as record_codec
 
@@ -441,7 +441,9 @@ def test_a_legacy_single_slot_record_is_reclaimed_only_once_dead(
     assert legacy.exists() is alive
 
 
-_POSIX_ONLY = pytest.mark.skipif(IS_WINDOWS, reason="the app-server socket is a POSIX unix socket")
+_POSIX_ONLY = pytest.mark.skipif(
+    is_windows(), reason="the app-server socket is a POSIX unix socket"
+)
 _SOCKET_GENERATION = "be6a5e0a-f271-4301-ad6b-521673bf262f"
 
 
