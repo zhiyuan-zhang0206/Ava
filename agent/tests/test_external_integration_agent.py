@@ -18,6 +18,7 @@ from agent.messages import NoteTag, system_note_message
 from ava import external
 from ava.external.state import decode_plugin_delta, load_snapshot
 from ava.sdk_surface import agent_identity
+from ava.sdk_surface.install import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
 from base.agents.messages.caller_identity import CallerIdentity
@@ -51,6 +52,18 @@ def native_checkpoint(
     pin_agent(None, owns_loop=True)
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)
+
+    installation = Installation(
+        registry=registry,
+        expansions=(),
+        wrap_layers={},
+        skill_providers=(),
+        metered=(),
+        disabled=frozenset(),
+        faces=True,
+        undo=(),
+    )
+    monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
 
     def loader_stub(**_kwargs: object) -> None:
         """Accept the `surface` kwarg attach passes (ignored)."""

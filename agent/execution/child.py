@@ -204,12 +204,17 @@ def _apply_overlay_scope(
     """Apply both maps at one scope — birth first, overlay on top (the same
     precedence the host uses when it resolves stored configuration).
     Returns True when at least one map applied."""
-    from base.packages.plugins.config_registration import apply_config_overlay
-
     applied = False
     for value in (birth, overlay):
         if value:
-            apply_config_overlay(value, scope=scope)
+            if scope == "framework":
+                from base.packages.plugins.config_registration import apply_config_overlay
+
+                apply_config_overlay(value, scope=scope)
+            else:
+                from ava.sdk_surface import install
+
+                install.apply_config_overlay(value)
             applied = True
     return applied
 
@@ -518,7 +523,7 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     _bind_identity(request)
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
-    # plugins load (apply_config_overlay needs _PLUGIN_CONFIGS bound first).
+    # plugins load (the SDK installation owns the bound plugin config image).
     framework_overlay_applied = _apply_overlay_scope(birth, overlay, scope="framework")
     # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
     # same explicit load a watcher child runs. Idempotent, surface-only: a

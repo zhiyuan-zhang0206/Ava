@@ -122,7 +122,7 @@ def agent_setting(name: str) -> Any:
 # - SDK implementation module → not in `ava.help()`, for plugin authors not the agent
 # - lazy attribute access → no cache here, so restart / test monkeypatch changes
 #   to the registry are immediately visible
-# - lazy import base.packages.plugins.config_registration → avoids ava module load triggering agent
+# - lazy import SDK installation → avoids settings import triggering an agent
 #   module import (test fixture / container mode can still import ava
 #   without connecting agent)
 
@@ -138,12 +138,13 @@ class _PluginsView:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        from base.packages.plugins.config_registration import (
-            process_plugin_config,
-            registered_plugin_config_names,
-        )
+        from pydantic import BaseModel
 
-        known = registered_plugin_config_names()
+        from ava.sdk_surface.install import installed
+
+        installation = installed()
+        configs: Mapping[str, BaseModel] = {} if installation is None else installation.configs
+        known = tuple(sorted(configs))
         if name not in known:
             raise AttributeError(
                 f"ava.sdk_surface.settings.plugins.{name} does not exist — plugin {name!r} declares no "
@@ -153,7 +154,7 @@ class _PluginsView:
         # The attached agent's overrides over the disk image; otherwise this process's own
         # instance (the exec child's boot applied its agent's overlay to it).
         attached = _attached()
-        return attached[1].config_for(name) if attached else process_plugin_config(name)
+        return attached[1].config_for(name) if attached else configs[name]
 
 
 plugins = _PluginsView()

@@ -1,19 +1,13 @@
-"""An agent's plugin-config overrides — the agent-scoped read path for plugin `per_agent` fields.
+"""One agent's plugin overrides over an explicitly supplied boot config image.
 
-`_PLUGIN_CONFIGS` (`base/packages/plugins/config_registration.py`) is a process-global
-`plugin -> frozen instance` map that boot mutates in place from the agent's `config_overlay`. One
-agent per process makes that exact; in the hosted runner one process serves many agents, so the
-last booted overlay would be every agent's plugin config. The host therefore routes each agent's
-overlay to its plugin owners (`resolve_agent_plugin_pins`), carries it on the agent's
-`AgentSlices`, and `PluginConfigView` layers it over the process-global instance:
+The host receives the installer's resolved image and creates one view per
+agent turn, carrying it on ``AgentSlices``. An exec child applies its overlay
+at boot; an external attachment owns its agent's view. Overrides affect only
+that view. Frozen plugin instances are memoized per view, never globally.
 
-    config_overlay (agents_meta)  >  the bound disk image (_PLUGIN_CONFIGS)
-
-There is no plugin-scope birth_config: only framework fields are `frozen`, so
-`agents_meta.birth_config` never carries a plugin key (`base/agents/birth_config.py`).
-
-Instances are built lazily and memoized per view: a plugin config is a frozen pydantic model, and
-rebuilding one per read would put model validation in the agent's hot path.
+Plugin fields have no birth_config: an explicit overlay pins them; otherwise
+another process start reads the current authority image. See
+``docs/plugin-config.ava.okf.md`` for the shared lifecycle contract.
 """
 
 from __future__ import annotations
@@ -32,9 +26,12 @@ class PluginConfigView:
     which is why this needs no lock.
     """
 
-    __slots__ = ("_cache", "_overrides")
+    __slots__ = ("_cache", "_configs", "_overrides")
 
-    def __init__(self, overrides: Mapping[str, Mapping[str, Any]]) -> None:
+    def __init__(
+        self, configs: Mapping[str, BaseModel], overrides: Mapping[str, Mapping[str, Any]]
+    ) -> None:
+        self._configs = configs
         self._overrides = {p: dict(fields) for p, fields in overrides.items()}
         self._cache: dict[str, BaseModel] = {}
 
@@ -43,11 +40,8 @@ class PluginConfigView:
         return {key: value for fields in self._overrides.values() for key, value in fields.items()}
 
     def config_for(self, plugin: str) -> BaseModel:
-        """This agent's instance for `plugin` — the process-global one when the
-        agent overrides nothing in it."""
-        from base.packages.plugins.config_registration import _PLUGIN_CONFIGS
-
-        base = _PLUGIN_CONFIGS[plugin]  # KeyError = not registered / not bound, as before
+        """This agent's instance, or its supplied base when no override is set."""
+        base = self._configs[plugin]
         updates = self._overrides.get(plugin)
         if not updates:
             return base
@@ -58,9 +52,14 @@ class PluginConfigView:
         self._cache[plugin] = built
         return built
 
+    def configs(self) -> dict[str, BaseModel]:
+        """The bound plugin configs with this agent's overrides applied."""
+        return {plugin: self.config_for(plugin) for plugin in self._configs}
+
 
 def resolve_agent_plugin_pins(
     config_overlay: Mapping[str, Any] | None,
+    configs: Mapping[str, BaseModel],
 ) -> dict[str, dict[str, Any]]:
     """Route an agent's flat `config_overlay` to its plugin owners.
 
@@ -77,14 +76,13 @@ def resolve_agent_plugin_pins(
     if not config_overlay:
         return {}
     from base.config import field_names
-    from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES
 
     framework = field_names()
     pins: dict[str, dict[str, Any]] = {}
     for key, value in config_overlay.items():
         if key in framework:
             continue  # framework scope — base/config/agent_pins.py owns it
-        owners = [p for p, cls in _PLUGIN_CONFIG_CLASSES.items() if key in cls.model_fields]
+        owners = [p for p, config in configs.items() if key in type(config).model_fields]
         if len(owners) != 1:
             continue  # unknown, or an ambiguity validation would never have stored
         pins.setdefault(owners[0], {})[key] = value
