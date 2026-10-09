@@ -201,7 +201,7 @@ def test_lost_launch_ack_keeps_first_attempt_and_first_prompt(
     assert len(calls) == 2
     assert calls[0].launch_attempt_id == calls[1].launch_attempt_id
     assert calls[0].agent_id == calls[1].agent_id == retry.json()["agent_id"]
-    assert calls[0].prompt is None and calls[1].prompt is None
+    assert all("prompt" not in call.model_dump() for call in calls)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
 
 

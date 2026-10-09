@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from base.agents import CancelResult, TerminateResult
-from ops.rpc_schemas import CancelRequested, OpResponse, OpStatus
+from ops.rpc_schemas import CancelRequested, LaunchAgentRequest, OpResponse, OpStatus
 from ops.rpc_schemas.billing_recovery import (
     BillingRecoveryMode,
     BillingRecoveryRunOutcome,
@@ -77,3 +77,26 @@ def test_generated_http_schema_resolves_the_same_exact_wire_domains() -> None:
     ]:
         ref = schemas[model]["properties"][field]["$ref"]
         assert schemas[ref.rsplit("/", 1)[1]]["enum"] == [member.value for member in owner]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"agent_id": 7},
+        {"agent_id": 7, "launch_attempt_id": None},
+        {"agent_id": 7, "launch_attempt_id": "invalid"},
+        *[
+            {
+                "agent_id": 7,
+                "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
+                field: None,
+            }
+            for field in ("prompt", "prompt_source", "label")
+        ],
+    ],
+)
+def test_launch_rejects_missing_attempt_and_retired_prompt_fields(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        LaunchAgentRequest.model_validate(payload)
