@@ -123,7 +123,7 @@ def test_migration_preserves_existing_keyless_birth(
     assert response.status_code == 201
     agent_id = response.json()["id"]
     migration = next(
-        (Path(__file__).resolve().parents[3] / "migrations").glob("*_agent-creation-identity.sql")
+        (Path(__file__).resolve().parents[4] / "migrations").glob("*_agent-creation-identity.sql")
     )
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("ALTER TABLE agents_meta DROP COLUMN creation_key CASCADE")
