@@ -177,8 +177,7 @@ def reconcile_config_image[C: BaseModel](
     """Validate an upgrade candidate before writing or importing legacy values.
 
     Keep and validate stored fields the schema still declares, fill missing
-    fields with its defaults, and drop retired fields. The added set identifies
-    defaults that legacy import can replace without an authority conflict.
+    fields with defaults, and drop retired fields. Added fields may adopt legacy values.
     """
     if content is None:
         return cls(), set(cls.model_fields), set()
@@ -188,6 +187,7 @@ def reconcile_config_image[C: BaseModel](
         raise InvalidConfigData(f"plugin disk image JSON malformed ({config_path}): {exc}") from exc
     if not isinstance(data, dict):
         raise InvalidConfigData(f"plugin config disk image must be a JSON object ({config_path})")
+    data = cast("dict[str, object]", data)
     disk_keys = set(data)
     cls_keys = set(cls.model_fields)
     defaults = cls().model_dump(mode="json")
