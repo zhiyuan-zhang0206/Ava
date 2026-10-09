@@ -135,7 +135,7 @@ def run_tracker() -> None:
         _send_report(_failure_message(f"subprocess exception: {exc}"))
 
 
-def _fire_tracker(_trigger: None) -> None:
+def _fire_tracker(_slot: datetime, _trigger: None) -> None:
     run_tracker()
 
 
