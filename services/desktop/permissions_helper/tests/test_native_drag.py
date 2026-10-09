@@ -10,12 +10,14 @@ import pytest
 
 from base.host.proc import run_bounded
 
+from .. import lifecycle
+
 
 @pytest.mark.skipif(
     sys.platform != "darwin" or shutil.which("swift") is None, reason="needs Swift on macOS"
 )
 def test_native_drag_sequence_validation_and_preallocation(tmp_path: Path) -> None:
-    source = (Path(__file__).parents[1] / "helper/main.swift").read_text()
+    source = lifecycle._SOURCE.read_text()
     body = "func drag(" + source.split("func drag(", 1)[1].split("/// Post a single key", 1)[0]
     harness = r"""
 import Foundation
