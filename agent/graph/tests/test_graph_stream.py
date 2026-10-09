@@ -28,6 +28,7 @@ from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
@@ -424,7 +425,14 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
     old_body = ("old payload " * 6 + "\n") * 340
     new_body = ("new payload " * 6 + "\n") * 340
     monkeypatch.setattr(settings.sandbox, "exec_output_crop_archive_max_bytes", len(old_body))
-    prior_output = output.wrap_code_output(old_body, agent_id=7)
+    prior_output = output.wrap_code_output(
+        old_body,
+        agent_id=7,
+        crop_config=settings.sandbox,
+        clock=Clock.from_settings(),
+        timeout_seconds=settings.sandbox.exec_timeout_seconds,
+        max_chars=settings.sandbox.exec_output_max_chars,
+    )
     archive = next(directory.glob("crop_*.txt"))
     state = AgentState(
         messages=[
