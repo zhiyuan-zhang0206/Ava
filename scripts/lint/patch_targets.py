@@ -6,6 +6,13 @@ prints the census behind the rule (class distribution, violations by relation, t
 patched private modules) as Markdown and always exits 0. Also run via pre-commit and in the
 CI structure job (`pre-commit run --all-files`).
 
+`--strict-evidence` is an opt-in completeness diagnostic: it rejects unresolved
+execution inputs and retains the existing private-authority policy. It exits 1
+on a gap or existing-policy violation, including with `--report`. Normal hooks
+retain the same private policy and visibly report their evidence gaps. Neither
+this diagnostic nor a legacy inferred home establishes test-placement compliance
+or activates a different private-authorization rule.
+
 ## Why
 
 A test that replaces `ava.mcps._daemon._connect_server` depends on an implementation detail
@@ -151,7 +158,7 @@ def _select_files(argv: list[str], repo_root: Path) -> list[Path] | None:
 
 
 def _scan(
-    files: list[Path], repo_root: Path
+    files: list[Path], repo_root: Path, *, strict_evidence: bool = False
 ) -> tuple[dict[str, patch_targets.FileResult], patch_targets.Sites, list[str]]:
     """(analysed files with patch points, measured class D sites, per-site errors)."""
     locality.reset_caches()
@@ -162,39 +169,81 @@ def _scan(
     for path in files:
         rel = path.relative_to(repo_root).as_posix()
         try:
-            result = patch_targets.analyze(rel, path.read_text(encoding="utf-8"), classifier)
-        except (OSError, UnicodeDecodeError):
-            continue  # unreadable member, as every lint skips it
+            result = patch_targets.analyze(
+                rel, path.read_text(encoding="utf-8"), classifier, include_unpatched=strict_evidence
+            )
+        except (OSError, UnicodeDecodeError) as exc:
+            if strict_evidence:
+                errors.append(f"{rel}:1: cannot read execution evidence: {exc}")
+            continue  # the existing patch contract skips unreadable members
         except SyntaxError as exc:
             errors.append(f"{rel}:{exc.lineno or 1}: cannot parse: {exc.msg}")
             continue
-        if result.sites:
+        if result.sites or (result.evidence is not None and result.evidence.unresolved):
             results[rel] = result
         measured.update(patch_targets.violations(rel, result))
         errors.extend(patch_targets.site_errors(rel, result))
     return results, measured, errors
 
 
+def _execution_gaps(results: dict[str, patch_targets.FileResult]) -> list[str]:
+    return [
+        f"{gap.path}:{gap.line}: incomplete execution evidence: {gap.reason}"
+        for result in results.values()
+        if result.evidence is not None
+        for gap in result.evidence.unresolved
+    ]
+
+
+def _show_incomplete(gaps: list[str]) -> None:
+    print(
+        "Legacy patch-authority check: execution evidence is incomplete; "
+        "this verdict does not certify test placement or new private authorization.",
+        file=sys.stderr,
+    )
+    for gap in gaps:
+        print(gap, file=sys.stderr)
+
+
+def _report_errors(
+    errors: list[str], measured: patch_targets.Sites, *, strict_evidence: bool
+) -> int:
+    for error in errors:
+        print(error)
+    if not errors:
+        return 0
+    counts = {key: len(lines) for key, lines in measured.items()}
+    kind = "strict execution-evidence diagnostics" if strict_evidence else "patch-target violations"
+    hint = (
+        _hint(counts)
+        if counts or not strict_evidence
+        else "Resolve the execution inputs before certifying complete evidence."
+    )
+    print(f"\n{len(errors)} {kind}. {hint}", file=sys.stderr)
+    print("Rule and fixes: see scripts/lint/patch_targets.py.", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     repo_root = repo_root.resolve()
     report = "--report" in argv
-    argv = [arg for arg in argv if arg != "--report"]
+    strict_evidence = "--strict-evidence" in argv
+    argv = [arg for arg in argv if arg not in {"--report", "--strict-evidence"}]
     files = _select_files([] if report else argv, repo_root)
     if files is None:
         return 1
-    results, measured, errors = _scan(files, repo_root)
+    results, measured, errors = _scan(files, repo_root, strict_evidence=strict_evidence)
+    gaps = _execution_gaps(results)
+    if strict_evidence:
+        errors.extend(gaps)
+    elif gaps and not report:
+        _show_incomplete(gaps)
     if report:
         print(patch_report.render(results))
-        return 0
-    for error in errors:
-        print(error)
-    if errors:
-        counts = {key: len(lines) for key, lines in measured.items()}
-        print(f"\n{len(errors)} patch-target violations. {_hint(counts)}", file=sys.stderr)
-        print("Rule and fixes: see scripts/lint/patch_targets.py.", file=sys.stderr)
-        return 1
-    return 0
+        if not strict_evidence:
+            return 0
+    return _report_errors(errors, measured, strict_evidence=strict_evidence)
 
 
 if __name__ == "__main__":

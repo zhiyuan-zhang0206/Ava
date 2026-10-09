@@ -147,42 +147,41 @@ def _argv(call: ast.Call, scope: _Scope) -> list[ast.expr] | None:
     return value.elts if isinstance(value, ast.List | ast.Tuple) else None
 
 
-def _code_arg(call: ast.Call, scope: _Scope) -> ast.expr | None:
+def _literal_text(node: ast.expr | None) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _python_argv(call: ast.Call, scope: _Scope) -> list[ast.expr] | None:
     argv = _argv(call, scope)
     if not argv or scope.origin(scope.value(argv[0])) != "sys.executable":
         return None
-    # Interpreter options preceding -c must be literal flags, not a script path.
-    for offset, item in enumerate(argv[1:], 1):
-        value = scope.value(item)
-        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-            return None
-        if value.value == "-c":
-            return argv[offset + 1] if offset + 1 < len(argv) else None
-        if value.value in {"-W", "-X"}:
-            return None
-        if not value.value.startswith("-") or value.value in {"-m", "--"}:
-            return None
-    return None
+    return argv if any(_literal_text(scope.value(item)) == "-c" for item in argv[1:]) else None
 
 
-def _argv_gap(call: ast.Call, scope: _Scope) -> str | None:
-    argv = _argv(call, scope)
-    if not argv or scope.origin(scope.value(argv[0])) != "sys.executable":
-        return None
-    values = [scope.value(item) for item in argv[1:]]
-    if not any(isinstance(item, ast.Constant) and item.value == "-c" for item in values):
-        return None
-    for item in argv[1:]:
-        value = scope.value(item)
-        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-            return "Python interpreter options are not literal"
-        if value.value == "-c":
-            return "Python -c argv has no source argument"
-        if value.value in {"-W", "-X"}:
-            return "Python interpreter option operands are not resolved"
-        if not value.value.startswith("-") or value.value in {"-m", "--"}:
-            return None
-    return None
+def _code_input(call: ast.Call, scope: _Scope) -> tuple[ast.expr | None, str | None]:
+    """Locate -c without confusing option operands or trailing argv data with source."""
+    argv = _python_argv(call, scope)
+    if argv is None:
+        return None, None
+    offset = 1
+    while offset < len(argv):
+        flag = _literal_text(scope.value(argv[offset]))
+        if flag is None:
+            return None, "Python interpreter options are not literal"
+        if flag == "-c":
+            if offset + 1 < len(argv):
+                return argv[offset + 1], None
+            return None, "Python -c argv has no source argument"
+        if flag in {"-W", "-X"}:
+            operand = scope.value(argv[offset + 1]) if offset + 1 < len(argv) else None
+            if _literal_text(operand) is None:
+                return None, "Python interpreter option operands are not literal"
+            offset += 2
+        elif not flag.startswith("-") or flag in {"-m", "--"}:
+            return None, None
+        else:
+            offset += 1
+    return None, None
 
 
 def _helper_parameter(
@@ -198,7 +197,9 @@ def _helper_parameter(
     ]
     if len(launches) != 1:
         return None
-    code = _code_arg(launches[0], scope)
+    code, _reason = _code_input(launches[0], scope)
+    if code is not None:
+        code = scope.value(code)
     parameters = {a.arg for a in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]}
     if isinstance(code, ast.Name) and code.id in parameters and scope.stores[code.id] == 1:
         return code.id
@@ -208,18 +209,45 @@ def _helper_parameter(
 def _argument(
     call: ast.Call, function: ast.FunctionDef | ast.AsyncFunctionDef, parameter: str
 ) -> ast.expr | None:
-    if any(isinstance(arg, ast.Starred) for arg in call.args) or any(
-        keyword.arg is None for keyword in call.keywords
-    ):
+    """Resolve the source slot; a following *argv does not change earlier arguments."""
+    if any(keyword.arg is None for keyword in call.keywords):
         return None
-    for keyword in call.keywords:
-        if keyword.arg == parameter:
-            return keyword.value
     names = [arg.arg for arg in [*function.args.posonlyargs, *function.args.args]]
     offset = names.index(parameter) if parameter in names else len(call.args)
-    if offset < len(call.args):
+    starred = _starred_offset(call)
+    keyword = next((kw.value for kw in call.keywords if kw.arg == parameter), None)
+    if keyword is not None:
+        return _source_keyword(
+            function,
+            parameter,
+            keyword,
+            ambiguous_positional=starred < len(call.args) or offset < len(call.args),
+        )
+    if parameter in names and offset < starred:
         return call.args[offset]
+    if starred < len(call.args) and parameter in names:
+        return None
     return _literal_default(function, parameter, names)
+
+
+def _starred_offset(call: ast.Call) -> int:
+    return next(
+        (i for i, arg in enumerate(call.args) if isinstance(arg, ast.Starred)), len(call.args)
+    )
+
+
+def _source_keyword(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    parameter: str,
+    value: ast.expr,
+    *,
+    ambiguous_positional: bool,
+) -> ast.expr | None:
+    if parameter in {arg.arg for arg in function.args.posonlyargs}:
+        return None
+    if parameter in {arg.arg for arg in function.args.args} and ambiguous_positional:
+        return None
+    return value
 
 
 def _literal_default(
@@ -277,10 +305,10 @@ class _Inputs(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         if self.scope.origin(node.func) in _LAUNCHERS and id(node) not in self._template_launches:
-            code = _code_arg(node, self.scope)
+            code, reason = _code_input(node, self.scope)
             if code is not None:
                 self._source(node, code)
-            elif (reason := _argv_gap(node, self.scope)) is not None:
+            elif reason is not None:
                 self.result.unresolved.append(Unresolved(self.path, node.lineno, reason))
         elif isinstance(node.func, ast.Name):
             found = self.scope.function(node.func.id)

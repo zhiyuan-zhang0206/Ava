@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import textwrap
 import time
 from pathlib import Path
 
@@ -26,16 +25,16 @@ _REPO = Path(__file__).resolve().parents[4]
 
 def _spawn_holder(target: Path, ready: Path, hold_s: float) -> subprocess.Popen[bytes]:
     """A separate interpreter that takes the lock, signals, and holds it."""
-    code = textwrap.dedent(f"""
-        import pathlib, sys, time
-        sys.path.insert(0, {str(_REPO)!r})
-        from base.native_process.os_platform import file_lock
-        with file_lock(pathlib.Path({str(target)!r}), timeout_s=60):
-            pathlib.Path({str(ready)!r}).write_text("1")
-            time.sleep({hold_s})
-    """)
+    code = (
+        "import pathlib, sys, time\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "from base.native_process.os_platform import file_lock\n"
+        "with file_lock(pathlib.Path(sys.argv[2]), timeout_s=60):\n"
+        "    pathlib.Path(sys.argv[3]).write_text('1')\n"
+        "    time.sleep(float(sys.argv[4]))\n"
+    )
     return subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", code, str(_REPO), str(target), str(ready), str(hold_s)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

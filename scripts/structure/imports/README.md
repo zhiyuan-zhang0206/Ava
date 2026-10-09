@@ -6,7 +6,11 @@ resolved module edges always use the current checkout.
 
 `executed.py` supplies bounded facts about actual Python `-c` inputs. It follows
 literal source, one plain binding and local undecorated helpers that pass a
-source parameter unchanged. Launchers and Python executables must resolve
+source parameter unchanged or through one plain local binding. A positional
+source before `*argv` and a keyword-only source remain independent of trailing
+argument data. `**kwargs` and unpacking before a positional source stay unknown.
+Literal `-W`/`-X` operands are consumed as interpreter options; source selection
+stops at a script, `-m` or `--`. Launchers and Python executables must resolve
 through their imported bindings; unrelated source samples do not participate.
 
 `inputs()` returns known source texts and structured `Unresolved` facts with
@@ -21,10 +25,36 @@ contracts or claim to model all Python launches. Its consumer must retain
 `unresolved`: an empty set of known dependencies cannot certify that an
 execution input has no first-party dependency.
 
-The existing placement and private-patch gates do not yet consume these facts.
-Their integration must explicitly handle incomplete evidence before using a
-dependency-derived home as private access authorization. A raw dependency LCA
-is a placement fact; it does not establish that authorization.
+A raw dependency LCA is a placement fact; it does not establish private access
+authorization. Completeness and the existing private policy have separate
+consumer contracts.
+
+`placement.collect_reference_evidence()` is the common collector for executed
+inputs and ordinary first-party references. Its refs-only API,
+`collect_references()`, raises `IncompleteReferenceEvidenceError` with the
+retained facts when execution inputs are unresolved. `place()` also requires
+complete subject references; it cannot silently certify a lower home from gaps.
+
+The existing patch gate temporarily calls `legacy_patch_placement()`. This
+adapter uses the same collector and subject calculation, pairs its inferred
+home with the evidence, and is only for that legacy consumer. Its result is
+explicitly marked `legacy-inference`; stderr and the census retain launch-site
+gaps. New LCA consumers must use `ReferenceEvidence` directly, never this adapter.
+
+`scripts/lint/patch_targets.py --strict-evidence` is a separate completeness
+diagnostic. It retains the existing private policy and exits 1 for unresolved
+execution inputs or existing-policy violations. `--report` does not suppress
+this diagnostic failure. Normal hooks retain the same private policy and show
+their evidence gaps. A root LCA already established from known subjects may
+still retain unknown inputs in the independent locality analysis; completeness
+failure is not a different placement conclusion.
+
+The root integration owner coordinates the private-policy design discussion.
+This contribution does not select a replacement authority rule. Remove the
+legacy adapter only after that design is resolved, its real consumers and
+private seams are reconciled, and the relevant tests and full-tree checks pass
+without exemptions. The test-placement owner independently closes raw-LCA and
+fixture/lane migration; a locality pass does not approve private authorization.
 
 `style.py` supplies a pure rule for qualified imports in the coordinated
 import-style migration.

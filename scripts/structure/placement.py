@@ -55,8 +55,8 @@ its patch targets give it rather than losing its home.
 A test of a linter or a gate carries sample paths and sample source: the input of its subject,
 not the subject. A path counts only as a chain from the repository root (`repo_root()`, a name
 bound only to it, a climb from `Path(__file__)` ending exactly there): `tmp_path / "scripts"`
-and a bare `"scripts/x.py"` name no root. Source in a string counts only in a file that spawns
-an interpreter (`sys.executable`). Both gates: `scripts/structure/placement_evidence.py`.
+and a bare `"scripts/x.py"` name no root. Source strings count only as actual Python `-c`
+inputs: `imports/executed.py` retains unknown inputs; `placement_evidence.py` owns root paths.
 
 ## What a home depends on
 
@@ -85,7 +85,22 @@ from pathlib import Path
 from typing import cast
 
 from scripts.structure import imports, lint_common, placement_evidence, service_units
-from scripts.structure.imports import cache
+from scripts.structure.imports import cache, executed
+from scripts.structure.placement_evidence import (
+    IncompleteReferenceEvidenceError as IncompleteReferenceEvidenceError,
+)
+from scripts.structure.placement_evidence import (
+    LegacyPlacement as LegacyPlacement,
+)
+from scripts.structure.placement_evidence import (
+    Placement as Placement,
+)
+from scripts.structure.placement_evidence import (
+    Ref as Ref,
+)
+from scripts.structure.placement_evidence import (
+    ReferenceEvidence as ReferenceEvidence,
+)
 
 # First-party Python code participates in placement, including runnable templates.
 CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts", "schedules", "commands", "demos")
@@ -148,11 +163,6 @@ _PATCH_CALLEES = frozenset({"setattr", "delattr", "patch", "dict", "multiple"})
 _NOT_MONKEYPATCH = frozenset({"self", "cls", "os", "sys", "object", "builtins", "super"})
 _MONKEYPATCH_TARGET_CALLS = frozenset({"setattr", "delattr", "setitem", "delitem"})
 _DOTTED = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$")
-_EMBEDDED_IMPORT = re.compile(
-    r"^[ \t]*(?:from[ \t]+([A-Za-z_][\w.]*)[ \t]+import[ \t]+([^\n#]+)"
-    r"|import[ \t]+([A-Za-z_][\w.]*(?:[ \t]*,[ \t]*[A-Za-z_][\w.]*)*))",
-    re.MULTILINE,
-)
 
 
 def unit_of(module: str) -> str | None:
@@ -399,18 +409,6 @@ def unit_graph(repo_root: Path) -> UnitGraph:
 # --------------------------------------------------------------------------- references
 
 
-@dataclass
-class Ref:
-    """One first-party module a file references."""
-
-    line: int
-    kind: str  # import | string-target | string-loose | embedded-import | path-file | path-dir
-    module: str
-    unit: str
-    via: str = ""  # callee of a string target
-    names: tuple[str, ...] = ()  # local names an import binds (patch-evidence pruning)
-
-
 def _callee(node: ast.AST) -> str:
     if isinstance(node, ast.Name):
         return node.id
@@ -443,7 +441,6 @@ class _Collector(ast.NodeVisitor):
         self._handled: set[int] = set()
         self._div_seen: set[int] = set()
         self._roots = placement_evidence.RepoRoots(tree, rel_path)
-        self._spawns_python = placement_evidence.spawns_interpreter(tree)
         self._rel_path = rel_path
 
     def _add(
@@ -515,8 +512,6 @@ class _Collector(ast.NodeVisitor):
         value = node.value
         if not isinstance(value, str):
             return
-        if "\n" in value and "import " in value and self._spawns_python:
-            self._embedded_imports(node.lineno, value)
         if len(value) > 200 or "\n" in value or " " in value or id(node) in self._handled:
             return
         if _DOTTED.match(value) and value.split(".")[0] in CODE_TOPS:
@@ -533,36 +528,40 @@ class _Collector(ast.NodeVisitor):
             is_file = rel.endswith(".py") and (self.index.repo_root / rel).is_file()
             self._add(line, "path-file" if is_file else "path-dir", module)
 
-    def _embedded_imports(self, line: int, text: str) -> None:
-        for match in _EMBEDDED_IMPORT.finditer(text):
-            if match.group(1):
-                self._embedded_from(line, match.group(1), match.group(2))
-            else:
-                for name in match.group(3).split(","):
-                    self._add_dotted(line, "embedded-import", name.strip())
+    def executed_imports(self, source: executed.Source) -> list[executed.Unresolved]:
+        facts = executed.import_facts(source, self._rel_path)
+        for node in facts.clauses:
+            clause = imports.normalize(node, self._rel_path)
+            for dependency in imports.dependencies(clause, self.index, CODE_TOPS):
+                self._add(source.line, "embedded-import", dependency.module)
+        for target in facts.targets:
+            self._add_dotted(source.line, "embedded-import", target)
+        return facts.unresolved
 
-    def _embedded_from(self, line: int, module: str, imported: str) -> None:
-        if module.split(".", maxsplit=1)[0] not in CODE_TOPS:
-            return
-        names = [name.strip().split(" as ")[0].strip("() ") for name in imported.split(",")]
-        submodules = [
-            f"{module}.{name}" for name in names if name and self.index.kind(f"{module}.{name}")
-        ]
-        for submodule in submodules:
-            self._add(line, "embedded-import", submodule)
-        if not submodules:
-            self._add_dotted(line, "embedded-import", module)
+
+def collect_reference_evidence(
+    tree: ast.AST, index: ModuleIndex, rel_path: str = ""
+) -> ReferenceEvidence:
+    """Actual source references and bounded Python -c evidence, without losing gaps."""
+    collector = _Collector(index, tree, rel_path)
+    collector.visit(tree)
+    inputs = executed.inputs(tree, rel_path)
+    unresolved = list(inputs.unresolved)
+    for source in inputs.sources:
+        unresolved.extend(collector.executed_imports(source))
+    return ReferenceEvidence(collector.refs, unresolved)
 
 
 def collect_references(tree: ast.AST, index: ModuleIndex, rel_path: str = "") -> list[Ref]:
-    """Every first-party reference of a parsed file, patch evidence included.
+    """Complete references only; callers needing incomplete facts use the evidence API.
 
-    `rel_path` (repo-relative, POSIX) anchors relative imports and root paths. Package
-    initializers keep their own package; an import cannot climb above its top-level package.
+    `rel_path` anchors actual relative imports. The API does not guess a package
+    anchor for synthetic input or silently return a partial dependency list.
     """
-    collector = _Collector(index, tree, rel_path)
-    collector.visit(tree)
-    return collector.refs
+    evidence = collect_reference_evidence(tree, index, rel_path)
+    if evidence.unresolved:
+        raise IncompleteReferenceEvidenceError(evidence)
+    return evidence.refs
 
 
 def _patch_target_root(call: ast.Call) -> ast.Name | None:
@@ -625,24 +624,19 @@ def placement_references(
 
     Fallback: a file whose every strong reference is patch evidence keeps all of them.
     """
-    refs = collect_references(tree, index, rel_path)
-    pruned = without_patch_evidence(list(ast.walk(tree)) if nodes is None else nodes, refs)
+    return _subject_references(
+        collect_references(tree, index, rel_path), list(ast.walk(tree)) if nodes is None else nodes
+    )
+
+
+def _subject_references(refs: list[Ref], nodes: Sequence[ast.AST]) -> tuple[list[Ref], bool]:
+    pruned = without_patch_evidence(nodes, refs)
     if _has_strong(refs) and not _has_strong(pruned):
         return refs, True
     return pruned, False
 
 
 # --------------------------------------------------------------------------- placement
-
-
-@dataclass(frozen=True)
-class Placement:
-    """The package a test file belongs to: `home` is a code directory such as `base/host`."""
-
-    home: str | None
-    unit: str | None = None
-    fallback: bool = False  # the patch-evidence fallback applied
-    ambiguous: bool = False  # no unit could legally import all the others
 
 
 def _pick_unit(
@@ -770,7 +764,12 @@ def place(
     if is_top_level(rel_path):
         return Placement(None)
     found, fallback = placement_references(tree, index, nodes, rel_path)
-    refs = list(found)
+    return _place_subjects(rel_path, index, found, fallback=fallback)
+
+
+def _place_subjects(
+    rel_path: str, index: ModuleIndex, refs: list[Ref], *, fallback: bool
+) -> Placement:
     basis = [ref for ref in refs if ref.kind in STRONG_KINDS] or refs  # loose evidence last
     if not basis:
         return Placement(None)
@@ -780,3 +779,21 @@ def place(
     unit, ambiguous = _pick_unit(sorted({ref.unit for ref in basis}), graph, weight, stem, refs)
     home = _home_dir(index, unit, [ref.module for ref in basis if ref.unit == unit])
     return Placement(home, unit, fallback, ambiguous)
+
+
+def legacy_patch_placement(
+    rel_path: str, tree: ast.AST, index: ModuleIndex, nodes: Sequence[ast.AST]
+) -> LegacyPlacement:
+    """Retain the current patch gate's inference, visibly carrying every gap.
+
+    The root integration owner coordinates the private-policy design. Remove
+    this adapter only after that design and its real consumer/seam closure are
+    verified with no exemptions; locality acceptance does not choose that rule.
+    It shares the collector and placement calculation; it does not parse again
+    with another grammar or suppress IncompleteReferenceEvidenceError.
+    """
+    evidence = collect_reference_evidence(tree, index, rel_path)
+    if is_top_level(rel_path):
+        return LegacyPlacement(Placement(None), evidence)
+    refs, fallback = _subject_references(evidence.refs, nodes)
+    return LegacyPlacement(_place_subjects(rel_path, index, refs, fallback=fallback), evidence)
