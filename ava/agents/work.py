@@ -68,6 +68,7 @@ def restart(
 ) -> NativeRestartAcceptance:
     """Request restart of the exact observed active turn.
 
+    Requires an established caller actor before sending the request.
     Retain the same target, key and overlay for recovery. The returned receipt
     proves acceptance; inspect restart_status for original execution evidence.
     """
@@ -77,7 +78,7 @@ def restart(
     key = validate_idempotency_key(idempotency_key)
     agent_identity.validate_external_identity()
     body = NativeRestartRequest(
-        target=target, source=agent_identity.default_actor(), config_overlay=config_overlay
+        target=target, source=agent_identity.require_actor(), config_overlay=config_overlay
     )
     response = transport.post(
         f"/api/keyed/v1/agents/{target.agent_id}/restart-work",
