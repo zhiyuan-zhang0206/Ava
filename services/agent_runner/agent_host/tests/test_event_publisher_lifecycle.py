@@ -247,3 +247,21 @@ async def test_parallel_invocations_keep_their_event_identity_and_queues(
     assert first.published == [("first", "one"), ("first", "two")]
     assert second.published == [("second", "one"), ("second", "two")]
     assert all(publisher._task is None for publisher in publishers)
+
+
+async def test_invocation_failure_keeps_its_original_type_without_worker_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary = RuntimeError("turn defect")
+    redis = _Redis("normal", ValueError("unused worker defect"))
+    publisher = AgentEventPublisher(cast(aredis.Redis, redis), "events", agent_id=42)
+
+    async def invoke(_agent: int, _ctx: AvaContext) -> TurnOutcome:
+        publisher.emit("event")
+        raise primary
+
+    with pytest.raises(RuntimeError) as caught:
+        await _drive(monkeypatch, publisher, invoke)
+    assert caught.value is primary
+    assert redis.published == [("events", "event")]
+    assert publisher._task is None

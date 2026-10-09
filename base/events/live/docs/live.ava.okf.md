@@ -103,8 +103,9 @@ invocation. `invocation.driver.drive_context` enters the `TaskGroup` passed to
 `publisher.start(tasks)` and closes the publisher before leaving that group.
 Worker completion is joined on success, failure and cancellation; an unexpected
 pipeline, command-result or pool-disconnect exception reaches the invocation as
-an exception-group leaf. An invocation failure remains visible if its drain also
-fails. This does not change the separate `EventBus.publish_best_effort` contract.
+an exception-group leaf. A lone invocation failure retains its original type
+and object after the worker joins cleanly, preserving host compact/stall error
+classification. An invocation failure remains visible if its drain also fails. This does not change the separate `EventBus.publish_best_effort` contract.
 
 `emit` stays synchronous and nonblocking. One worker publishes FIFO batches of
 up to 64 from a queue of 2048; overflow sheds the oldest buffered event and keeps
