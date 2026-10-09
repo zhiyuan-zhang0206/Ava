@@ -502,3 +502,27 @@ def test_invoke_text_does_not_retry_permanent() -> None:
             retry_delay_seconds=0.0,
         )
     assert calls["n"] == 1  # no retry on PERMANENT
+
+
+def test_invoke_response_attributes_usage_to_the_given_agent(
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A daemon call made for an agent passes its id; the usage row carries it."""
+    from base.lm.call import invoke_response
+
+    usage: Any = {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}
+    llm = _FakeLLM(AIMessage(content="x", usage_metadata=usage), model_name="deepseek-v4-pro")
+
+    invoke_response(
+        llm,
+        [],
+        desc="d",
+        error_type=ValueError,
+        usage_source="hierarchy.group",
+        usage_agent_id=42,
+    )
+
+    [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
+    assert record["extra"]["agent_id"] == 42
+    assert record["extra"]["source"] == "hierarchy.group"
+    assert record["extra"]["usage_kind"] == "chat"

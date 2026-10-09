@@ -87,6 +87,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
         located: LocatedChunk,
         _tools: object,
         _calls: list,
+        _agent_id: int,
         **kw: bool,
     ) -> ChunkResult:
         seen["described"].append(located)
