@@ -43,7 +43,7 @@ def _baseline(
     directories: dict[str, int] | None = None,
     complexity: dict[str, int] | None = None,
     nesting: dict[str, int] | None = None,
-    patch_targets: dict[str, int] | None = None,
+    ambient_state: dict[str, int] | None = None,
 ) -> pathlib.Path:
     """Write the baseline as shards under scripts/structure/baseline/."""
     directory = _clear_baseline_dir(root)
@@ -52,7 +52,7 @@ def _baseline(
         "files": files or {},
         "complexity": complexity or {},
         "nesting": nesting or {},
-        "patch_targets": patch_targets or {},
+        "ambient_state": ambient_state or {},
         **{kind: {} for kind in ("private_imports", "owner_bypasses", "path_imports")},
     }
     for name, shard in baseline_shards.split(data).items():
@@ -568,10 +568,16 @@ def test_explicit_quality_targets_and_full_flag(
     assert "2 functions in 2 files" in captured.err
 
 
+def _write_ambient_callbacks(root: pathlib.Path, path: str, count: int) -> None:
+    source = root / path
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("import atexit\n" + "atexit.register(lambda: None)\n" * count)
+
+
 @pytest.mark.parametrize(
     "kind,key,value",
     [
-        ("patch_targets", "base/q.py::base.db._pool", 2),
+        ("ambient_state", "base/q.py::import-time-call:atexit.register", 2),
     ],
 )
 @pytest.mark.parametrize("delta", [-1, 1])
@@ -586,10 +592,12 @@ def test_committed_baseline_change_uses_base_revision(
     delta: int,
     base: str,
 ) -> None:
+    _write_ambient_callbacks(tmp_path, "base/q.py", value)
     _baseline(tmp_path, **{kind: {key: value}})
     _git(tmp_path, "init", "--quiet")
     _commit_baseline(tmp_path)
     _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write_ambient_callbacks(tmp_path, "base/q.py", value + delta)
     _baseline(tmp_path, **{kind: {key: value + delta}})
     _commit_baseline(tmp_path)
     if base == "explicit":
@@ -626,19 +634,21 @@ def test_guard_rejects_an_invalid_base_baseline(
         directory = _clear_baseline_dir(tmp_path)
         (directory / "tests.json").write_text("not JSON", encoding="utf-8")
     else:
-        _baseline(tmp_path, patch_targets={"base/q.py::base.db._pool": 2})
+        _baseline(tmp_path, ambient_state={"base/q.py::import-time-call:atexit.register": 2})
     _git(tmp_path, "init", "--quiet")
     _commit_baseline(tmp_path)
-    _baseline(
-        tmp_path, patch_targets={"base/q.py::base.db._pool": 3 if previous == "raised" else 2}
-    )
+    count = 3 if previous == "raised" else 2
+    _write_ambient_callbacks(tmp_path, "base/q.py", count)
+    _baseline(tmp_path, ambient_state={"base/q.py::import-time-call:atexit.register": count})
 
     assert lcs.main([]) == rc
     captured = capsys.readouterr()
     if previous == "malformed":
         assert "invalid base baseline" in captured.out
     elif previous == "raised":
-        assert "raised patch_targets entry base/q.py::base.db._pool" in captured.out
+        assert (
+            "raised ambient_state entry base/q.py::import-time-call:atexit.register" in captured.out
+        )
     else:
         assert captured.out == ""
 
