@@ -171,6 +171,36 @@ def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
     return config_path
 
 
+def reconcile_config_image[C: BaseModel](
+    cls: type[C], content: str | None, config_path: Path
+) -> tuple[C, set[str], set[str]]:
+    """Validate an upgrade candidate before writing or importing legacy values.
+
+    Keep and validate stored fields the schema still declares, fill missing
+    fields with its defaults, and drop retired fields. The added set identifies
+    defaults that legacy import can replace without an authority conflict.
+    """
+    if content is None:
+        return cls(), set(cls.model_fields), set()
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise InvalidConfigData(f"plugin disk image JSON malformed ({config_path}): {exc}") from exc
+    if not isinstance(data, dict):
+        raise InvalidConfigData(f"plugin config disk image must be a JSON object ({config_path})")
+    disk_keys = set(data)
+    cls_keys = set(cls.model_fields)
+    defaults = cls().model_dump(mode="json")
+    merged = {field: data[field] if field in disk_keys else defaults[field] for field in cls_keys}
+    try:
+        candidate = cls.model_validate(merged)
+    except ValidationError as exc:
+        raise InvalidConfigData(
+            f"plugin disk image post-merge Pydantic validation failed ({config_path}): {exc}"
+        ) from exc
+    return candidate, cls_keys - disk_keys, disk_keys - cls_keys
+
+
 def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str], set[str]]:
     """Used by `ava plugins update` — auto-merge disk image and cls schema diff.
 
@@ -200,40 +230,10 @@ def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str]
         write_default_disk_image(plugin, cls)
         return set(cls.model_fields.keys()), set()
 
-    try:
-        captured = config_path.read_text()
-        disk_data = json.loads(captured)
-    except json.JSONDecodeError as e:
-        raise InvalidConfigData(
-            f"plugin {plugin!r} disk image JSON malformed ({config_path}): {e}"
-        ) from e
-
-    disk_keys = set(disk_data.keys())
-    cls_keys = set(cls.model_fields.keys())
-    added = cls_keys - disk_keys
-    removed = disk_keys - cls_keys
-
+    captured = config_path.read_text()
+    candidate, added, removed = reconcile_config_image(cls, captured, config_path)
     if not added and not removed:
         return set(), set()
-
-    default_dump = cls().model_dump(mode="json")
-    # Rebuild the image from the current schema's field set: keep the disk value
-    # where the field still exists, fill the cls default for a new field, and drop
-    # any field the schema no longer declares. The image converges to exactly
-    # cls_keys, so `_instantiate_from_disk`'s strict-equality check passes next boot.
-    merged: dict[str, object] = {
-        field: disk_data[field] if field in disk_keys else default_dump[field] for field in cls_keys
-    }
-
-    # Validate merged data — incompatible type blows up here (old disk value type
-    # does not match new cls field definition).
-    try:
-        cls(**merged)
-    except ValidationError as e:
-        raise InvalidConfigData(
-            f"plugin {plugin!r} disk image post-merge Pydantic validation failed "
-            f"(type incompatible, related to plugin upgrade; manual migrate needed {config_path}): {e}"
-        ) from e
 
     from base.packages.plugin_config_images import (
         PluginConfigOwner,
@@ -243,7 +243,7 @@ def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str]
 
     write_config_image(
         PluginConfigOwner(plugin, cls, config_path),
-        cls(**merged),
+        candidate,
         expected_digest=image_revision(captured.encode()),
     )
     return added, removed
