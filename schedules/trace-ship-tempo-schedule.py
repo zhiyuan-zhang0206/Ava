@@ -17,7 +17,7 @@ CRON = "*/5 * * * *"
 TIMEZONE = "UTC"
 
 
-def ship_traces(_trigger: None) -> None:
+def ship_traces(_slot: datetime, _trigger: None) -> None:
     try:
         out = ava.shell.run("ava trace ship 2>&1 | tail -3", timeout=600)
         print(out)
