@@ -85,7 +85,11 @@ resolved fixture name, implementation and scope after the call. This includes
 `getfixturevalue()` bindings through pytest's pinned-version fixture request
 state. Repeated reports for the same node and phase fail immediately, including
 repeated execution inside one worker. Worker reports never share an output
-filename. The planning job uses the same native binaries and vendored runtime
+filename. Runtime evidence captures the duration input digest at configuration;
+`--store-durations` measurements can replace that file at session finish without
+changing the recorded input generation. Pre-collection plan validation still
+rejects a different duration input. The planning job uses the same native
+binaries and vendored runtime
 as the paired runners, preserving environment-dependent collection. Group checks must match
 their planned node IDs and declared closure before any test body executes.
 
