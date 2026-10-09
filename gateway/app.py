@@ -271,6 +271,7 @@ async def _background_lifetime(
     app: FastAPI, upload_recovery: UploadRecovery
 ) -> AsyncGenerator[None]:
     """Join this lifespan's service loops before closing its database pools."""
+    inspect_queries = app.state.inspect_query_cache
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
     # lifespan — StreamableHTTPSessionManager.run() can only be entered once
     # per instance, and the tools close over this pool. Off (the default):
@@ -311,8 +312,11 @@ async def _background_lifetime(
                         latency_flusher.cancel()
                         auth401_flusher.cancel()
     finally:
-        app.state.db_pool.close()
-        app.state.control_db_pool.close()
+        try:
+            await inspect_queries.aclose()
+        finally:
+            app.state.db_pool.close()
+            app.state.control_db_pool.close()
 
 
 app = FastAPI(
