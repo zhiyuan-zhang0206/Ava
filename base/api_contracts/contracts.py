@@ -209,7 +209,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/routers/commands.py ───────────────────────────────────
     ("GET", "/api/commands"): RouteContract(),
-    # ── gateway/routers/config.py ───────────────────────────────────
+    # ── gateway/routers/configuration/runtime.py ───────────────────────────────────
     ("GET", "/api/config"): RouteContract(),
     ("GET", "/api/config/resolved"): RouteContract(),
     ("GET", "/api/config/audit"): RouteContract(),
