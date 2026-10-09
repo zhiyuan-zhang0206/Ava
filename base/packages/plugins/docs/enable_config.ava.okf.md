@@ -72,5 +72,5 @@ file is state loss — none of them gets papered over with a default.
 
 ## Key Dependencies
 
-- [[okf/plugins/plugins.ava.okf.md]] — the plugin system this config gates
+- [[docs/plugins/plugins.ava.okf.md]] — the plugin system this config gates
 - [[install_registry.ava.okf.md]] — the sibling registry gating *installed* packages
