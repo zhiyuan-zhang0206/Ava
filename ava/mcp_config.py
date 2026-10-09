@@ -27,10 +27,10 @@ a file lacking that section contributes nothing. A per-host enable overlay
 
 from __future__ import annotations
 
-import functools
+import errno
 import json
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from base.deploy.release.runtime_interpreter import external_plugin_read_root
 from base.host.system.probes import display_available, unix_sockets_available
@@ -64,6 +64,28 @@ class ToolInfo(TypedDict):
     input_schema: dict[str, Any]
 
 
+def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
+    """Validate optional host requirements without probing this host.
+
+    Missing or null requirements mean no preconditions. Otherwise only boolean
+    values for display and unix_socket are accepted; invalid declarations raise
+    MCPError rather than becoming a host-capability verdict.
+    """
+    requires = spec.get("requires")
+    if requires is None:
+        return {}
+    if not isinstance(requires, dict):
+        raise MCPError("server 'requires' must be an object or null")
+    validated: dict[str, bool] = {}
+    for key, want in cast(dict[object, object], requires).items():
+        if not isinstance(key, str) or key not in {"display", "unix_socket"}:
+            raise MCPError(f"unknown requires key {key!r} in MCP server config")
+        if not isinstance(want, bool):
+            raise MCPError(f"requires {key!r} must be a boolean")
+        validated[key] = want
+    return validated
+
+
 def assert_requirements(spec: dict[str, Any]) -> None:
     """Evaluate a server entry's optional `requires` preconditions before connect.
 
@@ -79,37 +101,29 @@ def assert_requirements(spec: dict[str, Any]) -> None:
     tool that cannot reach a service that cannot run (`ops.spec._gate_reason`
     gates that daemon out there over the same fact).
     """
-    requires = spec.get("requires")
-    if not requires:
-        return
+    requires = validate_requirements(spec)
     for key, want in requires.items():
-        if key == "display":
-            if want and not display_available():
-                raise MCPError(
-                    "MCP server requires a display, but this host has none "
-                    "(headless server / WSL without WSLg)"
-                )
-        elif key == "unix_socket":
-            if want and not unix_sockets_available():
-                raise MCPError(
-                    "MCP server requires AF_UNIX sockets, which this host has none of "
-                    "(Windows) — the service it fronts cannot run here either"
-                )
-        else:
-            raise MCPError(f"unknown requires key {key!r} in MCP server config")
+        if key == "display" and want and not display_available():
+            raise MCPError(
+                "MCP server requires a display, but this host has none "
+                "(headless server / WSL without WSLg)"
+            )
+        if key == "unix_socket" and want and not unix_sockets_available():
+            raise MCPError(
+                "MCP server requires AF_UNIX sockets, which this host has none of "
+                "(Windows) — the service it fronts cannot run here either"
+            )
 
 
 def server_capability(spec: dict[str, Any]) -> tuple[bool, str | None]:
-    """Non-raising read-time capability check for a server's `requires`.
+    """Validate requirements and return this host's capability verdict.
 
     Mirrors assert_requirements but returns (ok, reason) instead of raising, for
     a "can this host enable it?" UI gate. `display` and `unix_socket` are both
-    statically checkable here; unknown/other requirement keys are left to the
-    connect-time assert_requirements (so this returns ok for them).
+    statically checkable here. Invalid declarations raise MCPError, matching
+    connect-time validation; only an unavailable host capability returns false.
     """
-    requires = spec.get("requires")
-    if not requires:
-        return (True, None)
+    requires = validate_requirements(spec)
     if requires.get("display") and not display_available():
         return (False, "requires a display, but this host has none")
     if requires.get("unix_socket") and not unix_sockets_available():
@@ -361,19 +375,6 @@ def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, An
     return {k: v for k, v in merged.items() if enabled.get(k, True)}
 
 
-@functools.lru_cache(maxsize=1)
-def _session_death_codes() -> frozenset[int]:
-    """MCP error codes the client SDK synthesizes when a session is unusable:
-    CONNECTION_CLOSED when the stdio peer's read loop hit EOF, REQUEST_TIMEOUT
-    when a call got no reply. Imported lazily so this module still imports
-    where `mcp` is absent."""
-    try:
-        from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
-    except ImportError:
-        return frozenset()
-    return frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
-
-
 def is_transport_error(exc: BaseException) -> bool:
     """True when `exc` means the MCP server process / transport died.
 
@@ -381,32 +382,22 @@ def is_transport_error(exc: BaseException) -> bool:
     only if it was not a side-effectful tool call already in flight.
 
     Shared by the MCP daemon and the in-process SDK so both sides agree on
-    the retry seam.
+    the retry seam. Lazy dependency imports keep config discovery lightweight;
+    dependency failures propagate instead of changing the retry policy.
     """
-    name = type(exc).__name__
-    if name in (
-        "BrokenResourceError",
-        "ClosedResourceError",
-        "BrokenPipeError",
-        "ConnectionResetError",
-        "ConnectionRefusedError",
-        "TimeoutError",
-    ):
+    from anyio import BrokenResourceError, ClosedResourceError
+    from mcp import MCPError as MCPProtocolError
+    from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
+
+    if isinstance(exc, (BrokenResourceError, ClosedResourceError, TimeoutError)):
         return True
-    # OSError with an explicit transport errno (EPIPE / ECONNRESET / ECONNREFUSED).
-    # TimeoutError is a subclass of OSError but has no errno — caught by the
-    # name check above, not this branch.
     if isinstance(exc, OSError):
-        errno = getattr(exc, "errno", None)
-        if errno in (32, 54, 61):  # EPIPE, ECONNRESET, ECONNREFUSED
+        return isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionRefusedError)) or (
+            exc.errno in (errno.EPIPE, errno.ECONNRESET, errno.ECONNREFUSED)
+        )
+    if isinstance(exc, MCPProtocolError):
+        if exc.code in (CONNECTION_CLOSED, REQUEST_TIMEOUT):
             return True
-    # The mcp SDK raises session-death errors `from None` (no __cause__) with
-    # a code — the __cause__ probe alone missed them (2026-08-13 #1229).
-    if name in ("McpError", "MCPError", "JSONRPCError"):
-        code = getattr(exc, "code", None)
-        if code in _session_death_codes():
-            return True
-        cause = getattr(exc, "__cause__", None)
-        if cause is not None:
-            return is_transport_error(cause)
+        if exc.__cause__ is not None:
+            return is_transport_error(exc.__cause__)
     return False

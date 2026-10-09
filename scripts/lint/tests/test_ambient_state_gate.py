@@ -27,7 +27,7 @@ def _baseline(root: pathlib.Path, ambient: dict[str, int] | None = None) -> path
     """Write the baseline as shards, replacing any already there; only this section is filled."""
     directory = root / baseline_shards.SHARD_DIR
     if directory.is_dir():
-        for path in directory.glob("*.json"):
+        for path in directory.rglob("*.json"):
             path.unlink()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
@@ -42,6 +42,7 @@ def _baseline(root: pathlib.Path, ambient: dict[str, int] | None = None) -> path
         ambient_state.SECTION: ambient or {},
     }
     for name, shard in baseline_shards.split(data).items():
+        pathlib.Path(f"{directory}/{name}.json").parent.mkdir(parents=True, exist_ok=True)
         pathlib.Path(f"{directory}/{name}.json").write_text(
             baseline_shards.render(shard), encoding="utf-8"
         )
@@ -71,8 +72,11 @@ def _git(root: pathlib.Path, *args: str) -> None:
 @pytest.fixture
 def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Empty baseline")
     return tmp_path
 
 
@@ -121,6 +125,7 @@ def test_free_floating_background_work_names_the_service_loop_alternative(
 def test_a_frozen_site_passes(_repo: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write(_repo, "base/state.py", "_REGISTRY = {}\n")
     _baseline(_repo, {"base/state.py::ambient-container:_REGISTRY": 1})
+    _commit_base(_repo, with_lint=True)
 
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
@@ -139,6 +144,7 @@ def test_schedules_are_governed_by_this_rule_only(
     assert "schedules/daily.py:6:" in capsys.readouterr().out
 
     _baseline(_repo, {"schedules/daily.py::ambient-container:_STATE": 1})
+    _commit_base(_repo, with_lint=True)
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
 
@@ -330,23 +336,6 @@ def test_a_list_entry_whose_site_is_gone_fails_the_gate(
     assert "stale ambient_state list entry base/state.py::hidden-singleton:table" in (
         capsys.readouterr().out
     )
-
-
-def test_a_deferred_site_stays_in_the_baseline_and_goes_stale_with_its_fix(
-    _repo: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    key = "base/warn.py::ambient-container:_warned"
-    monkeypatch.setattr(
-        ambient_state.allow, "DEFERRED", {key: ambient_state.allow.DEFERRED_WARNING_REDESIGN}
-    )
-    _write(_repo, "base/warn.py", "_warned = set()\n")
-    _baseline(_repo, {key: 1})
-    assert lcs.main([]) == 0
-
-    _write(_repo, "base/warn.py", "VALUE = 1\n")
-    _baseline(_repo)
-    assert lcs.main([]) == 1
-    assert "stale ambient_state list entry" in capsys.readouterr().out
 
 
 def test_a_list_entry_for_a_deleted_file_fails_the_gate(

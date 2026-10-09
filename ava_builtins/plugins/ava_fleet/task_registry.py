@@ -6,17 +6,14 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import ava
-import ava.agents
 import ava.sdk_surface.agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-
-# Kept as compatibility aliases for existing SDK readers and tooling.
-from base.agents.tasks.model import TASK_COLUMNS as _COLS
+from base.agents.context import AvaContext
+from base.agents.tasks.model import TASK_COLUMNS, task_from_row
 from base.agents.tasks.model import Task as Task
-from base.agents.tasks.model import task_from_row as _row_to_task
 from base.agents.tasks.owner_notifications import TaskOwnerNotification, owner_change_notifications
 from base.agents.tasks.reparent import resolve_reparent
 
@@ -34,29 +31,9 @@ from ._task_update import (
     _collect_update_fields,
     _nothing_to_update,
     _owner_actually_changed,
+    _Unset,
     _validate_status,
     _write_task_update,
-)
-from ._task_update import (
-    _MAX_REMIND_INTERVAL_SECONDS as _MAX_REMIND_INTERVAL_SECONDS,
-)
-from ._task_update import (
-    _append_note_to_results as _append_note_to_results,
-)
-from ._task_update import (
-    _log_task_update as _log_task_update,
-)
-from ._task_update import (
-    _owner_change_payload as _owner_change_payload,
-)
-from ._task_update import (
-    _owner_is_changing as _owner_is_changing,
-)
-from ._task_update import (
-    _Unset as _Unset,
-)
-from ._task_update import (
-    _validate_remind_interval_seconds as _validate_remind_interval_seconds,
 )
 
 # `list` / `get` shadow builtins intentionally: these are the agent-facing names
@@ -69,12 +46,6 @@ from ._task_update import (
 __all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", "update"]
 
 
-def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
-    from base.agents.tasks.creation import ensure_parent_exists
-
-    ensure_parent_exists(cur, parent)
-
-
 def create(
     title: str,
     description: str,
@@ -83,7 +54,7 @@ def create(
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
-    operation_key: str | None = None,
+    operation_key: str,
 ) -> Task:
     """Args:
     title: unique among in_progress tasks.
@@ -96,13 +67,36 @@ def create(
     operation_key: reuse the same key and inputs to return the original Task.
         The returned snapshot may be outdated; use get(task.id) for current state.
     """
+    return _create(
+        ava.context,
+        title,
+        description,
+        parent=parent,
+        remind_interval_seconds=remind_interval_seconds,
+        owner=owner,
+        priority=priority,
+        operation_key=operation_key,
+    )
+
+
+def _create(
+    context: AvaContext,
+    title: str,
+    description: str,
+    *,
+    parent: int,
+    remind_interval_seconds: int | None = None,
+    owner: int | None = None,
+    priority: str = _DEFAULT_PRIORITY,
+    operation_key: str,
+) -> Task:
+    """Apply create with one explicit context, including admission revalidation."""
     from base.agents.tasks.creation import create_task_in_transaction
     from base.api_contracts.idempotency import validate_idempotency_key
 
     from ._task_creation_receipts import record_creation, replay_creation
 
-    if operation_key is not None:
-        operation_key = validate_idempotency_key(operation_key)
+    operation_key = validate_idempotency_key(operation_key)
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
     parent = coerce_typed(parent, "parent", int)
@@ -111,7 +105,7 @@ def create(
     )
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     priority = coerce_str(priority, "priority")
-    actor = ava.sdk_surface.agent_identity.require_agent_id()
+    actor = ava.sdk_surface.agent_identity.require_agent_id(context)
     effective_owner = owner if owner is not None else actor
     request: dict[str, object] = {
         "title": title,
@@ -121,8 +115,8 @@ def create(
         "priority": priority,
         "remind_interval_seconds": remind_interval_seconds,
     }
-    with ava.DB.transaction(), ava.DB.cursor() as cur:
-        snapshot = replay_creation(cur, actor, operation_key, request)
+    with context.sql.transaction(), context.sql.cursor() as cur:
+        snapshot = replay_creation(cur, actor, operation_key, request, context=context)
         if snapshot is not None:
             return Task(**snapshot)
         task, created_event, note_events = create_task_in_transaction(
@@ -154,45 +148,36 @@ def create_and_assign(
     title: str,
     description: str,
     *,
-    preset: str = "coder",
+    operation_key: str,
+    preset: str | None = None,
     label: str | None = None,
     config_overlay: dict[str, Any] | None = None,
     machine: str | None = None,
     parent: int,
     remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
-    operation_key: str | None = None,
-    require_idempotency: bool = False,
 ) -> tuple[Task, int]:
-    """Spawn an agent and assign it a task in one call.
+    """Create an agent and its assigned task under one operation key.
 
-    The new agent receives the task id, title, and description as its first
-    message; arguments carry the same meaning as in create() and
-    ava.agents.spawn(). ``machine`` defaults to your own machine.
-    ``parent``: same rule as create(). The parent is validated before the
-    agent spawns.
+    Reuse the key and inputs to recover the original pair after a lost reply.
+    The returned pair proves acceptance; query task and agent state to observe
+    current progress. Borrowed leases are unsupported.
 
-    ``require_idempotency``: opt in to atomic server acceptance with an explicit
-    ``operation_key``. Borrowed leases are unsupported in this mode. A returned
-    pair proves acceptance, not launch or execution. Keyless calls keep the
-    existing recipe; a key without opt-in is rejected.
+    Arguments have the same meaning as in create() and ava.agents.spawn().
+    With no preset selected, current defaults apply; machine defaults to your
+    own machine. The parent must exist and be open before either object is born.
 
     Returns:
         (task, agent_id).
     """
     from base.api_contracts.idempotency import validate_idempotency_key
 
-    if not isinstance(require_idempotency, bool):
-        raise TypeError("require_idempotency must be a bool")
-    if operation_key is not None:
-        operation_key = validate_idempotency_key(operation_key)
-    if require_idempotency and operation_key is None:
-        raise ValueError("require_idempotency requires an explicit operation_key")
-    if not require_idempotency and operation_key is not None:
-        raise ValueError("operation_key requires require_idempotency=True")
+    from ._task_assignment import create_and_assign_guarded
+
+    operation_key = validate_idempotency_key(operation_key)
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
-    preset = coerce_str(preset, "preset")
+    preset = coerce_str(preset, "preset", allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
     machine = coerce_str(machine, "machine", allow_none=True)
@@ -201,54 +186,18 @@ def create_and_assign(
         remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
     )
     priority = coerce_str(priority, "priority")
-    if require_idempotency:
-        from ._task_assignment import create_and_assign_guarded
-
-        assert operation_key is not None, "strong admission requires operation_key"  # noqa: S101
-        return create_and_assign_guarded(
-            title,
-            description,
-            parent=parent,
-            preset=preset,
-            label=label,
-            config_overlay=config_overlay,
-            machine=machine,
-            remind_interval_seconds=remind_interval_seconds,
-            priority=priority,
-            operation_key=operation_key,
-        )
-    # 0. Validate the parent before spawning: create() would reject a bad
-    # parent after the agent exists, leaving an orphaned agent behind.
-    with ava.DB.transaction(), ava.DB.cursor() as cur:
-        _ensure_parent_exists(cur, parent)
-
-    # 1. Spawn the agent — must exist before task creation so it can be the owner.
-    # The preset folds into the overlay at the spawn boundary (task #4086).
-    overlay = dict(config_overlay) if config_overlay else {}
-    if "preset" in overlay:
-        raise ValueError(
-            "preset given twice — as `preset` and as config_overlay['preset']; pass only one"
-        )
-    overlay["preset"] = preset
-    agent_id = ava.agents.spawn(
-        label=label,  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
-        config_overlay=overlay,
-        machine=machine,
-    )
-
-    # 2. Create the task with the spawned agent as owner — create() sends the
-    # notification with task id, title, and description.
-    task = create(
-        title=title,
-        description=description,
+    return create_and_assign_guarded(
+        title,
+        description,
         parent=parent,
+        preset=preset,
+        label=label,
+        config_overlay=config_overlay,
+        machine=machine,
         remind_interval_seconds=remind_interval_seconds,
-        owner=agent_id,
         priority=priority,
+        operation_key=operation_key,
     )
-
-    # 3. Return both so the caller can track the task and the agent.
-    return task, agent_id
 
 
 def update(
@@ -263,7 +212,7 @@ def update(
     priority: str | None = None,
     parent_id: int | None = _UNSET,  # type: ignore[assignment]
     note: str | None = None,
-    operation_key: str | None = None,
+    operation_key: str,
 ) -> None:
     """Any write resets the reminder clock. Owner changes notify both owners; other
     updates tell the owner who changed it; a parent-only reparent stays silent.
@@ -275,10 +224,47 @@ def update(
         owner: agent id to reassign to; a task always has an owner.
         remind_interval_seconds: None = unchanged; reminders cannot be disabled; capped at 24h.
         parent_id: reparent (explicit None = system root; int = set parent).
-        operation_key: optional stable key for this agent and task; reuse it to
+        operation_key: required stable key for this agent and task; reuse it to
             replay a committed update without another note or notification.
             Different effective fields with the same key raise ValueError.
     """
+    _update(
+        ava.context,
+        task_id,
+        status=status,
+        title=title,
+        description=description,
+        results=results,
+        owner=owner,
+        remind_interval_seconds=remind_interval_seconds,
+        priority=priority,
+        parent_id=parent_id,
+        note=note,
+        operation_key=operation_key,
+    )
+
+
+def _update_value(value: int | _Unset | None) -> int | None:
+    """Normalize the two unchanged spellings at typed business-call boundaries."""
+    return None if isinstance(value, _Unset) else value
+
+
+def _update(
+    context: AvaContext,
+    task_id: int,
+    *,
+    status: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    results: str | None = None,
+    owner: int | _Unset | None = _UNSET,
+    remind_interval_seconds: int | _Unset | None = _UNSET,
+    priority: str | None = None,
+    parent_id: int | _Unset | None = _UNSET,
+    note: str | None = None,
+    operation_key: str,
+) -> None:
+    """Apply update with one explicit context, including admission revalidation."""
     task_id = coerce_typed(task_id, "task_id", int)
     status = coerce_str(status, "status", allow_none=True)
     title = coerce_str(title, "title", allow_none=True)
@@ -297,7 +283,14 @@ def update(
     _validate_status(status)
 
     sets, params, payload, owner_changing, changes = _collect_update_fields(
-        task_id, status, title, description, results, owner, remind_interval_seconds, priority
+        task_id,
+        status,
+        title,
+        description,
+        results,
+        _update_value(owner),
+        _update_value(remind_interval_seconds),
+        priority,
     )
     if _nothing_to_update(sets, note) and parent_id is _UNSET:
         raise ValueError(
@@ -320,7 +313,7 @@ def update(
 
     from ._task_receipts import record_update, replay_update, update_identity, update_request
 
-    actor, operation_key = update_identity(operation_key)
+    actor, operation_key = update_identity(operation_key, context=context)
     request_body = update_request(
         {
             "status": status,
@@ -334,12 +327,12 @@ def update(
             "note": note,
         }
     )
-    with ava.DB.transaction(), ava.DB.cursor() as cur:
-        if replay_update(cur, actor, task_id, operation_key, request_body):
+    with context.sql.transaction(), context.sql.cursor() as cur:
+        if replay_update(cur, actor, task_id, operation_key, request_body, context=context):
             return
         if parent_id is not _UNSET:
             sets.append("parent_id = %s")
-            params.append(resolve_reparent(cur, task_id, parent_id))
+            params.append(resolve_reparent(cur, task_id, cast(int | None, parent_id)))
         old_owner, current_title, new_owner, updated_event = _write_task_update(
             cur,
             task_id,
@@ -350,7 +343,7 @@ def update(
             changes,
             title,
             note,
-            owner,
+            _update_value(owner),
             owner_changing,
             actor,
         )
@@ -373,16 +366,11 @@ def update(
 
     telemetry.emit_prepared(updated_event)
 
-    # Agent-scoped side effects run after the row change commits: telling an
-    # agent auto-wakes it, so keep it out of the transaction. System tooling
-    # has no actor for a task note or TaskUpdated; like gateway PATCH, its
-    # committed write relies on the board's normal poll.
-    if actor is not None:  # agent_id() is None before bootstrap; system tooling has no actor.
-        for event in note_events:
-            telemetry.emit_prepared(event)
-        from base.events.live import announce, bus  # deferred (task #3816)
+    for event in note_events:
+        telemetry.emit_prepared(event)
+    from base.events.live import announce, bus  # deferred (task #3816)
 
-        announce.publish_task_updated_sync(bus.EventBus.from_settings(), actor, task_id)
+    announce.publish_task_updated_sync(bus.EventBus.from_settings(), actor, task_id)
 
 
 def _queue_after_update(
@@ -391,7 +379,7 @@ def _queue_after_update(
     title: str,
     old_owner: int | None,
     new_owner: int | None,
-    actor: int | None,
+    actor: int,
     changes: builtins.list[str],
     *,
     owner_changed: bool,
@@ -402,13 +390,13 @@ def _queue_after_update(
         from base.agents.tasks.delivery import supersede_task_assignments
 
         supersede_task_assignments(cur, task_id)
-    if actor is None or parent_only:
+    if parent_only:
         return []
     if owner_changed:
         return _queue_owner_change(
             cur, task_id, title, old_owner, new_owner, actor, changes=changes
         )
-    if new_owner is not None and actor != new_owner and not _is_terminated(new_owner):
+    if new_owner is not None and actor != new_owner and not _is_terminated(cur, new_owner):
         return _queue_owner_updated(cur, task_id, title, new_owner, actor, changes)
     return []
 
@@ -432,7 +420,7 @@ def _queue_owner_change(
         old_owner,
         new_owner,
         actor=actor,
-        previous_owner_terminated=old_owner is None or _is_terminated(old_owner),
+        previous_owner_terminated=old_owner is None or _is_terminated(cur, old_owner),
         description=description,
         changes=changes,
     )
@@ -462,36 +450,32 @@ def _queue_owner_updated(
     return [receipt.event for receipt in receipts if receipt.event is not None]
 
 
-def _is_terminated(agent_id: int) -> bool:
+def _is_terminated(cur: psycopg.Cursor, agent_id: int) -> bool:
     """True when an agent is gone -- terminated, or absent from agents_meta.
 
     Gates only the previous-owner notification: a terminated former owner is
     left asleep rather than resurrected just to be told a task left it."""
-    with ava.DB.cursor() as cur:
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-        meta = cur.fetchone()
+    cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+    meta = cur.fetchone()
     return meta is None or meta[0] == "terminated"
 
 
-def log(task_id: int, message: str, *, operation_key: str | None = None) -> None:
+def log(task_id: int, message: str, *, operation_key: str) -> None:
     """Append one timestamped line; reuse operation_key to replay without appending again."""
     task_id = coerce_typed(task_id, "task_id", int)
     message = coerce_str(message, "message")
-    if operation_key is None:
-        update(task_id, note=message)
-    else:
-        update(task_id, note=message, operation_key=operation_key)
+    update(task_id, note=message, operation_key=operation_key)
 
 
 def get(task_id: int) -> Task:
     """Return the task with this id."""
     task_id = coerce_typed(task_id, "task_id", int)
     with ava.DB.cursor() as cur:
-        cur.execute(f"SELECT {_COLS} FROM agent_tasks WHERE id = %s", (task_id,))  # noqa: S608
+        cur.execute(f"SELECT {TASK_COLUMNS} FROM agent_tasks WHERE id = %s", (task_id,))  # noqa: S608
         row = cur.fetchone()
     if row is None:
         raise ValueError(f"task {task_id} does not exist")
-    return _row_to_task(row)
+    return task_from_row(row)
 
 
 def _where_clause(filters: builtins.list[str]) -> str:
@@ -524,14 +508,14 @@ def _build_list_query(
             " SELECT * FROM agent_tasks WHERE parent_id = %s"
             " UNION ALL"
             " SELECT c.* FROM agent_tasks c JOIN subtree s ON c.parent_id = s.id"
-            f") SELECT {_COLS} FROM subtree{_where_clause(filters)} ORDER BY created_at, id"
+            f") SELECT {TASK_COLUMNS} FROM subtree{_where_clause(filters)} ORDER BY created_at, id"
         )
         return sql, [parent, *params]
 
     if parent is not None:
         filters.append("parent_id = %s")
         params.append(parent)
-    sql = f"SELECT {_COLS} FROM agent_tasks{_where_clause(filters)} ORDER BY created_at, id"  # noqa: S608
+    sql = f"SELECT {TASK_COLUMNS} FROM agent_tasks{_where_clause(filters)} ORDER BY created_at, id"  # noqa: S608
     return sql, params
 
 
@@ -558,4 +542,4 @@ def list(
     sql, params = _build_list_query(parent, owner, status, recursive)
     with ava.DB.cursor() as cur:
         cur.execute(sql, params)
-        return [_row_to_task(r) for r in cur.fetchall()]
+        return [task_from_row(r) for r in cur.fetchall()]

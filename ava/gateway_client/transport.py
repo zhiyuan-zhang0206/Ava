@@ -10,8 +10,9 @@ from typing import Any
 
 import httpx
 
-from ava.sdk_surface import process_context
+import ava
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
+from base.agents.context import AvaContext
 from base.agents.messages.delivery_outbox import (
     TRANSIENT_HTTP_STATUSES as _TRANSIENT_HTTP_STATUSES,
 )
@@ -22,7 +23,7 @@ from base.config import settings
 from base.host.net.resilience import Policy, http_classifier, retry
 
 
-def _http() -> httpx.Client:  # pyright: ignore[reportUndefinedVariable]
+def _http(context: AvaContext | None = None) -> httpx.Client:  # pyright: ignore[reportUndefinedVariable]
     """The bound context's gateway client, built on first use so importing the SDK in a no-config
     context does not require the gateway URL to be resolvable until an actual call is made. Its
     timeout is `Settings.gateway_client_http_timeout_seconds` (env override
@@ -31,14 +32,14 @@ def _http() -> httpx.Client:  # pyright: ignore[reportUndefinedVariable]
     comfortably exceed the server's confirm window, otherwise a read timeout on a spawn that DID
     succeed triggers a retry that re-POSTs the non-idempotent create and yields a phantom-twin
     agent. `use_client` routes the calls through a different one."""
-    return process_context.current().gateway
+    return (context if context is not None else ava.context).gateway
 
 
 @contextmanager
 def use_client(client: Any) -> Generator[Any]:
     """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
     in-process gateway, or any `httpx.Client` — then put back whichever client was there before."""
-    with process_context.current().clients.using_gateway(client):
+    with ava.context.clients.using_gateway(client):
         yield client
 
 
@@ -100,7 +101,7 @@ def _memory_search_timeout() -> httpx.Timeout:  # pyright: ignore[reportUndefine
     return httpx.Timeout(budget)
 
 
-def _agent_jitter_seconds() -> float:
+def _agent_jitter_seconds(context: AvaContext | None = None) -> float:
     """Deterministic per-agent offset in [0, _JITTER_SPAN_S); 0 when no agent id.
 
     The heartbeat daemon's per-agent due-time jitter pattern
@@ -108,23 +109,23 @@ def _agent_jitter_seconds() -> float:
     agent at the same moment, and a fleet-wide identical retry schedule
     (1s, 2s, 4s, ...) would re-synchronize the retry waves as each agent
     retries in lockstep. Offsetting every sleep by a stable per-agent amount
-    keeps the waves de-phased. Deterministic on the agent id (the turn
-    contextvar in the host, or AVA_AGENT_ID carried by a launched child) so an agent keeps its own offset across restarts; no identity
+    keeps the waves de-phased. Deterministic on the supplied host context or local SDK identity, so an agent
+    keeps its own offset across restarts; no identity
     (tests, non-agent callers) → 0 (no offset).
     """
-    from base.native_process.turn_identity import effective_agent_id
+    from ava.sdk_surface.agent_identity import agent_id
 
-    ident = effective_agent_id()
+    ident = agent_id(context)
     if ident is None:
         return 0.0
     return _JITTER_SPAN_S * (ident % 1000) / 1000.0
 
 
-def _retry_delay_seconds(attempt: int) -> float:
+def _retry_delay_seconds(attempt: int, context: AvaContext | None = None) -> float:
     """Sleep before retry `attempt` (0-based): bounded exponential backoff
     plus the deterministic per-agent jitter offset."""
     base = min(_base_retry_delay_s() * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
-    return base + _agent_jitter_seconds()
+    return base + _agent_jitter_seconds(context)
 
 
 def raise_from_response(resp: httpx.Response) -> None:  # pyright: ignore[reportUndefinedVariable]
@@ -219,6 +220,7 @@ def _request_with_retry(
     attempts: int,
     *,
     retryable: bool = True,
+    context: AvaContext | None = None,
 ) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Execute one route's policy while keeping its final wire response intact."""
     import httpx
@@ -240,11 +242,11 @@ def _request_with_retry(
     if attempts < 1:
         # Preserve the old range(attempts) behavior for a zero/negative override.
         raise GatewayUnavailable(
-            f"Gateway transport error at {_http().base_url} (after {attempts} retries): None"
+            f"Gateway transport error at {_http(context).base_url} (after {attempts} retries): None"
         )
     policy = Policy(
         max_attempts=attempts,
-        backoff=_retry_delay_seconds,
+        backoff=lambda attempt: _retry_delay_seconds(attempt, context),
         jitter="none",  # backoff already includes the exact agent-only phase
         classify=classify,
         respect_retry_after=False,
@@ -257,11 +259,11 @@ def _request_with_retry(
     except httpx.TransportError as exc:
         if not retryable and not isinstance(exc, pre_send_errors):
             raise GatewayUnavailable(
-                f"Gateway transport error at {_http().base_url} "
+                f"Gateway transport error at {_http(context).base_url} "
                 f"(no retry: non-idempotent request; result unknown, may have been delivered): {exc!s}"
             ) from exc
         raise GatewayUnavailable(
-            f"Gateway transport error at {_http().base_url} (after {attempts} retries): {exc!s}"
+            f"Gateway transport error at {_http(context).base_url} (after {attempts} retries): {exc!s}"
         ) from exc
 
 
@@ -282,6 +284,7 @@ def post(
     idempotency_key: str | None = None,
     idempotency_scope: str | None = None,
     max_retries: int | None = None,
+    context: AvaContext | None = None,
 ) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
@@ -362,11 +365,12 @@ def post(
 
     retries = _max_retries() if max_retries is None else max_retries
     return _request_with_retry(
-        lambda: _http().post(
+        lambda: _http(context).post(
             path, json=json or {}, params=params, timeout=per_call, headers=headers
         ),
         retries,
         retryable=retryable,
+        context=context,
     )
 
 
@@ -376,6 +380,7 @@ def get(
     params: dict[str, Any] | None = None,
     timeout: httpx.Timeout | None = None,  # pyright: ignore[reportUndefinedVariable]
     max_retries: int | None = None,
+    context: AvaContext | None = None,
 ) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Unified GET wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
@@ -393,7 +398,9 @@ def get(
 
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
     retries = _max_retries() if max_retries is None else max_retries
-    return _request_with_retry(lambda: _http().get(path, params=params, timeout=per_call), retries)
+    return _request_with_retry(
+        lambda: _http(context).get(path, params=params, timeout=per_call), retries, context=context
+    )
 
 
 def patch(

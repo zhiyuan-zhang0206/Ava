@@ -29,7 +29,7 @@ def _clear_baseline_dir(root: pathlib.Path) -> pathlib.Path:
     to exist, and the README is what keeps git tracking it even with zero shards."""
     directory = root / baseline_shards.SHARD_DIR
     if directory.is_dir():
-        for path in directory.glob("*.json"):
+        for path in directory.rglob("*.json"):
             path.unlink()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
@@ -43,7 +43,7 @@ def _baseline(
     directories: dict[str, int] | None = None,
     complexity: dict[str, int] | None = None,
     nesting: dict[str, int] | None = None,
-    patch_targets: dict[str, int] | None = None,
+    ambient_state: dict[str, int] | None = None,
 ) -> pathlib.Path:
     """Write the baseline as shards under scripts/structure/baseline/."""
     directory = _clear_baseline_dir(root)
@@ -52,12 +52,13 @@ def _baseline(
         "files": files or {},
         "complexity": complexity or {},
         "nesting": nesting or {},
-        "patch_targets": patch_targets or {},
+        "ambient_state": ambient_state or {},
         **{kind: {} for kind in ("private_imports", "owner_bypasses", "path_imports")},
     }
     for name, shard in baseline_shards.split(data).items():
         # String concat, not `/`: a test-only key can produce a shard name
         # starting with "/", which `directory / name` would treat as absolute.
+        pathlib.Path(f"{directory}/{name}.json").parent.mkdir(parents=True, exist_ok=True)
         (pathlib.Path(f"{directory}/{name}.json")).write_text(
             baseline_shards.render(shard), encoding="utf-8"
         )
@@ -96,8 +97,11 @@ def _git(root: pathlib.Path, *args: str) -> None:
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every main() call scans and invokes Git only in its own temporary root."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Empty baseline")
 
 
 @pytest.mark.parametrize("lines", [600, 601, 700, 800, 801])
@@ -194,7 +198,7 @@ def test_docs_and_frontend_are_out_of_scope(
 def test_baseline_introduction_skips_guard_when_absent_from_head(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "rm", "-r", baseline_shards.SHARD_DIR)
     _write(tmp_path, "README.md", 1)
     _git(tmp_path, "add", "README.md")
     _git(tmp_path, "commit", "--quiet", "-m", "Before baseline introduction")
@@ -207,11 +211,55 @@ def test_baseline_introduction_skips_guard_when_absent_from_head(
     assert "baseline guard skipped" in captured.err
 
 
-def test_non_git_checkout_skips_guard(
+def test_non_git_checkout_fails_the_guard(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    (tmp_path / ".git").rename(tmp_path / "saved-git")
+    assert lcs.main([]) == 1
+    captured = capsys.readouterr()
+    assert "baseline guard skipped" not in captured.err
+    assert "cannot resolve" in captured.out
+
+
+def test_missing_default_base_fails_instead_of_using_head(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    assert lcs.main([]) == 1
+    captured = capsys.readouterr()
+    assert "origin/main" in captured.out
+    assert "falling back" not in captured.err
+    assert "guard skipped" not in captured.err
+
+
+def test_explicit_base_compares_the_selected_commit_instead_of_its_merge_base(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _git(tmp_path, "checkout", "--quiet", "-b", "comparison")
+    _write(tmp_path, "README.md", 1)
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "commit", "--quiet", "-m", "Selected comparison revision")
+    expected = lcs._git("rev-parse", "HEAD").stdout.strip()
+    _git(tmp_path, "checkout", "--quiet", "-")
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "comparison")
+    assert lcs._baseline_base() == expected
+
+
+def test_explicit_fetched_base_works_without_ancestry_in_a_shallow_checkout(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = lcs._git("rev-parse", "HEAD").stdout.strip()
+    _write(tmp_path, "README.md", 1)
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "commit", "--quiet", "-m", "Change after the comparison revision")
+    shallow = tmp_path.parent / "shallow"
+    _git(tmp_path, "clone", "--quiet", "--depth", "1", tmp_path.as_uri(), str(shallow))
+    _git(shallow, "fetch", "--quiet", "--depth", "1", "origin", base)
+    monkeypatch.setattr(lcs, "_REPO_ROOT", shallow)
+    assert lcs._git("merge-base", "HEAD", base).returncode != 0
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", base)
+    assert lcs._baseline_base() == base
     assert lcs.main([]) == 0
-    assert "baseline guard skipped" in capsys.readouterr().err
 
 
 # Malformed/misfiled/missing baseline shards: test_baseline_shard_validity_gate.py.
@@ -248,7 +296,7 @@ def test_explicit_out_of_scope_target_is_silent_but_guard_still_runs(
     _baseline(tmp_path)
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", baseline_shards.SHARD_DIR)
-    _git(tmp_path, "commit", "--quiet", "-m", "Freeze baseline")
+    _git(tmp_path, "commit", "--quiet", "--allow-empty", "-m", "Freeze baseline")
     directory = _entries(tmp_path, "docs", 21)
     path = _write(directory, "oversized.py", 801)
     args = [str(directory if target_is_directory else path)]
@@ -390,7 +438,7 @@ def _nested(depth: int) -> str:
 
 def _commit_baseline(root: pathlib.Path) -> None:
     _git(root, "add", baseline_shards.SHARD_DIR)
-    _git(root, "commit", "--quiet", "-m", "Baseline snapshot")
+    _git(root, "commit", "--quiet", "--allow-empty", "-m", "Baseline snapshot")
 
 
 @pytest.mark.parametrize(
@@ -412,6 +460,8 @@ def test_quality_boundaries(
 def test_function_qualnames_duplicates_and_lambda_exclusion() -> None:
     tree = ast.parse(
         "class Outer:\n    class Inner:\n        def method(self): pass\ndef p():\n    def c(): pass\n    def c(): pass\n    return lambda: 1\nasync def p(): pass\n"
+        "try:\n    pass\nexcept Exception:\n    def recovered(): pass\n"
+        "match value:\n    case 1:\n        def matched(): pass\n"
     )
     measured = quality.measure_quality(tree, "tests/q.py")
     expected = {
@@ -420,6 +470,8 @@ def test_function_qualnames_duplicates_and_lambda_exclusion() -> None:
         "tests/q.py::p.<locals>.c",
         "tests/q.py::p.<locals>.c#2",
         "tests/q.py::p#2",
+        "tests/q.py::recovered",
+        "tests/q.py::matched",
     }
     assert set(measured["complexity"]) == set(measured["nesting"]) == expected
     assert set(measured["complexity"].values()) == {1}
@@ -516,10 +568,16 @@ def test_explicit_quality_targets_and_full_flag(
     assert "2 functions in 2 files" in captured.err
 
 
+def _write_ambient_callbacks(root: pathlib.Path, path: str, count: int) -> None:
+    source = root / path
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("import atexit\n" + "atexit.register(lambda: None)\n" * count)
+
+
 @pytest.mark.parametrize(
     "kind,key,value",
     [
-        ("patch_targets", "base/q.py::base.db._pool", 2),
+        ("ambient_state", "base/q.py::import-time-call:atexit.register", 2),
     ],
 )
 @pytest.mark.parametrize("delta", [-1, 1])
@@ -534,15 +592,19 @@ def test_committed_baseline_change_uses_base_revision(
     delta: int,
     base: str,
 ) -> None:
+    _write_ambient_callbacks(tmp_path, "base/q.py", value)
     _baseline(tmp_path, **{kind: {key: value}})
     _git(tmp_path, "init", "--quiet")
     _commit_baseline(tmp_path)
     _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write_ambient_callbacks(tmp_path, "base/q.py", value + delta)
     _baseline(tmp_path, **{kind: {key: value + delta}})
     _commit_baseline(tmp_path)
     if base == "explicit":
         monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD~1")
         _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    else:
+        monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
     assert lcs.main([]) == (1 if delta > 0 else 0)
     captured = capsys.readouterr()
     assert (f"raised {kind} entry {key}" in captured.out) == (delta > 0)
@@ -572,19 +634,21 @@ def test_guard_rejects_an_invalid_base_baseline(
         directory = _clear_baseline_dir(tmp_path)
         (directory / "tests.json").write_text("not JSON", encoding="utf-8")
     else:
-        _baseline(tmp_path, patch_targets={"base/q.py::base.db._pool": 2})
+        _baseline(tmp_path, ambient_state={"base/q.py::import-time-call:atexit.register": 2})
     _git(tmp_path, "init", "--quiet")
     _commit_baseline(tmp_path)
-    _baseline(
-        tmp_path, patch_targets={"base/q.py::base.db._pool": 3 if previous == "raised" else 2}
-    )
+    count = 3 if previous == "raised" else 2
+    _write_ambient_callbacks(tmp_path, "base/q.py", count)
+    _baseline(tmp_path, ambient_state={"base/q.py::import-time-call:atexit.register": count})
 
     assert lcs.main([]) == rc
     captured = capsys.readouterr()
     if previous == "malformed":
         assert "invalid base baseline" in captured.out
     elif previous == "raised":
-        assert "raised patch_targets entry base/q.py::base.db._pool" in captured.out
+        assert (
+            "raised ambient_state entry base/q.py::import-time-call:atexit.register" in captured.out
+        )
     else:
         assert captured.out == ""
 

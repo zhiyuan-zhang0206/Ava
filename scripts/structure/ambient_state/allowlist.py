@@ -19,8 +19,6 @@ Three families are kept, and only these (user ruling 2026-10-02):
    pure function, which is a cache of a constant rather than state
    (`PURE_CALLEES`, `PURE_REPO_CALLEES`, `ALLOWED`).
 
-`DEFERRED` is not an exemption: it annotates frozen baseline sites whose fix waits
-on a separate redesign.
 """
 
 from __future__ import annotations
@@ -162,7 +160,6 @@ PURE_REPO_CALLEES: dict[str, str] = {
 # nothing mutable is a cache of a constant, not state. A site that stops being
 # reported fails as stale.
 ALLOWED: dict[str, str] = {
-    "ava/mcp_config.py::hidden-singleton:_session_death_codes": "constants read from mcp.types",
     "ava_builtins/plugins/ava_memory/sdk.py::hidden-cache:_documented_pool": "wraps one home's pool path in a documented constant",
     "base/config/admin/candidate.py::hidden-cache:_candidate_validation_model": "builds a validation subclass of a given Settings class",
     "base/config/service_read.py::hidden-singleton:domain_model_classes": "the static table of Settings domain classes",
@@ -178,7 +175,6 @@ ALLOWED: dict[str, str] = {
     "base/native_process/group_closure.py::hidden-singleton:_proc_listpids": "a ctypes loader of one OS entry point: code, not state",
     "base/native_process/pidfd.py::hidden-singleton:_api": "a ctypes loader of the pidfd syscalls: code, not state",
     "ava/__init__.py::ambient-instance:extend": "a namespace of functions built once and never rebound or filled afterwards",
-    "ava/sdk_surface/process_context.py::contextvar:_CURRENT": "the process's AvaContext: the one in-process entry to the run's context, as LangGraph's get_runtime() reads the run's Runtime (docs/decisions/agents/context/2026-10-04-ava-state-and-context.md)",
 }
 
 # ── 4. slice-governed packages ─────────────────────────────────────────────
@@ -223,10 +219,3 @@ BUS_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "bus")
 # `clock = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root that no longer
 # exists fails as stale.
 CLOCK_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "clock")
-
-# ── deferred: frozen in the baseline, fix waits on another redesign ────────
-
-DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"
-# Deferred sites remain measured baseline debt, never exemptions. Warning-only
-# process-wide caches have been removed; no warning redesign is needed for them.
-DEFERRED: dict[str, str] = {}

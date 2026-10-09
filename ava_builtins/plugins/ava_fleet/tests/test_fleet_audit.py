@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -69,7 +70,9 @@ def _refuse(_conn: object, _event: Event) -> Event:
 def test_a_created_task_is_recorded_with_its_row(
     db_conn: psycopg.Connection, agent_id: int, root_task_id: int
 ) -> None:
-    task = task_registry.create("audited", "detail", parent=root_task_id)
+    task = task_registry.create(
+        "audited", "detail", parent=root_task_id, operation_key=str(uuid4())
+    )
 
     [recorded] = _audit(db_conn, agent_id, "task_create")
     assert (recorded["task_id"], recorded["title"]) == (task.id, "audited")
@@ -84,7 +87,7 @@ def test_a_task_whose_audit_fact_cannot_be_recorded_is_not_created(
     monkeypatch.setattr("base.telemetry.audit_events.record_audit", _refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
-        task_registry.create("never", "detail", parent=root_task_id)
+        task_registry.create("never", "detail", parent=root_task_id, operation_key=str(uuid4()))
 
     count = db_conn.execute("SELECT count(*) FROM agent_tasks WHERE title='never'").fetchone()
     db_conn.commit()
@@ -94,9 +97,9 @@ def test_a_task_whose_audit_fact_cannot_be_recorded_is_not_created(
 def test_a_task_update_is_recorded_with_its_change(
     db_conn: psycopg.Connection, agent_id: int, root_task_id: int
 ) -> None:
-    task = task_registry.create("title", "detail", parent=root_task_id)
+    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
 
-    task_registry.update(task.id, remind_interval_seconds=1800)
+    task_registry.update(task.id, remind_interval_seconds=1800, operation_key=str(uuid4()))
 
     [recorded] = _audit(db_conn, agent_id, "task_update")
     assert recorded["task_id"] == task.id

@@ -12,12 +12,11 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from ops import lifecycle
 from ops.cluster import rpc as cluster_rpc
-from ops.lifecycle import launch
 from ops.lifecycle.tests.test_operations import _db
 from ops.lifecycle.tests.test_operations import (
     stub_pool as stub_pool,
 )
-from ops.rpc_schemas import LaunchAgentRequest, ResurrectAgentRequest, ResurrectAgentResponse
+from ops.rpc_schemas import ResurrectAgentRequest, ResurrectAgentResponse
 
 
 class TestResurrectIfTerminatedPlacement:
@@ -544,34 +543,3 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
         "SELECT wake_suppressed_until,wake_suppress_reason FROM agents_meta WHERE id=%s",
         (agent_id,),
     ).fetchone() == (None, None)
-
-
-@pytest.mark.asyncio
-async def test_launch_agent_op_hosted_skips_process_and_wakes(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
-) -> None:
-    """Hosted mode: the row the gateway created IS the agent. No fork, no
-    launch-confirm — the prompt INSERT (which publishes its own wake inside
-    `insert_inbound_message`) plus one explicit wake is the whole launch."""
-    inserted: list[tuple[int, str, str]] = []
-
-    def _fake_insert(_db, _bus, _pool: object, agent_id: int, prompt: str, source: str) -> int:
-        inserted.append((agent_id, prompt, source))
-        return 11
-
-    monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
-
-    async def _fake_publish(*_a: object, **_k: object) -> None:
-        return None
-
-    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", _fake_publish)
-    wakes: list[tuple[int, str]] = []
-    monkeypatch.setattr(
-        launch, "publish_inbound_wake", lambda _db, _bus, aid, payload: wakes.append((aid, payload))
-    )
-
-    body = LaunchAgentRequest(agent_id=7, prompt="go do X", prompt_source="user")
-    result = await lifecycle.launch_agent_op(database, event_bus, body, stub_pool)  # type: ignore[arg-type]
-    assert result.id == 7
-    assert inserted == [(7, "go do X", "user")]
-    assert wakes == [(7, "0")]

@@ -1,7 +1,0 @@
-{
-  "ambient_state": {
-    "base/host/env/dotenv_boot.py::global-rebind:_db_authority_refusal": 2,
-    "base/host/net/__init__.py::import-time-call:base.host.net.httpx_cli_guard.block_httpx_cli": 1
-  },
-  "patch_targets": {}
-}

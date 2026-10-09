@@ -226,6 +226,7 @@ def remove_env(
     audit_site: str | None = None,
     actor: str | None = None,
     trace_id: str | None = None,
+    expected_values: dict[str, str] | None = None,
 ) -> None:
     """Remove the named keys from a unit's .env, preserving unrelated lines.
 
@@ -236,7 +237,19 @@ def remove_env(
     if not path.exists():
         return
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
-        lines = path.read_text().splitlines()
+        content = path.read_text()
+        if expected_values is not None:
+            from io import StringIO
+
+            from dotenv import dotenv_values
+
+            present = dotenv_values(stream=StringIO(content))
+            if any(
+                present.get(key) is not None and present.get(key) != value
+                for key, value in expected_values.items()
+            ):
+                raise RuntimeError("legacy env changed before owned import removal")
+        lines = content.splitlines()
         out = [line for line in lines if env_line_key(line) not in keys]
         if len(out) == len(lines):
             return  # nothing to remove — no snapshot churn

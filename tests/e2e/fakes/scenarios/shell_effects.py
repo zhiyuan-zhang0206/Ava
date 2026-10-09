@@ -14,7 +14,7 @@ def sandbox() -> Path:
     return scratch_root("shell")
 
 
-def build_background(model: str) -> RecordingModel:
+def build_background(model: str, *, agent_id: int | None) -> RecordingModel:
     code = f"""
 import ava
 import time
@@ -25,10 +25,12 @@ job = ava.shell.run_background("sleep 5; echo BG-TAIL-MARK; exit 7", name="e2e-b
 (root / "background-handle").write_text(f"{{job.session_id}}\\n{{job.output_path}}\\n{{time.monotonic() - start}}")
 print("background-started", job.session_id)
 """
-    return RecordingModel(script=(exec_call(1, code), say("background started"), say("noticed")))
+    return RecordingModel(
+        agent_id=agent_id, script=(exec_call(1, code), say("background started"), say("noticed"))
+    )
 
 
-def build_background_policy(model: str) -> RecordingModel:
+def build_background_policy(model: str, *, agent_id: int | None) -> RecordingModel:
     code = f"""
 import ava
 from pathlib import Path
@@ -38,10 +40,12 @@ failure = ava.shell.run_background("sleep 4; echo POLICY-FAILURE; exit 9", name=
 (root / "policy-handles").write_text(f"{{success.session_id}}\\n{{success.output_path}}\\n{{failure.session_id}}\\n{{failure.output_path}}")
 print("policy-jobs", success.session_id, failure.session_id)
 """
-    return RecordingModel(script=(exec_call(1, code), say("jobs started"), say("jobs buffered")))
+    return RecordingModel(
+        agent_id=agent_id, script=(exec_call(1, code), say("jobs started"), say("jobs buffered"))
+    )
 
 
-def build_session_verbs(model: str) -> RecordingModel:
+def build_session_verbs(model: str, *, agent_id: int | None) -> RecordingModel:
     code = f"""
 import ava
 import time
@@ -67,10 +71,12 @@ ava.shell.sessions.new("e2e-extra", ttl=120)
 print("kill-all-count", ava.shell.sessions.kill_all())
 print("listed-after-kill-all", ava.shell.sessions.list())
 """
-    return RecordingModel(script=(exec_call(1, code), say("session verbs finished")))
+    return RecordingModel(
+        agent_id=agent_id, script=(exec_call(1, code), say("session verbs finished"))
+    )
 
 
-def build_survival(model: str) -> RecordingModel:
+def build_survival(model: str, *, agent_id: int | None) -> RecordingModel:
     root = sandbox()
     create = f"""
 import ava
@@ -91,11 +97,11 @@ ava.shell.sessions.send(sid, "echo AFTER-RESTART > " + str(root / "after"))
 print("survivor-capture", ava.shell.sessions.capture(sid))
 """
     if (root / "survivor-id").exists():
-        return RecordingModel(script=(exec_call(1, probe), say("survived")))
-    return RecordingModel(script=(exec_call(1, create), say("ready")))
+        return RecordingModel(agent_id=agent_id, script=(exec_call(1, probe), say("survived")))
+    return RecordingModel(agent_id=agent_id, script=(exec_call(1, create), say("ready")))
 
 
-def build_watchers(model: str) -> RecordingModel:
+def build_watchers(model: str, *, agent_id: int | None) -> RecordingModel:
     code = f"""
 import ava
 import datetime
@@ -111,10 +117,12 @@ cron = ava.watcher.cron("* * * * *", "CRON-WAKE-MARK", timezone="UTC",
 (root / "watcher-ids").write_text(f"{{launch}} {{at}} {{cron}}")
 print("watchers-created", launch, at, cron)
 """
-    return RecordingModel(script=(exec_call(1, code), *(say("watcher wake") for _ in range(8))))
+    return RecordingModel(
+        agent_id=agent_id, script=(exec_call(1, code), *(say("watcher wake") for _ in range(8)))
+    )
 
 
-def build_watcher_timeout(model: str) -> RecordingModel:
+def build_watcher_timeout(model: str, *, agent_id: int | None) -> RecordingModel:
     code = f"""
 import ava
 from pathlib import Path
@@ -124,7 +132,8 @@ Path({str(sandbox() / "timeout-id")!r}).write_text(str(wid))
 print("timeout-watcher", wid)
 """
     return RecordingModel(
-        script=(exec_call(1, code), say("timeout pending"), say("timeout noticed"))
+        agent_id=agent_id,
+        script=(exec_call(1, code), say("timeout pending"), say("timeout noticed")),
     )
 
 
@@ -154,10 +163,10 @@ class WatcherResurrectionModel(RecordingModel):
         return response
 
 
-def build_watcher_resurrection(model: str) -> RecordingModel:
+def build_watcher_resurrection(model: str, *, agent_id: int | None) -> RecordingModel:
     root = sandbox()
     if (root / "resurrection-id").exists():
-        return WatcherResurrectionModel(script=())
+        return WatcherResurrectionModel(agent_id=agent_id, script=())
     code = f"""
 import ava
 import datetime
@@ -167,10 +176,10 @@ wid = ava.watcher.at(datetime.timedelta(seconds=15), "RESURRECT-WAKE-MARK",
 Path({str(root / "resurrection-id")!r}).write_text(str(wid))
 print("resurrection-watcher", wid)
 """
-    return RecordingModel(script=(exec_call(1, code), say("watcher armed")))
+    return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say("watcher armed")))
 
 
-def build_watcher_orphan(model: str) -> RecordingModel:
+def build_watcher_orphan(model: str, *, agent_id: int | None) -> RecordingModel:
     root = sandbox()
     watcher_code = (
         "import os, signal, time\n"
@@ -184,4 +193,4 @@ def build_watcher_orphan(model: str) -> RecordingModel:
         f"wid = ava.watcher.launch({watcher_code!r}, timeout='60s', name='e2e-orphan')\n"
         "print('orphan-watcher', wid)"
     )
-    return RecordingModel(script=(exec_call(1, code), say("orphan guard armed")))
+    return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say("orphan guard armed")))

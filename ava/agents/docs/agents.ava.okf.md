@@ -17,7 +17,7 @@ tags:
 ## Core API
 
 ### Lifecycle
-- `spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, *, idempotency_key=None, require_idempotency=False) → int` — start a new agent, returns agent ID, non-blocking. `prompt` is the first message (should be self-contained); `fork_from` copies the parent agent's conversation state; `machine` defaults to self; a preset rides the overlay as `config_overlay={"preset": "name"}`, explicit fields win per-key. `config_overlay={"eval_isolation": true}` starts an eval-isolated agent; `eval_network_allowlist` can explicitly retain `web` or `understand`, while `mcps` and `ui` have no allowlist. Identity-class config you do NOT name (model, reasoning effort, skill set, prompt shaping) is resolved from the cluster default at spawn and frozen onto the new agent for its life — a later default change never re-brains it. (The `ava_fleet` plugin appends `label=` parameter to `spawn` to set initial role label.)
+- `spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, *, idempotency_key) → int` — start a new agent, returns agent ID, non-blocking. `prompt` is the first message (should be self-contained); `fork_from` copies the parent agent's conversation state; `machine` defaults to self; a preset rides the overlay as `config_overlay={"preset": "name"}`, explicit fields win per-key. `config_overlay={"eval_isolation": true}` starts an eval-isolated agent; `eval_network_allowlist` can explicitly retain `web` or `understand`, while `mcps` and `ui` have no allowlist. Identity-class config you do NOT name (model, reasoning effort, skill set, prompt shaping) is resolved from the cluster default at spawn and frozen onto the new agent for its life — a later default change never re-brains it. (The `ava_fleet` plugin appends `label=` parameter to `spawn` to set initial role label.)
 - `terminate(agent_id, *, message=None, force=False) → TerminateOutcome` — agent exits after completing the current turn; `message` is retained without another response and is visible after resurrection; `force=True` requests interruption instead. An `enqueued` result confirms acceptance, not exit or completion of owned work. Use force only when a clean stop cannot progress. The outcome compares as the acceptance status string and carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first; None when none).
 - `restart(agent_id) → RestartResult` — agent restarts as a fresh process with the same ID after completing the current turn.
 - `resurrect(agent_id, prompt) → ResurrectResult` — wake up a terminated agent, preserving its conversation state; `prompt` required.
@@ -49,6 +49,16 @@ tags:
 - [[gateway-cli.ava.okf.md]] — gateway is the actual entry point for agent spawn
 
 ## Notes
-For guaranteed plain-creation admission, set `require_idempotency=True` with an explicit 1–128 character `idempotency_key`; retain the same key, effective body and verified principal on retry. This mode rejects forks and never falls back to legacy routing. See [[strong-creation.ava.okf.md|Explicit strong creation]]. Default mode retains existing behavior but cannot promise recovery on older servers that ignore keys. Ambiguous transport outcomes are not automatically retried.
+
+`ava.agents.compaction` provides observed-source manual compaction and separate
+execution status; see [[ava/agents/docs/compaction.ava.okf.md]].
+
+`ava.agents.work` observes and controls one explicit active turn through
+`observe`, `cancel`, `restart` and `restart_status`; see [[work-control.ava.okf.md]].
+
+Every creation and fork requires an explicit 1–128 character `idempotency_key`. Retain the same key, effective body and verified principal on retry. All SDK calls use the fixed keyed admission path. A fork copies the original resolved checkpoint and first prompt once; replay returns its committed child before inspecting later source state. See [[strong-creation.ava.okf.md|Keyed agent creation]]. Ambiguous transport outcomes are not automatically retried.
+
+`get_launch_attempt(agent_id)` observes the current attempt UUID. Explicit guarded
+`retry_launch` retains that observation and a caller key; see [[launch-retry.ava.okf.md]].
 
 `send_message` is asynchronous insert — returns immediately, does not wait for target agent to receive or process. Target agent is woken if idle.

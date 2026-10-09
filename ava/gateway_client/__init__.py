@@ -65,6 +65,8 @@ from typing import Any, Literal, NamedTuple
 
 import ava
 import ava.sdk_surface.agent_identity
+from ava.gateway_client.launch_retry import get_launch_attempt as get_launch_attempt
+from ava.gateway_client.launch_retry import retry_launch as retry_launch
 from ava.gateway_client.transport import (
     _MEMORY_SEARCH_MAX_RETRIES,
     _TRANSIENT_HTTP_STATUSES,
@@ -81,6 +83,7 @@ from ava.gateway_client.transport import (
     patch as patch,
 )
 from base.agents import GatewayUnavailable as GatewayUnavailable
+from base.agents.context import AvaContext
 from base.log import logger
 
 
@@ -105,7 +108,9 @@ class MemorySearchResult(NamedTuple):
     tags: tuple[str, ...] = ()
 
 
-def memory_search(query: str, k: int, *, timeout: float | None = None) -> list[MemorySearchResult]:
+def memory_search(
+    query: str, k: int, *, timeout: float | None = None, context: AvaContext | None = None
+) -> list[MemorySearchResult]:
     """POST /api/memory/search → list of `MemorySearchResult`.
 
     Gateway-side primary directly calls embedder + the memory-search service; secondary
@@ -133,6 +138,7 @@ def memory_search(query: str, k: int, *, timeout: float | None = None) -> list[M
         {"query": query, "k": k},
         timeout=httpx.Timeout(timeout) if timeout is not None else _memory_search_timeout(),
         max_retries=_MEMORY_SEARCH_MAX_RETRIES,
+        context=context,
     )
     raise_from_response(resp)
     return [
@@ -152,17 +158,12 @@ def spawn(
     machine: str | None = None,
     config: dict[str, object] | None = None,
     label: str | None = None,
-    idempotency_key: str | None = None,
-    require_idempotency: bool = False,
+    idempotency_key: str,
 ) -> int:
-    """Create an agent through legacy or explicitly guarded admission."""
-    from base.api_contracts.idempotency import PRINCIPAL_SCOPE
+    """Create or fork an agent with a caller-owned immutable identity."""
+    from base.api_contracts.idempotency import PRINCIPAL_SCOPE, validate_idempotency_key
 
-    from .creation_admission import validate_spawn_admission
-
-    idempotency_key = validate_spawn_admission(
-        require_idempotency=require_idempotency, key=idempotency_key, fork_from=fork_from
-    )
+    idempotency_key = validate_idempotency_key(idempotency_key)
     body: dict = {"spawner": spawner}
     if prompt is not None:
         # prompt_source is schema-required only when prompt is given (the source concept only exists when non-empty)
@@ -176,16 +177,13 @@ def spawn(
         body["config"] = config
     if label is not None:
         body["label"] = label
-    # The transport supplies one creation key across connect-family retries.
-    # Explicit strong admission pins a guarded path; it never downgrades to
-    # legacy routing. Both paths retain conservative ambiguous-outcome retries.
-    path = "/api/keyed/v1/agents" if require_idempotency else "/api/agents"
-    scope: dict[str, Any] = {"idempotency_scope": PRINCIPAL_SCOPE} if require_idempotency else {}
+    # Every retry keeps the caller's key, body and fixed admission path.
+    # An ambiguous outcome remains terminal to this invocation.
     resp = post(
-        path,
+        "/api/keyed/v1/agents",
         body,
         idempotency_key=idempotency_key,
-        **scope,
+        idempotency_scope=PRINCIPAL_SCOPE,
     )
     raise_from_response(resp)
     data = resp.json()
@@ -203,13 +201,6 @@ def spawn(
             resolved=normalized.get("resolved"),
         )
     return int(data["id"])
-
-
-def retry_launch(agent_id: int) -> int:
-    """Retry launch of one committed identity without creating a new agent."""
-    resp = post(f"/api/agents/{agent_id}/retry-launch")
-    raise_from_response(resp)
-    return int(resp.json()["id"])
 
 
 def send_message(
@@ -317,7 +308,7 @@ def send_system_note(
     source: str,
     task_id: int | None,
     resurrect: bool,
-    idempotency_key: str | None = None,
+    idempotency_key: str,
 ) -> int:
     """POST /api/agents/{id}/system-note — deliver a framework system note.
 
@@ -326,6 +317,10 @@ def send_system_note(
     is set (same 120 s per-call timeout as send_message).
     """
     import httpx
+
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    idempotency_key = validate_idempotency_key(idempotency_key)
 
     body: dict[str, str | bool | int] = {
         "content": content,
@@ -381,7 +376,7 @@ def get_ancestors(agent_id: int) -> list[dict]:
 _BORN_CHAIN_TIMEOUT_S = 5.0
 
 
-def get_born_chain(agent_id: int) -> list[dict]:
+def get_born_chain(agent_id: int, *, context: AvaContext | None = None) -> list[dict]:
     """GET /api/agents/{id}/born-chain → the `ancestors` rows: the immutable
     birth chain above `agent_id`, nearest ancestor first (1 = direct birth
     parent). Each dict carries agent_id / label / status / machine / depth.
@@ -397,6 +392,7 @@ def get_born_chain(agent_id: int) -> list[dict]:
         f"/api/agents/{agent_id}/born-chain",
         timeout=httpx.Timeout(_BORN_CHAIN_TIMEOUT_S),
         max_retries=1,
+        context=context,
     )
     raise_from_response(resp)
     return resp.json()["ancestors"]
@@ -447,11 +443,10 @@ def terminate(
 
     `status` is "enqueued" / "already_terminated"; `open_tasks` carries what
     the agent still owned as it went down, if anything; `shell_sessions`
-    carries what a requested shell-session kill did (absent on older versions).
+    carries what a requested shell-session kill did.
 
-    source defaults to f"agent:{ava.self.AGENT_ID}" so the lifecycle marker
-    tells the peer who terminated it. Pass source=None to use the gateway
-    default ("user").
+    An omitted source requires the established actor identity. Callers without
+    an agent or system identity must supply an explicit source.
 
     force=True requests interruption. Hosted force returns "enqueued" while
     the original host drains actual work; acceptance is not observed exit.
@@ -460,14 +455,13 @@ def terminate(
     termination proceeds without waiting for another response.
 
     kill_all_shell_sessions=True also kills every shell session the agent owns
-    on its home machine. Sent only when set; an older gateway ignores it and
-    answers without `shell_sessions`, so an unhonored request stays visible.
+    on its home machine. Sent only when set.
     """
     body: dict = {}
     if source is not None:
         body["source"] = source
     else:
-        body["source"] = ava.sdk_surface.agent_identity.default_actor()
+        body["source"] = ava.sdk_surface.agent_identity.require_actor()
     if message is not None:
         body["message"] = message
     if force:
@@ -482,15 +476,14 @@ def terminate(
 def restart(agent_id: int, *, source: str | None = None) -> str:
     """POST /api/agents/{id}/restart → status string.
 
-    source defaults to f"agent:{ava.self.AGENT_ID}" so the lifecycle marker
-    tells the peer who restarted it. Pass source=None to use the gateway
-    default ("user").
+    An omitted source requires the established actor identity. Callers without
+    an agent or system identity must supply an explicit source.
     """
     body: dict = {}
     if source is not None:
         body["source"] = source
     else:
-        body["source"] = ava.sdk_surface.agent_identity.default_actor()
+        body["source"] = ava.sdk_surface.agent_identity.require_actor()
     resp = post(f"/api/agents/{agent_id}/restart", body)
     raise_from_response(resp)
     return resp.json()["status"]
@@ -499,9 +492,8 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
 def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) -> str:
     """POST /api/agents/{id}/resurrect -> status string.
 
-    resurrected_by defaults to f"agent:{ava.self.AGENT_ID}" so the
-    lifecycle marker tells the peer who resurrected it. Pass
-    resurrected_by=None to use the gateway default ("user").
+    An omitted resurrected_by requires the established actor identity. Callers
+    without an agent or system identity must supply explicit provenance.
 
     prompt is required -- a resurrected agent needs to know why it
     was woken up and what to do.
@@ -510,7 +502,7 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
     if resurrected_by is not None:
         body["resurrected_by"] = resurrected_by
     else:
-        body["resurrected_by"] = ava.sdk_surface.agent_identity.default_actor()
+        body["resurrected_by"] = ava.sdk_surface.agent_identity.require_actor()
     resp = post(f"/api/agents/{agent_id}/resurrect", body)
     raise_from_response(resp)
     return resp.json()["status"]

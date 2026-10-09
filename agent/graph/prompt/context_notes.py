@@ -35,9 +35,9 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
-from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.paths import workspace_dir
@@ -74,7 +74,7 @@ def _ordered(extensions: ExtensionRegistry, *, fork_only: bool) -> list[ContextN
     return [n for n in (*FRAMEWORK_NOTES, *plugin_notes) if n.on_fork or not fork_only]
 
 
-def context_notes(extensions: ExtensionRegistry, slices: AgentSlices) -> list[HumanMessage]:
+def context_notes(extensions: ExtensionRegistry, ctx: AvaContext) -> list[HumanMessage]:
     """Every note in rank order (ties: declaration order), skipping
     the ones with nothing to say.
 
@@ -82,20 +82,20 @@ def context_notes(extensions: ExtensionRegistry, slices: AgentSlices) -> list[Hu
     indexes) then pick up whatever was written during the window just compacted
     away.
     """
-    return _rendered(_ordered(extensions, fork_only=False), slices)
+    return _rendered(_ordered(extensions, fork_only=False), ctx)
 
 
-def fork_notes(extensions: ExtensionRegistry, slices: AgentSlices) -> list[HumanMessage]:
+def fork_notes(extensions: ExtensionRegistry, ctx: AvaContext) -> list[HumanMessage]:
     """The `on_fork` subset, in the same rank order as `context_notes` — what a
     freshly forked agent needs grafted onto the history it inherited from the
     agent it was forked from."""
-    return _rendered(_ordered(extensions, fork_only=True), slices)
+    return _rendered(_ordered(extensions, fork_only=True), ctx)
 
 
-def _rendered(entries: list[ContextNote], slices: AgentSlices) -> list[HumanMessage]:
+def _rendered(entries: list[ContextNote], ctx: AvaContext) -> list[HumanMessage]:
     built: list[tuple[int, HumanMessage]] = []
     for entry in entries:
-        note = entry.build(slices)
+        note = entry.build(ctx)
         if note is None:
             continue
         if not isinstance(note, HumanMessage):
@@ -110,22 +110,12 @@ def _rendered(entries: list[ContextNote], slices: AgentSlices) -> list[HumanMess
 # ── Framework-owned notes ──
 
 
-def _established_agent_id(note: str) -> int | None:
-    """Resolve the current agent identity for a standing note, or None.
-
-    Reads through `ava.sdk_surface.agent_identity.agent_id()`, which resolves the hosted runner's
-    turn contextvar first: the agent host hosts many agents' turns in one
-    process and establishes no process-wide id, so reading the `_agent_id`
-    process slot directly would silently drop the note from every hosted head
-    (task #3939 — the identity line was missing for two weeks before the skip
-    was noticed). The skip is debug-logged: a legitimately absent identity
-    (snapshot renders, dev REPL, container mode) stays quiet at normal levels,
-    but a production regression leaves a trace.
-    """
+def _established_agent_id(ctx: AvaContext, note: str) -> int | None:
+    """The identity carried explicitly by this invocation, or None for a snapshot render."""
     from ava.sdk_surface.agent_identity import agent_id
 
-    aid = agent_id()
-    if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() is None pre-bootstrap.
+    aid = agent_id(ctx)
+    if aid is None:
         logger.debug("[context-notes] {} note skipped: no agent identity established", note)
     return aid
 
@@ -146,11 +136,11 @@ def _format_timeout_display(timeout_s: float) -> str:
     return f"{timeout_s:.0f} seconds"
 
 
-def exec_timeout_note(_slices: AgentSlices) -> HumanMessage | None:
+def exec_timeout_note(ctx: AvaContext) -> HumanMessage | None:
     """A context note stating the execute_code hard timeout.
 
-    Returns ``None`` when this process has no established agent identity."""
-    if _established_agent_id("exec-timeout") is None:
+    Returns ``None`` when this invocation has no established agent identity."""
+    if _established_agent_id(ctx, "exec-timeout") is None:
         return None
     timeout_s = settings.sandbox.exec_timeout_seconds
     return system_note_message(
@@ -178,7 +168,7 @@ def _utc_offset(moment: datetime) -> str:
     return f"{raw[:3]}:{raw[3:]}"
 
 
-def timezone_note(_slices: AgentSlices) -> HumanMessage | None:
+def timezone_note(ctx: AvaContext) -> HumanMessage | None:
     """A context note declaring the cluster's timezone once, so the timestamps
     themselves don't have to carry it.
 
@@ -197,8 +187,8 @@ def timezone_note(_slices: AgentSlices) -> HumanMessage | None:
     IANA name beside it stays authoritative, and a `AVA_TIMEZONE` edit is
     `restart_required: agent`, which re-establishes the head.
 
-    Returns ``None`` when this process has no established agent identity."""
-    if _established_agent_id("timezone") is None:
+    Returns ``None`` when this invocation has no established agent identity."""
+    if _established_agent_id(ctx, "timezone") is None:
         return None
     clock = Clock.from_settings()
     now = datetime.now(clock.explicit_zone())
@@ -209,26 +199,17 @@ def timezone_note(_slices: AgentSlices) -> HumanMessage | None:
     )
 
 
-def _own_label(agent_id: int) -> str | None:
+def _own_label(ctx: AvaContext, agent_id: int) -> str | None:
     """The agent's current label, whitespace-normalized, or None.
 
-    Fail-soft on purpose: the identity line must render even when the label
-    read cannot (DB blip, row not yet auto-named), so every failure degrades to
-    "no label clause" — never to a missing identity line. A label is free text
-    (set by the agent via `ava.self.set_label` or by the gateway), so its
-    whitespace is collapsed before it enters the one-line note.
+    A missing row or empty label omits the optional clause. SQL and programming
+    errors propagate to the context-building caller. A label is free text (set
+    by the agent via `ava.self.set_label` or by the gateway), so its whitespace
+    is collapsed before it enters the one-line note.
     """
-    import ava
-
-    try:
-        with ava.DB.cursor() as cur:
-            cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
-            row = cur.fetchone()
-    except Exception:  # fail-soft by design: the identity line outranks the label clause
-        logger.opt(exception=True).warning(
-            "[context-notes] agent-id label read failed; the identity line renders without a label"
-        )
-        return None
+    with ctx.sql.cursor() as cur:
+        cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
+        row = cur.fetchone()
     if row is None or not row[0]:
         return None
     return " ".join(str(row[0]).split())
@@ -237,8 +218,7 @@ def _own_label(agent_id: int) -> str | None:
 def _machine_clause() -> str | None:
     """The host's machine name, whitespace-normalized, or None when unset.
 
-    Fail-soft like the label: a host whose machine name cannot be resolved
-    still states the agent's identity line."""
+    An unset machine name omits this optional clause; other failures propagate."""
     from base.cluster.machine import MachineNameMissing, machine_name
 
     try:
@@ -266,9 +246,10 @@ def _workspace_path(agent_id: int) -> str | None:
         return str(ws)
 
 
-def agent_id_note(_slices: AgentSlices) -> HumanMessage | None:
+def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
     """A context note stating the agent's own identity: id, label, machine,
-    workspace path — each clause fail-soft.
+    workspace path. Missing optional values omit their clauses; failed label
+    reads propagate.
 
     It lives outside the SystemMessage (as a system-styled HumanMessage) so a
     fork — which copies the source agent's full conversation including the
@@ -277,12 +258,12 @@ def agent_id_note(_slices: AgentSlices) -> HumanMessage | None:
     source. The note is also where the `# Workspace` section points for the
     concrete path, for the same fork-safety reason.
 
-    Returns ``None`` when this process has no established agent identity."""
-    aid = _established_agent_id("agent-id")
+    Returns ``None`` when this invocation has no established agent identity."""
+    aid = _established_agent_id(ctx, "agent-id")
     if aid is None:
         return None
     clauses: list[str] = []
-    label = _own_label(aid)
+    label = _own_label(ctx, aid)
     if label:
         clauses.append(f"label: {label}")
     machine = _machine_clause()
@@ -309,7 +290,7 @@ _PRELOADED_SKILLS_FRAMING = (
 )
 
 
-def preloaded_skills_note(slices: AgentSlices) -> HumanMessage | None:
+def preloaded_skills_note(ctx: AvaContext) -> HumanMessage | None:
     """The full SKILL.md body of every skill named in
     `Prompt.skills_to_expand_at_start`, concatenated into one note.
 
@@ -325,6 +306,7 @@ def preloaded_skills_note(slices: AgentSlices) -> HumanMessage | None:
     one copy, owned by the agent reading it (issue #1320)."""
     from agent.graph.prompt.capabilities import resolve_prompt_skills
 
+    slices = ctx.require_agent()
     skills = resolve_prompt_skills(
         slices.prompt.skills_to_expand_at_start,
         slices.prompt.sdk_disable,

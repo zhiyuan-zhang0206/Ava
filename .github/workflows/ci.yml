@@ -16,7 +16,8 @@
 #
 # CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
 # diff through base/deploy/git/repo_change.py, and suites skip when their side is untouched:
-# docs-only skips everything, frontend-only skips the backend suite,
+# docs-only skips both test suites; structure still checks all change classes.
+# Frontend-only skips the backend suite,
 # backend-only skips the frontend suite. e2e runs whenever EITHER side changed
 # (it is the integration net). Draft PRs skip CI entirely until
 # ready_for_review. Skipped required checks satisfy branch protection and the
@@ -260,7 +261,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -295,7 +296,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -380,21 +381,13 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
-          # No project cache here. setup-uv keys the cache on pyproject.toml +
-          # uv.lock only, every job shares that key, and an entry is immutable:
-          # the first job to finish writes it. This job installs nothing from the
-          # lockfile (only `uvx uv==0.11.16`) and finishes in ~20s, so it always
-          # won that race and left a ~46 MB entry without the project wheels,
-          # which every other job then restored as a "hit" and re-downloaded
-          # all 265 packages from PyPI anyway.
+          version: 0.12.23
+          # This job installs no project dependencies. Do not let it publish
+          # an incomplete cache under the lockfile key used by install jobs.
           enable-cache: false
 
       - name: Audit locked Python dependencies
-        # The canonical CI uv (0.10.2) predates `uv audit`; pin the
-        # audit-capable tool locally so this informational job performs a real
-        # vulnerability query without expanding the repository toolchain pin.
-        run: uvx --from 'uv==0.11.16' uv audit --frozen
+        run: uv audit --frozen
         continue-on-error: true
 
       - name: Install Node
@@ -424,7 +417,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -487,23 +480,108 @@ jobs:
       - name: Apply migrations to fresh DB + trigger smoke
         run: uv run python scripts/ci/migration_smoke.py
       - name: Run pyright
-        run: uv run pyright
+        # Pyright rejects --stats with --threads; time retains elapsed/CPU cost.
+        run: time uv run pyright --threads 2
+
+      - name: Run static pytest contracts
+        id: pytest-static
+        if: needs.classify.outputs.backend == 'true'
+        env:
+          COVERAGE_FILE: coverage-data-static
+        # The plugin owns this lane and the native exclusions. No data plane
+        # is provisioned; all private-home and host-effect guards stay active.
+        run: |
+          mkdir -p tmp
+          uv run pytest --test-environment=static -q -n 4 \
+            -W error::pytest.PytestUnhandledThreadExceptionWarning \
+            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
+            --cov=ops --cov=services --cov=ava_builtins \
+            --junit-xml=tmp/junit-backend-static.xml -o junit_family=xunit1
+
+      - name: Report executed test counts
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
+        run: >
+          python3 scripts/ci/shard_counts.py shard --group static
+          --junit tmp/junit-backend-static.xml --out tmp/shard-counts-static.json
+          --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
+
+      - name: Upload executed test counts
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shard-counts-static
+          path: tmp/shard-counts-static.json
+          if-no-files-found: ignore
+
+      - name: Validate static test results
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          test-outcome: ${{ steps.pytest-static.outcome }}
+          junit-patterns: '["tmp/junit-backend-static.xml"]'
+
+      - name: Upload static test reports
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-backend-static
+          path: tmp/junit-backend-static.xml
+          if-no-files-found: warn
+
+      - name: Upload coverage data
+        id: coverage-upload
+        if: needs.classify.outputs.backend == 'true'
+        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
+        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
+        # The retry absorbs that transient service fault; the note below records
+        # the outcome for the coverage gate's arrival check.
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shard-static
+          path: coverage-data-static
+
+      - name: Retry coverage data upload
+        id: coverage-upload-retry
+        # One immediate retry, bounded: transient 403/500 from the artifact
+        # service is the observed failure mode, and a failed upload is the only
+        # copy of the data — a failed download can be retried by re-running the
+        # aggregator, a lost upload cannot.
+        if: ${{ steps.coverage-upload.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shard-static
+          path: coverage-data-static
+          overwrite: true
+
+      - name: Note coverage upload outcome
+        if: ${{ always() && steps.coverage-upload.outcome == 'failure' }}
+        run: |
+          if [ "${{ steps.coverage-upload-retry.outcome }}" = "success" ]; then
+            echo "::warning title=coverage upload retried::first attempt to publish coverage-data-static failed; the retry succeeded"
+          else
+            echo "::warning title=coverage upload failed::coverage-data-static could not be published after a retry — artifact-service failure, not a test failure; the coverage gate scores the data that arrived"
+          fi
 
   backend-structure:
-    # Same required check, two segments: A always runs structure lint via
+    # One structure job, two segments: A always runs structure lint via
     # pre-commit --all-files; B installs Node/npm and explicitly runs the four
     # freshness hooks only when the PR diff matches their configured files:
     # regexes. Pushes and selector errors run B; a no-match PR logs STEP SKIPPED.
     # Other CI jobs own ruff/pyright/migrations/clock, frontend gates and core
     # manifests. Pre-push-only pyright/tsc/eslint/vitest remain redundant SKIP entries.
-    # Runs when EITHER side changed: frontend-only edits can break generated
-    # contracts too. Main pushes run all four hooks as a safety net; the merge
+    # Runs for every eligible change class, including documentation: directory
+    # structure is independent of test-suite classification. Main pushes run
+    # all four hooks as a safety net; the merge
     # queue re-evaluates the same selector on the combined tree before landing.
     name: backend structure (pre-commit lint + codegen freshness)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: [classify]
-    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    if: ${{ needs.classify.result == 'success' }}
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -513,7 +591,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -549,11 +627,25 @@ jobs:
           git fetch --depth=1 origin "$base"
           echo "LINT_STRUCTURE_BASELINE_BASE=$(git rev-parse FETCH_HEAD^{commit})" >> "$GITHUB_ENV"
 
+      - name: Restore pre-commit environments
+        id: precommit-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml', '.python-version', 'uv.lock') }}
+
       - name: Run pre-commit structural gates (--all-files)
         # Segment A: keep the existing exclusions and move only codegen to B.
         env:
           SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install,types-codegen-fresh,constants-codegen-fresh,events-registry-fresh,config-lite-table-fresh
         run: env -u VIRTUAL_ENV uv run pre-commit run --all-files
+
+      - name: Save pre-commit environments
+        if: success() && steps.precommit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: ${{ steps.precommit-cache.outputs.cache-primary-key }}
 
       - name: Select codegen freshness from changed files
         id: codegen
@@ -632,87 +724,6 @@ jobs:
           env -u VIRTUAL_ENV uv run pre-commit run events-registry-fresh --all-files
           env -u VIRTUAL_ENV uv run pre-commit run config-lite-table-fresh --all-files
 
-      - name: Run static pytest contracts
-        id: pytest-static
-        if: needs.classify.outputs.backend == 'true'
-        env:
-          COVERAGE_FILE: coverage-data-static
-        # The plugin owns this lane and the native exclusions. No data plane
-        # is provisioned; all private-home and host-effect guards stay active.
-        run: |
-          mkdir -p tmp
-          uv run pytest --test-environment=static -q \
-            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
-            --cov=ops --cov=services --cov=ava_builtins \
-            --junit-xml=tmp/junit-backend-static.xml -o junit_family=xunit1
-
-      - name: Report executed test counts
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
-        run: >
-          python3 scripts/ci/shard_counts.py shard --group static
-          --junit tmp/junit-backend-static.xml --out tmp/shard-counts-static.json
-          --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
-
-      - name: Upload executed test counts
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: shard-counts-static
-          path: tmp/shard-counts-static.json
-          if-no-files-found: ignore
-
-      - name: Validate static test results
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
-        uses: ./.github/actions/require-test-gate
-        with:
-          test-outcome: ${{ steps.pytest-static.outcome }}
-          junit-patterns: '["tmp/junit-backend-static.xml"]'
-
-      - name: Upload static test reports
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: test-results-backend-static
-          path: tmp/junit-backend-static.xml
-          if-no-files-found: warn
-
-      - name: Upload coverage data
-        id: coverage-upload
-        if: needs.classify.outputs.backend == 'true'
-        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
-        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
-        # The retry absorbs that transient service fault; the note below records
-        # the outcome for the coverage gate's arrival check.
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage-shard-static
-          path: coverage-data-static
-
-      - name: Retry coverage data upload
-        id: coverage-upload-retry
-        # One immediate retry, bounded: transient 403/500 from the artifact
-        # service is the observed failure mode, and a failed upload is the only
-        # copy of the data — a failed download can be retried by re-running the
-        # aggregator, a lost upload cannot.
-        if: ${{ steps.coverage-upload.outcome == 'failure' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage-shard-static
-          path: coverage-data-static
-          overwrite: true
-
-      - name: Note coverage upload outcome
-        if: ${{ always() && steps.coverage-upload.outcome == 'failure' }}
-        run: |
-          if [ "${{ steps.coverage-upload-retry.outcome }}" = "success" ]; then
-            echo "::warning title=coverage upload retried::first attempt to publish coverage-data-static failed; the retry succeeded"
-          else
-            echo "::warning title=coverage upload failed::coverage-data-static could not be published after a retry — artifact-service failure, not a test failure; the coverage gate scores the data that arrived"
-          fi
 
   merged-tree-structure:
     # #1584 caught a file-size violation only after the Trunk Merge Queue
@@ -741,6 +752,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/merged-tree"
+          # No combined tree exists when the required source checks already
+          # cover a head that contains main. Keep the queue checks unchanged.
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "Source head already contains origin/main." > "$RUNNER_TEMP/merged-tree/merge.out"
+            echo "STATUS=unchanged" >> "$GITHUB_ENV"
+            exit 0
+          fi
           # Hosted runners ship without a git identity, and merge --no-commit
           # still insists on one — pin the GitHub Actions bot identity locally
           # (this checkout is ephemeral).
@@ -764,7 +782,7 @@ jobs:
         if: ${{ env.STATUS == 'merged' }}
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -812,6 +830,7 @@ jobs:
             echo "### merged tree structure (informational)"
             case "${STATUS:-none}" in
               merged)   echo "Merged-tree lint completed — full log in artifact \`merged-tree-structure\`." ;;
+              unchanged) echo "Skipped: source head already contains origin/main; required source and queue checks cover this tree." ;;
               conflict) echo "Skipped: origin/main does not merge cleanly into the PR head." ;;
               *)        echo "Skipped: merged tree was not materialized." ;;
             esac
@@ -851,7 +870,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1061,7 +1080,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1141,7 +1160,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1274,7 +1293,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -1298,7 +1317,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -1471,7 +1490,9 @@ jobs:
 
   backend:
     # The aggregator carrying the branch-protection check name. Skipped
-    # (= satisfied) when the diff has no backend side; otherwise green iff the
+    # (= satisfied) when the diff has no backend side and structure succeeded;
+    # non-backend structure failures propagate without installing test tooling.
+    # With a backend side, green iff the
     # static and native smoke jobs are green and the enforced pytest path is
     # green — the selected subset when mode==enforce and the selector returned
     # SELECTED (shards skipped), the 16-shard fan-out in every other case.
@@ -1479,7 +1500,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: [classify, test-select, backend-static, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
-    if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
+    if: ${{ always() && needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success') }}
     env:
       # Every coverage-data file the combine expects: all backend-shard matrix
       # groups plus the serial and static buckets. tests/scripts/test_ci_artifact_policy.py
@@ -1498,8 +1519,13 @@ jobs:
           ok=true
           fail() { echo "::error::$1"; ok=false; }
           check() { if [ "$2" != "success" ]; then fail "$1: $2"; fi; }
-          check backend-static "${{ needs.backend-static.result }}"
           check backend-structure "${{ needs.backend-structure.result }}"
+          if [ "${{ needs.classify.outputs.backend }}" != "true" ]; then
+            if [ "$ok" = "false" ]; then exit 1; fi
+            echo "structure verified; no backend suite requested"
+            exit 0
+          fi
+          check backend-static "${{ needs.backend-static.result }}"
           check backend-serial "${{ needs.backend-serial.result }}"
           check backend-pgvector-smoke "${{ needs.backend-pgvector-smoke.result }}"
           check helper-signing-smoke "${{ needs.helper-signing-smoke.result }}"
@@ -1524,7 +1550,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Python deps
@@ -1601,7 +1627,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true
-    needs: [classify, test-select, backend-structure, backend-shard, backend-serial]
+    needs: [classify, test-select, backend-static, backend-shard, backend-serial]
     if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.test-select.outputs.mode != 'enforce' || needs.test-select.outputs.decision != 'SELECTED') }}
     permissions:
       contents: read
@@ -1892,7 +1918,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Node
@@ -2022,7 +2048,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Node
@@ -2134,7 +2160,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.10.2
+          version: 0.12.23
           enable-cache: true
 
       - name: Install Node

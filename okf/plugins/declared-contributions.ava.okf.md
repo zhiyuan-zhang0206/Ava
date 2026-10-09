@@ -13,7 +13,7 @@ A plugin does not register hooks, state, system prompt sections or context notes
 frozen declaration.
 
 - `system_prompt_sections` — `(slices: AgentSlices) -> str`; an empty string contributes nothing.
-- `context_notes` — `ContextNote(build, on_fork, rank)`; `build` returns a `HumanMessage` or `None` when it has
+- `context_notes` — `ContextNote(build, on_fork, rank)`; `build(ctx: AvaContext)` returns a `HumanMessage` or `None` when it has
   nothing to say. Lower `rank` sits closer to the SystemMessage; `on_fork` also grafts the note onto a fork.
 - `after_init` / `before_llm` / `before_exec` / `after_exec` — `Hook` instances ([[okf/plugins/graph-edge-hooks.ava.okf.md]]).
 - `state` — `BaseModel` classes whose fields become channels `<plugin>__<field>`; the plugin keeps its own
@@ -22,10 +22,13 @@ frozen declaration.
   `inspector.py` instead (see below).
 - The SDK surface, declared by `plugin.py`: `sdk_namespaces` (`SdkNamespace(name, module, expand)`), `sdk_members`
   (`SdkMember(namespace, name, fn)` on an existing namespace), `sdk_expansions` (dotted paths promoted into the
-  prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`), `skill_sources` and `flags`
-  (`<domain>.<field>` core settings the plugin may read through `read_flag`).
+  prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`) and `skill_sources`.
 - `config`, declared by the plugin's `default_config.py` (the config face): one frozen BaseModel bound from
   `~/.ava/configs/<plugin>/config.json`, schema drift points at `ava plugins update`.
+- `flags`, also declared by the pure config face: non-sensitive `<domain>.<field>` Core dependencies.
+  Config-face admission and SDK installation validate every key. A service reads a dependency through
+  `read_declared_flag(key, contributions.flags)` using that declaration directly; there is no separate
+  flag registry. Unknown or sensitive keys, undeclared reads and unavailable process domains fail.
 
 `agent/extensions/registry.py:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
 order, and returns an `ExtensionRegistry` — plugin name beside its contributions, so attribution is the entry,
@@ -39,19 +42,31 @@ serde (state classes), `build_graph(checkpointer, extensions)` (hooks, state fie
 `AvaContext.extensions` (default `EMPTY`: the framework's own sections, notes and hooks only). The graph is compiled
 once, so a changed plugin set takes effect on the next host start (the plugin directory watchdog); there is no
 in-process swap.
-`build_system_prompt(extensions, slices)`, `context_notes(extensions, slices)` and `fork_notes(extensions, slices)`
-read it. The attribution catalog (`ava plugins inspect`) reads each plugin's declaration records and compares them with the `ava-plugin.json` contribution keys.
+`build_system_prompt(extensions, slices, agent_id=...)`, `context_notes(extensions, ctx)` and
+`fork_notes(extensions, ctx)` read it. Context-note builders receive the actual turn context,
+including its identity and clients; they never read `ava.context` in the shared host. The attribution catalog (`ava plugins inspect`) reads each plugin's declaration records and compares them with the `ava-plugin.json` contribution keys.
 
 ## The SDK install
 
 `ava` is a singleton module that agent code reaches by attribute access, so it cannot be passed around as a value; its
-writes are concentrated in `ava/sdk_surface/install.py:install(registry)`, the only place that mutates it. Per plugin, in
+surface installation is concentrated in `ava/sdk_surface/install.py:install(registry)`. The execution bootstrap separately initializes the disposable child's `context`, `state` and `state_update` slots before agent code runs. Per plugin, in
 registry (plugin name) order: namespaces, members, expansions, wraps (a target may be a namespace or member just added),
-skill sources, flags, config. A plugin whose declaration cannot be applied (a conflicting or disabled namespace name, a wrap
-target that does not resolve, a config that does not bind) is rolled back whole, reported as a load failure and absent from
-the registry `install` returns. The SDK-usage recorder (`metering`) is installed last so it sits outermost over every wrap
-layer, and `uninstall()` takes it off first and undoes every layer newest-first. A second `install` without `uninstall` is
-an error; a reload is a new registry and a new install, and nothing triggers one at runtime.
+skill sources, flags, config. Only explicit declaration refusals (`RegisterNamespaceError`,
+`WrapTargetError`, `PluginFlagError`, config `SchemaDriftError` / `InvalidConfigData`) isolate one plugin:
+its already-applied pieces are undone newest-first, the refusal is reported, and it is absent from the
+returned registry. Rollback must succeed. Unknown programming, I/O or binding errors abort the whole
+installation, including earlier admitted plugins, and propagate with their original identity. A config
+write conflict escaping its binder (`PluginConfigChangedError`) and duplicate config binding are fatal;
+the installer does not retry them. Every undo is attempted; cleanup failure is fatal, or becomes a
+standard exception note when a primary failure already exists.
+
+The SDK-usage recorder (`metering`) is installed last so it sits outermost over every wrap layer, and
+`uninstall()` takes it off first and undoes every layer newest-first. A second `install` without
+`uninstall` is an error; a reload is a new registry and a new install, and nothing triggers one at runtime.
+`ava.ensure_plugins_loaded()` propagates errors escaping the loader in both launched and execution
+children. Its existing installation slot distinguishes in-flight work from failure: later calls re-raise
+the original error without retrying, and runtime faces are marked loaded only after success. A truly
+reentrant Python import defers until the loader module finishes initializing.
 
 ## Faces and registries
 

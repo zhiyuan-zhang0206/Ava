@@ -25,9 +25,17 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _LOCK = "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_kind,pid,started_at,runtime_protocol_version FROM agents_meta WHERE id=%s FOR UPDATE"
 # The one predecessor rule: a settled lifecycle receipt for (agent, generation,
-# owner) — the applied restart still held as the lifecycle pointer, or an
-# applied and observed terminate. Aliases: i = inbound_messages, m = agents_meta.
-PREDECESSOR_RECEIPT = "i.agent_id=%s AND i.target_generation=%s AND i.target_owner=%s AND i.applied_at IS NOT NULL AND ((i.kind='restart' AND i.status='claimed' AND m.lifecycle_command_id=i.id) OR (i.kind='terminate' AND i.status='done' AND i.observed_at IS NOT NULL))"
+# owner): an applied restart, including one superseded by an unowned force,
+# or an applied and observed terminate. Aliases: i = inbound_messages, m = agents_meta.
+PREDECESSOR_RECEIPT = (
+    "i.agent_id=%s AND i.target_generation=%s AND i.target_owner=%s "
+    "AND i.applied_at IS NOT NULL AND ((i.kind='restart' AND "
+    "((i.status='claimed' AND m.lifecycle_command_id=i.id) OR "
+    "(i.status='done' AND i.payload @> "
+    '\'{"lifecycle_release":true,"lifecycle_result":{"outcome":"superseded",'
+    '"reason":"force_terminate"}}\'::jsonb))) OR '
+    "(i.kind='terminate' AND i.status='done' AND i.observed_at IS NOT NULL))"
+)
 _PREDECESSOR = f"SELECT i.id,i.kind,i.observed_at FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id WHERE {PREDECESSOR_RECEIPT} LIMIT 1"  # noqa: S608 -- constant SQL fragment
 _STORE = "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s"
 # What a drained restart leaves: protocol-zero NULL, or the complete recorded

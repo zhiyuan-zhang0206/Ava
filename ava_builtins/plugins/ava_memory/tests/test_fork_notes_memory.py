@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+from dataclasses import replace
 from typing import Any, cast
 
 import psycopg
@@ -13,6 +15,7 @@ from langchain_core.messages import (
     RemoveMessage,
     SystemMessage,
 )
+from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.node import claim_node
@@ -21,6 +24,8 @@ from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_sn
 from agent.messages import NoteTag
 from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
+from base.agents.context.clients import ClientSet
+from base.db import Database
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from tests.fixtures.units import spawn_agent
 
@@ -93,11 +98,15 @@ async def test_fork_end_to_end_single_copy_each_note(
         _tagged(NoteTag.MEMORY, "shared pool index", "note-cluster-index"),
     ]
 
-    cmd = await claim_node(
-        AgentState(messages=list(inherited)),
-        _make_runtime(ops_pool=aops_pool, extensions=_registry(memory_plugin)),
-        _config(tid),
-    )
+    with closing(ClientSet(database=Database.from_settings)) as clients:
+        runtime = _make_runtime(
+            ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid
+        )
+        cmd = await claim_node(
+            AgentState(messages=list(inherited)),
+            Runtime(context=replace(runtime.context, clients=clients)),
+            _config(tid),
+        )
 
     assert cmd.goto == "before_llm"
     update = cast(dict[str, object], cmd.update or {})
@@ -154,11 +163,15 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
         _fake_note(NoteTag.PRELOADED_SKILLS, "source's preloaded skills", "note-old-preload"),
         HumanMessage(content="conversation tail"),
     ]
-    cmd = await claim_node(
-        AgentState(messages=list(inherited)),
-        _make_runtime(ops_pool=aops_pool, extensions=_registry(memory_plugin)),
-        _config(tid),
-    )
+    with closing(ClientSet(database=Database.from_settings)) as clients:
+        runtime = _make_runtime(
+            ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid
+        )
+        cmd = await claim_node(
+            AgentState(messages=list(inherited)),
+            Runtime(context=replace(runtime.context, clients=clients)),
+            _config(tid),
+        )
     msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
     assert isinstance(msgs[0], RemoveMessage)
     survivors = [m for m in msgs[1:] if not isinstance(m, RemoveMessage)]

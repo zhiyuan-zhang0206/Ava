@@ -8,12 +8,16 @@ for the fake.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from aiohttp import ServerDisconnectedError, ServerTimeoutError
+from google.genai.errors import ClientError, ServerError
+from httpx import ConnectError, ReadTimeout
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 
@@ -51,15 +55,18 @@ def _explicit_cache_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _FakeAsyncPager:
-    def __init__(self, items: list[Any]):
+    def __init__(self, items: list[Any], error: Exception | None = None) -> None:
         self._items = items
+        self._error = error
 
-    def __aiter__(self):
+    def __aiter__(self) -> AsyncIterator[Any]:
         return self._gen()
 
-    async def _gen(self):
+    async def _gen(self) -> AsyncIterator[Any]:
         for item in self._items:
             yield item
+        if self._error is not None:
+            raise self._error
 
 
 class _FakeCaches:
@@ -68,8 +75,12 @@ class _FakeCaches:
     def __init__(self) -> None:
         self.create_calls = 0
         self.update_calls: list[str] = []
+        self.list_calls = 0
         self.list_items: list[Any] = []
         self.create_error: Exception | None = None
+        self.list_error: Exception | None = None
+        self.page_error: Exception | None = None
+        self.update_error: Exception | None = None
         self.created_expire = datetime.now(UTC) + timedelta(seconds=3600)
 
     async def create(self, *, model: str, config: Any) -> Any:
@@ -85,10 +96,15 @@ class _FakeCaches:
         )
 
     async def list(self, *, config: Any = None) -> Any:
-        return _FakeAsyncPager(self.list_items)
+        self.list_calls += 1
+        if self.list_error is not None:
+            raise self.list_error
+        return _FakeAsyncPager(self.list_items, self.page_error)
 
     async def update(self, *, name: str, config: Any) -> Any:
         self.update_calls.append(name)
+        if self.update_error is not None:
+            raise self.update_error
         from google.genai import types
 
         return types.CachedContent(
@@ -101,8 +117,8 @@ class _HangingCaches(_FakeCaches):
     """Fake whose create/list/update hang until cancelled — simulates a wedged
     Gemini API, which the google-genai SDK would otherwise wait on forever.
 
-    The cache layer is fail-open: a timeout must fall back to the plain path
-    (None) exactly like any other cache-layer error, never raise into the caller.
+    An expired owned request deadline permits the declared cache-only recovery.
+    External cancellation and unrelated errors must still propagate.
     """
 
     def __init__(
@@ -229,7 +245,7 @@ class TestGetOrCreate:
 
     async def test_create_failure_negative_memo(self) -> None:
         caches = _FakeCaches()
-        caches.create_error = RuntimeError("quota")
+        caches.create_error = ClientError(429, {"error": {"code": 429, "message": "quota"}})
         llm = _gemini_llm(caches)
         assert (
             await get_or_create_cache(
@@ -316,9 +332,8 @@ class TestGetOrCreate:
         assert caches.create_calls == 1
 
 
-class TestTimeoutFailOpen:
-    """A wedged Gemini API must not hold the LLM-call prelude: every caches
-    call is bounded by AVA_GEMINI_CACHE_TIMEOUT_SECONDS and fails open."""
+class TestOwnedRequestTimeout:
+    """Only an expired owned SDK deadline permits cache-only recovery."""
 
     @staticmethod
     def _short_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -373,6 +388,271 @@ class TestTimeoutFailOpen:
         )
         assert ref2 is not None and ref2.name == ref.name
         assert caches.update_attempts == 1
+
+
+@pytest.mark.parametrize("operation", ["create", "list", "update"])
+@pytest.mark.parametrize("error_type", [TypeError, ValueError, RuntimeError, TimeoutError])
+async def test_unknown_cache_error_preserves_identity_without_negative_memo(
+    operation: str, error_type: type[Exception]
+) -> None:
+    caches = _FakeCaches()
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    if operation == "update":
+        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+        assert ref is not None
+        ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)
+    error = error_type("cache implementation failure")
+    error.__dict__["code"] = 429
+    error.__cause__ = ClientError(429, {"error": {"code": 429, "message": "quota"}})
+    setattr(caches, f"{operation}_error", error)
+
+    with pytest.raises(error_type) as raised:
+        await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+    assert raised.value is error
+    assert not gemini_cache._NEGATIVE
+    assert caches.create_calls == (0 if operation == "list" else 1)
+    assert caches.list_calls == 1
+    assert len(caches.update_calls) == (1 if operation == "update" else 0)
+
+    setattr(caches, f"{operation}_error", None)
+    assert await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy) is not None
+    assert caches.create_calls == (2 if operation == "create" else 1)
+
+
+@pytest.mark.parametrize("operation", ["create", "list", "update"])
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+async def test_permanent_cache_rejection_propagates_without_plain_recovery(
+    operation: str, status: int
+) -> None:
+    caches = _FakeCaches()
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    if operation == "update":
+        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+        assert ref is not None
+        ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)
+    error = ClientError(status, {"error": {"code": status, "message": "request rejected"}})
+    setattr(caches, f"{operation}_error", error)
+
+    with pytest.raises(ClientError) as raised:
+        await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+    assert raised.value is error
+    assert not gemini_cache._NEGATIVE
+    assert caches.create_calls == (0 if operation == "list" else 1)
+
+
+@pytest.mark.parametrize("operation", ["create", "list", "update"])
+@pytest.mark.parametrize("status", [408, 429, 500, 503])
+async def test_typed_transient_cache_rejection_keeps_bounded_recovery(
+    operation: str, status: int
+) -> None:
+    caches = _FakeCaches()
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    if operation == "update":
+        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+        assert ref is not None
+        ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)
+    error_type = ClientError if status < 500 else ServerError
+    setattr(
+        caches,
+        f"{operation}_error",
+        error_type(status, {"error": {"code": status, "message": "temporary rejection"}}),
+    )
+
+    result = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+    if operation == "create":
+        assert result is None
+        assert gemini_cache._NEGATIVE
+        assert await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy) is None
+        assert caches.create_calls == 1
+    else:
+        assert result is not None
+        assert not gemini_cache._NEGATIVE
+        assert caches.create_calls == 1
+
+
+@pytest.mark.parametrize("operation", ["create", "list", "update"])
+async def test_cache_request_external_cancellation_propagates(operation: str) -> None:
+    caches = _HangingCaches(**{f"hang_{operation}": True})
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    if operation == "update":
+        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+        assert ref is not None
+        ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)
+    task = asyncio.create_task(get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy))
+    try:
+        async with asyncio.timeout(1):
+            while getattr(caches, f"{operation}_attempts") == 0:
+                await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not gemini_cache._NEGATIVE
+    finally:
+        if not task.done():
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+
+@pytest.mark.parametrize("operation", ["create", "list", "update"])
+@pytest.mark.parametrize(
+    "error_type", [ConnectError, ReadTimeout, ServerDisconnectedError, ServerTimeoutError]
+)
+async def test_sdk_transport_failure_allows_cache_only_recovery(
+    operation: str, error_type: type[Exception]
+) -> None:
+    caches = _FakeCaches()
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    if operation == "update":
+        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+        assert ref is not None
+        ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)
+    setattr(caches, f"{operation}_error", error_type("connection interrupted"))
+
+    result = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+    assert (result is None) == (operation == "create")
+    assert bool(gemini_cache._NEGATIVE) == (operation == "create")
+    assert caches.create_calls == 1
+
+
+@pytest.mark.parametrize("error_type", [ReadTimeout, TypeError, TimeoutError])
+async def test_list_metadata_error_is_not_a_transport_recovery(
+    error_type: type[Exception],
+) -> None:
+    error = error_type("cached-content metadata failure")
+
+    class BrokenMetadata:
+        @property
+        def display_name(self) -> str:
+            raise error
+
+    caches = _FakeCaches()
+    caches.list_items = [BrokenMetadata()]
+    with pytest.raises(error_type) as raised:
+        await get_or_create_cache(
+            _gemini_llm(caches), _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
+    assert raised.value is error
+    assert caches.create_calls == 0
+    assert not gemini_cache._NEGATIVE
+
+
+@pytest.mark.parametrize("error_type", [ReadTimeout, TypeError, TimeoutError])
+async def test_refresh_response_error_is_not_a_transport_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
+) -> None:
+    error = error_type("refresh metadata failure")
+
+    class BrokenMetadata:
+        @property
+        def expire_time(self) -> datetime:
+            raise error
+
+    async def update(*, name: str, config: Any) -> BrokenMetadata:
+        return BrokenMetadata()
+
+    caches = _FakeCaches()
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+    assert ref is not None
+    before = datetime.now(UTC) + timedelta(seconds=300)
+    ref.expire_time = before
+    monkeypatch.setattr(caches, "update", update)
+    with pytest.raises(error_type) as raised:
+        await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+    assert raised.value is error
+    assert ref.expire_time == before
+    assert not gemini_cache._NEGATIVE
+
+
+@pytest.mark.parametrize("transient", [False, True])
+async def test_paginated_list_failure_uses_the_same_sdk_boundary(transient: bool) -> None:
+    caches = _FakeCaches()
+    error = ReadTimeout("next page unavailable") if transient else TypeError("page decoder bug")
+    caches.page_error = error
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    if transient:
+        assert await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy) is not None
+        assert caches.create_calls == 1
+    else:
+        with pytest.raises(TypeError) as raised:
+            await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+        assert raised.value is error
+        assert caches.create_calls == 0
+    assert caches.list_calls == 1
+    assert not gemini_cache._NEGATIVE
+
+
+@pytest.mark.parametrize("name", [None, ""])
+async def test_create_response_requires_a_resource_name(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str | None,
+) -> None:
+    from google.genai import types
+
+    async def create(*, model: str, config: Any) -> types.CachedContent:
+        return types.CachedContent(name=name)
+
+    caches = _FakeCaches()
+    monkeypatch.setattr(caches, "create", create)
+    with pytest.raises(ValueError, match="no resource name"):
+        await get_or_create_cache(
+            _gemini_llm(caches), _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
+    assert not gemini_cache._MEMO
+    assert not gemini_cache._NEGATIVE
+
+
+async def test_typed_stale_refresh_keeps_the_existing_single_plain_recovery() -> None:
+    caches = _FakeCaches()
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy)
+    assert ref is not None
+    ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)
+    caches.update_error = ClientError(
+        403,
+        {"error": {"code": 403, "message": "CachedContent not found (or permission denied)"}},
+    )
+    assert await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], policy) is ref
+    assert caches.update_calls == [ref.name]
+    assert caches.create_calls == 1
+    assert not gemini_cache._NEGATIVE
+
+
+@pytest.mark.parametrize("operation", ["create", "list", "update"])
+async def test_unknown_cache_prelude_error_stops_the_real_agent_call(operation: str) -> None:
+    from agent.llm.cache import ainvoke_with_cache_retry, prepare_invocation
+    from ava_builtins.plugins.lm_google.provider import PROVIDER
+
+    caches = _FakeCaches()
+    llm = _gemini_llm(caches)
+    policy = AgentSlices.resolve().llm_policy
+    if operation == "update":
+        invocation = await prepare_invocation(
+            llm, [SystemMessage(content=_BIG_PROMPT)], policy, PROVIDER.binding
+        )
+        assert invocation.used_explicit_cache
+        assert len(gemini_cache._MEMO) == 1
+        ref = next(iter(gemini_cache._MEMO.values()))
+        ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)
+    error = TypeError("cache prelude implementation failure")
+    setattr(caches, f"{operation}_error", error)
+    with pytest.raises(TypeError) as raised:
+        await ainvoke_with_cache_retry(
+            llm, [SystemMessage(content=_BIG_PROMPT)], policy, binding=PROVIDER.binding
+        )
+    assert raised.value is error
+    assert caches.create_calls == (0 if operation == "list" else 1)
+    assert not gemini_cache._NEGATIVE
 
 
 class TestRefresh:

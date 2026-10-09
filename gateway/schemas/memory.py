@@ -1,8 +1,4 @@
-"""memory search / graph.
-
-Split out of the former monolithic ops/schemas.py; FastAPI registers these
-unchanged, so the OpenAPI codegen is byte-identical to the wire before.
-"""
+"""Memory search and graph HTTP contracts."""
 
 from typing import Literal
 
@@ -39,12 +35,10 @@ class MemorySearchResponse(BaseModel):
     reconstruct absolute paths. fs-neutral makes mismatched gateway
     (e.g. /Users/x) and agent-runner (/home/y) filesystems work.
 
-    `results` carries path + description for each match; `paths` is the
-    bare list of relative paths (backward-compat for existing consumers).
+    `results` carries path, description and tags for each match.
     """
 
-    paths: list[str] = Field(default_factory=list)
-    results: list[MemorySearchResultItem] = Field(default_factory=list)
+    results: list[MemorySearchResultItem]
 
 
 class MemoryRefreshResponse(BaseModel):

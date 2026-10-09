@@ -33,7 +33,7 @@ tags:
 - [[base/lm/docs/model-configuration.ava.okf.md]] — effective agent model validation.
 - Gateway lifespan loads providers; zero bindings raises before the once flag, so a corrected config is retryable.
 - [[media-capabilities.ava.okf.md]] — per-model media resolution and attachment packing.
-- `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped.
+- `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped. Factories receive `factory(model, *, agent_id)`; None means a non-agent caller. Use the argument, not a host SDK binding.
 - `thinking: ThinkingConfig | None` — `TypedDict` for Anthropic extended-thinking (`{"type":"disabled"}`/`{"type":"enabled","budget_tokens":N}`); gemini-*/gpt-* read only `type`, mirroring on/off to reasoning toggles.
 
 ### content block shapes (`content.py`)
@@ -46,8 +46,8 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 ### stop classification (`stop.py`)
 - `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; plugin bindings declare four client-class keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; an unregistered provider key fails.
 
-### billing (`billing.py` + `pricing.py` + `pricing_catalog_archive.json`) — [[pricing.ava.okf.md]]
-- `billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension. Agent and birth-lineage usage is queried independently of task records. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites only provide the response and usage kind.
+### billing (`pricing/billing.py` + `pricing/__init__.py` + `pricing_catalog_archive.json`) — [[pricing.ava.okf.md]]
+- `pricing/billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension. Agent and birth-lineage usage is queried independently of task records. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites only provide the response and usage kind.
 - Plugin `PriceRates` are the live chat source and carry full history, tiers, windows, and future periods. The archive is their reconciliation ledger, live only for catalog-only services; `pricing_catalog.json` is an empty shell. `quote()` returns rates and cost atomically; both sources share the child node's parser and selector.
 
 ### durable usage — [[usage.ava.okf.md]]

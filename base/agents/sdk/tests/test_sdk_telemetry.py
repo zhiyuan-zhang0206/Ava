@@ -8,10 +8,17 @@ its emitted `sdk_call` event `detail`.
 
 from __future__ import annotations
 
+import asyncio
+import os
 import random
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from pydantic import ValidationError
 
 from base import telemetry
 from base.agents.sdk import call_policy
@@ -234,6 +241,105 @@ def test_live_sampling_keeps_tally_complete(
     assert tally == {"files.read": 11}
 
 
+@pytest.mark.parametrize("async_call", [False, True])
+@pytest.mark.parametrize("failure", ["auth", "schema", "code"])
+async def test_invalid_policy_blocks_sdk_side_effects(
+    monkeypatch: pytest.MonkeyPatch, async_call: bool, failure: str
+) -> None:
+    cache = call_policy._PolicyCache()
+    cache.value = SamplingPolicy()
+
+    def invalid() -> SamplingPolicy:
+        if failure == "auth":
+            httpx.Response(
+                401, request=httpx.Request("GET", "https://gateway/bootstrap")
+            ).raise_for_status()
+        if failure == "schema":
+            return SamplingPolicy(sample_every=0)
+        raise TypeError("policy reader bug")
+
+    monkeypatch.setattr(call_policy, "_read_policy", invalid)
+    cache.refresh()
+    monkeypatch.setattr(call_policy, "policy", cache.read)
+    calls: list[str] = []
+
+    def body() -> None:
+        calls.append("side effect")
+
+    async def async_body() -> None:
+        body()
+
+    error = {"auth": httpx.HTTPStatusError, "schema": ValidationError, "code": TypeError}[failure]
+    with sdk_usage_telemetry.recording() as tally:
+        for _ in range(2):
+            with pytest.raises(error):
+                if async_call:
+                    await sdk_usage_telemetry.run_metered_async("files.write", async_body, (), {})
+                else:
+                    sdk_usage_telemetry.run_metered("files.write", body, (), {})
+        assert tally == {}
+    assert calls == []
+    assert sdk_usage_telemetry._frames.get() == ()
+
+
+@pytest.mark.parametrize("async_call", [False, True])
+@pytest.mark.parametrize("original", [ValueError("SDK failed"), asyncio.CancelledError()])
+async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    captured: list[dict[str, Any]],
+    async_call: bool,
+    original: BaseException,
+) -> None:
+    cache = call_policy._PolicyCache()
+    cache.value = SamplingPolicy()
+    cache.next_refresh = float("inf")
+    reads: list[str] = []
+
+    def current() -> SamplingPolicy:
+        reads.append("read")
+        return cache.read()
+
+    def invalid() -> SamplingPolicy:
+        raise TypeError("new invalid policy")
+
+    monkeypatch.setattr(call_policy, "policy", current)
+    monkeypatch.setattr(call_policy, "_read_policy", invalid)
+    nested: list[str] = []
+
+    def body() -> None:
+        cache.refresh()
+        sdk_usage_telemetry.run_metered("inner.call", lambda: nested.append("ran"), (), {})
+        raise original
+
+    async def async_body() -> None:
+        body()
+
+    with pytest.raises(type(original)) as caught:
+        if async_call:
+            await sdk_usage_telemetry.run_metered_async("outer.call", async_body, (), {})
+        else:
+            sdk_usage_telemetry.run_metered("outer.call", body, (), {})
+    assert caught.value is original
+    assert reads == ["read"]
+    assert nested == ["ran"]
+    assert captured[0]["fn"] == "outer.call"
+    with pytest.raises(TypeError, match="new invalid policy"):
+        sdk_usage_telemetry.run_metered("next.call", lambda: nested.append("must not run"), (), {})
+    assert nested == ["ran"]
+
+
+def test_direct_emit_propagates_policy_errors_without_creating_events(
+    monkeypatch: pytest.MonkeyPatch, captured: list[dict[str, Any]]
+) -> None:
+    def invalid() -> SamplingPolicy:
+        raise TypeError("invalid policy")
+
+    monkeypatch.setattr(call_policy, "policy", invalid)
+    with pytest.raises(TypeError, match="invalid policy"):
+        sdk_usage_telemetry.emit("files.write")
+    assert captured == []
+
+
 def test_tally_counts_a_failed_top_level_call_too(monkeypatch: pytest.MonkeyPatch) -> None:
     """Like its event, a call that raises still counts — it really executed."""
     _spy_emit(monkeypatch)
@@ -320,3 +426,102 @@ def test_sdk_calls_by_tool_call_id_respects_the_start_window() -> None:
         _exec_output("tc-2", [{"method": "shell.run", "count": 1}]),
     ]
     assert set(sdk_usage_telemetry.sdk_calls_by_tool_call_id(messages, start=1)) == {"tc-2"}
+
+
+@pytest.mark.parametrize("error_type", [ImportError, RuntimeError])
+@pytest.mark.parametrize("async_call", [False, True])
+def test_local_capture_import_failure_rejects_body_with_original_exception(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception], async_call: bool
+) -> None:
+    import builtins
+
+    failure = error_type("local capture module is invalid")
+    original_import = builtins.__import__
+    executed: list[str] = []
+    emitted = _spy_emit(monkeypatch)
+
+    def import_module(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "base.agents.impersonation.manifest":
+            raise failure
+        return original_import(name, *args, **kwargs)
+
+    def body() -> None:
+        executed.append("body")
+
+    async def async_body() -> None:
+        body()
+
+    monkeypatch.setattr(builtins, "__import__", import_module)
+    with sdk_usage_telemetry.recording() as tally, pytest.raises(error_type) as raised:
+        if async_call:
+            asyncio.run(sdk_usage_telemetry.run_metered_async("capture.call", async_body, (), {}))
+        else:
+            sdk_usage_telemetry.run_metered("capture.call", body, (), {})
+    assert raised.value is failure
+    assert executed == [] and emitted == [] and tally == {}
+
+
+def test_no_local_participant_uses_the_real_optional_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.agents.impersonation import manifest
+
+    assert manifest.admit_local_sdk_call() is None
+    emitted = _spy_emit(monkeypatch)
+
+    def body() -> str:
+        assert not manifest.local_sdk_call_was_admitted()
+        return "without-participant"
+
+    assert sdk_usage_telemetry.run_metered("capture.call", body, (), {}) == "without-participant"
+    assert emitted == [("capture.call", {})]
+
+
+@pytest.mark.parametrize("error_type", ["ImportError", "RuntimeError"])
+def test_cold_capture_import_failure_rejects_body(tmp_path: Path, error_type: str) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            """
+import importlib.abc
+import os
+import sys
+from base.agents.sdk import call_policy, telemetry
+from base.agents.sdk.call_policy import SamplingPolicy
+
+assert 'base.agents.impersonation.manifest' not in sys.modules
+error_type = {'ImportError': ImportError, 'RuntimeError': RuntimeError}[os.environ['TEST_CAPTURE_ERROR']]
+failure = error_type('invalid cold capture module')
+executed = []
+call_policy.policy = SamplingPolicy
+telemetry.emit = lambda *args, **kwargs: executed.append('emit')
+
+class BrokenCapture(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname == 'base.agents.impersonation.manifest':
+            raise failure
+
+sys.meta_path.insert(0, BrokenCapture())
+try:
+    telemetry.run_metered('capture.call', lambda: executed.append('body'), (), {})
+except (ImportError, RuntimeError) as actual:
+    assert actual is failure
+else:
+    raise AssertionError('capture import failure was hidden')
+assert executed == []
+""",
+        ],
+        cwd=tmp_path,
+        env={
+            **{key: value for key, value in os.environ.items() if key != "AVA_CONFIG_BOOT"},
+            "AVA_HOME": str(tmp_path / "absent-home"),
+            "AVA_CONFIG_FETCH": "skip",
+            "TEST_CAPTURE_ERROR": error_type,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

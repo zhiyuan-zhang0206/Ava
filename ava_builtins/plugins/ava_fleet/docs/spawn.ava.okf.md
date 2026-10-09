@@ -95,6 +95,8 @@ IDLING (unclaimed) ──claim──→ RUNNING ──→ IDLING
 ### Parallel Decomposition
 
 ```python
+from uuid import uuid4
+
 # Break down a large task into independent subtasks, spawn a worker for each
 worker_ids = []
 for task in sub_tasks:
@@ -102,7 +104,7 @@ for task in sub_tasks:
         prompt=task,
         config_overlay={"llm_model": "claude-sonnet-4-5"},
         label=f"worker-{task.topic}",
-    )
+     idempotency_key=str(uuid4()))
     worker_ids.append(wid)
 
 # Then idle, waiting for each worker to report results via send_message
@@ -111,12 +113,14 @@ for task in sub_tasks:
 ### Fork Pattern
 
 ```python
+from uuid import uuid4
+
 # Current agent has accumulated context, fork a child agent to handle a specific direction
 child_id = ava.agents.spawn(
     prompt="Continue analyzing this lead...",
     fork_from=ava.self.AGENT_ID,
     label="Lead Analyst",
-)
+ idempotency_key=str(uuid4()))
 ```
 
 ## Relationship with Other Subsystems

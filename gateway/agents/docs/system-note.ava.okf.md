@@ -7,10 +7,11 @@ tags: [gateway, agents]
 
 ## System-note acceptance
 
-`POST /api/agents/{id}/system-note` accepts an optional `Idempotency-Key`.
+`POST /api/agents/{id}/system-note` requires `Idempotency-Key`.
 The key commits with its `inbound_messages` row. Replay returns the original
 id; changed recipient, content, source, task/tag or resurrection policy conflicts. The note keeps `kind=system_note`; its payload records
-`delivery_resurrect` for immutable policy comparison. Keyless payloads keep their shape. SDK transport sends one operation key under the route contract. The
+`delivery_resurrect` for immutable policy comparison. Missing keys fail before mutation. Both SDK layers require an explicit key;
+watcher retries retain the same key for one notification. The
 foundation rollout gate keeps automatic ambiguous-failure retries disabled
 for newly keyed routes when gateway capability is unproven. A caller can
 explicitly reuse its key against a compatible gateway.

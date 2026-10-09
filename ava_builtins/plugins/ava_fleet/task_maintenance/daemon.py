@@ -48,6 +48,7 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base import telemetry
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -62,6 +63,11 @@ from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import init_gateway_process
+from base.packages.plugins.config_registration import (
+    disk_image_path,
+    read_authority_config,
+    read_service_config,
+)
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
@@ -254,11 +260,16 @@ async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
 
 
 async def _dispatch_loop(
-    pool: ConnectionPool, db: Database, bus: EventBus, liveness: Liveness
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    liveness: Liveness,
+    *,
+    config: FleetConfig,
 ) -> None:
-    interval = settings.daemon.task_maintenance_interval_seconds
-    backoff_seconds = settings.daemon.task_reminder_backoff_seconds
-    escalate_n = settings.daemon.task_escalate_n
+    interval = config.task_maintenance_interval_seconds
+    backoff_seconds = config.task_reminder_backoff_seconds
+    escalate_n = config.task_escalate_n
     _log.info(
         "[task-maintenance] daemon started, pid=%s, interval=%.0fs, backoff=%.0fs, escalate_n=%d",
         os.getpid(),
@@ -289,7 +300,7 @@ async def _dispatch_loop(
         await _sleep_with_liveness(liveness, interval)
 
 
-async def run() -> None:
+async def run(config: FleetConfig) -> None:
     if _is_running():
         _log.info(
             "[task-maintenance] daemon already running (pidfile=%s), exiting",
@@ -309,7 +320,7 @@ async def run() -> None:
     db = Database.from_settings()
     pool = db.pool()
     try:
-        await _dispatch_loop(pool, db, EventBus.from_settings(), liveness)
+        await _dispatch_loop(pool, db, EventBus.from_settings(), liveness, config=config)
     finally:
         pool.close()
         await stop_health_server(health)
@@ -324,7 +335,10 @@ def main() -> None:
     init_gateway_process(name="task_maintenance")
     install_graceful_shutdown("task_maintenance")
     try:
-        asyncio.run(run())
+        config = read_service_config("ava_fleet", FleetConfig)
+        if config is None:
+            config = read_authority_config("ava_fleet", FleetConfig, disk_image_path("ava_fleet"))
+        asyncio.run(run(config))
     except KeyboardInterrupt:
         _log.info("[task-maintenance] interrupted, shutting down")
     except Exception:

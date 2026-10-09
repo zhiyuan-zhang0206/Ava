@@ -7,17 +7,26 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
+from google.genai.errors import ClientError
+from langchain_core.exceptions import ModelPermissionDeniedError
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_google_genai.chat_models import _handle_client_error
 
 from agent.llm.cache import ainvoke_with_cache_retry, prepare_invocation
 from ava_builtins.plugins.lm_google import gemini_cache
 from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
 from ava_builtins.plugins.lm_google.provider import PROVIDER
 from base.host.env.agent_slices import AgentSlices
+from base.lm.call import recover_invocation
+from base.lm.errors import ErrorClass, classify_error
 
 _SYSTEM = SystemMessage(content="You are a test agent. " * 100)
 _CONVO = [HumanMessage(content="hi"), AIMessage(content="hello")]
+
+
+class _ProgrammingError(TypeError):
+    code = 403
 
 
 class _StubRunnable:
@@ -161,10 +170,11 @@ class TestAinvokeWithCacheRetry:
         assert used_cache is True  # cache-bound attempt succeeded
         assert len(llm.runnable.calls) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    async def test_stale_cache_retries_plain_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from google.genai.errors import ClientError
-
-        stale = ClientError(
+    @pytest.mark.parametrize("official_wrapper", [False, True])
+    async def test_stale_cache_retries_plain_once(
+        self, monkeypatch: pytest.MonkeyPatch, official_wrapper: bool
+    ) -> None:
+        stale: Exception = ClientError(
             403,
             {
                 "error": {
@@ -174,6 +184,11 @@ class TestAinvokeWithCacheRetry:
                 }
             },
         )
+        if official_wrapper:
+            try:
+                _handle_client_error(stale, {"model": "gemini-3.7-flash"})
+            except ModelPermissionDeniedError as wrapped:
+                stale = wrapped
         llm = _StubLLM(invoke_errors=[stale])
         invalidated: list[str] = []
         # Even a still-eligible cache cannot be prepared again on recovery.
@@ -202,6 +217,46 @@ class TestAinvokeWithCacheRetry:
         # first call stripped (cache path), retry full (plain path)
         assert llm.runnable.calls[0] == _CONVO  # pyright: ignore[reportUnknownMemberType]
         assert llm.runnable.calls[1] == [_SYSTEM, *_CONVO]  # pyright: ignore[reportUnknownMemberType]
+
+    @pytest.mark.parametrize("provider_cause", [False, True])
+    async def test_programming_error_cannot_authorize_plain_cache_retry(
+        self, monkeypatch: pytest.MonkeyPatch, provider_cause: bool
+    ) -> None:
+        error = _ProgrammingError("CachedContent not found (application metadata bug)")
+        if provider_cause:
+            error.__cause__ = ClientError(
+                403, {"error": {"message": "CachedContent not found", "code": 403}}
+            )
+        llm = _StubLLM(invoke_errors=[error])
+        invalidated: list[str] = []
+
+        async def prepare(*args: object) -> CacheRef:
+            return _ref()
+
+        def invalidate(ref: CacheRef) -> None:
+            invalidated.append(ref.name)
+
+        monkeypatch.setattr(gemini_cache, "get_or_create_cache", prepare)
+        monkeypatch.setattr(gemini_cache, "invalidate", invalidate)
+        invocation = await prepare_invocation(
+            cast(BaseChatModel, llm),
+            [_SYSTEM, *_CONVO],
+            AgentSlices.resolve().llm_policy,
+            binding=PROVIDER.binding,
+        )
+        assert invocation.used_explicit_cache
+        assert classify_error(error).error_class is ErrorClass.UNKNOWN
+        assert recover_invocation(invocation, error) is None
+        with pytest.raises(TypeError) as raised:
+            await ainvoke_with_cache_retry(
+                cast(BaseChatModel, llm),
+                [_SYSTEM, *_CONVO],
+                AgentSlices.resolve().llm_policy,
+                binding=PROVIDER.binding,
+            )
+        assert raised.value is error
+        assert len(llm.runnable.calls) == 1
+        assert invalidated == []
 
     async def test_non_stale_error_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         llm = _StubLLM(invoke_errors=[ValueError("boom")])

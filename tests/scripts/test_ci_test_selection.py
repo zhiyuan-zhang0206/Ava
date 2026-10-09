@@ -41,6 +41,54 @@ def _step(job: dict[str, Any], name: str) -> dict[str, Any]:
     return matches[0]
 
 
+def _backend_verdict(
+    script: str,
+    backend: str,
+    results: dict[str, str],
+    *,
+    mode: str = "enforce",
+    decision: str = "FULL",
+) -> subprocess.CompletedProcess[str]:
+    script = script.replace("${{ needs.classify.outputs.backend }}", backend)
+    for job, result in results.items():
+        script = script.replace("${{ needs." + job + ".result }}", result)
+    assert "${{" not in script
+    return subprocess.run(  # noqa: S603 - checked-in verifier over closed test-owned results
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+        env=os.environ | {"TEST_SELECTION_MODE": mode, "DECISION": decision},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
+    results = dict.fromkeys(dependencies, "success")
+    non_backend = dict.fromkeys(results, "skipped")
+    for outcome in ("success", "failure", "cancelled", "skipped"):
+        actual = _backend_verdict(script, "false", non_backend | {"backend-structure": outcome})
+        assert actual.returncode == (0 if outcome == "success" else 1), actual.stdout
+        assert "backend-static:" not in actual.stdout
+    for mode, decision, changes, expected in (
+        ("enforce", "FULL", {}, 0),
+        ("shadow", "SELECTED", {"backend-shard": "failure"}, 1),
+        ("enforce", "SELECTED", {"backend-shard": "skipped"}, 0),
+        ("enforce", "SELECTED", {"backend-shard": "failure"}, 1),
+        (
+            "enforce",
+            "SELECTED",
+            {"backend-shard": "skipped", "backend-selected": "failure"},
+            1,
+        ),
+    ):
+        actual = _backend_verdict(script, "true", results | changes, mode=mode, decision=decision)
+        assert actual.returncode == expected, actual.stdout
+    for job in results:
+        actual = _backend_verdict(script, "true", results | {job: "failure"})
+        # FULL has no enforced subset.
+        assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
+
+
 def test_enforce_is_the_default_and_test_select_republishes_the_mode() -> None:
     """The revert switch is one value; job-level routing cannot read env, so
     test-select republishes it as an output before anything can fail."""
@@ -117,6 +165,11 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
         "backend-pgvector-smoke",
         "helper-signing-smoke",
     ]
+    assert aggregator["if"] == (
+        "${{ always() && needs.classify.result == 'success' && "
+        "(needs.classify.outputs.backend == 'true' || "
+        "needs.backend-structure.result != 'success') }}"
+    )
     verify = _step(aggregator, "Verify backend job results")["run"]
     assert '"$TEST_SELECTION_MODE" = "enforce"' in verify
     assert '"$DECISION" = "SELECTED"' in verify
@@ -125,11 +178,12 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
     assert verify.index('check backend-structure "${{ needs.backend-structure.result }}"') < (
         verify.index('if [ "$TEST_SELECTION_MODE" = "enforce" ]')
     )
+    _assert_backend_verdicts(verify, aggregator["needs"][2:])
 
 
 def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
     jobs = _workflow_jobs()
-    static = _step(jobs["backend-structure"], "Run static pytest contracts")
+    static = _step(jobs["backend-static"], "Run static pytest contracts")
     assert static["if"] == "needs.classify.outputs.backend == 'true'"
     assert "--test-environment=static" in static["run"]
     assert "--junit-xml=tmp/junit-backend-static.xml" in static["run"]

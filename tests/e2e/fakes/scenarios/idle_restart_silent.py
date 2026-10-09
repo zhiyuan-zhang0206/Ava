@@ -17,7 +17,6 @@ from pathlib import Path
 import psycopg
 from langchain_core.messages import AIMessage
 
-import ava
 from base.config import settings
 from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
 
@@ -57,18 +56,18 @@ PRE_RESTART_SCRIPT: tuple[AIMessage, ...] = (
 POST_RESTART_SCRIPT: tuple[AIMessage, ...] = ()
 
 
-def _is_post_restart_process() -> bool:
+def _is_post_restart_process(agent_id: int | None) -> bool:
     """A durable restart was applied before constructing this hosted fake."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages "
             "WHERE agent_id = %s AND kind = 'restart' AND applied_at IS NOT NULL LIMIT 1",
-            (ava.self.AGENT_ID,),
+            (agent_id,),
         )
         return cur.fetchone() is not None
 
 
-def build(model: str) -> ScriptedFakeChatModel:
-    if _is_post_restart_process():
+def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
+    if _is_post_restart_process(agent_id):
         return ScriptedFakeChatModel(script=POST_RESTART_SCRIPT)
     return ScriptedFakeChatModel(script=PRE_RESTART_SCRIPT)

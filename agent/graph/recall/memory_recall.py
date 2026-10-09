@@ -35,6 +35,7 @@ from agent.graph.recall._memory_filter import Candidate, filter_candidates
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
 from base.agents import GatewayUnavailable, IndexerUnavailable
+from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.host.env.agent_slices import AgentSlices
 from base.lm.content import content_blocks
@@ -115,13 +116,13 @@ def _build_query(messages: Collection[AnyMessage]) -> str:
 
 
 async def _search_or_none(
-    query: str, retrieve_k: int
+    query: str, retrieve_k: int, ctx: AvaContext
 ) -> list[gateway_client.MemorySearchResult] | None:
     """The memory-pool search results, or None when the search is unavailable or failed."""
     import httpx  # deferred: stays off the child boot path
 
     try:
-        return await asyncio.to_thread(gateway_client.memory_search, query, retrieve_k)
+        return await asyncio.to_thread(gateway_client.memory_search, query, retrieve_k, context=ctx)
     except (GatewayUnavailable, IndexerUnavailable) as exc:
         # Recall is an enhancement; a memory-index outage must not crash the
         # turn. Skip this turn and let the next one retry. Debug level because
@@ -182,6 +183,7 @@ async def passive_memory_recall(
     messages: Collection[AnyMessage],
     *,
     agent: AgentSlices,
+    context: AvaContext,
     log_key: bytes,
     injected_paths: Collection[str] = frozenset(),
 ) -> PassiveRecall | None:
@@ -204,7 +206,7 @@ async def passive_memory_recall(
         return None
     retrieve_k = agent.memory.memory_recall_retrieve_k
     search_started = time.monotonic()
-    results = await _search_or_none(query, retrieve_k)
+    results = await _search_or_none(query, retrieve_k, context)
     if results is None:
         return None
 

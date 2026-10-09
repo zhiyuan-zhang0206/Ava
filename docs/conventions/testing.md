@@ -34,11 +34,12 @@ Run explicit files or node IDs, including relevant consumer tests:
 .venv/bin/pytest -n 2 <selected-test-files-or-node-ids>
 ```
 
-For the owned audit, content lint, lint and structure tool contracts, run
+For the owned audit, content lint, lint, structure, CI, path and PTY screen
+unit contracts, run
 `.venv/bin/pytest --test-environment=static`. This scoped process refuses native
 Postgres/Redis and accepts its owned component directories, descendant paths
 and node IDs; other tests keep the native default. CI runs it in the required
-structure job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.ava.okf.md).
+backend static job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.ava.okf.md).
 
 Check changed Python files with pyright:
 
@@ -46,6 +47,12 @@ Check changed Python files with pyright:
 git diff --name-only --diff-filter=ACMR -z origin/main...HEAD -- '*.py' \
   | xargs -0 -r .venv/bin/pyright
 ```
+
+The `tool.pytest.ini_options.testpaths` configuration in `pyproject.toml` owns
+the test host directories. The CI selector, generated pyright test environments
+and fixture-scope lint read that configuration rather than separate directory lists.
+Use `tests` or `<host>/**/tests`; regenerate pyright environments after changing
+the configured hosts or their tracked test directories.
 
 Pytest paths are grouped by directory by the collection guard: collecting the
 same directory twice can hide its conftest fixtures. Python children started

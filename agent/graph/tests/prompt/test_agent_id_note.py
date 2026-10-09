@@ -3,11 +3,9 @@
 Policy: every window states the agent's own id — plus label / machine /
 workspace when available — as a system-styled HumanMessage outside the
 SystemMessage, so a fork does not carry a stale identity (issue #1320). The
-note must resolve the HOSTED turn identity (the agent host hosts many agents'
-turns in one process and establishes no process-wide id) — reading the process
-slot directly silently dropped this note from every hosted head for two weeks
-(task #3939). Each clause is fail-soft: a missing label / machine / workspace
-never costs the identity line itself.
+note reads the explicit host context because many agents share one process.
+Missing optional values do not cost the identity line; label-read failures
+propagate to the caller.
 """
 
 from __future__ import annotations
@@ -15,9 +13,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from psycopg import OperationalError
 
 from agent.graph.prompt.context_notes import _machine_clause, _own_label, agent_id_note
-from ava.sdk_surface import process_context
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
@@ -32,7 +32,14 @@ def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     pin_agent(29)
 
 
-def _no_label(_agent_id: int) -> str | None:
+def _context(agent_id: int | None = 29) -> AvaContext:
+    return AvaContext(
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
+        agent=AgentSlices.resolve(),
+    )
+
+
+def _no_label(_ctx: AvaContext, _agent_id: int) -> str | None:
     return None
 
 
@@ -50,7 +57,7 @@ def _no_optional_clauses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", False)
 
 
-def _steward_label(_agent_id: int) -> str | None:
+def _steward_label(_ctx: AvaContext, _agent_id: int) -> str | None:
     return "memory steward"
 
 
@@ -61,7 +68,7 @@ def _wsl_machine() -> str | None:
 def _content() -> str:
     """The note's body with its `[system]` carrier prefix stripped — the
     assertions are about what the note says, not its framing."""
-    note = agent_id_note(AgentSlices.resolve())
+    note = agent_id_note(_context())
     assert note is not None
     assert note.additional_kwargs["ava_note_tag"] == NoteTag.AGENT_ID  # pyright: ignore[reportUnknownMemberType]
     content = str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -121,14 +128,12 @@ def test_workspace_clause_respects_the_section_gate(
 
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The hosted runner pins the identity in a turn contextvar and leaves the
-    process slot None; the note must resolve through `ava.sdk_surface.agent_identity.agent_id()`
-    (task #3939)."""
+    """An explicit host context wins over unrelated native turn identity."""
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
-    with bind_turn_identity(31):
-        note = agent_id_note(AgentSlices.resolve())
+    with bind_turn_identity(97):
+        note = agent_id_note(_context(31))
 
     assert note is not None
     assert "Your Agent ID is 31" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -138,7 +143,7 @@ def test_opts_out_without_any_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot renders / dev REPL: no slot, no turn, no env — decline."""
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert agent_id_note(AgentSlices.resolve()) is None
+    assert agent_id_note(_context(None)) is None
 
 
 # ── clause readers ──
@@ -169,32 +174,59 @@ class _FakeDB:
         return _FakeCursor(self._row)
 
 
-def _fake_sql(monkeypatch: pytest.MonkeyPatch, fake: object) -> None:
-    """Serve `ava.DB` from `fake` for this test: the bound context's SQL slot."""
-    monkeypatch.setattr(process_context.current().clients, "_sql", fake)
+def _fake_sql(monkeypatch: pytest.MonkeyPatch, fake: object) -> AvaContext:
+    """Supply this note's SQL connection without binding the shared SDK."""
+    ctx = _context()
+    monkeypatch.setattr(ctx.clients, "_sql", fake)
+    return ctx
 
 
 def test_own_label_normalizes_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
     """A label is free text; the one-line note gets it whitespace-collapsed."""
-    _fake_sql(monkeypatch, _FakeDB(("  memory\n  steward ",)))
-    assert _own_label(29) == "memory steward"
+    ctx = _fake_sql(monkeypatch, _FakeDB(("  memory\n  steward ",)))
+    assert _own_label(ctx, 29) == "memory steward"
 
 
-def test_own_label_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No row / empty label / read failure all degrade to "no label clause" —
-    the identity line itself outranks the label."""
-    _fake_sql(monkeypatch, _FakeDB(None))
-    assert _own_label(29) is None
+@pytest.mark.parametrize("row", [None, (None,), ("",)])
+def test_own_label_omits_missing_data(
+    monkeypatch: pytest.MonkeyPatch, row: tuple[object, ...] | None
+) -> None:
+    ctx = _fake_sql(monkeypatch, _FakeDB(row))
+    assert _own_label(ctx, 29) is None
 
-    _fake_sql(monkeypatch, _FakeDB(("",)))
-    assert _own_label(29) is None
+
+@pytest.mark.parametrize("error_type", [OperationalError, RuntimeError])
+def test_own_label_propagates_cursor_failure(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+) -> None:
+    failure = error_type("label connection is unavailable")
 
     class _Boom:
         def cursor(self) -> object:
-            raise RuntimeError("db down")
+            raise failure
 
-    _fake_sql(monkeypatch, _Boom())
-    assert _own_label(29) is None
+    ctx = _fake_sql(monkeypatch, _Boom())
+    with pytest.raises(error_type) as raised:
+        _own_label(ctx, 29)
+    assert raised.value is failure
+
+
+def test_agent_id_note_propagates_query_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = OperationalError("label query failed")
+
+    class _BrokenCursor(_FakeCursor):
+        def execute(self, *args: object, **kwargs: object) -> None:
+            raise failure
+
+    class _BrokenDB:
+        def cursor(self) -> _BrokenCursor:
+            return _BrokenCursor(None)
+
+    ctx = _fake_sql(monkeypatch, _BrokenDB())
+    monkeypatch.setattr("agent.graph.prompt.context_notes._own_label", _own_label)
+    with pytest.raises(OperationalError) as raised:
+        agent_id_note(ctx)
+    assert raised.value is failure
 
 
 def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.MonkeyPatch) -> None:

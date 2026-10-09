@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess as subprocess
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -61,9 +62,10 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
     # the dev host's pg/redis.
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_status", lambda: 0)
     from cli.commands.lifecycle import start as _start_mod
 
-    monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
+    monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", _ignoring_retention(lambda: 0))
     monkeypatch.setattr("cli.commands.data_plane.bringup.prepare_gateway_schema", lambda: None)
     monkeypatch.setattr(
         "cli.commands.data_plane.bringup.complete_gateway_data_plane",
@@ -142,7 +144,7 @@ def test_cmd_restart_succeeds_non_interactively(monkeypatch: pytest.MonkeyPatch)
         "preflight_start_readiness",
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    rc = _stop_commands.cmd_restart()
+    rc = _stop_commands.cmd_restart(retained_children=[])
     assert rc == 0
 
 
@@ -160,6 +162,7 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         preserve_sessions=frozenset(),
         teardown_extras=True,
         force=False,
+        retained_children: object = None,
     ) -> int:
         assert require_confirmation is False, "cmd_restart must skip stdin confirmation"
         assert force is False
@@ -190,17 +193,22 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         "preflight_start_readiness",
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    rc = _stop_commands.cmd_restart()
+    rc = _stop_commands.cmd_restart(retained_children=[])
     assert order == ["stop", "start"]
     assert rc == 0
 
 
 def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """An outer operation's still-running journal is never closed by the nested
     restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
     from base.deploy.lifecycle import status_journal
+
+    # Real phases create an implicit journal while begin/finish are stubbed.
+    # Keep that unfinished record out of later tests' journal ownership.
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
 
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -222,7 +230,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
         "begin",
         lambda _operation, **_kwargs: False,  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _stop_commands.cmd_restart() == 0
+    assert _stop_commands.cmd_restart(retained_children=[]) == 0
     assert finished == []  # the outer operation still owns the journal
 
     monkeypatch.setattr(
@@ -230,7 +238,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
         "begin",
         lambda _operation, **_kwargs: True,  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _stop_commands.cmd_restart() == 0
+    assert _stop_commands.cmd_restart(retained_children=[]) == 0
     assert finished == [0]
 
 
@@ -245,7 +253,7 @@ def test_cmd_restart_short_circuits_on_stop_failure(monkeypatch: pytest.MonkeyPa
         "_cmd_start_body",
         lambda _operation, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    rc = _stop_commands.cmd_restart()
+    rc = _stop_commands.cmd_restart(retained_children=[])
     assert rc == 1
     assert start_called == [], "start must not run when stop fails"
 
@@ -272,7 +280,7 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
-    rc = _stop_commands.cmd_restart()
+    rc = _stop_commands.cmd_restart(retained_children=[])
     assert rc == RESTART_DECLINED_EXIT_CODE, "preflight failure must propagate non-zero"
     assert stopped == [], "must not stop services when preflight fails"
     assert start_called == [], "must not start when preflight fails"
@@ -304,7 +312,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
-    rc = _stop_commands.cmd_restart()
+    rc = _stop_commands.cmd_restart(retained_children=[])
 
     assert rc == RESTART_DECLINED_EXIT_CODE, "a readiness refusal must decline, not fail"
     assert stopped == [], "must not stop services when the readiness gate refuses"
@@ -349,7 +357,7 @@ def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
-        lambda: events.append("infra") or 0,
+        _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert _stop_commands.cmd_stop(force=True) == 0
     assert events == ["root+terminal-service", "terminals", "root", "infra"]
@@ -369,7 +377,10 @@ def test_stop_revokes_serving_before_stopping_root(
         "stop_root_service_tree",
         lambda **_kw: observed.append(start_serving.is_serving()),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
-    monkeypatch.setattr("cli.commands.data_plane.cluster_instance.stop_cluster_instance", lambda: 0)
+    monkeypatch.setattr(
+        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        _ignoring_retention(lambda: 0),
+    )
     assert _force_stop(tmp_path, require_confirmation=False) == 0
     assert observed == [False, False], "serving is revoked before either root stop"
 
@@ -385,7 +396,7 @@ def test_do_stop_keep_infra_skips_infra_teardown(
     )
     monkeypatch.setattr(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
-        lambda: events.append("infra") or 0,
+        _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert _force_stop(tmp_path, require_confirmation=False, keep_infra=True) == 0
     assert events == ["root", "root"], "the services, then the pty-sessions service"
@@ -400,7 +411,10 @@ def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
         lambda **kw: calls.append(kw),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: reaps.append(1))
-    monkeypatch.setattr("cli.commands.data_plane.cluster_instance.stop_cluster_instance", lambda: 0)
+    monkeypatch.setattr(
+        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        _ignoring_retention(lambda: 0),
+    )
     assert _force_stop(tmp_path, require_confirmation=False) == 0
     assert calls == [
         {"preserve": frozenset({"browser", SERVICE_UNIT}), "force": True},
@@ -425,7 +439,10 @@ def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
         raise AssertionError("a kept service's terminals must not be closed")
 
     monkeypatch.setattr("cli.commands.lifecycle.stop.force_close_terminals", closed)
-    monkeypatch.setattr("cli.commands.data_plane.cluster_instance.stop_cluster_instance", lambda: 0)
+    monkeypatch.setattr(
+        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        _ignoring_retention(lambda: 0),
+    )
     assert (
         _force_stop(
             tmp_path, require_confirmation=False, preserve_sessions=frozenset({SERVICE_UNIT})
@@ -446,7 +463,7 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: events.append("browser"))
     monkeypatch.setattr(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
-        lambda: events.append("infra") or 0,
+        _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert _force_stop(tmp_path, require_confirmation=False, keep_browser=False) == 0
     assert events == ["root+terminal-service", "browser", "root", "infra"]
@@ -504,7 +521,7 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
     monkeypatch.setattr("cli.commands.lifecycle.stop._repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
-        lambda: events.append("infra") or 0,
+        _ignoring_retention(lambda: events.append("infra") or 0),
     )
 
 
@@ -575,3 +592,10 @@ def test_cmd_stop_proceeds_when_announce_fails(
     assert rc == 0
     assert events == ["infra"]  # teardown still ran
     assert "could not announce shutdown" in capsys.readouterr().out
+
+
+def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:
+    def invoke(*_args: object, **_kwargs: object) -> T:
+        return callback()
+
+    return invoke

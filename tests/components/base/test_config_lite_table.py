@@ -31,6 +31,7 @@ from base.host.env.config_lite_table import (
     LITE_FIELDS,
     PER_AGENT_FIELDS,
     REQUIRED_FIELDS,
+    SENSITIVE_FIELDS,
 )
 from base.host.env.config_registry import _build_registry, field_alias, schema_extra
 
@@ -90,6 +91,12 @@ def test_all_field_faces_match_the_live_registry() -> None:
     assert {
         name for name in names if schema_extra(reg[name].info).get("per_agent") is True
     } == PER_AGENT_FIELDS
+    assert {
+        name
+        for name in names
+        if isinstance(extra := reg[name].info.json_schema_extra, dict)
+        and cast(dict[str, object], extra).get("sensitive") is True
+    } == SENSITIVE_FIELDS
     required: set[str] = set()
     for name in names:
         info = cast(FieldInfo, reg[name].info)  # the registry stores FieldInfo behind a Protocol
@@ -140,10 +147,12 @@ def test_index_and_reader_live_outside_the_config_package() -> None:
         "field_scopes",
         "field_capabilities",
         "per_agent_fields",
+        "sensitive_fields",
         "required_fields",
     }
     assert set(raw["lite_fields"]) == set(LITE_FIELDS)
     assert isinstance(PER_AGENT_FIELDS, frozenset) and isinstance(REQUIRED_FIELDS, frozenset)
+    assert isinstance(SENSITIVE_FIELDS, frozenset)
 
 
 @pytest.mark.parametrize(

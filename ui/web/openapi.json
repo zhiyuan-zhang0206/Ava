@@ -455,7 +455,7 @@
     "/api/keyed/v1/agents": {
       "post": {
         "summary": "Post Guarded Agents",
-        "description": "Create a plain agent through a versioned, principal-bound keyed entry.\n\nOlder routing cannot execute this path. Callers must keep it fixed for an\nintent and never fall back to the legacy path after an uncertain response.",
+        "description": "Create or fork an agent through principal-bound keyed admission.\n\nOlder routing cannot execute this path. Callers must keep it fixed for an\nintent and never fall back to the legacy path after an uncertain response.",
         "operationId": "post_guarded_agents_api_keyed_v1_agents_post",
         "parameters": [
           {
@@ -491,46 +491,6 @@
         },
         "responses": {
           "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SpawnedAgent"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/retry-launch": {
-      "post": {
-        "summary": "Retry Agent Launch",
-        "description": "Retry dispatch for one committed identity without adding an inbound.",
-        "operationId": "retry_agent_launch_api_agents__agent_id__retry_launch_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -676,86 +636,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ForceExpireImpersonationResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/compact": {
-      "post": {
-        "summary": "Post Compact",
-        "description": "Trigger compact — INSERT kind='compact_request' inbound; the claim\nNode takes over, runs the backend Compaction LLM to generate a summary\nthat replaces messages, and publishes a `compact_done` event to notify\nUI.\n\nThe new design uniformly uses backend LLM summary generation (see\ndocs/decisions/agents/graph/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query\nparameter old frontends sent is ignored (still accepted — extra query\nparameters never fail the call). Agent-initiated compact still goes through\nava.self.compact() -> kind='compact_summary'; this is a separate signal\nfrom UI-triggered compact_request.\n\nA compact targeting a terminated agent auto-resurrects it (shared with the\nchat path): otherwise the compact_request row would sit pending with no live\nprocess to claim it. The co-batched resurrect wins the claim node's recency\nrouting, so the agent wakes and the requested compaction still runs.",
-        "operationId": "post_compact_api_agents__agent_id__compact_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CompactEnqueued"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/cancel": {
-      "post": {
-        "summary": "Post Cancel",
-        "description": "Pause/stop the agent — INSERT a durable kind='cancel' inbound.\n\nDurable, not fire-and-forget: a running llm/exec node interrupts on the\nrow immediately (it watches the inbound Redis pub/sub path); if the agent\nis between actions when the cancel lands, the row stays pending and the\nnext claim pass halts it to idle. Either way the agent stops and stays\nalive (resumable by the next message). Enqueue-and-return like `/messages`;\nthe kernel emits a `cancelled` SSE event when it actually stops.\n\nNo cross-machine forwarding: the cancel is a durable row in the shared DB\n(plus a Redis wake), delivered regardless of which host runs the agent.",
-        "operationId": "post_cancel_api_cancel_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CancelRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CancelRequested"
                 }
               }
             }
@@ -1586,7 +1466,7 @@
     "/api/agents/{agent_id}/system-note": {
       "post": {
         "summary": "Post Agent System Note",
-        "description": "Deliver a framework system note to the specified agent.\n\nThe note is queued as a kind='system_note' inbound; the agent's claim\nrenders it as a system note (system_marker, NoteTag `body.note_tag`) in\nits timeline — no Agent prefix, no peer timestamp — instead of a chat\npeer message. Task notifications (assign / update / reminder) are the\ncurrent family (`note_tag='task'`).\n\n`body.resurrect` mirrors the chat path's auto-resurrect but is a choice,\nnot a given: task assignment (a delegator direction) wakes a terminated\nowner, while plain update / reminder notices must not (user ruling\n2026-08-27 — notification messages never resurrect a terminated owner).\n\nAn optional Idempotency-Key names one logical note, including its\nresurrection policy. Replays return the original inbound id and repair\nits wake tail; changed requests conflict (409). Keyless legacy requests\ncreate a fresh note. The inbound remains kind='system_note'.\n\n404: agent_id does not exist. 413: content exceeds the 1 MiB transport\nlimit. 422: note_tag is not a NoteTag value, or source is not a legal\nenvelope source.",
+        "description": "Deliver a framework system note to the specified agent.\n\nThe note is queued as a kind='system_note' inbound; the agent's claim\nrenders it as a system note (system_marker, NoteTag `body.note_tag`) in\nits timeline — no Agent prefix, no peer timestamp — instead of a chat\npeer message. Task notifications (assign / update / reminder) are the\ncurrent family (`note_tag='task'`).\n\n`body.resurrect` mirrors the chat path's auto-resurrect but is a choice,\nnot a given: task assignment (a delegator direction) wakes a terminated\nowner, while plain update / reminder notices must not (user ruling\n2026-08-27 — notification messages never resurrect a terminated owner).\n\nA required Idempotency-Key names one logical note, including its\nresurrection policy. Replays return the original inbound id and repair\nits wake tail; changed requests conflict (409). The inbound remains kind='system_note'.\n\n404: agent_id does not exist. 413: content exceeds the 1 MiB transport\nlimit. 422: note_tag is not a NoteTag value, or source is not a legal\nenvelope source.",
         "operationId": "post_agent_system_note_api_agents__agent_id__system_note_post",
         "parameters": [
           {
@@ -1601,18 +1481,11 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
               "title": "Idempotency-Key"
             }
           }
@@ -1899,7 +1772,7 @@
     "/api/agents/{agent_id}/context-breakdown": {
       "get": {
         "summary": "Get Context Breakdown",
-        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nThe breakdown of the latest LLM request's input: each message's tokens anchored to the\nprovider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed\nfrom them, only the inside of a message split by an estimator. Pure gateway-side view logic\n(`gateway/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.\nA checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown\nwith zeroed totals (same tolerance as token-usage: the panel re-opens fine later).",
+        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nThe breakdown of the latest LLM request's input: each message's tokens anchored to the\nprovider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed\nfrom them, only the inside of a message split by an estimator. Pure view logic\n(`base/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.\nA checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown\nwith zeroed totals (same tolerance as token-usage: the panel re-opens fine later).",
         "operationId": "get_context_breakdown_api_agents__agent_id__context_breakdown_get",
         "parameters": [
           {
@@ -3312,18 +3185,11 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
               "title": "Idempotency-Key"
             }
           }
@@ -3380,18 +3246,11 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
               "title": "Idempotency-Key"
             }
           }
@@ -4309,7 +4168,7 @@
       },
       "put": {
         "summary": "Put Config",
-        "description": "Merge a config patch for `machine` (default = this gateway) into `.env`,\nscope-routed. Persist only — no restart (restart_required says which process\nto restart).\n\nThe body is parsed by `ConfigPatchPlan.parse` (shared with the host-side\nconfig_write_op): the editability gate, scope routing, the merge-patch\nreducer and cluster-scalar coercion all live there as one pure function.\nReducer / JSON-merge-patch semantics: a key with a value is set/replaced, a\nkey mapped to `null` is unset (reverted to its default), and an ABSENT key is\nleft untouched. Deletion is always the explicit null — never inferred from a\nkey's absence — so a partial PUT can never drop a field it did not name (a\nfull-replace once wiped a cluster's secrets that way). Only editable fields\nare accepted; the body is split by scope:\n- cluster-scope keys merge into the gateway's `.env` (machine-independent).\n- host-scope keys merge into the target machine's own `.env`, gated host-side\n  by remote_writable + the capability validator.\nAgent-scope fields have writable=False and are rejected by the writable gate.\n\nA machine-addressed PUT (`?machine=<name>`, including this gateway's own name on\na dual-role box) may carry host-scope fields only — a cluster key in the body\n400s (\"edit it on the Cluster view\"). A machine-addressed PUT also edits that\nhost's fields via the remote_writable gate, EVEN when the name is this gateway\nitself on a dual-role box — keyed on whether `machine` was given, not on\ntarget == this gateway (otherwise an explicit self selection would collapse\ninto the Cluster view and its host-only, remote_writable-gated toggles\n(heartbeat_enabled / task_maintenance_enabled — writable=False) would be\nrejected as read-only). The host-side op is authoritative for per-field host\nverdicts; the returned ConfigWriteResult surfaces them so the frontend can\nshow inline failures + the per-machine restart banner.",
+        "description": "Merge a config patch for `machine` (default = this gateway) into `.env`,\nscope-routed, with one declaration owner per request. Persist only — no restart (restart_required says which process\nto restart).\n\nPlugin fields commit one whole config image; mixed Core/plugin or multi-plugin\nbodies fail before any write. Core fields retain their env writer.\n\nThe body is parsed by `ConfigPatchPlan.parse` (shared with the host-side\nconfig_write_op): the editability gate, scope routing, the merge-patch\nreducer and cluster-scalar coercion all live there as one pure function.\nReducer / JSON-merge-patch semantics: a key with a value is set/replaced, a\nkey mapped to `null` is unset (reverted to its default), and an ABSENT key is\nleft untouched. Deletion is always the explicit null — never inferred from a\nkey's absence — so a partial PUT can never drop a field it did not name (a\nfull-replace once wiped a cluster's secrets that way). Only editable fields\nare accepted; the body is split by scope:\n- cluster-scope keys merge into the gateway's `.env` (machine-independent).\n- host-scope keys merge into the target machine's own `.env`, gated host-side\n  by remote_writable + the capability validator.\nAgent-scope fields have writable=False and are rejected by the writable gate.\n\nA machine-addressed PUT (`?machine=<name>`, including this gateway's own name on\na dual-role box) may carry host-scope fields only — a cluster key in the body\n400s (\"edit it on the Cluster view\"). A machine-addressed PUT also edits that\nhost's fields via the remote_writable gate, EVEN when the name is this gateway\nitself on a dual-role box — keyed on whether `machine` was given, not on\ntarget == this gateway (otherwise an explicit self selection would collapse\ninto the Cluster view and its host-only, remote_writable-gated toggles\n(heartbeat_enabled / task_maintenance_enabled — writable=False) would be\nrejected as read-only). The host-side op is authoritative for per-field host\nverdicts; the returned ConfigWriteResult surfaces them so the frontend can\nshow inline failures + the per-machine restart banner.",
         "operationId": "put_config_api_config_put",
         "parameters": [
           {
@@ -7537,7 +7396,7 @@
     "/api/tasks/{task_id}": {
       "patch": {
         "summary": "Patch Task",
-        "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(status must be one of in_progress/done/cancelled and priority one of\nP0..P3 — both are shared enums, so pydantic 422s anything else; a title\ncolliding with another in_progress task's is rejected). owner reassigns to\nanother agent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes in the same database transaction.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nAn optional Idempotency-Key commits an immutable response with the write.\nReusing that key with different fields returns 409; replay returns the original\ntask snapshot without another update or wake, even if the task later changes.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains in progress. Close or cancel those children first.",
+        "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(status must be one of in_progress/done/cancelled and priority one of\nP0..P3 — both are shared enums, so pydantic 422s anything else; a title\ncolliding with another in_progress task's is rejected). owner reassigns to\nanother agent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes in the same database transaction.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nA required Idempotency-Key commits an immutable response with the write.\nReusing that key with different fields returns 409; replay returns the original\ntask snapshot without another update or wake, even if the task later changes.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains in progress. Close or cancel those children first.",
         "operationId": "patch_task_api_tasks__task_id__patch",
         "parameters": [
           {
@@ -7547,6 +7406,17 @@
             "schema": {
               "type": "integer",
               "title": "Task Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
             }
           }
         ],
@@ -10644,54 +10514,6 @@
         "title": "BuildResponse",
         "description": "POST /api/agents/{agent_id}/understanding/build response.\n\n`build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs\nnewly on the queue, `merged` those of the same stretch already live. `jobs` may be empty\n(everything chosen is covered): the rebuild of the upper levels is still queued."
       },
-      "CancelRequest": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "exclusiveMinimum": 0.0,
-            "title": "Agent Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id"
-        ],
-        "title": "CancelRequest",
-        "description": "POST /api/cancel request body — pause/stop the agent, addressed by id."
-      },
-      "CancelRequested": {
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/CancelResult"
-          },
-          "inbound_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inbound Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status"
-        ],
-        "title": "CancelRequested",
-        "description": "POST /api/cancel response.\n\n`enqueued`: a durable kind='cancel' inbound was INSERTed. The in-flight\n    llm/exec node interrupts on it if one is running; otherwise the next\n    claim pass halts the agent to idle. The process stays alive.\n`already_terminated`: agent is dead — nothing to pause."
-      },
-      "CancelResult": {
-        "type": "string",
-        "enum": [
-          "enqueued",
-          "already_terminated"
-        ],
-        "title": "CancelResult",
-        "description": "Acceptance of a durable cancel request; separate from process termination."
-      },
       "ClusterPanel": {
         "properties": {
           "current_machine": {
@@ -10917,37 +10739,6 @@
         "title": "CompactAcceptance",
         "description": "Original business acceptance, never proof of application or provider completion."
       },
-      "CompactEnqueued": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "status": {
-            "type": "string",
-            "const": "enqueued",
-            "title": "Status"
-          },
-          "inbound_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inbound Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "status"
-        ],
-        "title": "CompactEnqueued",
-        "description": "POST /api/agents/{id}/compact response — returns immediately after\npending insert, does not wait for the kernel loop to finish."
-      },
       "CompactOutcome": {
         "type": "string",
         "enum": [
@@ -11151,6 +10942,17 @@
             "type": "string",
             "title": "Name"
           },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
           "field_type": {
             "type": "string",
             "title": "Field Type"
@@ -11341,7 +11143,7 @@
           "machine_capabilities"
         ],
         "title": "ConfigView",
-        "description": "GET /api/config response — grouped field list + raw_overrides (PUT body source).\n\nraw_overrides is config.json's current content — the frontend deltas\nagainst this and returns the result via PUT.\n\nmachine_capabilities is the target machine's capability set (`gateway` and/or\n`agent-runner` and/or `observability-station`) — the gateway's own for the\nCluster (self) view, the `?machine=`\nhost's for a remote view. The panel uses it to pick which capability sections to\nrender on a remote view: a pure agent-runner shows only its agent-runner + common\nsections, while a co-located gateway,agent-runner box shows the gateway section too\n(so its gateway-daemon toggles stay editable). The Cluster view always shows all\nsections regardless (it edits every capability's cluster fields)."
+        "description": "GET /api/config response — grouped field list + raw_overrides (PUT body source).\n\nraw_overrides combines owned persisted inputs — the frontend deltas\nagainst this and returns the result via PUT.\n\nmachine_capabilities is the target machine's capability set (`gateway` and/or\n`agent-runner` and/or `observability-station`) — the gateway's own for the\nCluster (self) view, the `?machine=`\nhost's for a remote view. The panel uses it to pick which capability sections to\nrender on a remote view: a pure agent-runner shows only its agent-runner + common\nsections, while a co-located gateway,agent-runner box shows the gateway section too\n(so its gateway-daemon toggles stay editable). The Cluster view always shows all\nsections regardless (it edits every capability's cluster fields)."
       },
       "ConfigWriteResult": {
         "properties": {
@@ -11371,7 +11173,7 @@
           "restart_required"
         ],
         "title": "ConfigWriteResult",
-        "description": "PUT /api/config response — per-field results + whether anything was applied.\n\n`applied` is True iff every field passed and the write committed (atomic:\none bad field -> nothing written). `restart_required` is the union of the\nwritten fields' restart targets (\"agent\" | \"ops\" | \"gateway\" | \"all\"), for\nthe per-machine \"needs restart\" banner."
+        "description": "PUT /api/config response — per-field results + whether anything was applied.\n\n`applied` is True iff every field passed and the write committed (atomic:\none bad field -> nothing written for that owner). `restart_required` is the union of the\nwritten fields' restart targets (\"agent\" | \"ops\" | \"gateway\" | \"all\"), for\nthe per-machine \"needs restart\" banner."
       },
       "ContextBreakdownResponse": {
         "properties": {
@@ -14009,13 +13811,6 @@
       },
       "MemorySearchResponse": {
         "properties": {
-          "paths": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Paths"
-          },
           "results": {
             "items": {
               "$ref": "#/components/schemas/MemorySearchResultItem"
@@ -14025,8 +13820,11 @@
           }
         },
         "type": "object",
+        "required": [
+          "results"
+        ],
         "title": "MemorySearchResponse",
-        "description": "POST /api/memory/search response — RELATIVE paths from memory pool root.\n\nCaller (SDK `ava.memory.search`) uses `ava.memory.PATH / p` to\nreconstruct absolute paths. fs-neutral makes mismatched gateway\n(e.g. /Users/x) and agent-runner (/home/y) filesystems work.\n\n`results` carries path + description for each match; `paths` is the\nbare list of relative paths (backward-compat for existing consumers)."
+        "description": "POST /api/memory/search response — RELATIVE paths from memory pool root.\n\nCaller (SDK `ava.memory.search`) uses `ava.memory.PATH / p` to\nreconstruct absolute paths. fs-neutral makes mismatched gateway\n(e.g. /Users/x) and agent-runner (/home/y) filesystems work.\n\n`results` carries path, description and tags for each match."
       },
       "MemorySearchResultItem": {
         "properties": {
@@ -16536,6 +16334,28 @@
             },
             "type": "array",
             "title": "Parts"
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens"
+          },
+          "estimated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated"
           }
         },
         "type": "object",
@@ -16543,10 +16363,69 @@
           "idx",
           "ts",
           "source",
-          "parts"
+          "parts",
+          "context_tokens",
+          "estimated"
         ],
         "title": "RunTimelineMessage",
-        "description": "One raw message of the stitched history, split into its parts."
+        "description": "One raw message of the stitched history, split into its parts.\n\n`context_tokens` is what the message occupies in the context (None while no request has read it),\n`estimated` whether that is a share rather than the provider's own number (None with it)."
+      },
+      "RunTimelineMessageBar": {
+        "properties": {
+          "idx": {
+            "type": "integer",
+            "title": "Idx"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "session": {
+            "type": "integer",
+            "title": "Session"
+          },
+          "context_tokens": {
+            "type": "integer",
+            "title": "Context Tokens"
+          },
+          "estimated": {
+            "type": "boolean",
+            "title": "Estimated"
+          },
+          "context_total": {
+            "type": "integer",
+            "title": "Context Total"
+          },
+          "request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunTimelineUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "idx",
+          "start",
+          "end",
+          "session",
+          "context_tokens",
+          "estimated",
+          "context_total",
+          "request"
+        ],
+        "title": "RunTimelineMessageBar",
+        "description": "One message the Messages row shows, weighed for the two context rows (one bar per message).\n\n`start` / `end` are the extent of the block(s) that show the message, so its bars sit exactly\nunder them. `context_tokens` is what the message itself occupies in the context and `estimated`\nwhether that is a share rather than the provider's own number; `context_total` is the context\nthrough this message: its session's head and every message up to it, at the weight each was\nread with (before an AIMessage, the `input_tokens` of the request that produced it). `session`\nis the zero-based compaction segment (the total starts over in each). `request` is the usage of\nthe LLM request this AIMessage was (input, output, cache, cost), None for any other message.\nOnly messages a request has read are served."
       },
       "RunTimelineMessagePart": {
         "properties": {
@@ -16714,61 +16593,6 @@
         "title": "RunTimelineNode",
         "description": "One understanding-tree node.\n\n`level` is the engine level, stable across windows: 1 is the finest (leaves),\neach level up groups the one below. `span_start`..`span_end` is the inclusive\nmessage-index span in the stitched history, the indices the raw-message route\nreads. `generation` is None for a node with no understanding-call record.\n`context_tokens` is the sum of the context tokens of the messages the span covers (None while\nno request has read any of them), `estimated` whether any of that was a share rather than the\nprovider's own number (None with `context_tokens`)."
       },
-      "RunTimelineRequest": {
-        "properties": {
-          "idx": {
-            "type": "integer",
-            "title": "Idx"
-          },
-          "ts": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Ts"
-          },
-          "session": {
-            "type": "integer",
-            "title": "Session"
-          },
-          "input_tokens": {
-            "type": "integer",
-            "title": "Input Tokens"
-          },
-          "output_tokens": {
-            "type": "integer",
-            "title": "Output Tokens"
-          },
-          "added_tokens": {
-            "type": "integer",
-            "title": "Added Tokens"
-          },
-          "added_estimated": {
-            "type": "boolean",
-            "title": "Added Estimated"
-          },
-          "added_from": {
-            "type": "integer",
-            "title": "Added From"
-          },
-          "added_to": {
-            "type": "integer",
-            "title": "Added To"
-          }
-        },
-        "type": "object",
-        "required": [
-          "idx",
-          "ts",
-          "session",
-          "input_tokens",
-          "output_tokens",
-          "added_tokens",
-          "added_estimated",
-          "added_from",
-          "added_to"
-        ],
-        "title": "RunTimelineRequest",
-        "description": "One LLM request of the agent: an AIMessage carrying `usage_metadata`.\n\n`idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent\n(the read time of the message before it, the start of the turn's thinking block);\n`session` the zero-based compaction segment it was sent in; `input_tokens` the provider's\ntotal input tokens of that request, the size of its context, and `output_tokens` what it\ngenerated (both the provider's own numbers, never estimated).\n\n`added_tokens` is what newly entered the context for this request: the token sum of the\nmessages first read by it, i.e. those from the previous request's AIMessage (its output is\nre-sent) up to the message before this one; for a session's first request, from the session's\nfirst message. The segment head (system prompt) is not counted. `added_estimated` is True when\nany of those counts is a share rather than the provider's own number. `added_from` / `added_to`\nare that message range as indices into the stitched history, half-open (`added_to` is the\nrequest's own `idx`); the two are equal when the request read nothing new."
-      },
       "RunTimelineResponse": {
         "properties": {
           "agent_id": {
@@ -16809,12 +16633,12 @@
             "type": "array",
             "title": "Events"
           },
-          "requests": {
+          "messages": {
             "items": {
-              "$ref": "#/components/schemas/RunTimelineRequest"
+              "$ref": "#/components/schemas/RunTimelineMessageBar"
             },
             "type": "array",
-            "title": "Requests"
+            "title": "Messages"
           }
         },
         "type": "object",
@@ -16825,10 +16649,10 @@
           "nodes",
           "units",
           "events",
-          "requests"
+          "messages"
         ],
         "title": "RunTimelineResponse",
-        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent. `requests` are the agent's LLM requests\nsent in the window (the context-size row)."
+        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent. `messages` are the weighed messages whose\nblocks intersect the window (the two context rows)."
       },
       "RunTimelineUnit": {
         "properties": {
@@ -16956,6 +16780,18 @@
           "output": {
             "type": "integer",
             "title": "Output"
+          },
+          "cache_write": {
+            "type": "integer",
+            "title": "Cache Write"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "cost_calls": {
+            "type": "integer",
+            "title": "Cost Calls"
           }
         },
         "type": "object",
@@ -16963,10 +16799,13 @@
           "calls",
           "input",
           "cache_read",
-          "output"
+          "output",
+          "cache_write",
+          "cost_usd",
+          "cost_calls"
         ],
         "title": "RunTimelineUsage",
-        "description": "The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.\n\n`input` is the provider's total input tokens (cache reads included)."
+        "description": "The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.\n\n`input` is the provider's total input tokens (cache reads and writes included).\n`cost_usd` sums the usage-time cost recorded on the AIMessages (`ava_usage`); `cost_calls` is\nhow many of `calls` carry one, the rest (older messages, unpriced models) being unknown, not\nestimated."
       },
       "RunTimelineWindow": {
         "properties": {
@@ -17965,18 +17804,6 @@
             ],
             "title": "Config"
           },
-          "preset": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preset"
-          },
           "label": {
             "anyOf": [
               {
@@ -17990,6 +17817,7 @@
             "title": "Label"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "SpawnAgentRequest",
         "description": "POST /api/agents request body — for frontend / SDK; frontend does\nnot need to know checkpoint ids.\n\nIf `fork_from` is given, the gateway resolves the latest checkpoint\ninternally and passes an explicit id to the underlying create_agent_row\n(consistent with SDK `ava.agents.spawn(fork_from=N)` logic).\n\nFork config rule: a fork keeps the source's effective config so the\ninherited context stays cache-valid. The only allowed config change is\nADDING skills to `skills_to_inject_into_system_prompt` /\n`skills_to_expand_at_start` (supersets); anything else is rejected with\n`fork_config_change_not_allowed`. A fork WITHOUT config inherits the\nsource's resolved overlay + preset verbatim (the pre-2026-09-10 behavior\ndropped the source's overlay).\n\n`spawner` default \"user\" — frontend spawn button does not need to\npass it; external callers (claude-code / SDK paths `agent:N` etc.)\npass their own identifier so the frontend sidebar groups them under\na separate root section by spawner.\n\n`prompt_source` is **required only when prompt is given** —\nINSERTed into inbound_messages.source; the envelope wrap marks who\nthe message came from. Frontend passes \"user\"; SDK paths pass\nf\"agent:{my_id}\". This differs from spawner: spawner is \"who\ncreated the agent\", source is \"from whom the prompt arrived\".\n\nThe schema does not give prompt_source a default — to avoid the\n\"caller forgot to pass it and got silently tagged user,\ncontaminating envelope source\" anti-pattern (one of the\n`or default` forms AGENTS.md prohibits); both kinds of callers must\nexplicitly identify themselves."

@@ -1,7 +1,7 @@
 import sys as _sys
 from types import ModuleType as _ModuleType
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 # Runtime connections — `ava.DB`, `ava.REDIS` — are the bound context's clients
 # (`ava.context.sql` / `.redis`), served by the module class below. The agent's own identity
@@ -87,12 +87,13 @@ class PluginStateOutsideTurnError(AttributeError):
 # `ava.state_update = {}` — and the exec child dies with its slot.
 _STATE_KEY = "_exec_state"
 _UPDATE_KEY = "_exec_state_update"
+_CONTEXT_KEY = "_exec_context"
 
 state: Any
 state_update: dict[str, Any] | None
 
 context: AvaContext
-"""Your execution identity and supplied service connections, read-only.
+"""Your execution identity and supplied service connections.
 
 `ava.self.AGENT_ID` identifies the agent your SDK calls represent.
 `context.identity` records execution ownership and caller provenance. Compact,
@@ -111,7 +112,7 @@ def _outside_exec_turn(name: str) -> PluginStateOutsideTurnError:
 
 
 class _SdkModule(_ModuleType):
-    """The `ava` module, whose two framework slots are properties over its private keys."""
+    """The `ava` module, whose three framework slots use process-local private keys."""
 
     @property
     def state(self) -> Any:
@@ -139,21 +140,64 @@ class _SdkModule(_ModuleType):
 
     @property
     def context(self) -> AvaContext:
-        return process_context.current()
+        bound = self.__dict__.get(_CONTEXT_KEY)
+        if bound is not None:
+            return bound
+        launched = process_context.launched_context()
+        if launched is None:
+            raise process_context.ContextOutsideProcessError(
+                "ava.context requires an execution child, launched script or external attachment; "
+                "host code uses the context its caller supplied"
+            )
+        import atexit
+
+        self.context = launched
+        atexit.register(launched.clients.close)
+        return launched
+
+    @context.setter
+    def context(self, value: AvaContext) -> None:
+        if not isinstance(value, AvaContext):
+            raise TypeError("ava.context must be an AvaContext")
+        self.__dict__[_CONTEXT_KEY] = value
+
+    @context.deleter
+    def context(self) -> None:
+        self.__dict__[_CONTEXT_KEY] = None
 
     @property
     def DB(self) -> Any:  # noqa: N802 — the SDK's name for the SQL connection
-        return process_context.current().sql
+        return self.context.sql
 
     @property
     def REDIS(self) -> Any:  # noqa: N802 — the SDK's name for the Redis client
-        return process_context.current().redis
+        return self.context.redis
 
     def __dir__(self) -> list[str]:
         return sorted({*super().__dir__(), "DB", "REDIS", "context", "state", "state_update"})
 
 
 _sys.modules[__name__].__class__ = _SdkModule
+
+
+def bind_context(context: AvaContext) -> None:
+    """Initialize this process's SDK entry with an explicit context.
+
+    Framework-internal: used by disposable children and exclusive attachments,
+    never by the shared host to select its current agent.
+    """
+    cast(_SdkModule, _sys.modules[__name__]).context = context
+
+
+def unbind_context() -> AvaContext | None:
+    """Release the SDK binding without creating a launched-script context.
+
+    The caller owns restoration and closing its clients.
+    """
+    sdk = cast(_SdkModule, _sys.modules[__name__])
+    context = sdk.__dict__.get(_CONTEXT_KEY)
+    del sdk.context
+    return context
 
 
 def in_exec_turn() -> bool:
@@ -177,7 +221,7 @@ def unbind_exec_turn() -> None:
 # an `Installation` once loaded (`.faces` = the agent-runtime faces — state fields /
 # hooks / prompt sections, loaded on the full path via
 # `ensure_plugins_loaded(surface=False)`), `load_attempted()` true while a load is in
-# flight or after one failed. The agent process does NOT go through this path (it calls
+# flight; after a failure it re-raises the original error. The agent process does NOT go through this path (it calls
 # `agent.extensions.load_extensions` directly from build_graph / host boot and
 # re-registers built-in hooks after), so a genuinely-unknown `ava.X` keeps failing fast
 # in `__getattr__` there; nothing to latch in this module.
@@ -206,7 +250,7 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
     field registrations. Each stage runs at most once per process — the load state
     is the installation slot (`ava.sdk_surface.install`): `installed()` answers
     "loaded", `faces` "and the faces", `load_attempted()` "in flight, or attempted
-    and failed (no retry)". A call that arrives while the loader module is still
+    and failed (no retry)"; the failed state preserves the original exception. A call that arrives while the loader module is still
     initializing (a re-entrant import) defers instead, so a later miss retries
     once the module is complete.
 
@@ -215,91 +259,43 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
     static dependency on agent — the layering contract stays intact while the
     launched subprocess still self-loads its plugins.
 
-    Containment: the loader's own plugin-import loop is fail-soft (see
-    `agent/extensions/__init__.py`); anything still escaping it is an inventory/config
-    failure — a duplicate plugin name, a malformed `plugins_config.json`, a
-    plugin-config schema drift. None of those may kill an agent-launched
-    process at `import ava` the way the 2026-08-28 ava_ledger crash did (every
-    new process died); the failure is logged loudly and this process continues
-    without the plugin surface. The agent host surfaces the same failure at its
-    own boot. KeyboardInterrupt / SystemExit are not swallowed.
+    Expected typed declaration refusals are isolated by the installer after a
+    successful rollback. Unknown inventory, configuration, programming or I/O
+    failures propagate unchanged; a later call re-raises the same failure without
+    retrying the load. The loader's earlier per-module import containment is a
+    separate boundary in `agent.extensions`.
     """
     from .sdk_surface import install as _sdk_install
     from .sdk_surface import sdk_disable
 
+    _sdk_install.raise_load_failure()
     installation = _sdk_install.installed()
     if installation is not None and (surface or installation.faces):
         return
     if _sdk_install.load_attempted():
-        # A load is in flight (a re-entrant miss during the load), or one was
-        # attempted and failed — this process does not retry it (the slot keeps
-        # the attempt; a fresh `install()` overwrites it, `uninstall()` does not
-        # clear it).
-        return
+        return  # An actual re-entrant miss while a load is in flight.
     import importlib
 
-    if installation is not None:
-        # Surfaces are loaded and this call wants the faces (a child upgrading
-        # for a state snapshot). Faces only — re-running the loader would
-        # re-execute the surfaces; the faces flag keeps it to once per process.
-        # Marked before the load so a failure is not retried (same stance as the
-        # containment below).
-        _sdk_install.mark_faces_loaded()
-        try:
-            importlib.import_module("agent.extensions").load_agent_faces()
-        except Exception as exc:
-            _contain_plugin_load_failure(exc)
-        return
-    # Apply the env AVA_SDK_DISABLE entries BEFORE the load: a refused entry (one
-    # naming a framework module) is an operator error and must fail fast — never
-    # contained by the load containment below — and with the sentinel in place a
-    # disabled plugin namespace fails the install's own namespace check, exactly as
-    # it did when the env was applied at `import ava`. `install()` applies them
-    # again (idempotently) when it is reached directly — the host boot path.
-    sdk_disable.apply_entries(sdk_disable.env_entries())
-    # Mark BEFORE loading: a plugin's top-level access of a not-yet-registered
-    # `ava.X` re-enters `__getattr__` during the load, and the marker makes that
-    # re-entry fail fast (as it does in the agent process) instead of recursing.
+    if installation is None:
+        # Operator errors in AVA_SDK_DISABLE are fatal, before plugin admission.
+        sdk_disable.apply_entries(sdk_disable.env_entries())
     _sdk_install.mark_load_attempt()
     try:
-        importlib.import_module("agent.extensions").load_extensions(surface=surface)
-        if not surface:
-            _sdk_install.mark_faces_loaded()
-    except Exception as exc:
-        if isinstance(exc, AttributeError) and (
-            "partially initialized module 'agent.extensions'" in str(exc)
-        ):
-            # Not a failure — too early. A process that imports an `agent.*`
-            # module before `ava` reaches this call while the loader module is
-            # still its own partial `sys.modules` entry: the attribute does not
-            # exist YET. Clear the attempt so the next miss retries once the
-            # module finishes initializing; the in-flight lookup fails fast
-            # meanwhile (`_maybe_load_plugins_for_missing` reads the slot).
+        loader = importlib.import_module("agent.extensions")
+        if getattr(loader.__spec__, "_initializing", False):
+            # Python returned the module during its own import: no load ran yet.
             _sdk_install.clear_load_attempt()
             return
-        _contain_plugin_load_failure(exc)
-
-
-def _contain_plugin_load_failure(exc: Exception) -> None:
-    """Log + surface a plugin-load failure without killing the process.
-
-    Logger AND stderr: a launched child usually has no loguru sink configured
-    (base/log/__init__.py removes the default handler), and its stderr is exactly what
-    lands in the watcher / session log — containment without that line would be
-    a silent swallow.
-    """
-    from base.log import logger
-
-    logger.opt(exception=exc).error(
-        "[plugins] plugin load failed in this launched child — continuing "
-        "without plugin namespaces (the agent host reports the same "
-        "failure at its own boot)",
-    )
-    _sys.stderr.write(
-        f"[plugins] plugin load failed in this launched child "
-        f"({type(exc).__name__}: {exc}) — continuing without plugin "
-        f"namespaces\n"
-    )
+        if installation is not None:
+            loader.load_agent_faces()
+            _sdk_install.mark_faces_loaded()
+        else:
+            loader.load_extensions(surface=surface)
+            if not surface:
+                _sdk_install.mark_faces_loaded()
+    except BaseException as exc:
+        _sdk_install.mark_load_failed(exc)
+        raise
 
 
 def _maybe_load_plugins_for_missing(name: str) -> bool:
@@ -325,6 +321,7 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
         return False
     from .sdk_surface import install as _sdk_install
 
+    _sdk_install.raise_load_failure()
     if _sdk_install.installed() is not None or _sdk_install.load_attempted():
         return False
     from .sdk_surface import agent_identity
@@ -352,12 +349,14 @@ def __getattr__(name: str) -> Any:
         # Reached only when the slot property raised (an AttributeError falls through to here).
         raise _outside_exec_turn(name)
     if name == "context":
-        # Same fall-through: the property raised because no context is bound.
-        return process_context.current()
+        raise process_context.ContextOutsideProcessError(
+            "ava.context requires an execution child, launched script or external attachment; "
+            "host code uses the context its caller supplied"
+        )
     if name == "DB":
-        return process_context.current().sql
+        return _sys.modules[__name__].context.sql
     if name == "REDIS":
-        return process_context.current().redis
+        return _sys.modules[__name__].context.redis
     if name == "external":
         import importlib
 

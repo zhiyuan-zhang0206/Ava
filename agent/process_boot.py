@@ -184,4 +184,4 @@ async def boot_agent_scope(agent_id: int, llm_model: str, overrides: ModelOverri
     await notify_desktop_permissions_at_startup()
     from base.lm.factory import build_chat_model_bound
 
-    return build_chat_model_bound(llm_model, overrides=overrides)
+    return build_chat_model_bound(llm_model, agent_id=agent_id, overrides=overrides)

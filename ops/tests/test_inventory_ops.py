@@ -103,6 +103,37 @@ def test_inventory_read_op_overlay_reflected(
     assert result.mcp_servers["X"].enabled is False
 
 
+@pytest.mark.parametrize("requires", [[], {"gpu": False}, {"display": "false"}])
+def test_inventory_rejects_invalid_requirements_before_read_or_write(
+    _machine_only_mcp: Path, requires: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    _write_machine_mcp(_machine_only_mcp, {"broken": {"command": "x", "requires": requires}})
+    mcp_enabled.set_mcp_enabled("broken", enabled=False)
+    before = mcp_enabled.local_config_path().read_bytes()
+
+    with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
+        inventory_read_op()
+    with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
+        inventory_write_op(plugins={"ava_code": False}, mcp_servers={"broken": True})
+    assert mcp_enabled.local_config_path().read_bytes() == before
+    assert not enable_config.local_config_path().exists()
+
+
+def test_inventory_can_disable_server_with_invalid_requirements(
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    spec = {"command": "x", "requires": {"display": "false"}}
+    _write_machine_mcp(_machine_only_mcp, {"broken": spec})
+
+    result = inventory_write_op(plugins={}, mcp_servers={"broken": False})
+    assert result.applied is True
+    assert result.mcp_results["broken"] == FieldWriteResult(ok=True, reason=None)
+    assert mcp_enabled.read_enabled() == {"broken": False}
+    assert mcp_cfg_mod.read_servers(_machine_only_mcp / "mcp.json") == {"broken": spec}
+
+
 # ---------------------------------------------------------------------------
 # inventory_write_op
 # ---------------------------------------------------------------------------

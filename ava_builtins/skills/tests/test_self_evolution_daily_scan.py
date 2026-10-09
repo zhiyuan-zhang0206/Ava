@@ -1,42 +1,31 @@
-"""Unit tests for the self-evolution daily scan (reference/daily_scan.py).
+"""Unit tests for the self-evolution daily scan (scripts/daily_scan.py).
 
-The reference scripts are standalone (the skill dir has a hyphen, so they are
-not importable as a package); the test adds the reference dir to sys.path and
-imports the module directly. `collect` is stubbed — no DB, no filesystem.
+The skill scripts are standalone (the skill dir has a hyphen, so they are
+not importable as a package); load the real script by path with the shared
+test loader. `collect` is stubbed — no DB, no filesystem.
 """
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-REF_DIR = (
-    Path(__file__).resolve().parents[3]
-    / "ava_builtins"
-    / "skills"
-    / "platform"
-    / "ava-self-evolution"
-    / "reference"
-)
+from tests.skills import load_skill_script
 
 
 @pytest.fixture()
 def daily_scan() -> Any:
-    """The module under test, imported with its reference dir on sys.path.
-
-    importlib (not a static import) so pyright does not try to resolve the
-    reference dir at analysis time; the cast keeps the module's member types
-    unknown-but-Any instead of erroring on them.
-    """
-    sys.path.insert(0, str(REF_DIR))
+    """Load independently of collection imports and restore sibling-import paths."""
+    before = sys.path[:]
     try:
-        return cast(Any, importlib.import_module("daily_scan"))
+        return cast(
+            Any, load_skill_script("platform", "ava-self-evolution", "scripts", "daily_scan.py")
+        )
     finally:
-        sys.path.remove(str(REF_DIR))
+        sys.path[:] = before
 
 
 def _record(label: str, agent_id: int = 1, **overrides: object) -> dict[str, object]:

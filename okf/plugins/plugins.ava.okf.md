@@ -24,7 +24,7 @@ Declare a Pydantic `BaseModel` subclass (e.g., `AvaCodeState`, `AvaSdkReminderSt
 System prompt sections and context notes are declared, not registered: `contribute() -> PluginContributions` in the plugin's `agent_runtime.py`, collected by the loader into an `ExtensionRegistry` — [[okf/plugins/declared-contributions.ava.okf.md]].
 
 ### 4. SDK Surface, Config and Flags
-A plugin's `plugin.py` declares `sdk_namespaces` / `sdk_members` / `sdk_expansions` / `sdk_wraps` / `skill_sources`, one frozen `config` class and the core `flags` it reads in `contribute()`; the framework installs them into the `ava` module in one place (`ava/sdk_surface/install.py`) — [[okf/plugins/declared-contributions.ava.okf.md]].
+A plugin's `plugin.py` declares `sdk_namespaces` / `sdk_members` / `sdk_expansions` / `sdk_wraps` / `skill_sources` in `contribute()`. Its pure `default_config.py` may declare one frozen `config` class and the non-sensitive Core `flags` it reads; `configuration_declaration` admits both using the generated boot-lite field and sensitivity indexes, without importing full Settings, the SDK or installing the plugin; the framework installs them into the `ava` module in one place (`ava/sdk_surface/install.py`) — [[okf/plugins/declared-contributions.ava.okf.md]].
 
 ## The surface catalog + attribution
 Each declaration derives attribution records (`PluginContributions.as_records`): which surface, what identifier (spelled as `ava-plugin.json` declares it), which plugin — the registry entry names it. `agent/extensions/catalog.py:SURFACES` enumerates the injection surfaces, each carrying the live signature of its declaration type. `ava plugins inspect` renders both halves, and `declared_vs_registered` is the read-only form of the manifest gate. [[cli/commands/extensions/packages/docs/packages.ava.okf.md|The verb]]. What actually FIRED is the runtime half, keyed by the same triple: [[activation-telemetry.ava.okf.md]].
@@ -61,3 +61,7 @@ shape — and where each is validated: [[okf/plugins/package-manifest.ava.okf.md
 - Plugins can carry **skills** (`ava_builtins/plugins/<p>/skills/`, converge syncs them with the plugin name as the top-level directory; nodes hang under each plugin subtree) and **MCP server definitions** (`.mcp.json`), and can also register **ops services** (`services.py` declaring `ServiceSpec`, e.g., ava_fleet's task-maintenance).
 - All hooks share a single global HOOKS list—`make_hook_runner` snapshots the reference, not a copy.
 - Config files are per-machine, supporting different plugin combinations on different machines.
+
+Config metadata records its nullable plugin owner (Core is `None`). A flat config PUT must address one owner; mixed patches reject without writing. The panel splits requests by owner, retains every verdict and successful restart target, and displays partial failures. Each image uses schema validation and its own CAS/atomic writer; no cross-file transaction is promised. Fleet keeps stable field names while moving its five fields out of Core.
+
+Initial image creation rejects an image created concurrently or already present; it cannot reset explicit configuration. Schema updates preserve retained fields and use the same owned CAS/atomic writer as config edits.

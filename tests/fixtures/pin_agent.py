@@ -7,7 +7,7 @@ imported before pytest registers it cannot be assertion-rewritten.
 
 from __future__ import annotations
 
-from ava.sdk_surface import process_context
+import ava
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
@@ -23,22 +23,18 @@ def pin_agent(
 ) -> None:
     """Bind a context acting as `agent_id` for the rest of this test; the autouse fixture below
     puts the previous one back."""
-    bound = process_context.peek()
-    process_context.bind_process(
-        AvaContext(
-            identity=AgentIdentity(
-                agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease
-            ),
-            # The identity changes, the connections stay: a test's `use_client` or fake SQL slot
-            # entered before it pins an agent keeps applying.
-            clients=bound.clients if bound else ClientSet(database=Database.from_settings),
-        )
+    bound = getattr(ava, "context", None)
+    ava.context = AvaContext(
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease),
+        # The identity changes, the connections stay: a test's `use_client` or fake SQL slot
+        # entered before it pins an agent keeps applying.
+        clients=bound.clients if bound else ClientSet(database=Database.from_settings),
     )
 
 
 def pin_no_identity() -> None:
     """Leave this test with no bound context (a process that is no agent)."""
-    process_context.unbind_process()
+    del ava.context
 
 
 def exec_context(agent_id: int | None, *, actor: str | None = None) -> AvaContext:

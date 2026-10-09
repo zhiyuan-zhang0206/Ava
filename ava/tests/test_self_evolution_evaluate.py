@@ -14,12 +14,19 @@ import ava
 
 
 def _evaluate_module() -> ModuleType:
-    path = Path(".agents/skills/ava-self-evolution/scripts/evaluate.py")
-    sys.path.insert(0, str(path.parent))
-    spec = importlib.util.spec_from_file_location("test_evaluate", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    path = (
+        Path(__file__).parents[2]
+        / "ava_builtins/skills/platform/ava-self-evolution/scripts/evaluate.py"
+    )
+    previous_path = sys.path.copy()
+    try:
+        sys.path.insert(0, str(path.parent))
+        spec = importlib.util.spec_from_file_location("test_evaluate", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.path[:] = previous_path
     return module
 
 

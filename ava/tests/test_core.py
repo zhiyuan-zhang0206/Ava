@@ -5,12 +5,23 @@ requiring the Gateway process to be running — local `pytest tests/` would not 
 After migrating to integration/, they use FastAPI TestClient for in-process communication.
 """
 
+from uuid import uuid4
+
+import httpx
 import psycopg
 import pytest
 
 import ava
 from base.agents import InvalidModelConfig
+from base.config import settings
 from tests.fixtures.pin_agent import pin_agent
+
+
+@pytest.fixture(autouse=True)
+def _authenticated_sdk(monkeypatch: pytest.MonkeyPatch, gateway_client: httpx.Client) -> None:
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "sdk-core-secret")
+    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+    gateway_client.headers["Authorization"] = "Bearer sdk-core-secret"
 
 
 def _inbound_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
@@ -34,7 +45,7 @@ def _spawn_self(monkeypatch: pytest.MonkeyPatch) -> int:
     `_launch_agent_process` is stubbed — the test does not start a real
     subprocess.
     """
-    aid = ava.agents.spawn()
+    aid = ava.agents.spawn(idempotency_key=str(uuid4()))
     pin_agent(aid)
     return aid
 
@@ -55,7 +66,9 @@ class TestSelfRestart:
     def test_rejects_incompatible_effort_without_overlay_or_inbound(
         self, db_conn: psycopg.Connection, gateway_client
     ) -> None:
-        aid = ava.agents.spawn(config_overlay={"llm_model": "deepseek-flash"})
+        aid = ava.agents.spawn(
+            config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4())
+        )
         pin_agent(aid)
         with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
             ava.self.restart(config_overlay={"reasoning_effort": "low"})
@@ -68,7 +81,8 @@ class TestSelfRestart:
         self, db_conn: psycopg.Connection, gateway_client
     ) -> None:
         aid = ava.agents.spawn(
-            config_overlay={"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"}
+            config_overlay={"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"},
+            idempotency_key=str(uuid4()),
         )
         pin_agent(aid)
         overlay: dict[str, object] = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}

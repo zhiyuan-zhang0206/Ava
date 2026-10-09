@@ -18,12 +18,14 @@ tags:
 ## API Overview
 
 ```python
-task = ava.tasks.create(title, description, parent=root_id, owner=None, priority="P2")  # Create; parent is required (root id 1 for top-level tasks)
-task, aid = ava.tasks.create_and_assign(title, description, parent=root_id)   # Create + spawn agent to claim
+from uuid import uuid4
+
+task = ava.tasks.create(title, description, parent=root_id, owner=None, priority="P2", operation_key=str(uuid4()))  # Create; parent is required (root id 1 for top-level tasks)
+task, aid = ava.tasks.create_and_assign(title, description, parent=root_id, operation_key="assignment-intent")   # Create + spawn agent to claim
 task = ava.tasks.get(task_id)                                 # Read by id
 tasks = ava.tasks.list(owner=..., status=...)                 # Filter list
-ava.tasks.update(task_id, status=..., owner=..., priority=..., note=...)  # Change status/results/owner/priority + append progress
-ava.tasks.log(task_id, "note")                                # Append a timestamped line (= update(note=))
+ava.tasks.update(task_id, status=..., owner=..., priority=..., note=..., operation_key=str(uuid4()))  # Change status/results/owner/priority + append progress
+ava.tasks.log(task_id, "note", operation_key=str(uuid4()))                                # Append a timestamped line (= update(note=))
 ```
 
 ## Data Model at a Glance

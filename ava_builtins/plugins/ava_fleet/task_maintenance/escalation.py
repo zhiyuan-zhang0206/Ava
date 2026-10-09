@@ -8,10 +8,11 @@ from typing import Literal
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from ava_builtins.plugins.ava_fleet.default_config import contribute
 from base.agents.tasks.status import TaskStatus
-from base.config import settings
 from base.db import insert_inbound_message_in_transaction
 from base.db.transaction import write_transaction
+from base.packages.plugins.flags import read_declared_flag
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,7 @@ def _user_notice(cur: psycopg.Cursor, task: _Task) -> EscalationReceipt | None:
             title,
             content,
             task.priority,
-            settings.daemon.notice_ttl_limit_seconds,
+            read_declared_flag("daemon.notice_ttl_limit_seconds", contribute().flags),
         ),
     )
     return EscalationReceipt(task.owner, [task.id], "user", None, content)

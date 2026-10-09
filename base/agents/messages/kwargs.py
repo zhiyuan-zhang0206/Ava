@@ -8,7 +8,7 @@ dispatches on, and `read_ava_kwargs` is the single convergence point that gives
 a message's kwargs the typed view.
 
 Writers live in `agent/messages/__init__.py` (+ `agent/graph/claim/node.py`, `agent/graph/llm/node.py`);
-readers in `base/agents/history/timeline.py`, `gateway/agents/history/context_breakdown.py`,
+readers in `base/agents/history/timeline.py`, `base/agents/history/context_breakdown.py`,
 `agent/graph/recall/memory_recall.py`. It sits in `base/` (leaf) so both the agent
 and the gateway import it without an agent <-> gateway package cycle.
 
@@ -49,6 +49,23 @@ class AvaMsgType(StrEnum):
     EXEC_OUTPUT = "exec_output"
     COMPACT_SUMMARY = "compact_summary"
     COMPACT_REQUEST = "compact_request"
+
+
+class ExecStatus(StrEnum):
+    """How one `execute_code` call ended, stored as `ava_exec_status` (`<member>.value`).
+
+    COMPLETED: the code returned. FAILED: it raised, crashed, or was rejected before
+    running (syntax error). TIMED_OUT / CANCELLED: stopped at the sandbox limit / by an
+    interrupt. HALTED: it ended the run by lifecycle request (compact, restart,
+    terminate, impersonation). NOT_RUN: the call never executed (unknown tool, skipped
+    behind an earlier halt, synthetic interrupted result)."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
+    HALTED = "halted"
+    NOT_RUN = "not_run"
 
 
 class NoteTag(StrEnum):
@@ -94,11 +111,37 @@ class NoteTag(StrEnum):
     TIMEZONE = "timezone"
 
 
+class AvaUsage(TypedDict, total=False):
+    """`ava_usage` on an agent turn's final AIMessage: the figures of the `llm_usage` event
+    emitted at the same moment, from the same `quote`.
+
+    `cost_usd` and the `price_*` rates (USD per 1M tokens) are the usage-time snapshot; an
+    unpriced call carries `unpriced: 1` and none of them. `in_total` includes `cache_read`
+    and the cache writes. A message without this key predates it: its cost is unknown,
+    never estimated.
+    """
+
+    model: str
+    in_total: int
+    out_total: int
+    cache_read: int
+    cache_write_5m: int
+    cache_write_1h: int
+    reasoning: int
+    cost_usd: float
+    price_miss: float
+    price_hit: float
+    price_out: float
+    price_write_5m: float
+    price_write_1h: float
+    unpriced: int
+
+
 class AvaMessageKwargs(TypedDict, total=False):
     """The `ava_*` metadata bag on a message's `additional_kwargs`. Every key is
     contextual to the message kind (total=False): an `inbound` carries source /
-    inbound_id / image_urls, an `exec_output` carries exec_ms /
-    sdk_calls, a `system_note` carries note_tag, a compact summary carries
+    inbound_id / image_urls, an `exec_output` carries exec_ms / exec_status /
+    exec_started_at / exec_body_start / sdk_calls, a `system_note` carries note_tag, a compact summary carries
     `ava_compact_id`, an AIMessage carries the reasoning timings. `sdk_calls`
     is the one framework key without the `ava_` prefix — the frozen wire name
     for the exec_output's runtime SDK-call tally (`agent/graph/exec/node.py` writes
@@ -128,10 +171,14 @@ class AvaMessageKwargs(TypedDict, total=False):
     ava_note_tag: str
     ava_task_id: int
     ava_exec_ms: int | None
+    ava_exec_status: str
+    ava_exec_started_at: str | None
+    ava_exec_body_start: int
     sdk_calls: list[dict[str, Any]] | None
     ava_reasoning_ms_by_block: dict[str, int]
     ava_code_ms_by_block: dict[str, int]
     ava_reasoning_ms: int
+    ava_usage: AvaUsage
 
 
 def read_ava_kwargs(msg: BaseMessage) -> AvaMessageKwargs:
@@ -161,6 +208,29 @@ def message_read_time(msg: BaseMessage) -> str | None:
     `ava_created_at` directly.
     """
     return kwargs_read_time(read_ava_kwargs(msg))
+
+
+# The header prepended to every replacement compact summary (forced / command /
+# spontaneous) — written by `agent.hooks.compact.compose_summary_message`, and
+# the one invariant the read side (base/agents/history/context_breakdown.py) classifies the
+# untagged summary HumanMessage by. It lives here, in the leaf message-contract
+# module, so the gateway and the insights service can import it without pulling in
+# agent.hooks.compact (whose agent.graph imports do not resolve outside the agent).
+# Two jobs:
+#   1. "just compacted" — the compaction is the one event the post-compact context
+#      has no surviving record of: REMOVE_ALL wipes the turn that ran it, including
+#      the `[system halt] You just called ava.self.compact` ack that announced it.
+#      Without this line the agent re-reads a /compact still sitting in the
+#      summary's verbatim tail as a pending order and runs it again, every turn
+#      (the agent-17 self-compact loop). Stating it happened is the standing signal
+#      the wiped ack cannot be.
+#   2. "your own prior context" — frames the first-person "I" in the body as the
+#      agent's own memory, not the user speaking (the summary lands as a user-role
+#      message).
+COMPACT_SUMMARY_HEADER = (
+    "[system] Your context was just compacted. The following is the summary of "
+    "your own prior context:"
+)
 
 
 # ── Typed accessors for the loosely-typed LangChain message members ──

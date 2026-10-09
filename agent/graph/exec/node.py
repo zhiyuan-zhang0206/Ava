@@ -49,6 +49,7 @@ import time
 from collections.abc import Awaitable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
@@ -69,6 +70,8 @@ from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
+from base.agents.messages.kwargs import ExecStatus
+from base.clock import Clock
 from base.config import settings
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.log import logger
@@ -83,7 +86,7 @@ from ._result import (
 )
 from ._stream import ExecOutputChunkPublisher
 from ._subprocess import _run_in_subprocess
-from .output import crashed_no_output_body, wrap_code_output
+from .output import ExecEnvelope, crashed_no_output_body, wrap_code_output
 from .protocol import ResultPayload
 
 # Each exec step commits one call; remaining calls return to EXEC before AFTER_EXEC.
@@ -189,6 +192,7 @@ async def _run_agent_code(
                 cancel_event,
                 settings.sandbox.exec_timeout_seconds,
                 chunk_publisher,
+                accumulation_max_chars=settings.sandbox.exec_output_accumulation_max_chars,
                 state=state.model_dump(),
                 config_overlay=config_overlay,
             ),
@@ -227,9 +231,11 @@ def _dispatch_exec_result(
     ctx: AvaContext,
     agent_id: int,
     *,
+    elapsed_seconds: float,
+    timestamp: str | None = None,
     referenced_messages: Sequence[AnyMessage] = (),
-) -> tuple[bool, str]:
-    """Map the `_ExecResult` sum type to (halted, result_text).
+) -> tuple[bool, ExecEnvelope, ExecStatus]:
+    """Map the `_ExecResult` sum type to (halted, envelope, status).
 
     Lifecycle priority (lifecycle always wins the cancel/timeout race) is
     implemented at the construction site in `_construct_exec_result` (`_result.py`); the match directly
@@ -239,18 +245,32 @@ def _dispatch_exec_result(
     # Present on every variant (see the sum-type definitions): when the
     # accumulation budget dropped the middle mid-run, the envelope needs it to
     # report the true produced length and to stop calling the archive complete.
+    sandbox = settings.sandbox
+    clock = Clock.from_settings()
+    wrap = partial(
+        wrap_code_output,
+        crop_config=sandbox,
+        clock=clock,
+        timestamp=timestamp,
+        elapsed_seconds=elapsed_seconds,
+        timeout_seconds=sandbox.exec_timeout_seconds,
+        max_chars=sandbox.exec_output_max_chars,
+    )
     stream_cap = result.stream_cap
     match result:
         case _ExecLifecycle(output=output, exc=SystemHalt()):
             # ava.self.compact already INSERTed compact_summary inbound; append
             # "[system halt]" at the end (agent's real output comes first).
-            halted = True
+            halted, status = True, ExecStatus.HALTED
             extra = "[system halt] You just called ava.self.compact; your context has been compacted and you will continue as the same agent\n"
             output = (output if not output or output.endswith("\n") else output + "\n") + extra
-            result_text = wrap_code_output(
-                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+            envelope = wrap(
+                output,
+                agent_id=agent_id,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
             )
-            logger.info("[{label}] {body}", label="exec", body=result_text)
+            logger.info("[{label}] {body}", label="exec", body=envelope.text)
             logger.info("[{label}] {body}", label="halt", body="system_halt (compact)")
         case _ExecLifecycle(
             output=output, exc=AgentTermination() | AgentRestart() | AgentImpersonation() as exc
@@ -258,11 +278,14 @@ def _dispatch_exec_result(
             # Restart/terminate enqueue lifecycle inbounds; impersonation
             # records consent in its lease. Their drivers resume after exec
             # cleanup, without adding a duplicate "[halt]" annotation here.
-            halted = True
-            result_text = wrap_code_output(
-                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+            halted, status = True, ExecStatus.HALTED
+            envelope = wrap(
+                output,
+                agent_id=agent_id,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
             )
-            logger.info("[{label}] {body}", label="exec", body=result_text)
+            logger.info("[{label}] {body}", label="exec", body=envelope.text)
             logger.info(
                 "[{label}] {body}",
                 label="halt",
@@ -278,16 +301,20 @@ def _dispatch_exec_result(
                 f"dispatch ladder missed update"
             )
         case _ExecCancelled(output=output, reason=reason):
-            halted = True
-            result_text = wrap_code_output(
+            halted, status = True, ExecStatus.CANCELLED
+            envelope = wrap(
                 output,
+                agent_id=agent_id,
                 cancelled=True,
                 cancel_reason=reason,
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
             logger.info(
-                "[{label}] {body}", label="exec-cancelled", body=result_text, event="exec_cancelled"
+                "[{label}] {body}",
+                label="exec-cancelled",
+                body=envelope.text,
+                event="exec_cancelled",
             )
             # Notify frontend of abort (symmetric with llm_node cancel path;
             # the timeout path does not send Cancelled — not a user cancel).
@@ -296,15 +323,16 @@ def _dispatch_exec_result(
         case _ExecTimedOut(output=output):
             # Timeout is ordinary feedback, not a stop-turn signal: the envelope
             # hints at long-running primitives; the next LLM round adapts.
-            halted = False
-            result_text = wrap_code_output(
+            halted, status = False, ExecStatus.TIMED_OUT
+            envelope = wrap(
                 output,
+                agent_id=agent_id,
                 timed_out=True,
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
             logger.info(
-                "[{label}] {body}", label="exec-timeout", body=result_text, event="exec_timeout"
+                "[{label}] {body}", label="exec-timeout", body=envelope.text, event="exec_timeout"
             )
         case _ExecCrashed(
             output=output, exc=exc, full_traceback=child_traceback, code_reached=code_reached
@@ -323,16 +351,19 @@ def _dispatch_exec_result(
             # the code ran. Say what happened instead: with the child's
             # code_reached flag, "the code was NOT executed" (boot crash),
             # "ran, printed nothing" or "unknown".
-            halted = False
+            halted, status = False, ExecStatus.FAILED
             if not output:
                 output = crashed_no_output_body(exc, code_reached=code_reached)
-            result_text = wrap_code_output(
-                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+            envelope = wrap(
+                output,
+                agent_id=agent_id,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
             )
             logger.info(
                 "[{label}] {body}\n[full traceback]\n{full_traceback}",
                 label="exec-failed",
-                body=result_text,
+                body=envelope.text,
                 full_traceback=child_traceback or format_full_traceback(exc),
                 event="exec_failed",
                 exc_type=type(exc).__name__,
@@ -344,12 +375,15 @@ def _dispatch_exec_result(
                 # (P2 #2102); the alert rule reads it from the event stream.
                 _emit_exec_boot_failed(agent_id, exc)
         case _ExecDone(output=output):
-            halted = False
-            result_text = wrap_code_output(
-                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+            halted, status = False, ExecStatus.COMPLETED
+            envelope = wrap(
+                output,
+                agent_id=agent_id,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
             )
-            logger.info("[{label}] {body}", label="exec", body=result_text)
-    return halted, result_text
+            logger.info("[{label}] {body}", label="exec", body=envelope.text)
+    return halted, envelope, status
 
 
 def _attach_model(ctx: AvaContext) -> str:
@@ -384,6 +418,8 @@ async def _exec_single_call(
         error = exec_output_message(
             content=f"unknown tool {call['name']!r}; only `execute_code(code: str)` is registered",
             tool_call_id=call["id"] or "",
+            status=ExecStatus.NOT_RUN,
+            body_start=0,
             created_at=datetime.now(UTC),
         )
         ctx.event_publisher.emit(
@@ -403,6 +439,7 @@ async def _exec_single_call(
         item_id=f"{exec_msg_idx}.0",
     )
 
+    started_at = datetime.now(UTC)
     (
         result,
         plugin_state_update,
@@ -416,8 +453,15 @@ async def _exec_single_call(
         code_from_args(call["args"], source=f"tool_call {call['id']!r}"),
         chunk_publisher,
     )
-    halted, result_text = _dispatch_exec_result(
-        result, ctx, agent_id, referenced_messages=state.messages
+    clock = Clock.from_settings()
+    timestamp = clock.now_timestamp() if settings.general.message_timestamps else None
+    halted, envelope, status = _dispatch_exec_result(
+        result,
+        ctx,
+        agent_id,
+        elapsed_seconds=exec_ms / 1000,
+        timestamp=timestamp,
+        referenced_messages=state.messages,
     )
 
     # Pop the plugin's messages delta out of the state update — merged below
@@ -441,13 +485,16 @@ async def _exec_single_call(
             ExecOutput(
                 agent_id=agent_id,
                 item_id=f"{exec_msg_idx}.0",
-                content=result_text,
+                content=envelope.text,
             ).model_dump_json()
         )
 
         msg = exec_output_message(
-            content=result_text,
+            content=envelope.text,
             tool_call_id=call["id"] or "",
+            status=status,
+            body_start=envelope.body_start,
+            started_at=started_at,
             exec_ms=exec_ms,
             sdk_calls=envelope_sdk_calls,
             created_at=datetime.now(UTC),
@@ -508,6 +555,8 @@ def _skipped_call_results(
         message = exec_output_message(
             content="Not executed: an earlier tool call halted or cancelled this turn.",
             tool_call_id=call["id"] or "",
+            status=ExecStatus.NOT_RUN,
+            body_start=0,
             created_at=datetime.now(UTC),
         )
         results.append(message)

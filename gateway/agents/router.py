@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
@@ -301,24 +301,10 @@ def _normalize_and_resolve_preset(
     separately: it is stored on the agent row (`agents_meta.preset_name`) purely
     for display, next to the resolved overlay.
 
-    The former top-level `body.preset` field is retired (task #4086): a non-null
-    value is refused with a 400 pointing at the overlay key, while a null — the
-    field default, which a client rolling through the compatibility window may
-    still send explicitly — is tolerated as unset so such a client keeps
-    spawning.
-
     400 when the overlay key is not a non-empty string, or when the named preset
     does not exist (a spawn referencing a missing preset is a caller error,
     surfaced up front rather than silently ignored).
     """
-    if body.preset is not None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "the top-level preset field is retired — pass the preset as "
-                'config_overlay={"preset": "<name>"}'
-            ),
-        )
     explicit = body.config or {}
     preset_name = explicit.get(_PRESET_KEY)
     if preset_name is None:
@@ -509,8 +495,6 @@ async def _dispatch_committed_launch(
     pool: ConnectionPool, db: Database, bus: EventBus, target: str, launch: LaunchAgentRequest
 ) -> SpawnedAgent:
     attempt_id = launch.launch_attempt_id
-    if attempt_id is None:
-        raise RuntimeError("committed launch is missing its attempt ID")
     try:
         spawned = await forward_spawn_to_remote(db, target, launch)
         _require_matching_launch_receipt(spawned, launch.agent_id, target)
@@ -550,7 +534,7 @@ async def _dispatch_committed_launch(
             agent_id=launch.agent_id,
             state=state,
             retry_launch_path=(
-                f"/api/agents/{launch.agent_id}/retry-launch" if retry_legal else None
+                f"/api/keyed/v1/agents/{launch.agent_id}/retry-launch" if retry_legal else None
             ),
         ) from exc
     try:
@@ -632,7 +616,7 @@ async def post_guarded_agents(
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
     idempotency_scope: str = Header(alias=SCOPE_HEADER),
 ) -> SpawnedAgent:
-    """Create a plain agent through a versioned, principal-bound keyed entry.
+    """Create or fork an agent through principal-bound keyed admission.
 
     Older routing cannot execute this path. Callers must keep it fixed for an
     intent and never fall back to the legacy path after an uncertain response.
@@ -640,8 +624,6 @@ async def post_guarded_agents(
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
-    if body.fork_from is not None:
-        raise HTTPException(status_code=422, detail="guarded v1 creation does not support forks")
     return await _create_agent_http(body, request, key, immutable_birth=True)
 
 
@@ -666,52 +648,6 @@ async def _create_agent_http(
         )
     except CreationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-def _prepare_retry_launch(
-    pool: ConnectionPool, agent_id: int
-) -> tuple[str, LaunchAgentRequest | None]:
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT machine, config_overlay, birth_config, status, last_admission_at, "
-            "last_launch_attempt_id FROM agents_meta WHERE id=%s FOR UPDATE",
-            (agent_id,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            raise AgentNotFound(f"agent {agent_id} does not exist")
-        target, config, birth_config, status, admitted_at, prior_attempt = row
-        if admitted_at is not None and status != "terminated":
-            return target, None
-        if status != "idling" or prior_attempt is None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"agent {agent_id} cannot retry launch in status {status}",
-            )
-        attempt_id = uuid4()
-        cur.execute(
-            "UPDATE agents_meta SET last_launch_attempt_id=%s WHERE id=%s",
-            (attempt_id, agent_id),
-        )
-    return target, LaunchAgentRequest(
-        agent_id=agent_id,
-        launch_attempt_id=attempt_id,
-        config=config,
-        birth_config=birth_config,
-    )
-
-
-@router.post("/api/agents/{agent_id}/retry-launch", response_model_exclude_none=True)
-async def retry_agent_launch(agent_id: int, request: Request) -> SpawnedAgent:
-    """Retry dispatch for one committed identity without adding an inbound."""
-    pool = request.app.state.db_pool
-    target, launch = await asyncio.to_thread(_prepare_retry_launch, pool, agent_id)
-    if launch is None:
-        return await _accepted_launch_receipt(pool, SpawnedAgent(id=agent_id))
-    spawned = await _dispatch_committed_launch(
-        pool, request.app.state.db, request.app.state.bus, target, launch
-    )
-    return await _accepted_launch_receipt(pool, spawned)
 
 
 @router.get("/api/agents/{agent_id}")

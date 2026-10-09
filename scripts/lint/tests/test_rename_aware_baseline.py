@@ -18,7 +18,7 @@ def _write_baseline(root: pathlib.Path, data: dict[str, dict[str, int]]) -> path
     even with zero shards. Returns the shard directory."""
     directory = root / baseline_shards.SHARD_DIR
     if directory.is_dir():
-        for path in directory.glob("*.json"):
+        for path in directory.rglob("*.json"):
             path.unlink()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
@@ -26,6 +26,7 @@ def _write_baseline(root: pathlib.Path, data: dict[str, dict[str, int]]) -> path
         # Single concatenated string, not chained `/`: keeps an adversarial shard
         # name from being treated as an absolute-path override that discards
         # `directory`.
+        pathlib.Path(f"{directory}/{name}.json").parent.mkdir(parents=True, exist_ok=True)
         (pathlib.Path(f"{directory}/{name}.json")).write_text(
             baseline_shards.render(shard), encoding="utf-8"
         )
@@ -70,7 +71,7 @@ def _freeze(tmp_path: pathlib.Path, path: str, *, cc: int = 16) -> None:
 @pytest.fixture(autouse=True)
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
 
 
 def test_rename_map_follows_detected_moves(tmp_path: pathlib.Path) -> None:

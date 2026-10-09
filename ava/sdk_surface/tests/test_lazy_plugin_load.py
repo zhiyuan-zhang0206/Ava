@@ -21,12 +21,12 @@ from importlib.abc import Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import spec_from_loader
 from types import ModuleType, SimpleNamespace
-from typing import Any
 
 import pytest
 
 import ava
 from ava.sdk_surface import install
+from base.agents.sdk import call_policy
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
@@ -37,7 +37,9 @@ from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
-def _reset() -> Iterator[None]:
+def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    # These tests exercise lazy installation, independently of live sampling refresh.
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     # Each test drives the installation slot + agent identity explicitly;
     # snapshot-restore so nothing leaks between tests. Any SDK surface already
     # installed in this process (ava.memory, ava.tasks, ava.cwd ...) is taken out
@@ -170,39 +172,81 @@ def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> No
     assert install.installed() is not None
 
 
-def test_ensure_plugins_loaded_contains_a_failing_load_chain(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    loguru_records: list[dict[str, Any]],
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [
+        (AttributeError, "original plugin boot error"),
+        (ValueError, "original plugin boot error"),
+        (RuntimeError, "original plugin boot error"),
+        (OSError, "original plugin boot error"),
+        (AttributeError, "partially initialized module 'agent.extensions' implementation bug"),
+    ],
+)
+def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception], message: str
 ) -> None:
-    """A failure escaping the load chain — duplicate plugin name, malformed
-    config, schema drift — must not kill an agent-launched child at `import
-    ava` (the 2026-08-28 ava_ledger crash shape: every new process died). It
-    is contained, reported loudly, and the process continues without plugin
-    namespaces; the stderr line is the always-visible channel because a
-    launched child usually has no loguru sink configured."""
     from agent import extensions
-    from base.packages.plugins.enable_config import DuplicatePlugin
 
+    error = error_type(message)
     calls: list[int] = []
 
     def boom(*, surface: bool = False) -> None:
         calls.append(1)
-        raise DuplicatePlugin("plugin 'x' exists in both builtin and external roots")
+        raise error
 
     monkeypatch.setattr(extensions, "load_extensions", boom)
-
-    ava.ensure_plugins_loaded()  # must not raise
-    ava.ensure_plugins_loaded()  # ... and the failed attempt is not retried
-
+    for _ in range(2):
+        with pytest.raises(error_type) as caught:
+            ava.ensure_plugins_loaded()
+        assert caught.value is error
     assert calls == [1]
-    assert install.load_attempted()  # the slot keeps the attempted-and-failed load
-    report = next(r for r in loguru_records if "failed in this launched child" in r["message"])
-    assert report["exception"] is not None  # the traceback rides the record (#4979)
-    assert report["exception"].type is DuplicatePlugin
-    stderr = capsys.readouterr().err
-    assert "plugin load failed in this launched child" in stderr
-    assert "DuplicatePlugin" in stderr
+    assert install.load_attempted()
+    assert install.installed() is None
+
+
+def test_failed_lazy_lookup_repeats_the_original_boot_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent import extensions
+
+    _as_launched_child(monkeypatch)
+    error = RuntimeError("lazy boot failed")
+
+    def boom(*, surface: bool = False) -> None:
+        raise error
+
+    monkeypatch.setattr(extensions, "load_extensions", boom)
+    for _ in range(2):
+        with pytest.raises(RuntimeError) as caught:
+            _ = ava.missing_after_failure
+        assert caught.value is error
+
+
+def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent import extensions
+
+    calls = _spy_loader(monkeypatch, register="lazytasks")
+    ava.ensure_plugins_loaded()
+    surface = install.installed()
+    assert surface is not None and not surface.faces
+    error = RuntimeError("runtime faces boot failed")
+    face_calls: list[int] = []
+
+    def boom() -> None:
+        face_calls.append(1)
+        raise error
+
+    monkeypatch.setattr(extensions, "load_agent_faces", boom)
+    for full in (True, False, True):
+        with pytest.raises(RuntimeError) as caught:
+            ava.ensure_plugins_loaded(surface=not full)
+        assert caught.value is error
+    assert face_calls == calls == [1]
+    assert install.installed() is surface and not surface.faces
+    install.uninstall()
+    assert not hasattr(ava, "lazytasks")
 
 
 class _ReentrantLoader(Loader):

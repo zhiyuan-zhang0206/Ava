@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,7 +45,14 @@ def _enter_home(home: Path) -> None:
     os.environ["AVA_HOME"] = str(home)
 
 
-def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) -> int:
+def run_start(
+    args: argparse.Namespace,
+    *,
+    runtime: StartRuntime | None = None,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
+    if retained_children is None:
+        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     try:
         if runtime is None:
             runtime = StartRuntime.development(_checkout())
@@ -68,6 +76,7 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
                 all_services=args.all_services,
                 persist_services=args.persist_services,
                 runtime=runtime,
+                retained_children=retained_children,
             )
             if result == 0:
                 from base.deploy.lifecycle.start_serving import clear_serving

@@ -57,6 +57,7 @@ from base.events.live.projection import Cancelled, CompactDone, CompactionMode, 
 from base.host.env.agent_slices import AgentSlices
 from base.lm.call import ProviderCallBinding
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
+from base.lm.errors import is_retryable_provider_error
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
@@ -84,7 +85,7 @@ def compose_summary_message(summary: str) -> str:
     framing is identical across forced / command / spontaneous compaction.
     The header itself (with the rationale for its wording) lives in
     `agent/messages/__init__.py:COMPACT_SUMMARY_HEADER` — the read-side classifier
-    (gateway/agents/history/context_breakdown.py) keys on it too."""
+    (base/agents/history/context_breakdown.py) keys on it too."""
     return f"{COMPACT_SUMMARY_HEADER}\n\n{summary}"
 
 
@@ -120,6 +121,10 @@ class CompactionFailedError(RuntimeError):
     into a non-resurrectable 'exit' termination. Subclasses RuntimeError so
     pre-existing `except RuntimeError` handling keeps working.
     """
+
+
+class EmptyCompactionSummaryError(RuntimeError):
+    """The model returned no summary text; retry the explicit summary validation."""
 
 
 # Compaction keeps every pre-compact checkpoint: the never-delete ruling
@@ -259,7 +264,7 @@ async def generate_summary(
     summary = response.text
     closing = closing_request_of(response, instruction)
     if not summary.strip():
-        raise RuntimeError(
+        raise EmptyCompactionSummaryError(
             f"Compaction LLM returned no text content"
             f" (summarizing {len(content_msgs)} messages,"
             f" response content type {type(response.content).__name__});"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
@@ -294,11 +299,7 @@ def _last_compact_summary_text(messages: list[AnyMessage]) -> str | None:
 
 
 def _is_permanent_provider_failure(exc: BaseException) -> bool:
-    """Whether ``exc`` is a PERMANENT-class provider rejection (the compaction
-    request itself cannot go out — context over the effective ceiling). Any
-    other failure (transient network / provider 5xx / empty-model-output) must
-    NOT trigger the wipe fallback: it would destroy the conversation for a
-    blip that a retry or a later attempt clears."""
+    """Only a trusted permanent provider rejection permits the emergency trim."""
     from base.lm.errors import ErrorClass, classify_error
 
     return classify_error(exc).error_class is ErrorClass.PERMANENT
@@ -342,14 +343,10 @@ async def emergency_compact_summary(
       minimal fallback (marker + last preserved summary) instead of raising —
       a request the provider refuses outright cannot be fixed by retry, and
       the wipe must still happen for the agent to recover;
-    - a transient failure / short summary retries, and raising
-      `CompactionFailedError` when exhausted stays the outcome — a provider
-      blip or a template-defying model must not silently destroy the
-      conversation either.
+    - typed transient failures and empty/short summaries retry; exhaustion
+      raises `CompactionFailedError`. Unknown errors propagate once unchanged.
 
-    Returns the summary text; callers feed it through the normal compact
-    transition (build_compact_transition), so the fallback is indistinguishable
-    from a real compaction downstream (same header, same wipe, same notes).
+    Callers commit returned text through the normal compact transition.
     """
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
@@ -368,6 +365,10 @@ async def emergency_compact_summary(
                     ),
                 )
                 return _emergency_fallback_summary(messages)
+            if not isinstance(e, EmptyCompactionSummaryError) and not is_retryable_provider_error(
+                e
+            ):
+                raise
             logger.warning(
                 "[{label}] {body}",
                 label="emergency-compact",
@@ -475,6 +476,10 @@ async def _auto_compact_summary(
         try:
             summary = await generate_summary(messages, llm, slices, binding=binding)
         except Exception as e:
+            if not isinstance(e, EmptyCompactionSummaryError) and not is_retryable_provider_error(
+                e
+            ):
+                raise
             last_error = e
             logger.warning(
                 "[{label}] {body}",

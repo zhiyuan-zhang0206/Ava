@@ -1,7 +1,0 @@
-{
-  "ambient_state": {
-    "services/supervision/ava_root/health.py::thread:ProbeRunner.observe": 1,
-    "services/supervision/ava_root/supervisor.py::asyncio-task:Supervisor._spawn": 1
-  },
-  "patch_targets": {}
-}

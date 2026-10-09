@@ -25,6 +25,9 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[A
     """Install the ava_memory SDK surface against isolated stores."""
     import base.cluster.machine
     import base.paths
+    from base.agents.sdk import call_policy
+
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
 
     workspace = tmp_path / "workspace"
     pool = tmp_path / "pool"
@@ -151,7 +154,7 @@ def test_personal_write_dedupes_legacy_duplicate_pointer_lines(
     )
 
 
-def test_personal_write_uses_hosted_turn_identity(
+def test_personal_write_uses_sdk_context_without_reading_host_turn(
     memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import base.paths
@@ -162,10 +165,10 @@ def test_personal_write_uses_hosted_turn_identity(
 
     monkeypatch.setattr(base.paths, "workspace_dir", workspace)
     with bind_turn_identity(29):
-        entry = ava.memory.write("hosted-note", "Belongs to agent 29.")
+        entry = ava.memory.write("sdk-note", "Belongs to the initialized SDK agent 17.")
 
-    assert entry == tmp_path / "29" / "memory" / "hosted-note.md"
-    assert not (tmp_path / "17").exists()
+    assert entry == tmp_path / "17" / "memory" / "sdk-note.md"
+    assert not (tmp_path / "29").exists()
 
 
 def test_write_truncates_long_description_in_index_pointer(

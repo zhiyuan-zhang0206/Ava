@@ -61,8 +61,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
         }
     ),
     # Agent host and exec children (kernel + SDK + builtin plugins). daemon is
-    # consumed by the ava_fleet plugin's in-agent task_maintenance service
-    # (task_maintenance_* / task_reminder_backoff_seconds / task_escalate_n).
+    # required by agent lifecycle notification and delivery consumers.
     "agent": frozenset(
         {
             "agent",

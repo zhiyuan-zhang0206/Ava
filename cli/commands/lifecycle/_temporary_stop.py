@@ -313,6 +313,7 @@ def _stop_initialization(
     teardown_extras: bool,
     notes: list[str],
     clients: list[str],
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> None:
     """Close a proven pre-application attempt through the existing native owners."""
     _timed_phase(
@@ -326,7 +327,13 @@ def _stop_initialization(
         _timed_phase(
             phases,
             "data-plane",
-            lambda: stop_data_plane(remaining(deadline), save=True, notes=notes, clients=clients),
+            lambda: stop_data_plane(
+                remaining(deadline),
+                save=True,
+                notes=notes,
+                clients=clients,
+                retained_children=retained_children,
+            ),
         )
 
 
@@ -368,6 +375,7 @@ def _drain_and_stop(
     teardown_extras: bool,
     notes: list[str],
     clients: list[str],
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> None:
     """Drain the agents, then stop the selected resources; each phase is timed into `phases`."""
     # Task #3270: an operator's own stop binds the hold to this
@@ -428,7 +436,13 @@ def _drain_and_stop(
         _timed_phase(
             phases,
             "data-plane",
-            lambda: stop_data_plane(remaining(deadline), save=True, notes=notes, clients=clients),
+            lambda: stop_data_plane(
+                remaining(deadline),
+                save=True,
+                notes=notes,
+                clients=clients,
+                retained_children=retained_children,
+            ),
         )
         progress.data_plane_stopped = True
     _mark_stopped(current.holder, current.acquired_at)
@@ -443,6 +457,7 @@ def stop(
     announce: bool,
     teardown_extras: bool,
     timeout: float = PAUSE_TIMEOUT_SECONDS,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Drain via normal restart, then stop selected resources.
 
@@ -485,6 +500,7 @@ def stop(
                 teardown_extras=teardown_extras,
                 notes=notes,
                 clients=clients,
+                retained_children=retained_children,
             )
             return _finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
         _drain_and_stop(
@@ -499,6 +515,7 @@ def stop(
             teardown_extras=teardown_extras,
             notes=notes,
             clients=clients,
+            retained_children=retained_children,
         )
     except (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired) as exc:
         _report_incomplete(

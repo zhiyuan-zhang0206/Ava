@@ -133,10 +133,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         transactional_idempotency=True,
         legacy_keyed_retry=False,
     ),
-    ("POST", "/api/agents/{agent_id}/retry-launch"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="explicit same-ID launch retry rotates the attempt key; each call dispatches once",
-    ),
     ("POST", "/api/keyed/v1/agents"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="guarded plain creation requires a verified principal-v1 key; no legacy fallback",
@@ -213,7 +209,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/routers/commands.py ───────────────────────────────────
     ("GET", "/api/commands"): RouteContract(),
-    # ── gateway/routers/config.py ───────────────────────────────────
+    # ── gateway/routers/configuration/runtime.py ───────────────────────────────────
     ("GET", "/api/config"): RouteContract(),
     ("GET", "/api/config/resolved"): RouteContract(),
     ("GET", "/api/config/audit"): RouteContract(),
@@ -297,16 +293,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/impersonation/force-expire"): RouteContract(
         note="observed-session CAS close — repeated or stale requests leave the lease unchanged"
     ),
-    ("POST", "/api/agents/{agent_id}/compact"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="transactional compact acceptance; pending original inbound only permits recovery",
-        transactional_idempotency=True,
-    ),
-    ("POST", "/api/cancel"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="transactional cancel acceptance; native work-episode fencing remains separate",
-        transactional_idempotency=True,
-    ),
     ("POST", "/api/agents/{agent_id}/terminate"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="termination is not bound to the observed incarnation"
     ),
@@ -368,7 +354,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         transactional_idempotency=True,
-        note="notice resolution and reply share a durable keyed receipt; keyless legacy reads with reply remain distinct",
+        note="notice resolution and reply require a key and share one durable receipt",
     ),
     ("POST", "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
@@ -533,11 +519,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         transactional_idempotency=True,
-        note="keyed task patch and immutable result share the notification transaction",
+        note="task patch requires a key; immutable result shares the notification transaction",
     ),
     # ── gateway/agents/history/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
-    # ── gateway/run_timeline/router.py, messages.py, context.py ──────────────────
+    # ── gateway/routers/insights.py (proxy of services/derived/insights/run_timeline) ──
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
         note="read-only: the understanding tree and the layer-0 message units in a window",
     ),
@@ -546,6 +532,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/agents/{agent_id}/run-timeline/messages"): RouteContract(
         note="read-only raw messages of a stitched-index range — long parts clip with text_truncated; full=true returns the whole body",
+    ),
+    ("GET", "/api/insights/{rest:path}"): RouteContract(
+        note="read-only: proxied untouched to the insights service, which builds every insights read from the record",
     ),
     # ── gateway/extensions/ui_contributions.py ───────────────────────────────────
     ("GET", "/api/ui/contributions"): RouteContract(),

@@ -62,12 +62,11 @@ def test_a_plugin_without_a_face_declares_no_class() -> None:
 @pytest.mark.parametrize(
     "extra",
     [
-        "def contribute():\n    return PluginContributions()\n",
-        "def contribute():\n    return PluginContributions(config=Config, flags=('lm.llm_model',))\n",
+        "def contribute():\n    return PluginContributions(config=Config, state=Config)\n",
         "def contribute():\n    return 1\n",
     ],
 )
-def test_a_face_must_declare_a_config_class_and_nothing_else(extra: str) -> None:
+def test_a_config_face_rejects_other_contribution_surfaces(extra: str) -> None:
     body = _FACE.split("def contribute", maxsplit=1)[0] + extra
     with pytest.raises((ValueError, TypeError)):
         config_face.declared_config_class("probe", _plugin("probe", body))
@@ -101,3 +100,28 @@ def test_a_broken_face_is_left_out_not_raised() -> None:
     write_local({"plugins": {"probe": {"enabled": True}, "broken": {"enabled": True}}})
 
     assert sorted(overlay_config_classes()) == ["probe"]
+
+
+def test_a_pure_face_admits_config_and_core_dependencies() -> None:
+    body = _FACE.replace(
+        "config=Config)", "config=Config, flags=('daemon.notice_ttl_limit_seconds',))"
+    )
+    declaration = config_face.configuration_declaration("probe", _plugin("probe", body))
+    assert declaration.config is not None
+    assert declaration.flags == ("daemon.notice_ttl_limit_seconds",)
+
+
+def test_a_dependency_only_face_needs_no_config_class() -> None:
+    body = _FACE.replace("config=Config", "flags=('daemon.notice_ttl_limit_seconds',)")
+    plugin_dir = _plugin("probe", body)
+    assert config_face.declared_config_class("probe", plugin_dir) is None
+    assert config_face.configuration_declaration("probe", plugin_dir).flags
+
+
+@pytest.mark.parametrize("key", ["data_plane.db_url", "daemon.not_a_field", "a.b.c"])
+def test_pure_admission_rejects_sensitive_and_unknown_core_dependencies(key: str) -> None:
+    from base.packages.plugins.flags import UnknownFlag
+
+    body = _FACE.replace("config=Config)", f"config=Config, flags=({key!r},))")
+    with pytest.raises(UnknownFlag):
+        config_face.configuration_declaration("probe", _plugin("probe", body))

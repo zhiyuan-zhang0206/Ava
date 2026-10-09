@@ -1,7 +1,0 @@
-{
-  "ambient_state": {
-    "gateway/agents/delivery.py::ambient-container:_background_tasks": 1,
-    "gateway/agents/delivery.py::asyncio-task:_spawn_background": 1
-  },
-  "patch_targets": {}
-}

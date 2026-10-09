@@ -261,6 +261,20 @@ def test_a_damaged_or_foreign_cache_is_rebuilt(cache_root: pathlib.Path, damage:
     assert json.loads((cache_root / import_cache.CACHE_PATH).read_text(encoding="utf-8"))["files"]
 
 
+def test_previous_relative_import_semantics_cache_is_rebuilt(cache_root: pathlib.Path) -> None:
+    """Version 1 could resolve an escape above the package as a repository import."""
+    rel = "cli/commands/run.py"
+    _edit(cache_root, rel, "from ...base.net import retry\n")
+    _statements(cache_root)
+    cache_file = cache_root / import_cache.CACHE_PATH
+    payload = json.loads(cache_file.read_text())
+    payload["version"] = 1
+    payload["files"][rel][2] = "from base.net import retry"
+    cache_file.write_text(json.dumps(payload))
+    assert _statements(cache_root)[rel] == ""
+    assert json.loads(cache_file.read_text())["version"] == 2
+
+
 def test_a_cache_hit_still_resolves_against_the_current_tree(cache_root: pathlib.Path) -> None:
     """`from cli.commands import helper` names the attribute `helper` of `cli.commands` until a
     module `helper.py` appears next to it. The importing file did not change, so its cached

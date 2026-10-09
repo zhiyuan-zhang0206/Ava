@@ -11,8 +11,8 @@ roster stays single-source. These lock the load-bearing invariants:
   disabled via plugins_config still contributes its service);
 - no installed plugins -> nothing folded;
 - a session-name collision fails fast (the roster is keyed on `session`);
-- a broken / declaration-less `services.py` is skipped loudly, and the other
-  plugins' services still load (fail-soft, user ruling 2026-09-11).
+- a present broken / declaration-less `services.py` reports and aborts the roster;
+  an absent optional services face contributes nothing.
 """
 
 from __future__ import annotations
@@ -60,8 +60,8 @@ def test_discovery_ignores_agent_enable_state(monkeypatch: pytest.MonkeyPatch) -
     """Roster discovery keys on plugin PRESENCE, not the agent-facing enable-state:
     even with every plugin marked disabled in plugins_config, task-maintenance is
     still in the roster — the machine roster must not depend on the
-    agent-plugin-registration plane. Its cluster-level on/off is the explicit
-    `AVA_TASK_MAINTENANCE_ENABLED` gate, exercised in
+    agent-plugin-registration plane. Its host-owned on/off is the explicit
+    Fleet config image gate, exercised in
     `test_plugin_gate_flows_through_annotation`."""
     from base.packages.plugins.enable_config import PluginEntry, PluginsConfig
 
@@ -78,7 +78,12 @@ def test_plugin_gate_flows_through_annotation(monkeypatch: pytest.MonkeyPatch) -
     """The plugin service's own gate is honored by ops: disabling task-maintenance
     drops it from the start roster but keeps it (with a reason) in the annotated
     view — same contract as the core config-gated services."""
-    monkeypatch.setattr(spec.settings.daemon, "task_maintenance_enabled", False)
+    from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
+    from base.packages.plugins.config_registration import disk_image_path
+
+    image = disk_image_path("ava_fleet")
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_text(FleetConfig(task_maintenance_enabled=False).model_dump_json())
     start = {s.session for s in spec.services_for_capabilities(frozenset({"gateway"}))}
     assert "task-maintenance" not in start
     annotated = {
@@ -101,30 +106,27 @@ def test_session_collision_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
         roster.build_services()
 
 
-def test_services_py_without_declare_is_skipped_loudly(
+def test_services_py_without_declare_reports_and_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict]
 ) -> None:
-    """A plugin that ships a services.py with no `services()` function is a
-    misconfiguration: it is skipped with a loud report (fail-soft, user ruling
-    2026-09-11) — one malformed plugin must not block `ava start` for every
-    other service."""
+    """A present malformed face is not optional absence."""
     plugin_dir = tmp_path / "brokenplugin"
     plugin_dir.mkdir()
     (plugin_dir / "services.py").write_text("X = 1  # no services() function\n")
     monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"brokenplugin": plugin_dir})
 
-    spec.plugin_services()  # must not raise
+    with pytest.raises(spec.PluginServiceError, match="callable services"):
+        spec.plugin_services()
 
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
 
 
-def test_broken_services_py_is_skipped_and_others_still_load(
+def test_broken_services_py_reports_and_aborts_roster(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict]
 ) -> None:
-    """A services.py that raises at import is skipped loudly; the remaining
-    plugins' services still reach the roster."""
+    """An import error cannot produce a successful partial roster."""
     good_dir = tmp_path / "goodplugin"
     good_dir.mkdir()
     (good_dir / "services.py").write_text(
@@ -142,9 +144,8 @@ def test_broken_services_py_is_skipped_and_others_still_load(
         lambda: {"brokenplugin": bad_dir, "goodplugin": good_dir},
     )
 
-    sessions = {s.session for s in spec.plugin_services()}
-
-    assert sessions == {"probe-good"}
+    with pytest.raises(RuntimeError, match="services boom"):
+        spec.plugin_services()
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
@@ -206,3 +207,84 @@ def test_failed_service_import_does_not_publish_partial_module(
     with pytest.raises(RuntimeError, match="broken collector"):
         spec._load_plugin_module("quota_failed_probe", services_py)
     assert sys.modules.get(dotted) is previous
+
+
+@pytest.mark.parametrize(
+    ("body", "error", "match"),
+    [
+        ("def services():\n    return undefined_roster\n", NameError, "undefined_roster"),
+        ("def services():\n    return [1]\n", spec.PluginServiceError, "tuple\\[ServiceSpec"),
+        ("services = 3\n", spec.PluginServiceError, "callable services"),
+        (
+            "from pydantic import BaseModel\n"
+            "class Config(BaseModel):\n    enabled: bool\n"
+            "def services():\n    Config(enabled='not-a-bool')\n    return ()\n",
+            ValueError,
+            "validation error",
+        ),
+    ],
+)
+def test_invalid_service_face_propagates_to_roster_operation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loguru_records: list[dict],
+    body: str,
+    error: type[Exception],
+    match: str,
+) -> None:
+    plugin_dir = tmp_path / "brokenplugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "services.py").write_text(body)
+    monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"brokenplugin": plugin_dir})
+    with pytest.raises(error, match=match):
+        roster.build_services()
+    assert any(
+        "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
+    )
+
+
+def test_absent_optional_service_face_does_not_fail_discovery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    plugin_dir = tmp_path / "no_service_face"
+    plugin_dir.mkdir()
+    monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"no_service_face": plugin_dir})
+    assert spec.plugin_services() == ()
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+def test_failed_gate_never_produces_a_start_or_status_roster(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict], diagnostic: bool
+) -> None:
+    def broken_gate() -> str | None:
+        raise RuntimeError("broken gate")
+
+    service = service_spec.ServiceSpec(
+        session="invalid-gate",
+        cmd="noop",
+        capabilities=frozenset({"gateway"}),
+        requires_db=False,
+        gate=broken_gate,
+    )
+    monkeypatch.setattr(spec, "build_services", lambda: (service,))
+    read = (
+        spec.services_for_capabilities_annotated if diagnostic else spec.services_for_capabilities
+    )
+    with pytest.raises(RuntimeError, match="broken gate"):
+        read(frozenset({"gateway"}))
+    assert any("roster evaluation aborted" in r["message"] for r in loguru_records)
+
+
+def test_invalid_face_aborts_manifest_generation_before_any_unit_is_born(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.supervision.ava_root_glue.manifests import build_units
+
+    plugin_dir = tmp_path / "invalid_config"
+    plugin_dir.mkdir()
+    (plugin_dir / "services.py").write_text(
+        "def services():\n    raise ValueError('invalid service configuration')\n"
+    )
+    monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"invalid_config": plugin_dir})
+    with pytest.raises(ValueError, match="invalid service configuration"):
+        build_units(None, capabilities={"gateway"}, repo_root=tmp_path)

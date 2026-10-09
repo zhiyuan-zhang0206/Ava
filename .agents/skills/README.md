@@ -1,36 +1,30 @@
-# .agents/skills — project skills (open Agent Skills standard)
+# Repository development skills
 
-This directory is the repo's project-skill root: skills written for Ava's own
-development, following the [open Agent Skills standard](https://agentskills.io)
-layout (each skill is a directory with its own `SKILL.md`).
+This directory is the project-local skill entry point for agents developing
+Ava. It follows the [Agent Skills layout](https://agentskills.io): each skill
+has its own `SKILL.md`; references and runnable tools stay with their owner.
 
-**Distribution: project-local only for the real project-skill directories.**
-They are NOT a `converge` source (issue #146 /
-`docs/decisions/runtime/processes/shutdown/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`).
-An Ava agent sees them only through the project-local mount —
-`ava_builtins/plugins/ava_code/_walk.py:project_skill_roots` resolves this
-directory from `ava.cwd` at scan time — so they load exactly when the agent is
-working inside this checkout, never on a machine that only runs Ava. This
-project-local family covers repo-development workflow, Ava-cluster-operations
-skills (`review-contribution`, `ava-self-development`, …), and the
-platform's external-host guide (`impersonator-guide`, for agents acting under an
-impersonation lease).
-General methodology and user-service skills are built-ins instead, then appear
-here through mirrors for open-standard clients.
+Start with [ava-self-development](ava-self-development/SKILL.md) and
+[the contribution guide](../../docs/contributing.md). The shared references are
+[Ava Guide](ava-guide/SKILL.md),
+[Serious Engineering](ava-serious-engineering/SKILL.md) and
+[Serious Research](ava-serious-research/SKILL.md).
+[Review Contribution](review-contribution/SKILL.md) checks this repository's
+rules; [Measure Complexity](measure-complexity/SKILL.md) runs the repository's
+radon tooling; [Inspect a Trace](inspect-a-trace/SKILL.md) explains runtime
+evidence and diagnostics. These independent tools keep their existing owners.
 
-## Built-in mirrors are symlinks
+The three shared packages are symlinks to their canonical sources under
+`ava_builtins/skills/`. This is a development selection, not a mirror of the
+complete built-in catalog. Runtime and personal-service skills remain in their
+built-in packages; removing a project entry does not remove those packages.
+On checkouts with `core.symlinks=false`, mirrors may appear as plain files;
+Ava's built-in loading remains independent of this directory.
 
-The built-in mirrors are **symlinks back to `ava_builtins/skills/<group>/<name>`** (git
-tracks each link itself, mode 120000) so every built-in skill is also reachable
-under the open-standard path for other clients (Claude Code, editors). On a
-platform that checks out symlinks as plain files (`core.symlinks=false`, e.g.
-Windows), those entries land as ordinary files; tools that enumerate this
-directory as a plain filesystem then see files instead of skills — treat the
-symlink entries as mirrors, not separate copies. (Ava's load dir is unaffected
-either way: built-ins converge from `ava_builtins/skills/` directly.)
-
-The directories that are **not** symlinks are real project skills authored
-here (one dir = one skill; edit them in place).
-
-Contributor testing and migration instructions are ordinary documentation:
-[testing](../../docs/conventions/testing.md) and [migrations](../../db/docs/migrations.md).
+Real project skills here are not fleet-wide convergence sources. Ava's Code
+plugin discovers project-local skills from the current checkout; `.claude/skills`
+and `.ava/skills` point here for the same repository context. Built-in skills
+converge from `ava_builtins/skills/` through their existing install/update policy.
+The external executor manual is independently owned by
+[`impersonator-guide`](../../ava_builtins/skills/platform/impersonator-guide/SKILL.md),
+where runtime launchers can find it without exposing a project entry.

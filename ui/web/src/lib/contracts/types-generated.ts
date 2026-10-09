@@ -316,32 +316,12 @@ export interface paths {
         put?: never;
         /**
          * Post Guarded Agents
-         * @description Create a plain agent through a versioned, principal-bound keyed entry.
+         * @description Create or fork an agent through principal-bound keyed admission.
          *
          *     Older routing cannot execute this path. Callers must keep it fixed for an
          *     intent and never fall back to the legacy path after an uncertain response.
          */
         post: operations["post_guarded_agents_api_keyed_v1_agents_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/retry-launch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retry Agent Launch
-         * @description Retry dispatch for one committed identity without adding an inbound.
-         */
-        post: operations["retry_agent_launch_api_agents__agent_id__retry_launch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -415,71 +395,6 @@ export interface paths {
          * @description End the caller's observed takeover without terminating the native agent.
          */
         post: operations["post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/compact": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Compact
-         * @description Trigger compact — INSERT kind='compact_request' inbound; the claim
-         *     Node takes over, runs the backend Compaction LLM to generate a summary
-         *     that replaces messages, and publishes a `compact_done` event to notify
-         *     UI.
-         *
-         *     The new design uniformly uses backend LLM summary generation (see
-         *     docs/decisions/agents/graph/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
-         *     parameter old frontends sent is ignored (still accepted — extra query
-         *     parameters never fail the call). Agent-initiated compact still goes through
-         *     ava.self.compact() -> kind='compact_summary'; this is a separate signal
-         *     from UI-triggered compact_request.
-         *
-         *     A compact targeting a terminated agent auto-resurrects it (shared with the
-         *     chat path): otherwise the compact_request row would sit pending with no live
-         *     process to claim it. The co-batched resurrect wins the claim node's recency
-         *     routing, so the agent wakes and the requested compaction still runs.
-         */
-        post: operations["post_compact_api_agents__agent_id__compact_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cancel
-         * @description Pause/stop the agent — INSERT a durable kind='cancel' inbound.
-         *
-         *     Durable, not fire-and-forget: a running llm/exec node interrupts on the
-         *     row immediately (it watches the inbound Redis pub/sub path); if the agent
-         *     is between actions when the cancel lands, the row stays pending and the
-         *     next claim pass halts it to idle. Either way the agent stops and stays
-         *     alive (resumable by the next message). Enqueue-and-return like `/messages`;
-         *     the kernel emits a `cancelled` SSE event when it actually stops.
-         *
-         *     No cross-machine forwarding: the cancel is a durable row in the shared DB
-         *     (plus a Redis wake), delivered regardless of which host runs the agent.
-         */
-        post: operations["post_cancel_api_cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -954,10 +869,9 @@ export interface paths {
          *     owner, while plain update / reminder notices must not (user ruling
          *     2026-08-27 — notification messages never resurrect a terminated owner).
          *
-         *     An optional Idempotency-Key names one logical note, including its
+         *     A required Idempotency-Key names one logical note, including its
          *     resurrection policy. Replays return the original inbound id and repair
-         *     its wake tail; changed requests conflict (409). Keyless legacy requests
-         *     create a fresh note. The inbound remains kind='system_note'.
+         *     its wake tail; changed requests conflict (409). The inbound remains kind='system_note'.
          *
          *     404: agent_id does not exist. 413: content exceeds the 1 MiB transport
          *     limit. 422: note_tag is not a NoteTag value, or source is not a legal
@@ -1132,8 +1046,8 @@ export interface paths {
          *
          *     The breakdown of the latest LLM request's input: each message's tokens anchored to the
          *     provider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed
-         *     from them, only the inside of a message split by an estimator. Pure gateway-side view logic
-         *     (`gateway/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
+         *     from them, only the inside of a message split by an estimator. Pure view logic
+         *     (`base/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
          *     A checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown
          *     with zeroed totals (same tolerance as token-usage: the panel re-opens fine later).
          */
@@ -2348,8 +2262,11 @@ export interface paths {
         /**
          * Put Config
          * @description Merge a config patch for `machine` (default = this gateway) into `.env`,
-         *     scope-routed. Persist only — no restart (restart_required says which process
+         *     scope-routed, with one declaration owner per request. Persist only — no restart (restart_required says which process
          *     to restart).
+         *
+         *     Plugin fields commit one whole config image; mixed Core/plugin or multi-plugin
+         *     bodies fail before any write. Core fields retain their env writer.
          *
          *     The body is parsed by `ConfigPatchPlan.parse` (shared with the host-side
          *     config_write_op): the editability gate, scope routing, the merge-patch
@@ -3870,7 +3787,7 @@ export interface paths {
          *     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
          *     reassigned, completed, cancelled, or otherwise edited.
          *
-         *     An optional Idempotency-Key commits an immutable response with the write.
+         *     A required Idempotency-Key commits an immutable response with the write.
          *     Reusing that key with different fields returns 409; replay returns the original
          *     task snapshot without another update or wake, even if the task later changes.
          *
@@ -5224,34 +5141,6 @@ export interface components {
             rebuild_id: number | null;
         };
         /**
-         * CancelRequest
-         * @description POST /api/cancel request body — pause/stop the agent, addressed by id.
-         */
-        CancelRequest: {
-            /** Agent Id */
-            agent_id: number;
-        };
-        /**
-         * CancelRequested
-         * @description POST /api/cancel response.
-         *
-         *     `enqueued`: a durable kind='cancel' inbound was INSERTed. The in-flight
-         *         llm/exec node interrupts on it if one is running; otherwise the next
-         *         claim pass halts the agent to idle. The process stays alive.
-         *     `already_terminated`: agent is dead — nothing to pause.
-         */
-        CancelRequested: {
-            status: components["schemas"]["CancelResult"];
-            /** Inbound Id */
-            inbound_id?: number | null;
-        };
-        /**
-         * CancelResult
-         * @description Acceptance of a durable cancel request; separate from process termination.
-         * @enum {string}
-         */
-        CancelResult: "enqueued" | "already_terminated";
-        /**
          * ClusterPanel
          * @description GET /api/status cluster sub-section — multi-machine view.
          *
@@ -5362,22 +5251,6 @@ export interface components {
             target: components["schemas"]["CompactTarget"];
         };
         /**
-         * CompactEnqueued
-         * @description POST /api/agents/{id}/compact response — returns immediately after
-         *     pending insert, does not wait for the kernel loop to finish.
-         */
-        CompactEnqueued: {
-            /** Agent Id */
-            agent_id: number;
-            /**
-             * Status
-             * @constant
-             */
-            status: "enqueued";
-            /** Inbound Id */
-            inbound_id?: number | null;
-        };
-        /**
          * CompactOutcome
          * @enum {string}
          */
@@ -5461,6 +5334,8 @@ export interface components {
         ConfigFieldView: {
             /** Name */
             name: string;
+            /** Owner */
+            owner?: string | null;
             /** Field Type */
             field_type: string;
             /** Current Value */
@@ -5527,7 +5402,7 @@ export interface components {
          * ConfigView
          * @description GET /api/config response — grouped field list + raw_overrides (PUT body source).
          *
-         *     raw_overrides is config.json's current content — the frontend deltas
+         *     raw_overrides combines owned persisted inputs — the frontend deltas
          *     against this and returns the result via PUT.
          *
          *     machine_capabilities is the target machine's capability set (`gateway` and/or
@@ -5554,7 +5429,7 @@ export interface components {
          * @description PUT /api/config response — per-field results + whether anything was applied.
          *
          *     `applied` is True iff every field passed and the write committed (atomic:
-         *     one bad field -> nothing written). `restart_required` is the union of the
+         *     one bad field -> nothing written for that owner). `restart_required` is the union of the
          *     written fields' restart targets ("agent" | "ops" | "gateway" | "all"), for
          *     the per-machine "needs restart" banner.
          */
@@ -6833,14 +6708,11 @@ export interface components {
          *     reconstruct absolute paths. fs-neutral makes mismatched gateway
          *     (e.g. /Users/x) and agent-runner (/home/y) filesystems work.
          *
-         *     `results` carries path + description for each match; `paths` is the
-         *     bare list of relative paths (backward-compat for existing consumers).
+         *     `results` carries path, description and tags for each match.
          */
         MemorySearchResponse: {
-            /** Paths */
-            paths?: string[];
             /** Results */
-            results?: components["schemas"]["MemorySearchResultItem"][];
+            results: components["schemas"]["MemorySearchResultItem"][];
         };
         /**
          * MemorySearchResultItem
@@ -8061,6 +7933,9 @@ export interface components {
         /**
          * RunTimelineMessage
          * @description One raw message of the stitched history, split into its parts.
+         *
+         *     `context_tokens` is what the message occupies in the context (None while no request has read it),
+         *     `estimated` whether that is a share rather than the provider's own number (None with it).
          */
         RunTimelineMessage: {
             /** Idx */
@@ -8071,6 +7946,46 @@ export interface components {
             source: string | null;
             /** Parts */
             parts: components["schemas"]["RunTimelineMessagePart"][];
+            /** Context Tokens */
+            context_tokens: number | null;
+            /** Estimated */
+            estimated: boolean | null;
+        };
+        /**
+         * RunTimelineMessageBar
+         * @description One message the Messages row shows, weighed for the two context rows (one bar per message).
+         *
+         *     `start` / `end` are the extent of the block(s) that show the message, so its bars sit exactly
+         *     under them. `context_tokens` is what the message itself occupies in the context and `estimated`
+         *     whether that is a share rather than the provider's own number; `context_total` is the context
+         *     through this message: its session's head and every message up to it, at the weight each was
+         *     read with (before an AIMessage, the `input_tokens` of the request that produced it). `session`
+         *     is the zero-based compaction segment (the total starts over in each). `request` is the usage of
+         *     the LLM request this AIMessage was (input, output, cache, cost), None for any other message.
+         *     Only messages a request has read are served.
+         */
+        RunTimelineMessageBar: {
+            /** Idx */
+            idx: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Session */
+            session: number;
+            /** Context Tokens */
+            context_tokens: number;
+            /** Estimated */
+            estimated: boolean;
+            /** Context Total */
+            context_total: number;
+            request: components["schemas"]["RunTimelineUsage"] | null;
         };
         /**
          * RunTimelineMessagePart
@@ -8145,47 +8060,6 @@ export interface components {
             estimated: boolean | null;
         };
         /**
-         * RunTimelineRequest
-         * @description One LLM request of the agent: an AIMessage carrying `usage_metadata`.
-         *
-         *     `idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent
-         *     (the read time of the message before it, the start of the turn's thinking block);
-         *     `session` the zero-based compaction segment it was sent in; `input_tokens` the provider's
-         *     total input tokens of that request, the size of its context, and `output_tokens` what it
-         *     generated (both the provider's own numbers, never estimated).
-         *
-         *     `added_tokens` is what newly entered the context for this request: the token sum of the
-         *     messages first read by it, i.e. those from the previous request's AIMessage (its output is
-         *     re-sent) up to the message before this one; for a session's first request, from the session's
-         *     first message. The segment head (system prompt) is not counted. `added_estimated` is True when
-         *     any of those counts is a share rather than the provider's own number. `added_from` / `added_to`
-         *     are that message range as indices into the stitched history, half-open (`added_to` is the
-         *     request's own `idx`); the two are equal when the request read nothing new.
-         */
-        RunTimelineRequest: {
-            /** Idx */
-            idx: number;
-            /**
-             * Ts
-             * Format: date-time
-             */
-            ts: string;
-            /** Session */
-            session: number;
-            /** Input Tokens */
-            input_tokens: number;
-            /** Output Tokens */
-            output_tokens: number;
-            /** Added Tokens */
-            added_tokens: number;
-            /** Added Estimated */
-            added_estimated: boolean;
-            /** Added From */
-            added_from: number;
-            /** Added To */
-            added_to: number;
-        };
-        /**
          * RunTimelineResponse
          * @description GET /api/agents/{agent_id}/run-timeline response.
          *
@@ -8193,8 +8067,8 @@ export interface components {
          *     messages and understanding nodes — and the default window; None when it has
          *     neither. `nodes` are the tree's nodes intersecting the window, every level;
          *     `units` are layer 0 intersecting it. `events` are optional lifecycle markers
-         *     in the window; they play no part in the extent. `requests` are the agent's LLM requests
-         *     sent in the window (the context-size row).
+         *     in the window; they play no part in the extent. `messages` are the weighed messages whose
+         *     blocks intersect the window (the two context rows).
          */
         RunTimelineResponse: {
             /** Agent Id */
@@ -8207,8 +8081,8 @@ export interface components {
             units: components["schemas"]["RunTimelineUnit"][];
             /** Events */
             events: components["schemas"]["RunTimelineEvent"][];
-            /** Requests */
-            requests: components["schemas"]["RunTimelineRequest"][];
+            /** Messages */
+            messages: components["schemas"]["RunTimelineMessageBar"][];
         };
         /**
          * RunTimelineUnit
@@ -8263,7 +8137,10 @@ export interface components {
          * RunTimelineUsage
          * @description The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.
          *
-         *     `input` is the provider's total input tokens (cache reads included).
+         *     `input` is the provider's total input tokens (cache reads and writes included).
+         *     `cost_usd` sums the usage-time cost recorded on the AIMessages (`ava_usage`); `cost_calls` is
+         *     how many of `calls` carry one, the rest (older messages, unpriced models) being unknown, not
+         *     estimated.
          */
         RunTimelineUsage: {
             /** Calls */
@@ -8274,6 +8151,12 @@ export interface components {
             cache_read: number;
             /** Output */
             output: number;
+            /** Cache Write */
+            cache_write: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Cost Calls */
+            cost_calls: number;
         };
         /**
          * RunTimelineWindow
@@ -8746,8 +8629,6 @@ export interface components {
             config?: {
                 [key: string]: unknown;
             } | null;
-            /** Preset */
-            preset?: string | null;
             /** Label */
             label?: string | null;
         };
@@ -9929,37 +9810,6 @@ export interface operations {
             };
         };
     };
-    retry_agent_launch_api_agents__agent_id__retry_launch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpawnedAgent"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_agent_born_chain_api_agents__agent_id__born_chain_get: {
         parameters: {
             query?: never;
@@ -10048,70 +9898,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ForceExpireImpersonationResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_compact_api_agents__agent_id__compact_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompactEnqueued"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cancel_api_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CancelRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CancelRequested"];
                 };
             };
             /** @description Validation Error */
@@ -10666,8 +10452,8 @@ export interface operations {
     post_agent_system_note_api_agents__agent_id__system_note_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -11668,8 +11454,8 @@ export interface operations {
     post_notice_resolve_api_agents__agent_id__notices__notice_id__resolve_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -11706,8 +11492,8 @@ export interface operations {
     post_notice_create_api_agents__agent_id__notices_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -14415,7 +14201,9 @@ export interface operations {
     patch_task_api_tasks__task_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 task_id: number;
             };

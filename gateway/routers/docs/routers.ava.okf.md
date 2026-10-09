@@ -20,7 +20,8 @@ OKF viewer. Fleet graph keeps its route-local query.
 | `gateway/events/` | `router` (events), `agent_events`, `computer_traces`, `resolutions`, `metrics`, `system` |
 | `gateway/cluster/` | `router` (cluster), `machine_pause`, `bootstrap`, `status`, `ops_monitor` |
 | `gateway/extensions/` | `inventory`, `skills`, `plugin_ui`, `ui_contributions`, `packages` |
-| `gateway/alerts/`, `gateway/http/auth/`, `gateway/mcp_server/`, `gateway/schedules/`, `gateway/run_timeline/`, `gateway/inspect/` | `router` |
+| `gateway/routers/configuration/` | `runtime`, `default_model` |
+| `gateway/alerts/`, `gateway/http/auth/`, `gateway/mcp_server/`, `gateway/schedules/`, `gateway/inspect/` | `router` |
 
 ## Router categories
 
@@ -39,7 +40,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 ### Cluster & configuration
 - **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, and maintenance control (admin contracts: [[gateway/cluster/docs/ops-surfaces.ava.okf.md]])
 - **bootstrap** (`/api/bootstrap`) — agent-runner registration handshake (returns cluster config; `AVA_DB_URL` is the credential-free endpoint, never a login, and the human secret is never served; admits a unit's machine API token)
-- **config** (`/api/config`) — runtime configuration read/write (PUT is merge-patch reducer, not full-replace); validates the full affected Settings candidate before persisting (400 invalid / 409 concurrent-write retry)
+- **configuration** (`/api/config*`) — [[gateway/routers/configuration/docs/configuration.ava.okf.md|runtime config and the default model]]
 - **settings** (`/api/settings`) — frontend user preference KV store (`user_settings` table)
 - **frontend_telemetry** (`POST /api/frontend-telemetry`) — user-modeling telemetry ingest: validates a batch of tracked frontend interactions (page/element/session_id/key/value, no free text) and emits one `frontend_interaction` event per accepted interaction into the unified stream (per-session rate-limit backstop)
 - **inventory** (`/api/inventory`) — cross-machine plugin + MCP enable/disable panel

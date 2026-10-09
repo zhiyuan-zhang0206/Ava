@@ -21,7 +21,6 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
@@ -180,7 +179,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
             if operation == "write":
                 sdk.write("expired-note", "Must not be written.")
             else:
-                notes.per_agent_memory_note(AgentSlices.resolve())
+                notes.per_agent_memory_note(ava.context)
         assert not list(tmp_path.iterdir())
     finally:
         with pytest.raises(leases.ImpersonationError, match="expired"):

@@ -1,108 +1,95 @@
-"""Turn-scoped agent identity (base/native_process/turn_identity.py) and its layering into
-`ava.sdk_surface.agent_identity` — Phase 1 of future/infra/lifecycle/agent-runner-as-server.md.
-
-Locks the resolution order `turn contextvar > process slot > AVA_AGENT_ID env`
-at every identity read, the copied-context handoff to worker threads, and the
-process-mode invariants (nothing bound => behavior identical to today).
-"""
+"""Host turn metadata never selects the SDK's process-local identity."""
 
 from __future__ import annotations
 
 import asyncio
-import threading
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+import ava
 from ava.sdk_surface import agent_identity
 from base.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+from tests.fixtures.pin_agent import exec_context, pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
 def _reset_process_slots(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate the process bootstrap slots and the env identity per test."""
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
 
-class TestBootLayering:
-    def test_process_mode_unchanged(self) -> None:
-        pin_agent(11, owns_loop=True)
+def test_turn_metadata_cannot_override_a_local_sdk_binding() -> None:
+    pin_agent(11, owns_loop=True)
+    with bind_turn_identity(22):
         assert agent_identity.agent_id() == 11
-        assert agent_identity.require_agent_id() == 11
         assert agent_identity.require_actor() == "agent:11"
-        agent_identity.assert_self_action("restart")  # does not raise
+    assert agent_identity.require_agent_id() == 11
 
-    def test_turn_binding_wins_over_process_slot(self) -> None:
-        pin_agent(11, owns_loop=True)
-        with bind_turn_identity(22):
-            assert agent_identity.agent_id() == 22
-            assert agent_identity.require_agent_id() == 22
-            assert agent_identity.require_actor() == "agent:22"
-            assert agent_identity.default_actor() == "agent:22"
-        assert agent_identity.agent_id() == 11
 
-    def test_turn_binding_provides_identity_without_process_slot(self) -> None:
-        with bind_turn_identity(33):
-            assert agent_identity.require_agent_id() == 33
-            agent_identity.assert_self_action("terminate")  # turn context owns its loop
-
-    def test_no_identity_still_raises(self) -> None:
+def test_host_identity_requires_the_callers_explicit_context() -> None:
+    context = exec_context(33)
+    with bind_turn_identity(33):
+        assert agent_identity.agent_id() is None
         with pytest.raises(RuntimeError, match="no established agent identity"):
             agent_identity.require_agent_id()
+        with pytest.raises(RuntimeError, match="established agent identity"):
+            agent_identity.assert_self_action("terminate")
+        assert agent_identity.require_agent_id(context) == 33
+        assert agent_identity.require_actor(context) == "agent:33"
+    assert getattr(ava, "context", None) is None
 
-    def test_launched_child_semantics_survive(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # A launched child (env identity, owns_loop False) still refuses
-        # lifecycle self-actions — and a bound turn context is never a child.
-        monkeypatch.setenv("AVA_AGENT_ID", "5")
-        assert agent_identity.is_launched_child() is True
-        with pytest.raises(RuntimeError, match="background script"):
-            agent_identity.assert_self_action("restart")
-        with bind_turn_identity(5):
-            assert agent_identity.is_launched_child() is False
-            agent_identity.assert_self_action("restart")  # the host owns the turn loop
 
-    def test_explicit_actor_still_wins_without_turn_context(self) -> None:
-        pin_agent(None, actor="schedule:7")
+def test_native_turn_cannot_bootstrap_env_identity_or_attach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ava.external import attach
+
+    monkeypatch.setenv("AVA_AGENT_ID", "5")
+    with bind_turn_identity(5):
+        assert agent_identity.is_launched_child() is False
+        assert getattr(ava, "context", None) is None
+        with pytest.raises(RuntimeError, match="native agent runtime"):
+            attach("must-not-be-read")
+
+
+def test_turn_metadata_cannot_grant_a_launched_script_loop_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AVA_AGENT_ID", "5")
+    assert agent_identity.is_launched_child() is True
+    with bind_turn_identity(5), pytest.raises(RuntimeError, match="background script"):
+        agent_identity.assert_self_action("restart")
+
+
+def test_explicit_actor_is_independent_of_turn_metadata() -> None:
+    pin_agent(None, actor="schedule:7")
+    with bind_turn_identity(9):
         assert agent_identity.require_actor() == "schedule:7"
-        with bind_turn_identity(9):
-            # A turn context is more specific than the process actor: work done
-            # inside agent 9's turn is agent 9's.
-            assert agent_identity.require_actor() == "agent:9"
 
 
-class TestPropagation:
-    def test_bind_reaches_asyncio_tasks(self) -> None:
-        async def scenario() -> tuple[Any, Any]:
-            async def turn() -> Any:
-                return agent_identity.agent_id()
+def test_sdk_threads_use_one_local_binding_without_patching_thread_start() -> None:
+    import threading
 
-            with bind_turn_identity(77):
-                task = asyncio.create_task(turn())
-            return await task, agent_identity.agent_id()
+    def read_identity(_: int) -> int:
+        return agent_identity.require_agent_id()
 
-        inside, outside = asyncio.run(scenario())
-        assert inside == 77
-        assert outside is None
+    start = threading.Thread.start
+    pin_agent(88)
+    with ThreadPoolExecutor(2) as pool:
+        assert list(pool.map(read_identity, range(4))) == [88] * 4
+    pin_no_identity()
+    assert threading.Thread.start is start
+    assert threading.Thread.start.__module__ == "threading"
 
-    def test_copied_context_reaches_worker_thread(self) -> None:
-        # The exec-node pattern: threads do not inherit contextvars, so the
-        # worker must be started under contextvars.copy_context().
-        import contextvars
 
-        seen: list[Any] = []
-        with bind_turn_identity(88):
-            ctx = contextvars.copy_context()
-        t = threading.Thread(target=ctx.run, args=(lambda: seen.append(agent_identity.agent_id()),))
-        t.start()
-        t.join()
-        assert seen == [88]
+def test_native_metadata_still_propagates_to_host_async_tasks() -> None:
+    async def scenario() -> tuple[int | None, int | None]:
+        async def read_turn() -> int | None:
+            return current_turn_agent_id()
 
-    def test_bare_thread_does_not_inherit(self) -> None:
-        seen: list[Any] = []
-        with bind_turn_identity(88):
-            t = threading.Thread(target=lambda: seen.append(current_turn_agent_id()))
-            t.start()
-            t.join()
-        assert seen == [None]
+        with bind_turn_identity(77):
+            task = asyncio.create_task(read_turn())
+        return await task, current_turn_agent_id()
+
+    assert asyncio.run(scenario()) == (77, None)

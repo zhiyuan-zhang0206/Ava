@@ -18,7 +18,7 @@ def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent
     assert body["retryable"] is False
     assert body["state"]["status"] == "idling"
     assert body["state"]["availability"]["reason"] == "launch_unreachable"
-    assert body["retry_launch_path"] == f"/api/agents/{agent_id}/retry-launch"
+    assert body["retry_launch_path"] == f"/api/keyed/v1/agents/{agent_id}/retry-launch"
     assert (
         client.get(f"/api/agents/{agent_id}").json()["availability"]["reason"]
         == "launch_unreachable"
@@ -30,7 +30,7 @@ def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent
     )
 
 
-def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
+def test_failed_plain_launch_persists_prompt_and_advertises_guarded_recovery(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
     from base.agents.observation.evidence import AvailabilityReason
@@ -52,61 +52,6 @@ def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
         agent_id = body["agent_id"]
         _assert_failed_birth_visible(client, body, agent_id)
         assert _inbound_rows(db_conn, agent_id) == [("Do the task", "chat", "user")]
-
-        async def _succeed(_db: object, _target: str, retry: LaunchAgentRequest) -> SpawnedAgent:
-            attempts.append(retry)
-            return SpawnedAgent(id=retry.agent_id)
-
-        monkeypatch.setattr(route, "forward_spawn_to_remote", _succeed)
-        repaired = client.post(body["retry_launch_path"])
-        assert repaired.status_code == 200
-        assert repaired.json()["id"] == agent_id
-        assert attempts[0].launch_attempt_id != attempts[1].launch_attempt_id
-        assert attempts[1].prompt is None
-        assert _inbound_rows(db_conn, agent_id) == [("Do the task", "chat", "user")]
-        assert (
-            client.get(f"/api/agents/{agent_id}").json()["availability"]["reason"]
-            != "launch_unreachable"
-        )
-
-
-def test_retry_launch_rejects_non_idling_agent_without_rotating_attempt(
-    db_conn: psycopg.Connection,
-) -> None:
-    with TestClient(app) as client:
-        created = client.post("/api/agents", json={})
-        assert created.status_code == 201
-        agent_id = created.json()["id"]
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,))
-            original_attempt_row = cur.fetchone()
-            assert original_attempt_row is not None
-            original_attempt = original_attempt_row[0]
-            cur.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (agent_id,))
-        db_conn.commit()
-
-        response = client.post(f"/api/agents/{agent_id}/retry-launch")
-        assert response.status_code == 409
-        assert response.json()["detail"] == (
-            f"agent {agent_id} cannot retry launch in status running"
-        )
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,))
-            retry_attempt_row = cur.fetchone()
-            assert retry_attempt_row is not None
-            assert retry_attempt_row[0] == original_attempt
-
-
-def test_retry_launch_returns_404_for_missing_agent(db_conn: psycopg.Connection) -> None:
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM agents_meta")
-        missing_id_row = cur.fetchone()
-        assert missing_id_row is not None
-        missing_id = missing_id_row[0]
-    with TestClient(app) as client:
-        response = client.post(f"/api/agents/{missing_id}/retry-launch")
-    assert response.status_code == 404
-    assert response.json()["reason"] == "agent_not_found"
 
 
 def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
@@ -132,12 +77,6 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
         assert body["agent_id"] > 0
         assert body["state"] == {"status": "unknown", "availability": None}
         assert _inbound_rows(db_conn, body["agent_id"]) == [("Keep me", "chat", "user")]
-
-        async def _succeed(_db: object, _target: str, retry: LaunchAgentRequest) -> SpawnedAgent:
-            return SpawnedAgent(id=retry.agent_id)
-
-        monkeypatch.setattr(route, "forward_spawn_to_remote", _succeed)
-        assert client.post(f"/api/agents/{body['agent_id']}/retry-launch").status_code == 200
 
 
 def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(

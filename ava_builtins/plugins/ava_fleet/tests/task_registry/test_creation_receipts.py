@@ -4,12 +4,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from threading import Barrier
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
 from psycopg import sql
 
-from ava.sdk_surface import process_context
 from ava_builtins.plugins.ava_fleet import _task_creation_receipts, _task_update, task_registry
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
@@ -38,17 +38,16 @@ def test_concurrent_creation_returns_same_original_task(
     def create(_index: int) -> task_registry.Task:
         clients = ClientSet(database=Database.from_settings)
         try:
-            with process_context.scoped(
-                AvaContext(identity=AgentIdentity(actor, True), clients=clients)
-            ):
-                barrier.wait()
-                return task_registry.create(
-                    "concurrent creation",
-                    "work",
-                    parent=root_task_id,
-                    owner=owner,
-                    operation_key="same",
-                )
+            context = AvaContext(identity=AgentIdentity(actor, True), clients=clients)
+            barrier.wait()
+            return task_registry._create(
+                context,
+                "concurrent creation",
+                "work",
+                parent=root_task_id,
+                owner=owner,
+                operation_key="same",
+            )
         finally:
             clients.close()
 
@@ -79,8 +78,10 @@ def test_lost_response_returns_original_after_mutation_and_title_reuse(
     assert snapshot is not None
     original = task_registry.Task(**snapshot[0])
     monkeypatch.setattr(telemetry, "emit_prepared", real_emit)
-    task_registry.update(original.id, title="renamed", status="done")
-    task_registry.create("original", "another work", parent=root_task_id)
+    task_registry.update(original.id, title="renamed", status="done", operation_key=str(uuid4()))
+    task_registry.create(
+        "original", "another work", parent=root_task_id, operation_key=str(uuid4())
+    )
     before = _facts(db_conn)
     monkeypatch.setattr(telemetry, "emit_prepared", fail)
     assert (
@@ -94,7 +95,7 @@ def test_deleted_task_and_parent_replay_snapshot(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     pin_agent(_seed_agent(db_conn))
-    parent = task_registry.create("parent", "work", parent=root_task_id)
+    parent = task_registry.create("parent", "work", parent=root_task_id, operation_key=str(uuid4()))
     original = task_registry.create("child", "work", parent=parent.id, operation_key="deleted")
     db_conn.execute("DELETE FROM agent_tasks WHERE id IN (%s,%s)", (original.id, parent.id))
     db_conn.commit()
@@ -200,7 +201,7 @@ def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(
 ) -> None:
     pin_agent(_seed_agent(db_conn))
     snapshot: dict[str, object] = asdict(
-        task_registry.create("snapshot", "work", parent=root_task_id)
+        task_registry.create("snapshot", "work", parent=root_task_id, operation_key=str(uuid4()))
     )
     for invalid in (
         {k: v for k, v in snapshot.items() if k != "priority"},

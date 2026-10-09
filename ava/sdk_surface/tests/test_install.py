@@ -19,13 +19,18 @@ import pytest
 
 import ava
 from ava.sdk_surface import install, metering, skill_sources, wraps
+from ava.sdk_surface import plugins as sdk_plugins
 from ava.sdk_surface.plugins import (
     FrameworkNamespaceConflictError,
+    InvalidNamespaceNameError,
     PluginNamespaceConflictError,
 )
 from ava.sdk_surface.sdk_disable import _DisabledSDKModule
+from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
+from base.packages.plugin_config_images import PluginConfigChangedError
 from base.packages.plugins import flags, load_report
+from base.packages.plugins.config_registration import DuplicateRegistration
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
@@ -36,9 +41,10 @@ from base.packages.plugins.extensions import (
 
 
 @pytest.fixture(autouse=True)
-def _surface() -> Iterator[None]:
+def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Start from no installation and bare callables, and leave no installation behind."""
     assert install.installed() is None
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     yield
     install.uninstall()
 
@@ -237,8 +243,8 @@ def _declaring(failing: str) -> PluginContributions:
 @pytest.mark.parametrize(
     ("failing", "error"),
     [
-        pytest.param("wrap", AttributeError, id="wrap-target-does-not-resolve"),
-        pytest.param("expansion", ValueError, id="expansion-path-invalid"),
+        pytest.param("wrap", wraps.WrapTargetError, id="wrap-target-does-not-resolve"),
+        pytest.param("expansion", InvalidNamespaceNameError, id="expansion-path-invalid"),
         pytest.param("flag", flags.UnknownFlag, id="flag-unknown-applied-last"),
     ],
 )
@@ -413,3 +419,151 @@ def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_regis
 
     install.uninstall()
     assert install.expansions() == ()
+
+
+def test_install_keeps_core_dependencies_in_the_admitted_declaration() -> None:
+    contribution = PluginContributions(flags=("general.message_timestamps",))
+
+    admitted = install.install(_registry(("declared", contribution)))
+
+    assert admitted.plugins == (("declared", contribution),)
+    installation = install.installed()
+    assert installation is not None and installation.registry == admitted
+    install.uninstall()
+    assert contribution.flags == ("general.message_timestamps",)
+
+
+@pytest.mark.parametrize("key", ["bogus.x", "data_plane.db_url"])
+def test_invalid_core_dependency_rolls_back_the_plugin(
+    load_failures: list[tuple[str, BaseException]], key: str
+) -> None:
+    bad = PluginContributions(
+        sdk_namespaces=(SdkNamespace("failed_ns", _namespace()),),
+        flags=("general.message_timestamps", key),
+    )
+    good = PluginContributions(sdk_namespaces=(SdkNamespace("good_ns", _namespace()),))
+
+    admitted = install.install(_registry(("bad", bad), ("good", good)))
+
+    assert admitted.plugins == (("good", good),)
+    [(name, error)] = load_failures
+    assert name == "bad" and isinstance(error, flags.UnknownFlag)
+    assert not hasattr(ava, "failed_ns")
+    assert hasattr(ava, "good_ns")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        AttributeError("binding implementation bug"),
+        ValueError("binding invariant bug"),
+        RuntimeError("binding runtime bug"),
+        OSError("binding disk failure"),
+        PluginConfigChangedError("unhandled config write conflict"),
+        DuplicateRegistration("config binding invariant violated"),
+        KeyboardInterrupt("binding cancelled"),
+    ],
+)
+def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    load_failures: list[tuple[str, BaseException]],
+    error: BaseException,
+) -> None:
+    from pydantic import BaseModel
+
+    from base.packages.plugins import config_registration
+
+    def fail_binding(plugin: str, cls: type[BaseModel]) -> Callable[[], None]:
+        raise error
+
+    monkeypatch.setattr(config_registration, "bind_plugin_config", fail_binding)
+    before = _surface_snapshot()
+    failing = PluginContributions(
+        sdk_namespaces=(SdkNamespace("failed_ns", _namespace(ping=_ping)),),
+        sdk_members=(SdkMember("self", "failed_member", _extra),),
+        sdk_wraps=(SdkWrap("files.read", _passthrough),),
+        skill_sources=(lambda: [Path("/nonexistent-failed")],),
+        flags=("general.message_timestamps",),
+        config=BaseModel,
+    )
+    prior = PluginContributions(sdk_namespaces=(SdkNamespace("prior_ns", _namespace()),))
+    later = PluginContributions(sdk_namespaces=(SdkNamespace("later_ns", _namespace()),))
+
+    with pytest.raises(type(error)) as caught:
+        install.install(_registry(("prior", prior), ("failed", failing), ("later", later)))
+
+    assert caught.value is error
+    assert install.installed() is None
+    assert load_failures == []
+    assert _surface_snapshot() == before
+    assert not hasattr(ava, "failed_ns") and not hasattr(ava, "prior_ns")
+    assert not hasattr(ava, "later_ns")
+
+
+@pytest.mark.parametrize("refused", [False, True], ids=["unknown-primary", "typed-refusal"])
+def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
+    monkeypatch: pytest.MonkeyPatch,
+    load_failures: list[tuple[str, BaseException]],
+    refused: bool,
+) -> None:
+    from pydantic import BaseModel
+
+    from base.packages.plugins import config_registration
+
+    primary = RuntimeError("original bind failure")
+    cleanup = OSError("member cleanup failed")
+    cancelled = KeyboardInterrupt("namespace cleanup interrupted")
+    calls: list[str] = []
+    install_member = sdk_plugins.install_member
+    install_namespace = sdk_plugins.install_namespace
+
+    def member(*args: Any, **kwargs: Any) -> Callable[[], None]:
+        undo = install_member(*args, **kwargs)
+
+        def undo_member() -> None:
+            undo()
+            calls.append("member")
+            raise cleanup
+
+        return undo_member
+
+    def namespace(plugin: str, *args: Any, **kwargs: Any) -> Callable[[], None]:
+        undo = install_namespace(plugin, *args, **kwargs)
+
+        def undo_namespace() -> None:
+            undo()
+            calls.append(plugin)
+            if plugin == "failed":
+                raise cancelled
+
+        return undo_namespace
+
+    def fail_binding(plugin: str, cls: type[BaseModel]) -> Callable[[], None]:
+        raise primary
+
+    monkeypatch.setattr(sdk_plugins, "install_member", member)
+    monkeypatch.setattr(sdk_plugins, "install_namespace", namespace)
+    monkeypatch.setattr(config_registration, "bind_plugin_config", fail_binding)
+    before = _surface_snapshot()
+    failing = PluginContributions(
+        sdk_namespaces=(SdkNamespace("failed_ns", _namespace()),),
+        sdk_members=(SdkMember("self", "failed_member", _extra),),
+        flags=("not_a_flag",) if refused else (),
+        config=None if refused else BaseModel,
+    )
+    prior = PluginContributions(sdk_namespaces=(SdkNamespace("prior_ns", _namespace()),))
+    later = PluginContributions(sdk_namespaces=(SdkNamespace("later_ns", _namespace()),))
+    expected = cleanup if refused else primary
+
+    with pytest.raises(type(expected)) as caught:
+        install.install(_registry(("prior", prior), ("failed", failing), ("later", later)))
+
+    assert caught.value is expected
+    assert calls == ["member", "failed", "prior"]
+    notes = "\n".join(caught.value.__notes__)
+    assert "namespace cleanup interrupted" in notes
+    if not refused:
+        assert "member cleanup failed" in notes
+    assert load_failures == []
+    assert install.installed() is None
+    assert _surface_snapshot() == before

@@ -34,15 +34,14 @@ import pytest
 from scripts.codegen import gen_pyright_test_environments as gen
 from scripts.codegen.gen_pyright_test_environments import (
     CALL_SIGNATURE_RULES,
-    HOSTS,
     TESTS_STANDARD,
     effective_rules,
 )
+from scripts.structure.lint_common import pytest_test_hosts
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_PYRIGHT = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"][
-    "pyright"
-]
+_PYPROJECT_TEXT = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+_PYRIGHT = tomllib.loads(_PYPROJECT_TEXT)["tool"]["pyright"]
 
 
 def _config(*environments: dict[str, Any]) -> dict[str, Any]:
@@ -96,7 +95,9 @@ def _tracked_test_directories() -> list[str]:
     directories = {
         path.rsplit("/", 1)[0]
         for path in result.stdout.split("\0")
-        if path.split("/")[0] in HOSTS and "tests" in path.split("/")[:-1]
+        if path.split("/")[0] != "tests"
+        and path.split("/")[0] in pytest_test_hosts(_PYPROJECT_TEXT)
+        and "tests" in path.split("/")[:-1]
     }
     return sorted(directories)
 
@@ -127,6 +128,9 @@ def test_an_environment_root_that_exists_names_a_directory(environment: dict[str
 # ── the generator ───────────────────────────────────────────────────────────
 
 _SYNTHETIC_PYPROJECT = f"""\
+[tool.pytest.ini_options]
+testpaths = ["tests", "base/**/tests", "ava/**/tests", "ava_builtins/**/tests", "cli/**/tests", "services/**/tests"]
+
 [tool.pyright]
 {chr(10).join(f'{rule} = "warning"' for rule in TESTS_STANDARD)}
 
@@ -175,7 +179,8 @@ def test_tests_roots_are_the_outermost_tests_directory_of_a_package_module() -> 
             "docs/tests/test_x.py",  # not a package host
             "base/packages/attests/x.py",
             "base/packages/mod.py",
-        ]
+        ],
+        pytest_test_hosts(_SYNTHETIC_PYPROJECT),
     ) == ["ava_builtins/skills/integrations/gmail/scripts/tests", "base/packages/tests"]
 
 

@@ -173,14 +173,22 @@ def _write_cache(server: str, tools: list[ToolInfo]) -> None:
 
 def _clients() -> McpClients:
     """The MCP clients of the bound context, built on first use."""
-    from ava.sdk_surface import process_context
+    import ava
 
-    return process_context.current().clients.get(McpClients)
+    return ava.context.clients.get(McpClients)
 
 
 def _get_remote_client() -> _RemoteMCPClient | None:
     """The client of this machine's MCP daemon, or None to connect locally."""
     return _clients().remote()
+
+
+def _enabled_server_spec(server: str) -> dict[str, Any]:
+    """Require current enable admission before using a cached or new session."""
+    config = _load_config()
+    if server not in config:
+        raise MCPServerNotFound(f"no server {server!r} in `$AVA_HOME/mcp.json`")
+    return config[server]
 
 
 async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
@@ -190,6 +198,7 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
       Default None → use mcp SDK default (sys.stderr).
       `subprocess.DEVNULL` → discard subprocess stderr (discovery scenario).
     """
+    _enabled_server_spec(server)
     if server in mcp.sessions:
         return mcp.sessions[server]
 
@@ -199,13 +208,9 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
         mcp.session_locks[server] = lock
 
     async with lock:
+        spec = _enabled_server_spec(server)
         if server in mcp.sessions:
             return mcp.sessions[server]
-
-        cfg = _load_config()
-        if server not in cfg:
-            raise MCPServerNotFound(f"no server {server!r} in `$AVA_HOME/mcp.json`")
-        spec = cfg[server]
         assert_requirements(spec)
         url = server_url(spec)
         if url is not None:
@@ -393,7 +398,9 @@ def _list_tools(server: str) -> list[ToolInfo]:
         # must propagate, not be silently retried on a freshly-spawned local
         # session, which would mask the error and double-run side effects.
         with suppress(MCPConnectError, OSError):
-            return remote.list_tools(server)
+            return remote.list_tools(
+                server, timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds
+            )
 
     cached = _read_cache(server)
     if cached is not None:
@@ -430,7 +437,9 @@ def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
         # (MCPCallError / MCPToolNotFound) propagates rather than being silently
         # retried locally (which would double-run a side-effectful tool).
         with suppress(MCPConnectError, OSError):
-            return remote.call_tool(server, tool, args)
+            return remote.call_tool(
+                server, tool, args, timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds
+            )
         # The daemon attempt may have outlived the borrowed lease.
         agent_identity.validate_external_identity()
 

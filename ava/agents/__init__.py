@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 import ava
 import ava.sdk_surface.agent_identity
@@ -35,7 +36,9 @@ from base.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 from base.clock import Clock
 from base.config import settings
 
+from . import compaction as compaction
 from . import presets as presets
+from . import work as work
 
 __all_for_ava__ = [
     "AgentDirectoryPage",
@@ -53,8 +56,10 @@ __all_for_ava__ = [
     "TerminateOutcome",
     "TerminateResult",
     "commands",
+    "compaction",
     "get_ancestors",
     "get_last_message",
+    "get_launch_attempt",
     "get_neighbors",
     "get_status",
     "list_agents",
@@ -66,6 +71,7 @@ __all_for_ava__ = [
     "send_message",
     "spawn",
     "terminate",
+    "work",
 ]
 
 
@@ -387,16 +393,14 @@ def spawn(
     machine: str | None = None,
     config_overlay: dict[str, object] | None = None,
     *,
-    idempotency_key: str | None = None,
-    require_idempotency: bool = False,
+    idempotency_key: str,
 ) -> int:
     """Start a new agent; does not block.
 
-    Set `require_idempotency=True` with an explicit `idempotency_key` for plain
-    creation that can recover its original identity after a lost response. Reuse
-    the same key, inputs and caller identity; use a new key for another agent.
-    Strong mode rejects `fork_from`. The default mode remains compatible but
-    cannot guarantee key recovery on older servers.
+    An explicit `idempotency_key` identifies this creation or fork. Reuse the
+    same key, inputs and caller identity to recover its original agent after a
+    lost response; use a new key for another agent. Acceptance does not prove
+    execution, and uncertain transport outcomes are not automatically retried.
 
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
     `machine` defaults to yours. `config_overlay={"preset": "name"}` starts from a saved config
@@ -415,18 +419,37 @@ def spawn(
         config=config_overlay,
         label=None,
         idempotency_key=idempotency_key,
-        require_idempotency=require_idempotency,
     )
 
 
-def retry_launch(agent_id: int) -> int:
-    """Retry starting an existing agent after a launch failure.
+def get_launch_attempt(agent_id: int) -> UUID:
+    """Read the current launch attempt ID for an explicit retry.
 
-    This keeps its identity and first prompt. Use the agent id returned in the
-    failed creation response.
+    Keep this value with the retry's key; a later observation may describe
+    another attempt. Fails when no launch attempt can be observed.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return _client.retry_launch(agent_id)
+    return _client.get_launch_attempt(agent_id)
+
+
+def retry_launch(
+    agent_id: int,
+    *,
+    idempotency_key: str,
+    expected_prior_attempt_id: str | UUID,
+) -> int:
+    """Retry starting an existing agent after a launch failure.
+
+    Keep the agent id, `idempotency_key` and `expected_prior_attempt_id` together
+    when recovering a lost response. Acceptance does not prove the agent started.
+    A deliberate new retry needs a new key and the latest observed attempt.
+    """
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    return _client.retry_launch(
+        agent_id,
+        idempotency_key=idempotency_key,
+        expected_prior_attempt_id=expected_prior_attempt_id,
+    )
 
 
 def spawn_impl(
@@ -436,8 +459,7 @@ def spawn_impl(
     machine: str | None,
     config: dict[str, object] | None,
     label: str | None,
-    idempotency_key: str | None = None,
-    require_idempotency: bool = False,
+    idempotency_key: str,
 ) -> int:
     # Shared spawn body. `label` is exposed on the public `spawn` only when the
     # ava_fleet plugin wraps it (the plugin passes a real label through here);
@@ -450,11 +472,9 @@ def spawn_impl(
     machine = coerce_str(machine, "machine", allow_none=True)
     config = coerce_typed(config, "config", dict, allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
-    from ava.gateway_client.creation_admission import validate_spawn_admission
+    from base.api_contracts.idempotency import validate_idempotency_key
 
-    idempotency_key = validate_spawn_admission(
-        require_idempotency=require_idempotency, key=idempotency_key, fork_from=fork_from
-    )
+    idempotency_key = validate_idempotency_key(idempotency_key)
     spawner = ava.sdk_surface.agent_identity.require_actor()
     if config:
         # The `preset` key is spawn-boundary metadata, not a Settings field: it
@@ -479,7 +499,6 @@ def spawn_impl(
         config=config,
         label=label,
         idempotency_key=idempotency_key,
-        **({"require_idempotency": True} if require_idempotency else {}),
     )
 
 
@@ -569,7 +588,7 @@ def send_system_note(
     tag: str = "task",
     task_id: int | None = None,
     resurrect: bool = True,
-    idempotency_key: str | None = None,
+    idempotency_key: str,
 ) -> int:
     """Deliver a framework system note to another agent.
 
@@ -605,9 +624,9 @@ def send_system_note(
     if task_id is not None and tag != NoteTag.TASK.value:
         raise ValueError("task_id requires tag='task'")
     resurrect = coerce_typed(resurrect, "resurrect", bool)
-    idempotency_key = coerce_str(idempotency_key, "idempotency_key", allow_none=True)
-    if idempotency_key is not None and not 1 <= len(idempotency_key) <= 128:
-        raise ValueError("idempotency_key must contain 1 to 128 characters")
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    idempotency_key = validate_idempotency_key(idempotency_key)
     source = ava.sdk_surface.agent_identity.require_actor()
     return _client.send_system_note(
         agent_id,

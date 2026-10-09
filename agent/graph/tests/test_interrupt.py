@@ -521,10 +521,14 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
 
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
 
-    def standing_head(_extensions: ExtensionRegistry, _slices: AgentSlices) -> str:
+    def standing_head(
+        _extensions: ExtensionRegistry, _slices: AgentSlices, *, agent_id: int | None
+    ) -> str:
+        assert agent_id is None
         return "standing head"
 
-    def no_notes(_extensions: ExtensionRegistry, _slices: AgentSlices) -> list[Any]:
+    def no_notes(_extensions: ExtensionRegistry, ctx: AvaContext) -> list[Any]:
+        assert ctx.identity is None
         return []
 
     monkeypatch.setattr("agent.graph._init_context.build_system_prompt", standing_head)

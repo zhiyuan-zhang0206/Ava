@@ -20,14 +20,18 @@ import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
+from langgraph.runtime import Runtime
+
 from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, PluginStateHandle
+from base.agents.context import AvaContext
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
+from base.paths import workspace_dir
 
 from ._prompt_sections import _coding_tools_section, _engineering_workflow_section
-from ._state import AvaCodeState, default_cwd
+from ._state import AvaCodeState
 
 
 def state_handle() -> PluginStateHandle[AvaCodeState]:
@@ -117,7 +121,7 @@ def _logical_cwd_error(cwd: Path) -> OSError | None:
 
 
 class _ValidateCwdAfterInitHook(Hook):
-    """Repair a persisted logical cwd that cannot be statted or is not a directory.
+    """Initialize an absent cwd channel or repair an unusable persisted directory.
 
     The Python process cwd is deliberately outside plugin state: SDK wrappers
     resolve against ``ava.cwd`` explicitly, while bare Python filesystem and
@@ -127,19 +131,25 @@ class _ValidateCwdAfterInitHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: object,
+        runtime: Runtime[AvaContext],
         _config: object,
         /,
-    ) -> dict | None:
-        cwd = Path(state.ava_code__cwd)  # pyright: ignore[reportAttributeAccessIssue]
-        exc = _logical_cwd_error(cwd)
+    ) -> dict[str, str] | None:
+        initialized = "ava_code__cwd" in state.model_fields_set
+        cwd = Path(state_handle().view(state).cwd)
+        exc = _logical_cwd_error(cwd) if initialized else None
+        if initialized and exc is None:
+            return None
+
+        identity = runtime.context.identity
+        aid = None if identity is None else identity.agent_id
+        fallback = str(Path.home() if aid is None else workspace_dir(aid))
         if exc is not None:
             # The persisted cwd is no longer usable (worktree deleted after
             # PR merge / task cleanup, drive unmounted, replaced by a file,
             # etc.). Fall back
             # to the agent's workspace and persist the new cwd so future
             # turns and restarts don't crash on the same stale path.
-            fallback = default_cwd()
             logger.warning(
                 "[ava_code] after_init: persisted cwd {cwd!r} failed validation "
                 "({exc!r}), falling back to {fallback!r} — state updated so "
@@ -148,8 +158,7 @@ class _ValidateCwdAfterInitHook(Hook):
                 exc=exc,
                 fallback=str(fallback),
             )
-            return {"ava_code__cwd": str(fallback)}
-        return None
+        return {"ava_code__cwd": fallback}
 
 
 def contribute() -> PluginContributions:

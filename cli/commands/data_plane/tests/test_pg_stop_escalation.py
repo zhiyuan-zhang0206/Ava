@@ -9,6 +9,7 @@ would trigger the compensating `ava start`).
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -83,7 +84,9 @@ def _port_of(data: Path) -> int:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="owned POSIX PostgreSQL")
 def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     data, port = _private_home(tmp_path, monkeypatch)
     monkeypatch.setattr(instance, "archive_pg_args", _hung_archive_args)
@@ -99,14 +102,14 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     monkeypatch.setattr("base.telemetry.emit", emit)
     notes: list[str] = []
     try:
-        assert instance._start_pg(port, "") == 0
+        assert instance._start_pg(port, "", retained_children=retained_children) == 0
         owner = ownership.postgres(data)
         assert owner is not None
         hung = _wait_for_hung_archive_command(data)
         hung_pids = {process.pid for process in hung}
 
         started = time.monotonic()
-        stopped = plane.stop(7, notes=notes)
+        stopped = plane.stop(7, notes=notes, retained_children=retained_children)
         elapsed = time.monotonic() - started
 
         assert stopped == ["postgres"]
@@ -120,7 +123,9 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
         assert [kind for kind, _ in events] == ["postgres_stop_escalated"]
         assert events[0][1]["level"] == "error"
     finally:
-        pg.stop(data, timeout=10, immediate_wait=1, kill_wait=1)
+        pg.stop(
+            data, timeout=10, immediate_wait=1, kill_wait=1, retained_children=retained_children
+        )
         for process in psutil.process_iter(["cmdline"]):
             if HUNG_SECONDS in " ".join(process.info["cmdline"] or []):
                 process.kill()
@@ -131,7 +136,17 @@ def test_the_fast_shutdown_leaves_room_for_the_legs_after_it(
 ) -> None:
     monkeypatch.setattr(plane, "PROCESS_CLEANUP_WAIT_S", 10.0)
     monkeypatch.setattr(plane, "PROCESS_KILL_WAIT_S", 3.0)
+    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
 
-    assert plane._postgres_fast_budget(time.monotonic() + 300) == pytest.approx(277, abs=1)
+    assert plane._postgres_fast_budget(1300.0) == 277.0
     # a stop with less time than the reserve gives the fast shutdown all of it
-    assert plane._postgres_fast_budget(time.monotonic() + 20) == pytest.approx(20, abs=1)
+    assert plane._postgres_fast_budget(1020.0) == 20.0
+    # Exhaustion refuses admission instead of relying on a busy host to spend the budget.
+    for deadline in (1000.0, 999.0):
+        with pytest.raises(TimeoutError, match="stop deadline expired"):
+            plane._postgres_fast_budget(deadline)
+
+
+@pytest.fixture
+def retained_children() -> list[subprocess.Popen[bytes]]:
+    return []

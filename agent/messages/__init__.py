@@ -39,29 +39,10 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
-
-# The header prepended to every replacement compact summary (forced / command /
-# spontaneous) — written by `agent.hooks.compact.compose_summary_message`, and
-# the one invariant the read side (gateway/agents/history/context_breakdown.py) classifies the
-# untagged summary HumanMessage by. It lives here, in the leaf message-contract
-# module, so the gateway can import it without pulling in agent.hooks.compact
-# (whose agent.graph imports do not resolve inside a gateway process).
-# Two jobs:
-#   1. "just compacted" — the compaction is the one event the post-compact context
-#      has no surviving record of: REMOVE_ALL wipes the turn that ran it, including
-#      the `[system halt] You just called ava.self.compact` ack that announced it.
-#      Without this line the agent re-reads a /compact still sitting in the
-#      summary's verbatim tail as a pending order and runs it again, every turn
-#      (the agent-17 self-compact loop). Stating it happened is the standing signal
-#      the wiped ack cannot be.
-#   2. "your own prior context" — frames the first-person "I" in the body as the
-#      agent's own memory, not the user speaking (the summary lands as a user-role
-#      message).
-COMPACT_SUMMARY_HEADER = (
-    "[system] Your context was just compacted. The following is the summary of "
-    "your own prior context:"
+from base.agents.messages.kwargs import (
+    COMPACT_SUMMARY_HEADER as COMPACT_SUMMARY_HEADER,  # public: the header's owner is the base leaf
 )
+from base.agents.messages.kwargs import AvaMsgType, ExecStatus, NoteTag, read_ava_kwargs
 
 
 def _stamp_picked_up(kwargs: dict[str, object]) -> dict[str, object]:
@@ -210,7 +191,10 @@ def exec_output_message(
     *,
     content: str,
     tool_call_id: str,
+    status: ExecStatus,
+    body_start: int,
     exec_ms: int | None = None,
+    started_at: datetime | None = None,
     sdk_calls: list[dict[str, Any]] | None = None,
     created_at: datetime | None = None,
 ) -> ToolMessage:
@@ -222,11 +206,16 @@ def exec_output_message(
     server reports "An assistant message with 'tool_calls' must be followed
     by tool messages").
 
-    Normal return, error, timeout and cancellation share one shape: the
-    outcome lives in `content` text only, never in a structured field.
+    The outcome and timing are structured fields; the `content` header is text
+    for the model only and no code parses it.
 
     additional_kwargs:
         ava_msg_type: "exec_output"
+        ava_exec_status: ExecStatus value, how the call ended.
+        ava_exec_started_at: ISO-8601 wall-clock the run began (None when it never ran);
+            the end is `ava_created_at`.
+        ava_exec_body_start: index in `content` where the output body begins, after
+            the envelope header (0 when there is no header).
         ava_exec_ms: int (wall-clock the code ran; surfaced on the code_output
             timeline item so the collapsed chip can read "ran in 1.3s")
         sdk_calls: the run's real SDK-call tally, `[{"method": ..., "count": N},
@@ -240,6 +229,9 @@ def exec_output_message(
     kwargs: dict[str, object] = {
         "ava_msg_type": AvaMsgType.EXEC_OUTPUT.value,
         "ava_exec_ms": exec_ms,
+        "ava_exec_status": status.value,
+        "ava_exec_started_at": started_at.isoformat() if started_at is not None else None,
+        "ava_exec_body_start": body_start,
     }
     if sdk_calls is not None:
         kwargs["sdk_calls"] = sdk_calls

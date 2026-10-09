@@ -20,6 +20,8 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DEFAULT_PORTS, DaemonProbe, probe_daemon
@@ -75,6 +77,7 @@ def healthz_daemon(
     profile: str | None = None,
     no_profile_marker: bool = False,
     config_inputs: tuple[Path, ...] = (),
+    plugin_config: tuple[str, BaseModel] | None = None,
     db_access: DbAccess | None = None,
     stop_ceiling_s: float | None = None,
 ) -> ServiceSpec:
@@ -87,7 +90,7 @@ def healthz_daemon(
         capabilities: which machine capabilities run it.
         requires_db: whether it dials Postgres; no default because a database
             outage holds exactly the services that say yes.
-        gate, profile, no_profile_marker, config_inputs, db_access, stop_ceiling_s: the optional
+        gate, profile, no_profile_marker, config_inputs, plugin_config, db_access, stop_ceiling_s: the optional
             declarations of ``ServiceSpec``, passed through unchanged.
 
     Raises:
@@ -114,6 +117,7 @@ def healthz_daemon(
         profile=profile,
         no_profile_marker=no_profile_marker,
         config_inputs=config_inputs,
+        plugin_config=plugin_config,
         db_access=db_access,
         stop_ceiling_s=stop_ceiling_s,
     )

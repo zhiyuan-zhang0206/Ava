@@ -9,6 +9,16 @@ Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 
 What is (and is not) covered, feature by feature, lives in [FEATURES.md](FEATURES.md).
 
+
+SDK creation and budget-handoff scenarios explicitly request the
+`authenticated_gateway` fixture. It gives their test HTTP clients and exec SDK
+children a fresh private bearer; the throwaway gateway verifies it through
+production authentication middleware. Runner/ops retain the direct-process
+harness's open posture because no root launcher or machine-token ledger exists.
+Other scenarios retain their existing gateway posture. Fixture credentials are
+function scoped and restored at teardown; no product admission bypass is added.
+
+
 ## Running
 
 ```bash
@@ -31,9 +41,12 @@ On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
 ## Writing a new scenario
 
 1. In `fakes/scenarios/`, add a module, define `SCRIPT: tuple[AIMessage, ...]`
-   and `def build(model: str) -> ScriptedFakeChatModel`. The `build` signature must
-   match the `base/lm/factory.py:_LLMFactory` Protocol (takes model name → returns
-   BaseChatModel); the `isinstance(BaseChatModel)` at the end of `_resolve_override`
+   and `def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel`.
+   The `build` signature must match the `base/lm/factory.py:_LLMFactory` Protocol
+   (model name and explicit agent id → BaseChatModel). Host model factories must
+   use this id for records and scenario selection; the host does not bind the
+   process-local `ava` SDK. None denotes a caller outside an agent. The
+   `isinstance(BaseChatModel)` at the end of `_resolve_override`
    catches bad factories immediately at build time.
 2. The test function uses `@pytest.mark.scenario("tests.e2e.fakes.scenarios.<name>:build")`.
 3. Each `AIMessage` in SCRIPT = one LLM turn:
@@ -85,11 +98,11 @@ multi-chunk.
 | `lifecycle/test_self_resurrect.py` | `lifecycle_resurrect` | after `terminate`, `POST /resurrect` → fresh process + 'resurrect' inbound |
 | `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/agents` fork_from=source+prompt → forked agent (new id) first claim batch contains [fork marker, prompt], reply `FORK_OK` proves context contains both |
 | `flow/test_message_flow.py` | `message_flow` | **Panoramic Case 1 (#1018)** — one user message → reasoning + code tool call + real exec + reply; REST timeline fan-out (reasoning/code/output/chat), reply rendered in browser via SSE, zero unrecognized-marker alarms + zero `[timeline] unrecognized` console warnings |
-| `flow/test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — UI-triggered force compact (POST /api/agents/{id}/compact) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
+| `flow/test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — native compact history fixture (not public manual admission) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
 | `flow/test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |
 | `state/test_shell_history_state.py` | `shell_history` | **task #4585** — browser back/forward between `/?agent_id=N` and `/shell/N/S` restores each container's scroll position (per history entry) with no blank / invalid-params frame on either return, and the shell poll + manual refresh stay alive |
 | `plugins/test_ava_code_effects.py` | `ava_code:*` (`build_cwd_notes`, `build_context_files`, `build_cwd_tools`, `build_cwd_restart`, `build_system_prompt`, `build_after_compact`) | **ava_code effects, asserted on the messages the model actually received** (a recording fake logs each call's input), the files the exec wrote, and the checkpoint: cwd-change note + project-skills note reach the next model input and are consumed; AGENTS.md / CLAUDE.md injected on read once (path + content-hash dedup, direct-read exempt, oversize head+tail with archive); relative SDK paths follow the logical cwd; cwd survives restart and a vanished cwd falls back to the workspace; coding conventions are in the system prompt; compaction re-surfaces skills + context files |
-| `lifecycle/test_lifecycle_effects.py` | `lifecycle_effects:*` | **Agent lifecycle effects, asserted on what each agent's model was handed, inbound rows and disk**: `ava.agents.send_message` reaches the peer's model with the sender in the inbound; `ava.agents.spawn` starts a child that runs its prompt; external terminate stores a message that greets the revival; forced terminate and `/api/cancel` kill a running exec (its post-sleep marker never appears) and the agent stays usable; `ava.self.compact` replaces history with the summary |
+| `lifecycle/test_lifecycle_effects.py` | `lifecycle_effects:*` | **Agent lifecycle effects, asserted on what each agent's model was handed, inbound rows and disk**: `ava.agents.send_message` reaches the peer's model with the sender in the inbound; `ava.agents.spawn` starts a child that runs its prompt; external terminate stores a message that greets the revival; forced terminate and a canonical native cancel command kill a running exec (its post-sleep marker never appears) and the agent stays usable; `ava.self.compact` replaces history with the summary |
 | `flow/test_sdk_effects.py` | `sdk_effects:*` | **execute_code and SDK effects, asserted on the tool output / notes the model is handed back and on disk**: a raising or hard-crashing exec is reported and the agent carries on; `ava.files.edit` missing/ambiguous/replace_all contract; reading injection-like content yields a SECURITY note (source and triggers, never the body); a `/command` expands into the model input and is listed by `ava.agents.commands()`; an uploaded file is announced to the agent and readable at the announced path; an exec timeout kills the child and its own subprocess |
 | `flow/test_schedules_api.py` | `schedules:build` | **Schedule management through real gateway and CLI processes**: REST CRUD and version snapshots; start/stop/restart persist a sync request for the absent manager; runs and transcript reads; draft launches a writer whose model sees the request; `ava schedules` verbs reach the same gateway rows. Session execution is covered separately by SC2/SC3. |
 

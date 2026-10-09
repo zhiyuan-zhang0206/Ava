@@ -188,6 +188,9 @@ def test_page_session_owner_walks_process_ancestry(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(psd.psutil, "Process", lambda _pid: _Proc())  # pyright: ignore[reportUnknownArgumentType]
     assert psd._page_session_owner(99, {12: (7, "page")}) == (7, "page")
+    assert psd._page_session_owner(99, {11: (8, "near"), 12: (7, "page")}) == (8, "near")
+    # Unrelated host ancestry must not acquire a managed page's ownership.
+    assert psd._page_session_owner(99, {77: (7, "page")}) is None
 
 
 def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) -> None:

@@ -485,8 +485,6 @@ check-typed-exception = true
 "ava/sdk_surface/help.py" = ["TID251"]
 "ava/sdk_surface/discovery.py" = ["TID251"]
 "services/agent_runner/agent_host/runtime.py" = ["TID251"]
-# The process's AvaContext: the one in-process entry to the run's context (docs/decisions/agents/context/2026-10-04-ava-state-and-context.md).
-"ava/sdk_surface/process_context.py" = ["TID251"]
 # An operator CLI: its report on stdout is the contract.
 "services/derived/memory_indexer/memory_search_reconcile.py" = ["T201"]
 # tests may import contextvars to exercise the propagation contracts
@@ -791,6 +789,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "ava_builtins/skills/coordination/ava-dynamic-workflow/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "ava_builtins/skills/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -872,6 +875,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/cluster/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/config/admin/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -967,6 +975,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/lm/compat/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/pricing/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1086,6 +1099,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "schedules/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/audit/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1187,6 +1205,16 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/backup/walg/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived/insights/run_timeline/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived/insights/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

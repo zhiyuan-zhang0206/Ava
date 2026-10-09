@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, get_args
 
+from pydantic import BaseModel
+
 from base.cluster.machine import MachineRole
 from base.daemon.health import DEFAULT_PORTS, DaemonProbe
 
@@ -52,6 +54,9 @@ class ServiceSpec:
             daemon (``health_name`` set) has no module at all.
         config_inputs: authoritative external files read at process birth.
             Their paths and bytes are part of the immutable launch generation.
+        plugin_config: a plugin name and its frozen, non-secret birth snapshot.
+            The launcher serializes this exact instance into the unit environment;
+            the service gate must bind the same instance.
         stop_ceiling_s: the longest this service's own SIGTERM cleanup may run,
             when that can exceed root's default TERM window. Derive it from the
             same constants or settings the service's shutdown code reads, never
@@ -125,8 +130,13 @@ class ServiceSpec:
     stop_ceiling_s: float | None = None
     health_name: str | None = None
     home_healthz: bool = False
+    plugin_config: tuple[str, BaseModel] | None = None
 
     def __post_init__(self) -> None:
+        if self.plugin_config is not None:
+            name, config = self.plugin_config
+            if not name or not config.model_config.get("frozen"):
+                raise ValueError("service plugin config requires a name and frozen config model")
         _validate_capabilities(self)
         _validate_endpoint(self)
         _validate_healthz(self)

@@ -18,7 +18,7 @@ from agent import state as state_module
 from ava import external, gateway_client
 from ava.external import state
 from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
-from ava.sdk_surface import agent_identity, process_context
+from ava.sdk_surface import agent_identity
 from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.settings import agent_setting
 from base import telemetry
@@ -39,7 +39,7 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
         assert ava.self.AGENT_ID == 405
         assert agent_identity.require_agent_id() == 405
         assert agent_identity.require_actor() == "agent:405"
-        assert agent_identity.default_actor() == "agent:405"
+        assert agent_identity.require_actor() == "agent:405"
         assert agent_setting("llm_model") == "external-test"
     assert _borrowed_agent_id() is None
     assert agent_identity.require_actor() == "external_agent:codex"
@@ -148,7 +148,7 @@ def _invalidate_lease(lease: dict[str, Any], invalidated: str) -> str:
 
 def _borrowed_agent_id() -> int | None:
     """The agent id the process's bound context borrows through an attachment, if any."""
-    context = process_context.peek()
+    context = getattr(ava, "context", None)
     lease = None if context is None or context.identity is None else context.identity.lease
     return None if lease is None else lease.agent_id
 
@@ -510,7 +510,7 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
 def test_attachment_reuses_clients_and_restores_original_context(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
-    original = process_context.peek()
+    original = getattr(ava, "context", None)
     assert original is not None
     with external.attach("lease"):
         assert ava.context.clients is original.clients
@@ -519,7 +519,7 @@ def test_attachment_reuses_clients_and_restores_original_context(
         assert ava.context.identity.lease.agent_id == 405
         assert ava.context.sql is ava.DB
         assert ava.context.redis is ava.REDIS
-    assert process_context.peek() is original
+    assert getattr(ava, "context", None) is original
 
 
 def test_external_controls_stay_out_of_native_prompt(
@@ -529,7 +529,7 @@ def test_external_controls_stay_out_of_native_prompt(
     from base.host.env.agent_slices import AgentSlices
     from base.packages.plugins.extensions import ExtensionRegistry
 
-    prompt = build_system_prompt(ExtensionRegistry(()), AgentSlices.resolve())
+    prompt = build_system_prompt(ExtensionRegistry(()), AgentSlices.resolve(), agent_id=None)
     assert "external" not in ava.__all_for_ava__
     assert "ava.external.attach" not in prompt
     assert "## ava.external" not in prompt

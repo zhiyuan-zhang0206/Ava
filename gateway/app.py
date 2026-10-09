@@ -58,7 +58,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -127,12 +127,6 @@ from gateway.mcp_server import router as mcp_server_router
 from gateway.routers import (
     commands as commands_router,
 )
-from gateway.routers import (
-    config as config_router,
-)
-from gateway.routers import (
-    default_model as default_model_router,
-)
 from gateway.routers import fleet_graph as fleet_graph_router
 from gateway.routers import (
     frontend_telemetry as frontend_telemetry_router,
@@ -142,6 +136,9 @@ from gateway.routers import (
 )
 from gateway.routers import (
     guide as guide_router,
+)
+from gateway.routers import (
+    insights as insights_router,
 )
 from gateway.routers import (
     memory as memory_router,
@@ -161,9 +158,9 @@ from gateway.routers import (
 from gateway.routers import (
     tasks as tasks_router,
 )
+from gateway.routers.configuration import default_model as default_model_router
+from gateway.routers.configuration import runtime as config_router
 from gateway.routers.upload import router as uploads_router
-from gateway.run_timeline import history as run_timeline_history
-from gateway.run_timeline import router as run_timeline_router
 from gateway.schedules import router as schedules_router
 from gateway.upload_delivery import router as upload_delivery_router
 from gateway.upload_delivery.worker import UploadRecovery
@@ -184,8 +181,9 @@ def _build_request_resources(app: FastAPI) -> None:
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.auth401_log = rejection_log.AuthRejectionLog()
     app.state.login_limiter = LoginRateLimiter()
-    app.state.run_timeline_views = run_timeline_history.HistoryViewCache()
     app.state.fleet_graph_stale_emitter = fleet_graph_router.FleetGraphStaleEmitter()
+    # The insights service's Unix socket: no connection until the first proxied read.
+    app.state.insights_client = insights_router.build_client()
 
 
 @asynccontextmanager
@@ -254,16 +252,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Periodic telemetry emitters (latency / auth-401 / runtime): each
     # drains its accumulator or DB sample once per 60s and emits ONE bounded
     # event; the lifespan owns and stops every task or scheduled callback.
-    app.state.latency_flusher = asyncio.create_task(latency.latency_flusher())
-    app.state.auth401_flusher = asyncio.create_task(
-        rejection_log.auth401_flusher(app.state.auth401_log)
-    )
     app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
     upload_recovery = UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
     # The lifespan owns this handle; app.state is only the HTTP exposure and
     # can be replaced by a nested lifespan on the same app.
     app.state.upload_recovery = upload_recovery
 
+    async with _background_lifetime(app, upload_recovery):
+        yield
+
+
+@asynccontextmanager
+async def _background_lifetime(
+    app: FastAPI, upload_recovery: UploadRecovery
+) -> AsyncGenerator[None]:
+    """Join this lifespan's service loops before closing its database pools."""
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
     # lifespan — StreamableHTTPSessionManager.run() can only be entered once
     # per instance, and the tools close over this pool. Off (the default):
@@ -275,30 +278,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         app.state.mcp_manager = mcp_manager
 
-    async with asyncio.TaskGroup() as upload_tasks:
-        upload_recovery.start(upload_tasks)
-        try:
-            if mcp_manager is not None:
-                async with mcp_manager.run():
-                    yield
-            else:
-                yield
-        finally:
-            app.state.mcp_manager = None
+    try:
+        async with asyncio.TaskGroup() as background:
+            latency_flusher = background.create_task(latency.latency_flusher())
+            auth401_flusher = background.create_task(
+                rejection_log.auth401_flusher(app.state.auth401_log)
+            )
+            upload_recovery.start(background)
             try:
-                await upload_recovery.close()
+                if mcp_manager is not None:
+                    async with mcp_manager.run():
+                        yield
+                else:
+                    yield
             finally:
-                app.state.runtime_metrics.stop()
-                await app.state.grafana_client.aclose()
-                for flusher in (
-                    app.state.latency_flusher,
-                    app.state.auth401_flusher,
-                ):
-                    flusher.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await flusher
-                app.state.db_pool.close()
-                app.state.control_db_pool.close()
+                app.state.mcp_manager = None
+                try:
+                    await upload_recovery.close()
+                finally:
+                    app.state.runtime_metrics.stop()
+                    try:
+                        await asyncio.gather(
+                            app.state.grafana_client.aclose(), app.state.insights_client.aclose()
+                        )
+                    finally:
+                        # Infinite loops need cancellation even on a normal return.
+                        # The group joins this lifespan's tasks before pool closure.
+                        latency_flusher.cancel()
+                        auth401_flusher.cancel()
+    finally:
+        app.state.db_pool.close()
+        app.state.control_db_pool.close()
 
 
 app = FastAPI(
@@ -598,7 +608,7 @@ app.include_router(skills_router.router)
 app.include_router(packages_router.router)
 app.include_router(metrics_router.router)
 app.include_router(events_router.router)
-app.include_router(run_timeline_router.router)
+app.include_router(insights_router.router)
 app.include_router(event_resolutions_router.router)
 app.include_router(ops_monitor_router.router)
 app.include_router(alerts_router.router)

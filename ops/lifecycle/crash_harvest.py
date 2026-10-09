@@ -28,9 +28,6 @@ from ops.lifecycle.events import (
     publish_page_closed as publish_page_closed,
 )
 from ops.lifecycle.launch import (
-    _insert_prompt_blocking as _insert_prompt_blocking,
-)
-from ops.lifecycle.launch import (
     launch_agent_op as launch_agent_op,
 )
 from ops.lifecycle.termination import (

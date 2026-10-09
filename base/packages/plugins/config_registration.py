@@ -3,14 +3,8 @@
 Symmetric with whole-class state declaration (`agent/state.py`): a plugin writes a Pydantic BaseModel
 and declares it (`PluginContributions.config`, from the `contribute()` of its `default_config.py` config
 face, `base/packages/plugins/config_face.py`); the framework
-handles namespace isolation + disk persistence. Differences:
-
-- State is runtime mutable, written via LangGraph reducer; Config is a boot
-  snapshot, frozen, immutable after instantiation.
-- State field names ∈ BaseAgentState are shared with base; Config has an
-  independent namespace per plugin.
-- State persists to LangGraph checkpoint; Config persists to
-  `~/.ava/configs/<plugin>/config.json` (full image, not partial overlay).
+handles namespace isolation and persists each full image at
+`~/.ava/configs/<plugin>/config.json`; the bound config is an immutable boot snapshot.
 
 `ava.sdk_surface.install` binds each declared class through `bind_plugin_config(plugin, cls)`, which
 reads `~/.ava/configs/<plugin>/config.json`, validates it against the class schema, instantiates it and
@@ -40,14 +34,15 @@ Declaration (`ava_builtins/plugins/<name>/default_config.py`):
 import json
 import math
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
-from base import paths
 from base.host.env.agent_slices import AgentSlices
+from base.host.env.dotenv_boot import resolve_ava_home
 
 
 class PluginConfigError(Exception):
@@ -117,10 +112,16 @@ def bind_plugin_config(plugin: str, cls: type[BaseModel]) -> Callable[[], None]:
 
 def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
     """Read disk image (auto-write default if missing), validate schema, return instance."""
+    from base.packages.plugin_config_images import PluginConfigChangedError
+    from base.packages.plugins.config_view import with_cluster_policy
+
     config_path = disk_image_path(plugin)
+    read_plugin_config(plugin, cls, config_path)
     if not config_path.exists():
-        write_default_disk_image(plugin, cls)
-    return read_config_image(cls, config_path)
+        # Another boot may create the authority; bind its validated image below.
+        with suppress(PluginConfigChangedError):
+            write_default_disk_image(plugin, cls)
+    return with_cluster_policy(plugin, config_from_image(cls, config_path.read_text(), config_path))
 
 
 def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
@@ -135,6 +136,11 @@ def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
     except FileNotFoundError:
         return cls()
 
+    return config_from_image(cls, content, config_path)
+
+
+def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Path) -> C:
+    """Validate one captured full image using the same contract as its disk reader."""
     try:
         disk_data = json.loads(content)
     except json.JSONDecodeError as e:
@@ -170,20 +176,29 @@ def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
 
 def disk_image_path(plugin: str) -> Path:
     """Disk image path — `~/.ava/configs/<plugin>/config.json`. Does not pre-create directory."""
-    return paths.ava_home() / "configs" / plugin / "config.json"
+    return resolve_ava_home().resolve() / "configs" / plugin / "config.json"
 
 
 def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
-    """Serialize cls full default values to disk image (overwrite, create parent dir).
+    """Serialize full defaults only when the whole image is absent.
 
     Used for `ava start` first boot + `ava plugins update` writing initial
-    image for new plugin. Existing field values are not preserved — caller
-    should check path.exists() first.
+    image for new plugin. Concurrent creation is rejected rather than overwriting an existing image.
     """
     instance = cls()  # All defaults; cls fields lacking default raise ValidationError
     config_path = disk_image_path(plugin)
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(instance.model_dump_json(indent=2) + "\n")
+    from base.packages.plugin_config_images import (
+        PluginConfigOwner,
+        image_revision,
+        write_config_image,
+    )
+
+    write_config_image(
+        PluginConfigOwner(plugin, cls, config_path),
+        instance,
+        expected_digest=image_revision(None),
+    )
     return config_path
 
 
@@ -217,7 +232,8 @@ def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str]
         return set(cls.model_fields.keys()), set()
 
     try:
-        disk_data = json.loads(config_path.read_text())
+        captured = config_path.read_text()
+        disk_data = json.loads(captured)
     except json.JSONDecodeError as e:
         raise InvalidConfigData(
             f"plugin {plugin!r} disk image JSON malformed ({config_path}): {e}"
@@ -250,7 +266,17 @@ def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str]
             f"(type incompatible, related to plugin upgrade; manual migrate needed {config_path}): {e}"
         ) from e
 
-    config_path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
+    from base.packages.plugin_config_images import (
+        PluginConfigOwner,
+        image_revision,
+        write_config_image,
+    )
+
+    write_config_image(
+        PluginConfigOwner(plugin, cls, config_path),
+        cls(**merged),
+        expected_digest=image_revision(captured.encode()),
+    )
     return added, removed
 
 
@@ -699,3 +725,76 @@ def is_per_agent_field(plugin: str, field: str) -> bool:
     if info is None:
         return False
     return bool(_schema_extra(info).get("per_agent", False))
+
+
+def service_config_packet(plugin: str, config: BaseModel) -> str:
+    """Canonical, non-secret config for the existing unit environment/hash path."""
+    for name, field in type(config).model_fields.items():
+        if _field_is_sensitive(field.json_schema_extra):
+            raise InvalidConfigData(f"service config {plugin}.{name} is sensitive")
+    return json.dumps(
+        {"plugin": plugin, "config": config.model_dump(mode="json")},
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
+    """Validate this service's birth snapshot; None outside a launched service.
+
+    A present packet must name this plugin and contain its complete declared
+    image. A malformed packet cannot fall back to disk or defaults.
+    """
+    from base.host.env.bootstrap import service_plugin_config_packet
+
+    packet = service_plugin_config_packet()
+    if packet is None:
+        return None
+    try:
+        data: object = json.loads(packet)
+    except json.JSONDecodeError as exc:
+        raise InvalidConfigData(f"invalid service plugin config JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise InvalidConfigData("service plugin config requires a JSON object")
+    data = cast("dict[str, object]", data)
+    if set(data) != {"plugin", "config"}:
+        raise InvalidConfigData("service plugin config requires exactly plugin and config")
+    if data["plugin"] != plugin:
+        raise InvalidConfigData(
+            f"service plugin config names {data['plugin']!r}, expected {plugin!r}"
+        )
+    values = data["config"]
+    if not isinstance(values, dict) or set(cast("dict[str, object]", values)) != set(
+        cls.model_fields
+    ):
+        raise SchemaDriftError(
+            f"service plugin config {plugin!r} field set differs from declaration"
+        )
+    try:
+        return cls.model_validate(values)
+    except ValidationError as exc:
+        raise InvalidConfigData(f"invalid service plugin config {plugin!r}: {exc}") from exc
+
+
+def read_authority_config[C: BaseModel](plugin: str, cls: type[C], config_path: Path) -> C:
+    """Read the sole local authority image; pending legacy imports fail before defaults."""
+    from base.host.env.bootstrap import legacy_plugin_config_values
+
+    aliases = tuple(
+        _schema_extra(info)["env_var"]
+        for info in cls.model_fields.values()
+        if "env_var" in _schema_extra(info)
+    )
+    if legacy_plugin_config_values(aliases):
+        raise InvalidConfigData(
+            f"plugin {plugin!r} has unimported legacy config; run ava plugins update"
+        )
+    return read_config_image(cls, config_path)
+
+
+def read_plugin_config[C: BaseModel](plugin: str, cls: type[C], config_path: Path) -> C:
+    """Resolve local host authority and the current gateway cluster projection."""
+    from base.packages.plugins.config_view import with_cluster_policy
+
+    return with_cluster_policy(plugin, read_authority_config(plugin, cls, config_path))

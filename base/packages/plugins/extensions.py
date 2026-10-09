@@ -23,6 +23,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
+from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
 from base.lm.provider_api import ProviderContribution
 from base.packages.plugins.contributions import Contribution
@@ -32,7 +33,7 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec
 # A note builder returns a langchain `HumanMessage`, or None when it has nothing to say; the type is
 # `object` here because this module is imported by processes that must stay off the LM stack (a
 # child's surface load), and `agent.graph.prompt.context_notes` checks what a builder returns.
-NoteBuilder = Callable[[AgentSlices], object | None]
+NoteBuilder = Callable[[AvaContext], object | None]
 SectionFn = Callable[[AgentSlices], str]
 
 HookPoint = Literal["after_init", "before_llm", "before_exec", "after_exec"]
@@ -71,7 +72,7 @@ class ContextNote:
     """One standing context note: how to build it, where it sits in the head, and whether a
     fork needs it too.
 
-    `build` returns `None` when the note has nothing to say this time — its layer is disabled,
+    `build` receives the explicit invocation context and returns `None` when the note has nothing to say this time — its layer is disabled,
     its source file is absent, its list is empty. That is the normal way a note opts out.
 
     `rank` orders the rendered head: lower ranks sit closer to the SystemMessage; equal ranks
@@ -152,7 +153,7 @@ class PluginContributions:
     sdk_expansions: tuple[str, ...] = ()
     # One frozen BaseModel bound once from `$AVA_HOME/configs/<plugin>/config.json`.
     config: type[BaseModel] | None = None
-    # Fully qualified `<domain>.<field>` core settings the plugin may read through `read_flag`.
+    # Fully qualified `<domain>.<field>` Core dependencies, validated on admission.
     flags: tuple[str, ...] = ()
 
     def merged(self, other: PluginContributions) -> PluginContributions:

@@ -1,0 +1,7 @@
+{
+  "ambient_state": {
+    "base/packages/plugins/config_registration.py::ambient-container:_PLUGIN_CONFIGS": 1,
+    "base/packages/plugins/config_registration.py::ambient-container:_PLUGIN_CONFIG_CLASSES": 1,
+    "base/packages/skills/index.py::ambient-container:_CACHE": 1
+  }
+}

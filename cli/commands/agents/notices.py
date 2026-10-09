@@ -15,6 +15,7 @@ fails fast (raise_for_status()) on any HTTP error.
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 _TIMEOUT_S = 15.0
 
@@ -147,12 +148,9 @@ def cmd_notices_resolve(*, notice_id: int, agent_id: int, action: str, reply: st
     resp = dial_post(
         f"{base}/agents/{agent_id}/notices/{notice_id}/resolve",
         timeout=_TIMEOUT_S,
-        headers=headers,
+        headers={**headers, "Idempotency-Key": str(uuid4())},
         json={"action": action, "reply": reply},
     )
-    if resp.status_code == 409:
-        print(f"notice #{notice_id} is already resolved (409)")
-        return 0
     resp.raise_for_status()
     print(f"notice #{notice_id} resolved: {action}")
     return 0
@@ -166,7 +164,7 @@ def _resolve_all(notices: list[dict[str, Any]], base: str, headers: Any, dial_po
         r = dial_post(
             f"{base}/agents/{n['agent_id']}/notices/{n['id']}/resolve",
             timeout=_TIMEOUT_S,
-            headers=headers,
+            headers={**headers, "Idempotency-Key": str(uuid4())},
             json={"action": action, "reply": None},
         )
         if r.status_code in (200, 201):

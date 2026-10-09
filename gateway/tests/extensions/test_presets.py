@@ -10,6 +10,7 @@ spawn op in-process, so a preset-seeded spawn actually persists its merged
 from __future__ import annotations
 
 import psycopg
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
@@ -167,21 +168,16 @@ class TestSpawnWithPreset:
         overlay, _ = self._row(db_conn, agent_id)
         return overlay
 
-    def test_top_level_preset_retired_400(self, db_conn: psycopg.Connection) -> None:
-        """The former top-level preset field is refused with a pointer at the
-        overlay key (task #4086) — it no longer seeds config."""
+    @pytest.mark.parametrize("preset", [None, "coder"])
+    def test_top_level_preset_is_rejected_before_birth(
+        self, db_conn: psycopg.Connection, preset: str | None
+    ) -> None:
         with TestClient(app) as client:
-            _create(client, name="coder", label="Coder", config={"llm_model": "claude-sonnet-5"})
-            r = client.post("/api/agents", json={"spawner": "user", "preset": "coder"})
-        assert r.status_code == 400
-        assert "config_overlay" in r.json()["detail"]
-
-    def test_top_level_preset_null_tolerated(self, db_conn: psycopg.Connection) -> None:
-        """A null top-level preset (what a client rolling through the
-        compatibility window may still send) is tolerated as unset."""
-        with TestClient(app) as client:
-            r = client.post("/api/agents", json={"spawner": "user", "preset": None})
-        assert r.status_code == 201, r.text
+            before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
+            result = client.post("/api/agents", json={"spawner": "user", "preset": preset})
+        assert result.status_code == 422
+        assert result.json()["errors"][0]["type"] == "extra_forbidden"
+        assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == before
 
     def test_unknown_preset_in_config_400(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:

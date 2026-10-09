@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.sdk.call_policy import SamplingPolicy
 
 # Event name written to events for one top-level SDK call.
 SDK_CALL_EVENT = "sdk_call"
@@ -75,23 +76,30 @@ def annotate(**detail: Any) -> None:
         frames[-1].detail.update(detail)
 
 
-def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | None = None) -> None:
+def emit(
+    fn: str,
+    detail: Mapping[str, Any] | None = None,
+    duration: float | None = None,
+    *,
+    sampling_policy: SamplingPolicy | None = None,
+) -> None:
     """Write one ``sdk_call`` event. Pure side channel — a broken log sink never raises
     into the SDK call path; its first failure (and its recovery) is logged once.
     ``detail`` is omitted from the payload when empty, so a plain call stays ``{fn}``;
     ``duration`` (seconds, measured by ``run_metered``) rides as a top-level payload
     key — the registry declares it (``contract.SdkCall``), so a reader may reference
-    ``attributes->>'duration'``."""
+    ``attributes->>'duration'``. Policy errors propagate before emission; metered
+    calls supply their entry snapshot so a refresh cannot mask the SDK outcome."""
+    from base.agents.sdk.call_policy import policy
+
+    current = policy() if sampling_policy is None else sampling_policy
+    every = current.sample_every if current.sampling_enabled else 1
+    if every > 1:
+        import random
+
+        if random.randrange(every) != 0:  # noqa: S311 — telemetry sampling, not security
+            return
     try:
-        from base.agents.sdk.call_policy import policy
-
-        current = policy()
-        every = current.sample_every if current.sampling_enabled else 1
-        if every > 1:
-            import random
-
-            if random.randrange(every) != 0:  # noqa: S311 — telemetry sampling, not security
-                return
         extra: dict[str, Any] = {"fn": fn, "sample_rate": every}
         if detail:
             extra["detail"] = dict(detail)
@@ -108,17 +116,9 @@ def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | Non
 
 @contextlib.contextmanager
 def _event_capture_admission() -> Generator[None, None, None]:
-    """Use the optional local capture gate without changing SDK call behavior."""
-    try:
-        from base.agents.impersonation.manifest import admitted_local_sdk_call
-    except Exception as exc:
-        # Event capture is a side channel. An unavailable settings
-        # bootstrap must never turn an SDK operation into a new hard failure.
-        from base.telemetry import report_sink_failure
+    """Use the optional gate; invalid capture code rejects the SDK call before its body."""
+    from base.agents.impersonation.manifest import admitted_local_sdk_call
 
-        report_sink_failure("SDK call local-capture admission (calls run uncaptured)", exc)
-        yield
-        return
     with admitted_local_sdk_call():
         yield
 
@@ -131,6 +131,9 @@ def _measure(fn: str) -> Generator[None, None, None]:
     if frames and frames[-1].fn == fn:
         yield
         return
+    from base.agents.sdk.call_policy import policy
+
+    snapshot = policy() if not frames else None
     # A controller may close while this call is in its body.  Admit before
     # entering it, then retain that admission through the `finally` emission
     # so the local receipt cannot seal between the call and its sdk_call row.
@@ -146,11 +149,11 @@ def _measure(fn: str) -> Generator[None, None, None]:
                 tally = _tally.get()
                 if tally is not None:
                     tally[fn] = tally.get(fn, 0) + 1
-                emit(fn, frame.detail, duration=time.monotonic() - t0)
+                emit(fn, frame.detail, duration=time.monotonic() - t0, sampling_policy=snapshot)
 
 
 def run_metered(fn: str, original: Callable[..., Any], args: Any, kwargs: Any) -> Any:
-    """Record a synchronous invocation, preserving its return and exceptions."""
+    """Validate policy before execution, then preserve the invocation's outcome."""
     with _measure(fn):
         return original(*args, **kwargs)
 
@@ -158,7 +161,7 @@ def run_metered(fn: str, original: Callable[..., Any], args: Any, kwargs: Any) -
 async def run_metered_async(
     fn: str, original: Callable[..., Awaitable[Any]], args: Any, kwargs: Any
 ) -> Any:
-    """Record an async invocation when awaited, including cancellation and duration."""
+    """Validate policy when awaited, preserving cancellation and the call's outcome."""
     with _measure(fn):
         return await original(*args, **kwargs)
 

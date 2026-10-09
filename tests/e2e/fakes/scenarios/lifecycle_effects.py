@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import psycopg
 
-import ava
 from base.config import settings
 from tests.e2e.fakes._recording import RecordingModel, exec_call, say, scratch_root
 
@@ -34,44 +33,46 @@ def exec_finished_marker() -> str:
     return str(scratch_root("lifecycle") / "exec-finished")
 
 
-def _is_peer() -> bool:
+def _is_peer(agent_id: int | None) -> bool:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages WHERE agent_id = %s AND source LIKE 'agent:%%' LIMIT 1",
-            (ava.self.AGENT_ID,),
+            (agent_id,),
         )
         return cur.fetchone() is not None
 
 
-def build_relay(model: str) -> RecordingModel:
+def build_relay(model: str, *, agent_id: int | None) -> RecordingModel:
     """A sends B a message through the SDK; B answers."""
-    if _is_peer():
-        return RecordingModel(script=(say(PEER_REPLY),))
+    if _is_peer(agent_id):
+        return RecordingModel(agent_id=agent_id, script=(say(PEER_REPLY),))
     code = (
         "import ava\n"
         f"peer = int(open({peer_id_file()!r}).read())\n"
         f"ava.agents.send_message(peer, {PING!r})\n"
         "print('sent-to', peer)"
     )
-    return RecordingModel(script=(exec_call(1, code), say(FINAL)))
+    return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
 
 
-def build_spawn(model: str) -> RecordingModel:
+def build_spawn(model: str, *, agent_id: int | None) -> RecordingModel:
     """A spawns a child through the SDK with a first prompt; the child answers."""
-    if _is_peer():
-        return RecordingModel(script=(say(CHILD_REPLY),))
+    if _is_peer(agent_id):
+        return RecordingModel(agent_id=agent_id, script=(say(CHILD_REPLY),))
     code = (
-        f"import ava\nchild = ava.agents.spawn(prompt={CHILD_PROMPT!r})\nprint('child-id', child)"
+        "import ava\nfrom uuid import uuid4\n"
+        f"child = ava.agents.spawn(prompt={CHILD_PROMPT!r}, idempotency_key=str(uuid4()))\n"
+        "print('child-id', child)"
     )
-    return RecordingModel(script=(exec_call(1, code), say(FINAL)))
+    return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
 
 
-def build_terminate(model: str) -> RecordingModel:
+def build_terminate(model: str, *, agent_id: int | None) -> RecordingModel:
     """One reply before the external terminate, one after the revival."""
-    return RecordingModel(script=(say("first reply"), say(FINAL)))
+    return RecordingModel(agent_id=agent_id, script=(say("first reply"), say(FINAL)))
 
 
-def build_cancel(model: str) -> RecordingModel:
+def build_cancel(model: str, *, agent_id: int | None) -> RecordingModel:
     """A long exec the test cancels, then a normal reply to the next message."""
     code = (
         "import time\n"
@@ -80,9 +81,11 @@ def build_cancel(model: str) -> RecordingModel:
         f"open({exec_finished_marker()!r}, 'w').write('done')\n"
         "print('exec-finished')"
     )
-    return RecordingModel(script=(exec_call(1, code), say("after cancel"), say(FINAL)))
+    return RecordingModel(
+        agent_id=agent_id, script=(exec_call(1, code), say("after cancel"), say(FINAL))
+    )
 
 
-def build_self_compact(model: str) -> RecordingModel:
+def build_self_compact(model: str, *, agent_id: int | None) -> RecordingModel:
     code = f"import ava\nava.self.compact({COMPACT_SUMMARY!r})"
-    return RecordingModel(script=(exec_call(1, code), say(FINAL)))
+    return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))

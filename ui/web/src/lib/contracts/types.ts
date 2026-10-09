@@ -15,8 +15,12 @@ import type { components } from "./types-generated";
 
 type Schemas = components["schemas"];
 
-export type CompactEnqueued = Schemas["CompactEnqueued"];
-export type CancelRequested = Schemas["CancelRequested"];
+export type CompactTarget = Schemas["CompactTarget"];
+export type CompactAcceptance = Schemas["CompactAcceptance"];
+export type CompactStatus = Schemas["CompactStatus"];
+export type NativeWorkTarget = Schemas["NativeWorkTarget"];
+export type NativeCancelAcceptance = Schemas["NativeCancelAcceptance"];
+export type RetryLaunchAccepted = Schemas["RetryLaunchAccepted"];
 
 /** The persisted lifecycle vocabulary carried on the gateway wire. These are
  *  control-plane states, not the status vocabulary the console presents. */
@@ -198,7 +202,7 @@ export type RunTimelineUnit = Schemas["RunTimelineUnit"];
 export type RunTimelineEvent = Schemas["RunTimelineEvent"];
 export type RunTimelineUsage = Schemas["RunTimelineUsage"];
 export type RunTimelineGeneration = Schemas["RunTimelineGeneration"];
-export type RunTimelineRequest = Schemas["RunTimelineRequest"];
+export type RunTimelineMessageBar = Schemas["RunTimelineMessageBar"];
 export type RunTimelineContext = Schemas["RunTimelineContext"];
 export type SessionOut = Schemas["SessionOut"];
 export type RunTimelineMessages = Schemas["RunTimelineMessages"];
@@ -531,6 +535,7 @@ export type SystemEvent =
 // the stable `@/lib/types` path without touching the generated layer directly.
 
 export interface ConfigFieldView {
+  readonly owner?: string | null; // None is Core; a plugin name owns its image.
   readonly name: string;
   readonly field_type: "bool" | "string" | "int" | "float" | "enum";
   readonly current_value: boolean | string | number | null;
@@ -652,10 +657,10 @@ export type ScheduleRunView = Schemas["ScheduleRunView"];
 export type ScheduleLogsView = Schemas["ScheduleLogsView"];
 export type ScheduleDraftResponse = Schemas["ScheduleDraftResponse"];
 
-// --- Ava Guide (natural-language ops assistant; POST /api/guide/draft) ---
+// --- Ava Guide (natural-language ops assistant; POST /api/keyed/v1/guide/draft) ---
 export type GuideDraftResponse = Schemas["GuideDraftResponse"];
 
-// --- Package install (POST /api/packages/draft) ---
+// --- Package install (POST /api/keyed/v1/packages/draft) ---
 //
 // Every skill / plugin / MCP install starts as a natural-language request that
 // spawns an installer agent — there is no URL form, because the user is not

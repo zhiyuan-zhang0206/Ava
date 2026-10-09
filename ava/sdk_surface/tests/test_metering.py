@@ -13,7 +13,7 @@ import contextlib
 import inspect
 import io
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -22,6 +22,7 @@ import pytest
 import ava
 from ava.sdk_surface import install, metering
 from base.agents.context.identity import ExternalLease
+from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
@@ -36,12 +37,24 @@ from tests.fixtures.pin_agent import pin_agent
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
     """Capture (fn, detail, duration) for each emitted sdk_call event."""
     calls: list[tuple[str, dict[str, object], float | None]] = []
-    monkeypatch.setattr(
-        sdk_usage_telemetry,
-        "emit",
-        lambda fn, detail=None, duration=None: calls.append((fn, dict(detail or {}), duration)),  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def emit(
+        fn: str,
+        detail: Mapping[str, object] | None = None,
+        duration: float | None = None,
+        *,
+        sampling_policy: call_policy.SamplingPolicy | None = None,
+    ) -> None:
+        assert sampling_policy is not None
+        calls.append((fn, dict(detail or {}), duration))
+
+    monkeypatch.setattr(sdk_usage_telemetry, "emit", emit)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def _valid_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
 
 
 def _help(*targets: object) -> str:
@@ -340,6 +353,36 @@ async def test_async_calls_measure_execution_and_isolate_concurrent_frames(
     assert [row[1] for row in calls] == [{"label": "a"}, {"label": "b"}]
 
 
+@pytest.mark.parametrize("async_call", [False, True])
+async def test_recorder_rejects_invalid_sampling_before_the_original_call(
+    monkeypatch: pytest.MonkeyPatch, async_call: bool
+) -> None:
+    from base.agents.sdk import call_policy
+
+    calls: list[str] = []
+
+    def invalid() -> call_policy.SamplingPolicy:
+        raise TypeError("invalid sampling configuration")
+
+    def body() -> str:
+        calls.append("side effect")
+        return "ok"
+
+    async def async_body() -> str:
+        return body()
+
+    monkeypatch.setattr(call_policy, "policy", invalid)
+    original = async_body if async_call else body
+    wrapped = metering._make_recorder(original, "plugin.write")
+    assert inspect.signature(wrapped) == inspect.signature(original)
+    with pytest.raises(TypeError, match="invalid sampling configuration"):
+        if async_call:
+            await wrapped()
+        else:
+            wrapped()
+    assert calls == []
+
+
 def test_borrowed_identity_is_stamped_on_external_sdk_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -443,7 +486,9 @@ def test_a_failing_identity_snapshot_is_reported_and_the_call_goes_on(
         raise RuntimeError("identity unreadable")
 
     monkeypatch.setattr(metering, "report_sink_failure", record)
-    monkeypatch.setattr(metering.process_context, "peek", _boom)
+    from base.agents.messages import external_caller
+
+    monkeypatch.setattr(external_caller, "external_caller", _boom)
     with metering._caller():
         pass
 

@@ -5,7 +5,7 @@ provider pattern.
 Module-level ``get_backend()`` returns the platform-appropriate backend
 (stateless, built per call).
 Callers use the same ``PlatformBackend`` protocol regardless of platform;
-the backend is selected by ``IS_MACOS`` in ``base.native_process.os_platform``.
+the backend is selected by ``is_macos()`` in ``base.native_process.os_platform``.
 
 Design:
   - Abstract methods are the operations that differ by platform.
@@ -18,7 +18,7 @@ from __future__ import annotations
 import abc
 from pathlib import Path
 
-from base.native_process.os_platform import IS_LINUX, IS_MACOS
+from base.native_process.os_platform import is_linux, is_macos
 
 # ---------------------------------------------------------------------------
 # Abstract interface
@@ -474,6 +474,6 @@ class LinuxPlatformBackend(PlatformBackend):
 
 def get_backend() -> PlatformBackend:
     """Return the platform-appropriate ``PlatformBackend`` (stateless: built per call)."""
-    if not (IS_MACOS or IS_LINUX):
+    if not (is_macos() or is_linux()):
         raise RuntimeError("unsupported host platform for OS jobs")
-    return MacPlatformBackend() if IS_MACOS else LinuxPlatformBackend()
+    return MacPlatformBackend() if is_macos() else LinuxPlatformBackend()

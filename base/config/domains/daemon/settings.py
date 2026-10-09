@@ -453,55 +453,6 @@ class DaemonSettings(
         },
     )
 
-    task_maintenance_enabled: bool = Field(
-        default=True,
-        alias="AVA_TASK_MAINTENANCE_ENABLED",
-        description="Run the task-maintenance daemon on the gateway. On by default; set false to disable task reminders and the escalation pass cluster-wide.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    task_maintenance_interval_seconds: float = Field(
-        default=300.0,
-        alias="AVA_TASK_MAINTENANCE_INTERVAL_SECONDS",
-        description="Task-maintenance daemon poll interval (seconds): how often it checks for overdue tasks and reminds owners. A precision lower bound, not the cadence — each task controls its own remind_interval_seconds.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    task_reminder_backoff_seconds: float = Field(
-        default=3600.0,
-        alias="AVA_TASK_REMINDER_BACKOFF_SECONDS",
-        description="Floor for the interval (seconds) between repeated reminders for the same overdue window: a task whose remind_interval_seconds exceeds this repeats at its own interval instead.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    task_escalate_n: int = Field(
-        default=3,
-        alias="AVA_TASK_ESCALATE_N",
-        description="Number of unanswered reminders before the daemon escalates to the parent task's owner.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     events_maintenance_interval_seconds: float = Field(
         default=3600.0,
         alias="AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",

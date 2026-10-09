@@ -2,12 +2,16 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+
+from scripts.ci.file_shard_runtime import compare
+from scripts.ci.file_shard_shadow import Plan
 
 ROOT = Path(__file__).resolve().parents[3]
 PLUGIN = "scripts.ci.file_shard_shadow"
@@ -51,6 +55,9 @@ def project(root: Path) -> None:
             "@pytest.fixture(autouse=True)\n"
             "def scope_marker(request):\n"
             f"    request.node.scope_marker = {marker!r}\n"
+            "@pytest.fixture\n"
+            "def runtime_value():\n"
+            f"    return {marker!r}\n"
         )
         for filename in ("test_first.py", "test_second.py"):
             (path / filename).write_text(
@@ -58,6 +65,7 @@ def project(root: Path) -> None:
                 '@pytest.mark.parametrize("n", [1, 2])\n'
                 "def test_contract(n, request):\n"
                 f"    assert request.node.scope_marker == {marker!r}\n"
+                f"    assert request.getfixturevalue('runtime_value') == {marker!r}\n"
                 "@pytest.mark.flaky\n"
                 "def test_serial():\n"
                 '    raise AssertionError("flaky case must stay outside the plan")\n'
@@ -329,3 +337,162 @@ def test_configuration_drift_is_rejected_before_collecting_a_group(tmp_path: Pat
     assert result.returncode == 4
     assert "same pytest configuration" in result.stderr
     assert not output.exists()
+
+
+@pytest.fixture(scope="module")
+def runtime_proof(tmp_path_factory: pytest.TempPathFactory) -> tuple[Plan, Path]:
+    root = tmp_path_factory.mktemp("runtime-proof")
+    manifest, data = plan(root)
+    evidence = root / "evidence"
+    for mode in ("baseline", "candidate"):
+        for index in range(1, 3):
+            directory = evidence / mode / str(index)
+            directory.mkdir(parents=True)
+            selection = (
+                ["--splits", "2", "--group", str(index), "--splitting-algorithm", "least_duration"]
+                if mode == "baseline"
+                else [
+                    "--file-shard-check",
+                    str(manifest),
+                    "--file-shard-group",
+                    str(index),
+                    "--file-shard-report",
+                    str(directory / "collection.json"),
+                    "--file-shard-execute",
+                ]
+            )
+            result = run(
+                root,
+                "-m",
+                "not flaky",
+                "-n",
+                "2",
+                *selection,
+                "--file-shard-runtime-report",
+                str(directory / "runtime.json"),
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+        # Coverage loss is checked separately against real-shaped coverage.py JSON.
+        (evidence / mode / "coverage.json").write_text(
+            json.dumps(
+                {"files": {"production.py": {"executed_lines": [1, 2], "missing_lines": [3]}}}
+            )
+        )
+    return Plan.model_validate(data), evidence
+
+
+def test_runtime_proof_captures_dynamic_bindings_and_each_execution_once(
+    runtime_proof: tuple[Plan, Path],
+) -> None:
+    snapshot, evidence = runtime_proof
+    result = compare(snapshot, evidence, 2)
+    assert result["matched"] and result["node_count"] == 10
+    records = [
+        json.loads(path.read_text()) for path in evidence.glob("candidate/*/runtime-gw*.json")
+    ]
+    nodes = [node for record in records for node in record["nodes"].values()]
+    assert sum("runtime_value" in node["fixtures"] for node in nodes) == 8
+    times = result["candidate_collection_seconds"]
+    assert isinstance(times, list) and len(cast(list[float], times)) == 4
+
+
+def test_duration_measurements_preserve_the_runtime_input_generation(tmp_path: Path) -> None:
+    manifest, data = plan(tmp_path)
+    original = (tmp_path / ".test_durations").read_bytes()
+    for index, group in enumerate(data["groups"], 1):
+        durations = tmp_path / f"durations-{index}.json"
+        durations.write_bytes(original)
+        directory = tmp_path / f"measured-{index}"
+        directory.mkdir()
+        result = run(
+            tmp_path,
+            "-m",
+            "not flaky",
+            "-n",
+            "2",
+            "--file-shard-check",
+            str(manifest),
+            "--file-shard-group",
+            str(index),
+            "--file-shard-report",
+            str(directory / "collection.json"),
+            "--file-shard-execute",
+            "--file-shard-runtime-report",
+            str(directory / "runtime.json"),
+            "--store-durations",
+            "--clean-durations",
+            "--durations-path",
+            str(durations),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert set(json.loads(durations.read_text())) == {node["nodeid"] for node in group["nodes"]}
+        assert durations.read_bytes() != original
+        reports = [json.loads(path.read_text()) for path in directory.glob("runtime-*.json")]
+        assert {report["worker"] for report in reports} == {"controller", "gw0", "gw1"}
+        assert all(report["durations_sha256"] == data["durations_sha256"] for report in reports)
+
+
+@pytest.mark.parametrize(
+    "defect",
+    ["dynamic-binding", "missing-worker", "duplicate-node", "failed-generation", "lost-coverage"],
+)
+def test_runtime_proof_refuses_false_equivalence(
+    runtime_proof: tuple[Plan, Path], tmp_path: Path, defect: str
+) -> None:
+    snapshot, source = runtime_proof
+    evidence = tmp_path / "evidence"
+    shutil.copytree(source, evidence)
+    path = next(
+        path
+        for path in evidence.glob("candidate/*/runtime-gw*.json")
+        if json.loads(path.read_text())["nodes"]
+    )
+    data = json.loads(path.read_text())
+    nodeid = next(iter(data["nodes"]))
+    if defect == "dynamic-binding":
+        data["nodes"][nodeid]["fixtures"]["runtime_value"] = "wrong_owner:value:function"
+    elif defect == "failed-generation":
+        data["exitstatus"] = 1
+    elif defect == "duplicate-node":
+        other = path.with_name(
+            "runtime-gw1.json" if path.name == "runtime-gw0.json" else "runtime-gw0.json"
+        )
+        sibling = json.loads(other.read_text())
+        sibling["nodes"][nodeid] = data["nodes"][nodeid]
+        other.write_text(json.dumps(sibling))
+    elif defect == "missing-worker":
+        path.unlink()
+    else:
+        (evidence / "candidate/coverage.json").write_text(
+            json.dumps(
+                {"files": {"production.py": {"executed_lines": [1], "missing_lines": [2, 3]}}}
+            )
+        )
+    if defect not in {"missing-worker", "duplicate-node", "lost-coverage"}:
+        path.write_text(json.dumps(data))
+    with pytest.raises(ValueError):
+        compare(snapshot, evidence, 2)
+
+
+def test_runtime_proof_rejects_repeated_execution_inside_one_worker(tmp_path: Path) -> None:
+    project(tmp_path)
+    conftest = tmp_path / "tests/conftest.py"
+    conftest.write_text(
+        conftest.read_text() + "from _pytest.runner import runtestprotocol\n"
+        "def pytest_runtest_protocol(item, nextitem):\n"
+        "    if item.nodeid == 'tests/a/test_first.py::test_contract[1]':\n"
+        "        runtestprotocol(item, nextitem=nextitem)\n"
+    )
+    result = run(
+        tmp_path,
+        "-m",
+        "not flaky",
+        "--splits",
+        "1",
+        "--group",
+        "1",
+        "--file-shard-runtime-report",
+        str(tmp_path / "runtime.json"),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Repeated runtime phase" in result.stdout + result.stderr

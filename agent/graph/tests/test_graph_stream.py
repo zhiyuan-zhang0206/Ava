@@ -28,6 +28,7 @@ from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
@@ -413,14 +414,26 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
     from base.config import settings
 
     directory = tmp_path / ".exec_output"
-    monkeypatch.setattr(output, "_overflow_dir", lambda: directory)
+
+    def overflow_dir(_agent_id: int) -> Path:
+        return directory
+
+    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
     # Bodies exceed the 300-line soft-crop trigger; the new body stays under
     # exec_output_max_chars so a reference-protected skip leaves it fully
     # inline (6 x "old payload " = 72 chars + newline -> 340 lines, 24,820 chars).
     old_body = ("old payload " * 6 + "\n") * 340
     new_body = ("new payload " * 6 + "\n") * 340
     monkeypatch.setattr(settings.sandbox, "exec_output_crop_archive_max_bytes", len(old_body))
-    prior_output = output.wrap_code_output(old_body)
+    prior_output = output.wrap_code_output(
+        old_body,
+        agent_id=7,
+        crop_config=settings.sandbox,
+        clock=Clock.from_settings(),
+        timeout_seconds=settings.sandbox.exec_timeout_seconds,
+        max_chars=settings.sandbox.exec_output_max_chars,
+        elapsed_seconds=1.0,
+    ).text
     archive = next(directory.glob("crop_*.txt"))
     state = AgentState(
         messages=[

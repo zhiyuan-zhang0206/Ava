@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Whole-file Collection Shadow"
-description: "Opt-in collection-only evidence for whole-file shards: a complete snapshot, pytest-split balancing and per-group node/fixture comparisons."
+description: "Opt-in whole-file shard evidence: complete snapshots and paired Linux execution, resolved fixtures and coverage."
 tags:
 - infrastructure
 - quality-assurance
@@ -10,9 +10,10 @@ tags:
 # Whole-file Collection Shadow
 
 `scripts/ci/file_shard_shadow.py` is an opt-in pytest plugin for evaluating
-collection before sharding. Both planning and checking require `--collect-only`;
-neither changes the required CI jobs or executes a test body. Loading the plugin
-without its options leaves collection unchanged.
+collection before sharding. Planning and ordinary checking require `--collect-only`.
+An explicit `--file-shard-execute` opts into running a checked group for runtime
+proof, requiring a per-worker runtime report. Loading the plugin without its
+options leaves collection unchanged. Required CI routing remains unchanged.
 
 ## Snapshot and ownership
 
@@ -61,9 +62,59 @@ rejected because it would compare an already reduced population.
 Plans are temporary evidence, never a committed or reusable discovery cache.
 Regenerate after source changes: checking planned files alone cannot discover
 new files outside the snapshot. The fixture comparison covers declared closure;
-runtime `getfixturevalue`, import side effects and order dependence still need
-execution evidence. Synthetic contracts execute the candidate files to verify
-directory fixtures, parameters and dynamic collection; full runtime and Linux
-cost validation remain prerequisites for changing the gate.
+runtime `getfixturevalue`, import side effects and order dependence need execution
+evidence. Synthetic contracts exercise directory fixtures, parameters, dynamic
+collection and resolved runtime bindings with real xdist workers.
+
+## Paired Linux runtime proof
+
+`Whole-file runtime proof` runs by manual dispatch. Its paired experiment executes
+two complete test populations, so ordinary pull requests and merge-queue trees
+do not start it automatically. Use `plan_only=true` to diagnose complete Linux
+collection without starting either test population; that run cannot certify
+execution equivalence. The default dispatch runs the complete comparison.
+It pins all jobs to the same source SHA, snapshots once, then
+runs the existing node split and checked whole-file split sequentially on each
+of 16 runners, with the same four workers, native environment and coverage
+sources. Neither population retries. The baseline always runs first; this
+experiment establishes execution equivalence and reports collection/test-phase
+costs, but one pair does not establish a statistically stable latency gain.
+
+Each worker records setup/call/teardown outcomes and times, plus the actual
+resolved fixture name, implementation and scope after the call. This includes
+`getfixturevalue()` bindings through pytest's pinned-version fixture request
+state. Repeated reports for the same node and phase fail immediately, including
+repeated execution inside one worker. Worker reports never share an output
+filename. Runtime evidence captures the duration input digest at configuration;
+`--store-durations` measurements can replace that file at session finish without
+changing the recorded input generation. Pre-collection plan validation still
+rejects a different duration input. The planning job uses the same native
+binaries and vendored runtime
+as the paired runners, preserving environment-dependent collection. Group checks must match
+their planned node IDs and declared closure before any test body executes.
+
+Planning arms a 60-second repeating thread dump before importing pytest, writing
+to a separate stack file so pytest capture cannot hide a stalled import or
+collection. Collection logs contain per-file counts (`-qq`); the plan artifact
+still records every eligible node and fixture closure. The collection command
+has a four-minute timeout and a 15-second kill grace within its five-minute step
+and ten-minute job limits. Logs are
+published even when collection fails; a timeout fails the plan and cannot start
+the paired population. The test-protocol faulthandler option alone does not cover
+collection. The plan artifact is still published only after successful collection.
+
+`scripts/ci/file_shard_runtime.py` requires all worker and controller reports,
+zero exit statuses, version/configuration/duration agreement, exclusive execution
+and the exact complete planned node population. Runtime fixture bindings and
+outcomes must match between populations, including skip outcomes. Both coverage
+populations are combined separately; the source files and executable statements
+must match, and losing any baseline covered line fails the proof. Additional
+covered lines remain visible in its report. Missing artifacts, crashes, fixture
+changes and coverage loss cannot produce a successful comparison artifact.
+
+This proof is not a required-gate migration. A successful Linux run, fresh
+complete timings and review of actual file-group execution balance are needed
+before changing the regular backend shards. Plans remain disposable snapshots;
+never reuse a successful old plan after source changes.
 
 Infrastructure owner: [[scripts/docs/scripts.ava.okf.md]].

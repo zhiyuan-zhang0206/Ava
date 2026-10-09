@@ -111,15 +111,15 @@ its own script (`scripts/lint/patch_targets.py`).
   decision only once its owner exists: an entry in `DECISIONS` with its owning
   module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
 
-Rules 4, 5 and 6 reject every measured site directly. Their retired
-`private_imports`, `owner_bypasses` and `path_imports` baseline fields may not
+Rules 4, 5, 6 and 8 reject every measured site directly. Their retired
+`private_imports`, `owner_bypasses`, `path_imports` and `patch_targets` baseline fields may not
 be reintroduced, even empty. Historical comparison revisions may carry empty
-retired fields; nonempty historical fields are invalid too.
+retired fields; nonempty historical locality/path-import fields are invalid too.
+Historical patch-target fields are parsed and discarded without granting any allowance.
 
-Rule 8 and ambient-state sites retain exact `path::target -> site count` maps
-in their baseline shards until the remaining debt is cleared. Their guards
-remain shrink-only, including when a rule version changes; see the patch-target
-and ambient-state lint owners.
+Only ambient-state sites retain exact `path::target -> site count` maps in their
+baseline shards until the remaining debt is cleared. Their guards remain shrink-only,
+including when a rule version changes; see the ambient-state lint owner.
 
 A test in the top-level `tests/` has no baseline section to be frozen in: it must stay by design
 or be listed in `scripts/structure/tests_location_allowed.py` as `contract` or `integration`
@@ -184,17 +184,17 @@ Every hard function violation fails, including after a file or function rename.
 Complexity and nesting baselines and rename allowances have been removed and
 cannot be reintroduced. Refactor the implementation until it meets the budget.
 
-The remaining site-exemption guard chooses its comparison base in this order:
+The remaining site-exemption guard selects one comparison commit:
 
-1. If `LINT_STRUCTURE_BASELINE_BASE` is set, use its merge base with `HEAD`,
-   or resolve the value directly to a commit if no merge base exists.
-   An unresolvable explicit value is a hard error.
-2. Otherwise use the merge base of `HEAD` and `origin/main` when available;
-   a failed merge-base computation emits a note and falls through.
-3. Otherwise use `HEAD`.
+1. If `LINT_STRUCTURE_BASELINE_BASE` is set, resolve that exact value to a commit,
+   including in a shallow checkout. An empty or unresolvable value is a hard error.
+2. Otherwise use the merge base of `HEAD` and `origin/main`. A missing ref or failed
+   merge-base query is a hard error. A local checkout or fork without `origin/main`
+   can explicitly set `LINT_STRUCTURE_BASELINE_BASE=HEAD` or another fetched revision.
 
-The guard reads the baseline at that revision. An absent baseline emits a
-note and skips comparison. Empty retired budget sections in the comparison
+Git rename-query and historical-read failures are hard errors. The guard reads the
+baseline at the selected commit. Only a valid revision that predates the baseline
+directory emits a note and skips comparison. Empty retired budget sections in the comparison
 revision are discarded; nonempty retired sections or malformed baselines fail.
 Retired sections are always refused in the working tree, including empty ones.
 Every remaining site section stays shrink-only when a lint is added or its rule
@@ -303,11 +303,21 @@ runtime explicitly; helpers receive the values they need as parameters. Outside
 a graph run, use the caller's explicit context or resource owner: `get_runtime()`
 requires an active runnable context and is not a process-wide service locator.
 
+The disposable execution child has no LangGraph runtime. Its bootstrap initializes
+`ava.context`, `ava.state` and `ava.state_update` before user code runs; normal
+imports and threads in that one execution use those same child-local slots.
+SDK modules read context through `ava.context`, not a separate context variable,
+thread inheritance patch or hidden host-current getter. Shared-host code receives
+`Runtime[AvaContext]`, an explicit context or the narrower dependency it needs.
+Plugin context-note builders receive `AvaContext` explicitly. See the
+[process-local SDK decision](../decisions/agents/context/2026-10-09-process-local-sdk-context.md).
+
+
 `contextvars` imports are banned by ruff `TID251` except in the mechanism
 files on the allowlist (`pyproject.toml` — `flake8-tidy-imports.banned-api`
 plus the `per-file-ignores` entries). LangGraph's runtime itself propagates
-contextvars (pregel `copy_context`, `get_runtime`), and the SDK / log /
-telemetry / retry-policy readers sit outside node signatures, so a blanket
+contextvars (pregel `copy_context`, `get_runtime`), and native metadata /
+telemetry readers sit outside node signatures, so a blanket
 ban is not possible — but every use is a mechanism-layer decision. A new use
 point needs a written justification in the PR description before joining the
 allowlist. Each `ContextVar` is also a frozen `contextvar` site of the

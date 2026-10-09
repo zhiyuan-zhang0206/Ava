@@ -18,7 +18,7 @@ are for when the user is not in a live conversation with the agent. In a live
 dialog the user reads your replies as you write them, so answer directly and
 do not post a notice.
 
-2. **Post** `ava.ui.notify(title, content, require_response=..., blocking=...,
+2. **Post** `ava.ui.notify(title, content, idempotency_key=notice_key, require_response=..., blocking=...,
    priority=...)` — post one notice. `require_response=False` is an FYI the user
    may glance at or ignore; `require_response=True` needs an answer (and
    `blocking=True` if you are stalled until it arrives).
@@ -138,7 +138,7 @@ def notify(
     priority: str = "P2",
     task: int | None = None,
     expire_at: datetime | timedelta | str | None = None,
-    idempotency_key: str | None = None,
+    idempotency_key: str,
 ) -> "Notice":
     """Post one notice, replacing any previous open notice.
 
@@ -192,9 +192,9 @@ def notify(
             )
         expire_at_iso = due_at.isoformat()
 
-    idempotency_key = coerce_str(idempotency_key, "idempotency_key", allow_none=True)
-    if idempotency_key is not None and not 1 <= len(idempotency_key) <= 128:
-        raise ValueError("idempotency_key must contain 1 to 128 characters")
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    idempotency_key = validate_idempotency_key(idempotency_key)
     aid = ava.sdk_surface.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway performs the whole
@@ -319,8 +319,7 @@ def _spawn_with_label(
     config_overlay: dict[str, object] | None = None,
     label: str | None = None,
     *,
-    idempotency_key: str | None = None,
-    require_idempotency: bool = False,
+    idempotency_key: str,
 ) -> int:
     """Start a new agent; does not block.
 
@@ -332,10 +331,8 @@ def _spawn_with_label(
         config_overlay: per-agent settings overlay, e.g. {"llm_model": ...};
             a preset is named inside it as {"preset": "name"}.
         label: initial role name; omitted = auto-named.
-        idempotency_key: explicit operation key for retrying the same creation.
-        require_idempotency: True requires a key and plain creation; reuse the
-            same inputs and caller identity to recover the original agent.
-            Default mode cannot guarantee key recovery on older servers.
+        idempotency_key: required operation identity for creation or fork; reuse
+            the same key, inputs and caller identity to recover the original agent.
     """
     return ava.agents.spawn_impl(
         prompt=prompt,
@@ -344,7 +341,6 @@ def _spawn_with_label(
         config=config_overlay,
         label=label,
         idempotency_key=idempotency_key,
-        require_idempotency=require_idempotency,
     )
 
 

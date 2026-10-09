@@ -12,6 +12,7 @@ Contrast with codebase_sweep_orchestrator.py (7 waves, ~28 agents).
 import json
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 import ava
 from base.paths import workspace_dir
@@ -37,7 +38,7 @@ def hf(wave: int, role: str) -> Path:
 
 
 def spawn(prompt: str) -> int:
-    return ava.agents.spawn(prompt=prompt)
+    return ava.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))
 
 
 def read_state() -> dict:

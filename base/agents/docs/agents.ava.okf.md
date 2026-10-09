@@ -27,5 +27,6 @@ Its component nodes describe the current contracts and implementation.
 - [[base/agents/messages/docs/inbound-provenance.ava.okf.md]] — Inbound Provenance Facts.
 - [[base/agents/messages/docs/kwargs.ava.okf.md]] — Message Metadata Contract.
 - [[base/agents/observation/docs/observation.ava.okf.md]] — Agent observation evidence.
+- [[base/agents/sdk/docs/sampling.ava.okf.md]] — Live SDK-call sampling and configuration admission.
 
 - [[base/agents/upload_delivery/docs/storage.ava.okf.md]] — Immutable native upload storage.

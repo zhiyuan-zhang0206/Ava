@@ -7,8 +7,8 @@ fast (`raise_for_status()`) on any HTTP error. Ordered by escalating force:
 
   ls              GET  /api/agents                       read one directory page
   send <id> <txt> POST /api/agents/{id}/messages         deliver a chat inbound (source required)
-  cancel <id>     POST /api/cancel                       halt the current action -> idle, stays alive
-  compact <id>    POST /api/agents/{id}/compact          request conversation compaction (durable)
+  cancel <id>     observe native work, then POST /cancel-work             cancel that active work
+  compact <id>    observe closed history, then POST /compact-history       accept manual compaction
   restart <id>    POST /api/agents/{id}/restart          bounce the process, state preserved
   terminate <id>  POST /api/agents/{id}/terminate        graceful stop + exit
   kill <id>       POST /api/agents/{id}/terminate(force) hard-stop a stuck agent
@@ -34,7 +34,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from base.agents import CancelResult, ShellSessionKillTiming
+from base.agents import ShellSessionKillTiming
 from ops.rpc_schemas.billing_recovery import BillingRecoveryMode, BillingRecoveryRunOutcome
 
 _TIMEOUT_S = 15.0
@@ -72,7 +72,7 @@ def _explicit_caller(source: str | None, *, field: str = "source") -> dict[str, 
 
     User ruling 2026-09-20: CLI parameters are explicit; the opt-in
     AVA_CALLER_IDENTITY profile (still consumed by SDK-side stamping, see
-    ``ava.sdk_surface.agent_identity.default_actor``) no longer compensates an omitted ``--source``.
+    ``ava.sdk_surface.agent_identity.require_actor``) no longer compensates an omitted ``--source``.
     """
     if source is None:
         return {}
@@ -324,24 +324,33 @@ def send_agent_message(
 
 
 def cmd_agents_cancel(agent_id: int) -> int:
-    """`ava agents cancel <id>` — halt the current action via POST /api/cancel.
-
-    A running step interrupts immediately; if the agent is between steps the next
-    claim halts it to idle. Either way it stops but stays alive and resumes on the
-    next message — the soft stop, vs terminate / kill which end the agent."""
+    """Cancel the exact observed ACTIVE native work; acceptance precedes its stop."""
+    from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
     from base.host.net.http_dial import post as dial_post
 
-    url = f"{gateway_api_base()}/api/cancel"
+    root = f"{gateway_api_base()}/api/keyed/v1/agents/{agent_id}"
+    observed = dial_get(f"{root}/native-work", timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    observed.raise_for_status()
+    target = NativeWorkTarget.model_validate(observed.json())
+    if target.agent_id != agent_id:
+        raise ValueError("work observation targets another agent")
     resp = dial_post(
-        url,
-        json={"agent_id": agent_id},
+        f"{root}/cancel-work",
+        json=target.model_dump(mode="json"),
         timeout=_TIMEOUT_S,
-        headers={**gateway_auth_headers(), "Idempotency-Key": uuid4().hex},
+        headers={
+            **gateway_auth_headers(),
+            "Idempotency-Key": uuid4().hex,
+            "Idempotency-Scope": "principal-v1",
+        },
     )
     resp.raise_for_status()
-    status = CancelResult(resp.json()["status"])
-    print(f"  ✓ agent {agent_id} cancel: {status}")
+    accepted = NativeCancelAcceptance.model_validate(resp.json())
+    if accepted.target != target:
+        raise ValueError("cancel acceptance targets another work")
+    print(f"  ✓ agent {agent_id} cancel accepted: {accepted.command_id}")
     return 0
 
 
@@ -540,21 +549,33 @@ def cmd_agents_kill(
 
 
 def cmd_agents_compact(agent_id: int) -> int:
-    """`ava agents compact <id>` — request conversation compaction through the
-    gateway's durable `compact_request` inbound (the same surface the web UI
-    triggers).
-
-    Returns immediately: the agent consumes the request on its next claim pass.
-    A terminated target is auto-resurrected first; a
-    wedged target consumes it once recovered (turn-liveness restart, or an
-    operator kill + resurrect) — the request is durable and waits."""
+    """Accept manual compaction of the exact observed closed source history."""
+    from base.agents.compaction.models import CompactAcceptance, CompactTarget
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
     from base.host.net.http_dial import post as dial_post
 
-    url = f"{gateway_api_base()}/api/agents/{agent_id}/compact"
+    root = f"{gateway_api_base()}/api/keyed/v1/agents/{agent_id}"
+    observed = dial_get(
+        f"{root}/compact-target", timeout=_TIMEOUT_S, headers=gateway_auth_headers()
+    )
+    observed.raise_for_status()
+    target = CompactTarget.model_validate(observed.json())
+    if target.source.agent_id != agent_id:
+        raise ValueError("compact observation targets another agent")
     resp = dial_post(
-        url, timeout=_TIMEOUT_S, headers={**gateway_auth_headers(), "Idempotency-Key": uuid4().hex}
+        f"{root}/compact-history",
+        json=target.model_dump(mode="json"),
+        timeout=_TIMEOUT_S,
+        headers={
+            **gateway_auth_headers(),
+            "Idempotency-Key": uuid4().hex,
+            "Idempotency-Scope": "principal-v1",
+        },
     )
     resp.raise_for_status()
-    print(f"  ✓ agent {agent_id} compact: {resp.json().get('status')}")
+    accepted = CompactAcceptance.model_validate(resp.json())
+    if accepted.target != target:
+        raise ValueError("compact acceptance targets another history")
+    print(f"  ✓ agent {agent_id} compact accepted: {accepted.command_id}")
     return 0

@@ -34,19 +34,23 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
 ) -> None:
     module = _load()
     calls: list[list[str]] = []
-    exporter = SimpleNamespace(DEFAULT_REPO="owner/repo", main=lambda args: calls.append(args) or 0)
+
+    def run_exporter(args: list[str]) -> int:
+        calls.append(args)
+        return 0
+
+    def snapshot(exporter: object) -> dict[str, object]:
+        return {
+            "repositories": {"owner/repo": {"days": {"2026-09-03": {"runs": 7, "failed_runs": 2}}}}
+        }
+
+    exporter = SimpleNamespace(DEFAULT_REPO="owner/repo", main=run_exporter)
     # Pin the cluster timezone: the day label must follow the cluster wall
     # clock, not the test environment's zone (CI has no cluster config).
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     monkeypatch.setattr(module, "claimed_slot", lambda: datetime(2026, 9, 3, 22, 20, tzinfo=UTC))
     monkeypatch.setattr(module, "_load_exporter", lambda: exporter)
-    monkeypatch.setattr(
-        module,
-        "_snapshot",
-        lambda _exporter: {
-            "repositories": {"owner/repo": {"days": {"2026-09-03": {"runs": 7, "failed_runs": 2}}}}
-        },
-    )
+    monkeypatch.setattr(module, "_snapshot", snapshot)
     failures: list[str] = []
     monkeypatch.setattr(module, "_report_failure", failures.append)
 
@@ -60,10 +64,14 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
 def test_fire_reports_failed_collector(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load()
     monkeypatch.setattr(module, "claimed_slot", lambda: datetime(2026, 9, 3, 22, 20, tzinfo=UTC))
+
+    def failed_exporter(args: list[str]) -> int:
+        return 1
+
     monkeypatch.setattr(
         module,
         "_load_exporter",
-        lambda: SimpleNamespace(DEFAULT_REPO="owner/repo", main=lambda _: 1),
+        lambda: SimpleNamespace(DEFAULT_REPO="owner/repo", main=failed_exporter),
     )
     failures: list[str] = []
     monkeypatch.setattr(module, "_report_failure", failures.append)

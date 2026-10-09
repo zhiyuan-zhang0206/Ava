@@ -28,7 +28,7 @@ from base.config import settings
 from base.host import config_validators
 from base.host.env import runtime_config
 from gateway.app import app
-from gateway.routers import config as config_router
+from gateway.routers.configuration import runtime as config_router
 from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
 
@@ -682,3 +682,62 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
 
 
 # ── PUT remote ──
+
+
+def test_plugin_config_owner_metadata_and_mixed_patch_rejection() -> None:
+    """A mixed request cannot partly commit Core env and a Fleet image."""
+    from base.packages.plugins.config_registration import disk_image_path
+
+    before_env = runtime_config.env_file_path().read_bytes()
+    image = disk_image_path("ava_fleet")
+    before_image = image.read_bytes() if image.exists() else None
+    with TestClient(app) as client:
+        fields = {field["name"]: field for field in client.get("/api/config").json()["fields"]}
+        assert fields["task_escalate_n"]["owner"] == "ava_fleet"
+        assert fields["llm_model"]["owner"] is None
+        response = client.put("/api/config", json={"task_escalate_n": 7, "llm_model": "unknown"})
+    assert response.status_code == 400
+    assert "mixes owners" in response.json()["detail"]
+    assert runtime_config.env_file_path().read_bytes() == before_env
+    assert (image.read_bytes() if image.exists() else None) == before_image
+
+
+def test_fleet_cluster_write_goes_only_to_owned_image() -> None:
+    from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
+    from base.packages.plugins.config_registration import disk_image_path, read_config_image
+
+    before_env = runtime_config.env_file_path().read_bytes()
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config", json={"task_escalate_n": 11, "reduce_context_switch": False}
+        )
+        invalid = client.put("/api/config", json={"task_escalate_n": "wrong"})
+    assert response.status_code == 200, response.text
+    assert response.json()["applied"] is True
+    assert response.json()["restart_required"] == ["agent", "all"]
+    assert invalid.status_code == 400
+    saved = read_config_image(FleetConfig, disk_image_path("ava_fleet"))
+    assert saved.task_escalate_n == 11 and saved.reduce_context_switch is False
+    assert runtime_config.env_file_path().read_bytes() == before_env
+
+
+def test_remote_host_fleet_toggle_respects_owned_image_and_policy() -> None:
+    from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
+    from base.packages.plugins.config_registration import disk_image_path, read_config_image
+    from ops.host_config import config_write_op
+
+    rejected = config_write_op({"task_maintenance_enabled": False}, local=True)
+    assert rejected.applied is False
+    accepted = config_write_op({"task_maintenance_enabled": False}, local=False)
+    assert accepted.applied is True
+    assert (
+        read_config_image(FleetConfig, disk_image_path("ava_fleet")).task_maintenance_enabled
+        is False
+    )
+    mixed = config_write_op({"task_maintenance_enabled": True, "heartbeat_enabled": False})
+    assert mixed.applied is False
+    assert "mixes owners" in str(mixed.results["task_maintenance_enabled"].reason)
+    assert (
+        read_config_image(FleetConfig, disk_image_path("ava_fleet")).task_maintenance_enabled
+        is False
+    )

@@ -23,6 +23,8 @@ import pytest
 
 from agent.graph.exec._stream import StreamCap, StreamingTextIO
 from agent.graph.exec.output import wrap_code_output
+from agent.graph.exec.tests.output_inputs import CropConfig
+from base.clock import Clock
 from base.db import Database
 from tests.fixtures.pin_agent import exec_context, pin_agent
 
@@ -140,11 +142,17 @@ def _overflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from agent.graph.exec import output
 
     pin_agent(7)
-    monkeypatch.setattr(output, "_overflow_dir", lambda: tmp_path / "overflow")
+
+    def overflow_dir(_agent_id: int) -> Path:
+        return tmp_path / "overflow"
+
+    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
     return tmp_path / "overflow"
 
 
-def test_envelope_still_has_both_ends_after_the_accumulation_cap(_overflow: Path) -> None:
+def test_envelope_still_has_both_ends_after_the_accumulation_cap(
+    _overflow: Path, crop_config: CropConfig, output_clock: Clock
+) -> None:
     """The compatibility contract: the accumulator keeps budget/2 at each end
     and `truncate_both_ends` slices max_chars/2 off each end, so with the
     budget >= the inline cap the envelope's head comes entirely out of the
@@ -154,32 +162,62 @@ def test_envelope_still_has_both_ends_after_the_accumulation_cap(_overflow: Path
     stream.write("M" * 100_000)
     stream.write("TAIL_END")
 
-    out = wrap_code_output(stream.getvalue(), max_chars=1000, stream_cap=stream.cap())
+    out = wrap_code_output(
+        stream.getvalue(),
+        agent_id=7,
+        max_chars=1000,
+        stream_cap=stream.cap(),
+        crop_config=crop_config,
+        clock=output_clock,
+        timeout_seconds=60,
+        elapsed_seconds=1.0,
+    ).text
 
     assert "HEAD_START" in out, "head must survive both caps"
     assert "TAIL_END" in out, "tail must survive both caps"
     assert "output truncated" in out and "omitted" in out
 
 
-def test_envelope_banner_reports_the_true_produced_length(_overflow: Path) -> None:
+def test_envelope_banner_reports_the_true_produced_length(
+    _overflow: Path, crop_config: CropConfig, output_clock: Clock
+) -> None:
     """Without this the agent reads the capped length as the real one and has no
     idea how much output it actually generated."""
     stream = StreamingTextIO(max_chars=2000)
     stream.write("X" * 250_000)
 
-    out = wrap_code_output(stream.getvalue(), max_chars=1000, stream_cap=stream.cap())
+    out = wrap_code_output(
+        stream.getvalue(),
+        agent_id=7,
+        max_chars=1000,
+        stream_cap=stream.cap(),
+        crop_config=crop_config,
+        clock=output_clock,
+        timeout_seconds=60,
+        elapsed_seconds=1.0,
+    ).text
 
     assert f"{250_000:,} chars produced" in out
     assert "the dropped middle is unrecoverable" in out
     assert "full output at" not in out, "the archive no longer holds the full output"
 
 
-def test_envelope_still_promises_the_full_output_when_uncapped(_overflow: Path) -> None:
+def test_envelope_still_promises_the_full_output_when_uncapped(
+    _overflow: Path, crop_config: CropConfig, output_clock: Clock
+) -> None:
     """The uncapped path is unchanged: the archive really is complete, so the
     banner keeps saying so (and the ava_code plugin's reuse of
     `truncate_both_ends` keeps its wording)."""
     big = "HEAD_START" + ("M" * 5000) + "TAIL_END"
-    out = wrap_code_output(big, max_chars=1000)
+    out = wrap_code_output(
+        big,
+        agent_id=7,
+        max_chars=1000,
+        crop_config=crop_config,
+        clock=output_clock,
+        timeout_seconds=60,
+        elapsed_seconds=1.0,
+    ).text
 
     assert "full output at" in out
     assert "produced" not in out
@@ -187,13 +225,24 @@ def test_envelope_still_promises_the_full_output_when_uncapped(_overflow: Path) 
     assert archived.read_text(encoding="utf-8") == big
 
 
-def test_overflow_archive_says_it_is_not_the_full_output(_overflow: Path) -> None:
+def test_overflow_archive_says_it_is_not_the_full_output(
+    _overflow: Path, crop_config: CropConfig, output_clock: Clock
+) -> None:
     """An agent that greps the archive and finds nothing must be able to tell
     "never printed" from "dropped mid-run" — otherwise the miss reads as proof."""
     stream = StreamingTextIO(max_chars=2000)
     stream.write("X" * 250_000)
 
-    wrap_code_output(stream.getvalue(), max_chars=1000, stream_cap=stream.cap())
+    wrap_code_output(
+        stream.getvalue(),
+        agent_id=7,
+        max_chars=1000,
+        stream_cap=stream.cap(),
+        crop_config=crop_config,
+        clock=output_clock,
+        timeout_seconds=60,
+        elapsed_seconds=1.0,
+    )
 
     (archived,) = list(_overflow.glob("exec_*.txt"))
     text = archived.read_text(encoding="utf-8")
@@ -204,7 +253,10 @@ def test_overflow_archive_says_it_is_not_the_full_output(_overflow: Path) -> Non
 
 
 def test_instrumentation_logs_the_true_length_not_the_capped_one(
-    _overflow: Path, monkeypatch: pytest.MonkeyPatch
+    _overflow: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    crop_config: CropConfig,
+    output_clock: Clock,
 ) -> None:
     """`[exec output chars]` is how max_chars gets tuned from a real
     distribution. Fed the capped length it would report the budget forever and
@@ -221,7 +273,16 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
 
     stream = StreamingTextIO(max_chars=2000)
     stream.write("X" * 250_000)
-    wrap_code_output(stream.getvalue(), max_chars=1000, stream_cap=stream.cap())
+    wrap_code_output(
+        stream.getvalue(),
+        agent_id=7,
+        max_chars=1000,
+        stream_cap=stream.cap(),
+        crop_config=crop_config,
+        clock=output_clock,
+        timeout_seconds=60,
+        elapsed_seconds=1.0,
+    )
 
     assert logged == [250_000]
 
@@ -243,10 +304,7 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     from agent.graph.exec.node import _ExecDone
 
     budget = 5000
-    # The accumulation budget lives in the PARENT's StreamingTextIO — the
-    # child ships raw chunks and the parent accumulates/truncates. So the
-    # in-process monkeypatch still reaches it.
-    monkeypatch.setattr("base.config.settings.sandbox.exec_output_accumulation_max_chars", budget)
+    # The parent receives this budget explicitly; the child ships raw chunks.
 
     result, _payload = await _run_in_subprocess(
         database,
@@ -255,6 +313,7 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
         cancel_event=asyncio.Event(),
         timeout=60.0,
         chunk_publisher=None,
+        accumulation_max_chars=budget,
     )
 
     assert isinstance(result, _ExecDone), f"the run must not be killed, got {type(result).__name__}"
@@ -264,28 +323,3 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     assert result.output.startswith("spam 0\n"), "the head is pinned"
     assert "DONE_MARKER" in result.output, "the loop ran to completion, the tail proves it"
     assert "dropped here DURING execution" in result.output
-
-
-# ---------------------------------------------------------------------------
-# The budget is a validated settings field
-# ---------------------------------------------------------------------------
-
-
-def test_budget_below_the_inline_cap_is_refused_at_startup() -> None:
-    """A budget under `exec_output_max_chars` would hand the envelope less than
-    it slices, so its "head" would reach into the accumulator's dropped middle.
-    Fail the operator's config loudly instead of rendering an incoherent
-    envelope."""
-    from pydantic import ValidationError
-
-    from base.config.domains.sandbox import SandboxSettings
-
-    with pytest.raises(ValidationError, match="must be >= exec_output_max_chars"):
-        SandboxSettings.model_validate(
-            {"exec_output_max_chars": 30_000, "exec_output_accumulation_max_chars": 1000}
-        )
-
-    ok = SandboxSettings.model_validate(
-        {"exec_output_max_chars": 1000, "exec_output_accumulation_max_chars": 1000}
-    )
-    assert ok.exec_output_accumulation_max_chars == 1000

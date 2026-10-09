@@ -11,7 +11,7 @@ Data sources (task #1197 LGTM cutover):
   connection as the nodes.
 - Edge events (audit category, spawn/send_message/fork/resurrect): aggregated
   in Postgres from `audit_events`, the permanent audit record
-  (gateway/events/audit_rows.py), in the same phase as the nodes.
+  (base/events/reads/audit_rows.py), in the same phase as the nodes.
 
 A successful graph also passes through the gateway-latency heartbeat guard
 (`telemetry_staleness`, over `telemetry_events`). An old or missing heartbeat
@@ -39,8 +39,8 @@ from base import telemetry
 from base.config import settings
 from base.events.declarations.gateway import FleetGraphStaleReason
 from base.events.live.bus import EventBus
+from base.events.reads import audit_rows
 from base.log import logger
-from gateway.events import audit_rows
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers._fleet_tokens import AgentTokens, agent_tokens
 from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse

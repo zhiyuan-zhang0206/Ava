@@ -10,13 +10,13 @@ would silently reopen the watcher-compacts-its-own-agent bug) fails loudly.
 import pytest
 
 import ava
-from ava.sdk_surface import agent_identity, process_context
+from ava.sdk_surface import agent_identity
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 def _owns_loop() -> bool:
     """Whether the bound context's identity owns the turn loop."""
-    context = process_context.current()
+    context = ava.context
     assert context.identity is not None
     return context.identity.owns_loop
 
@@ -108,13 +108,11 @@ def test_is_launched_child_false_without_agent_id(monkeypatch: pytest.MonkeyPatc
 def test_actor_sets_system_principal() -> None:
     pin_agent(None, actor="schedule:7")
     assert agent_identity.require_actor() == "schedule:7"
-    assert agent_identity.default_actor() == "schedule:7"
 
 
 def test_require_actor_derives_agent_when_no_actor() -> None:
     pin_agent(42, owns_loop=True)  # no actor
     assert agent_identity.require_actor() == "agent:42"
-    assert agent_identity.default_actor() == "agent:42"
 
 
 def test_actor_takes_precedence_over_agent_id() -> None:
@@ -140,22 +138,26 @@ def test_require_actor_binds_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _owns_loop() is False  # env-established, not loop owner
 
 
-def test_default_actor_binds_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    # default_actor() should also establish from env for consistency --
-    # without it, a watcher calling terminate/restart/resurrect would
-    # attribute the action to "agent:None".
-    pin_no_identity()
-    monkeypatch.setenv("AVA_AGENT_ID", "42")
-    assert agent_identity.default_actor() == "agent:42"
-    assert _owns_loop() is False
+@pytest.mark.parametrize("action", ["terminate", "restart", "resurrect"])
+def test_lifecycle_default_source_requires_identity_before_http(
+    action: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ava.gateway_client as client
 
-
-def test_default_actor_is_non_raising_legacy_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The lower-stakes default-source paths keep the pre-actor behavior rather
-    # than raising: no identity at all -> the "agent:None" sentinel string.
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert agent_identity.default_actor() == "agent:None"
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("missing provenance cannot reach HTTP")
+
+    monkeypatch.setattr(client, "post", forbidden)
+    with pytest.raises(RuntimeError, match="no established actor or agent identity"):
+        if action == "terminate":
+            ava.agents.terminate(7)
+        elif action == "restart":
+            ava.agents.restart(7)
+        else:
+            ava.agents.resurrect(7, "continue")
 
 
 @pytest.mark.parametrize("action", ["compact", "restart", "terminate"])
@@ -193,7 +195,7 @@ def test_context_outside_a_bound_process_raises(monkeypatch: pytest.MonkeyPatch)
     """Like `ava.state` outside an exec turn: no bound context, no attribute."""
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    with pytest.raises(AttributeError, match=r"ava\.context exists only"):
+    with pytest.raises(AttributeError, match=r"ava\.context requires an execution child"):
         _ = ava.context
     assert getattr(ava, "context", None) is None
 
