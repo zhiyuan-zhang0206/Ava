@@ -202,7 +202,6 @@ export type RunTimelineUnit = Schemas["RunTimelineUnit"];
 export type RunTimelineEvent = Schemas["RunTimelineEvent"];
 export type RunTimelineUsage = Schemas["RunTimelineUsage"];
 export type RunTimelineGeneration = Schemas["RunTimelineGeneration"];
-export type RunTimelineMessageBar = Schemas["RunTimelineMessageBar"];
 export type RunTimelineContext = Schemas["RunTimelineContext"];
 export type SessionOut = Schemas["SessionOut"];
 export type RunTimelineMessages = Schemas["RunTimelineMessages"];
