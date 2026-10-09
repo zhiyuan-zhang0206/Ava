@@ -38,7 +38,7 @@ def is_launched_child() -> bool:
     `python x.py` in a persistent shell session gets `ava.tasks` et al. without a
     bootstrap, while the agent process (which loaded plugins explicitly) and
     gateway / cli keep fail-fast on a genuinely unknown `ava.X`. A bound turn
-    context cannot bootstrap a launched script in a host turn."""
+    shared-host startup posture cannot bootstrap a launched script."""
     identity = _bound()
     return identity is not None and identity.agent_id is not None and not identity.owns_loop
 

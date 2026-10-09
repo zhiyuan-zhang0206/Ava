@@ -154,6 +154,7 @@ def _finalize_turn_observability(
     log_llm_usage(
         final_msg,
         model=model,
+        agent_id=agent_id,
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
         # Gemini + explicit cachedContent reports only the explicit block in

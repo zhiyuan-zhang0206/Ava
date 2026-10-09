@@ -2,8 +2,9 @@
 
 The dispatcher owns per-agent single-flight and wake delivery. This driver binds an admitted
 incarnation, resolves its framework/plugin configuration, and invokes the graph until idle
-or native lifecycle return. The turn's identity is a
-contextvar every graph node inherits; its configuration travels as its `AgentSlices`
+or native lifecycle return. The agent identity and configuration travel through
+`Runtime[AvaContext]`; native admission/resource scopes remain separate from SDK
+identity and ordinary log attribution. Configuration travels as its `AgentSlices`
 on the graph context, and managed exec children receive the same pins through their
 existing environment projection.
 

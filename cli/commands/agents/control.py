@@ -223,6 +223,7 @@ def send_agent_message(
     agent_id: int,
     content: str,
     *,
+    origin_agent_id: int | None = None,
     source: str,
     tail_file: str | None = None,
     completion: bool = False,
@@ -292,6 +293,7 @@ def send_agent_message(
         if key is not None:
             delivery_outbox.record_failed_send(
                 agent_id=agent_id,
+                origin_agent_id=origin_agent_id,
                 source=source,
                 content=content,
                 client_message_id=key,
@@ -302,6 +304,7 @@ def send_agent_message(
         if resp.status_code in delivery_outbox.TRANSIENT_HTTP_STATUSES:
             delivery_outbox.record_failed_send(
                 agent_id=agent_id,
+                origin_agent_id=origin_agent_id,
                 source=source,
                 content=content,
                 client_message_id=key,

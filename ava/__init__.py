@@ -141,6 +141,11 @@ class _SdkModule(_ModuleType):
     @property
     def context(self) -> AvaContext:
         bound = self.__dict__.get(_CONTEXT_KEY)
+        if bound is process_context.SdkProcessPurpose.SHARED_HOST:
+            raise process_context.ContextOutsideProcessError(
+                "the shared agent host has no SDK process context; "
+                "host code uses the context its caller supplied"
+            )
         if bound is not None:
             return bound
         launched = process_context.launched_context()
@@ -157,12 +162,16 @@ class _SdkModule(_ModuleType):
 
     @context.setter
     def context(self, value: AvaContext) -> None:
+        if is_host_process():
+            raise RuntimeError("the shared agent host cannot bind an SDK process context")
         if not isinstance(value, AvaContext):
             raise TypeError("ava.context must be an AvaContext")
         self.__dict__[_CONTEXT_KEY] = value
 
     @context.deleter
     def context(self) -> None:
+        if is_host_process():
+            raise RuntimeError("the shared agent host cannot release its startup posture")
         self.__dict__[_CONTEXT_KEY] = None
 
     @property
@@ -178,6 +187,24 @@ class _SdkModule(_ModuleType):
 
 
 _sys.modules[__name__].__class__ = _SdkModule
+
+
+def bind_host_process() -> None:
+    """Establish shared-host startup posture before plugins or graph work.
+
+    This process never binds a current agent to the SDK, even if its environment
+    inherited an agent id. The posture lasts until this interpreter exits.
+    """
+    sdk = cast(_SdkModule, _sys.modules[__name__])
+    bound = sdk.__dict__.get(_CONTEXT_KEY)
+    if bound is not None and bound is not process_context.SdkProcessPurpose.SHARED_HOST:
+        raise RuntimeError("cannot boot a shared host with an established SDK process context")
+    sdk.__dict__[_CONTEXT_KEY] = process_context.SdkProcessPurpose.SHARED_HOST
+
+
+def is_host_process() -> bool:
+    """Whether this interpreter explicitly booted as the shared host."""
+    return globals().get(_CONTEXT_KEY) is process_context.SdkProcessPurpose.SHARED_HOST
 
 
 def bind_context(context: AvaContext) -> None:
