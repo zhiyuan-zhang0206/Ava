@@ -159,9 +159,16 @@ def test_the_turns_text_is_its_own_line_before_its_work_line() -> None:
     ]
 
 
-def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_sender_and_time_line() -> None:
-    def inbound(source: str | None, text: str) -> HumanMessage:
-        kwargs = {"ava_msg_type": "inbound", "ava_created_at": "2026-10-05T03:04:05+00:00"}
+def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the_recorded_offset() -> (
+    None
+):
+    def inbound(source: str | None, text: str, *, legacy: bool = False) -> HumanMessage:
+        kwargs: dict[str, object] = {
+            "ava_msg_type": "inbound",
+            "ava_created_at": "2026-10-05T03:04:05+00:00",
+        }
+        if not legacy:
+            kwargs["ava_inbound_body_start"] = text.index("\n\n") + 2 if "\n\n" in text else 0
         if source:
             kwargs["ava_source"] = source
         return HumanMessage(content=text, additional_kwargs=kwargs)
@@ -173,6 +180,7 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_sender_and_ti
         inbound("shell:1940", "Shell session (id 1940) [2026-10-05 Mon 11:04:08]:\n\nexited 0"),
         inbound("system:notice-reply", "[system] Re: x"),
         inbound(None, "no source"),
+        inbound("user", "[2026-10-05 Mon 11:04:09]\n\nold", legacy=True),
     ]
     lines = build_catalog(chunk, divide_units(chunk)).splitlines()
     assert lines == [
@@ -182,6 +190,8 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_sender_and_ti
         "[4] shell 1940: exited 0",
         "[5] system notice-reply: [system] Re: x",
         "[6] human message: no source",
+        # written before the offset was recorded: shown whole, header included
+        "[7] human message: [2026-10-05 Mon 11:04:09] old",
     ]
 
 
