@@ -1,11 +1,13 @@
 """The production IM main exits while Feishu's SDK call remains blocked."""
 
 import asyncio
+import concurrent.futures
 import os
 import secrets
 import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -22,8 +24,10 @@ from tests.components.services.daemon_shutdown_test_support import Child
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGTERM contract")
 
 
-def run_blocked_ws_child(markers_path: Path) -> None:
+def run_blocked_ws_child(markers_path: Path, *, responsive: bool = True) -> None:
     """Use a blocked SDK transport with the real adapter and daemon main."""
+    request_submitted = threading.Event()
+    disconnect_seen: concurrent.futures.Future[None] = concurrent.futures.Future()
 
     def mark(name: str) -> None:
         with markers_path.open("a", encoding="utf-8") as markers:
@@ -32,7 +36,15 @@ def run_blocked_ws_child(markers_path: Path) -> None:
     class BlockedWsClient(FakeWsClient):
         def start(self) -> None:
             loop = asyncio.get_event_loop()
-            loop.call_soon(mark, "ready")
+
+            def hold_dispatch() -> None:
+                mark("ready")
+                # Park dispatch after readiness: the service must not confuse
+                # submitting a coroutine with the SDK loop executing it.
+                request_submitted.wait(600)
+                threading.Event().wait(1 if responsive else 600)
+
+            loop.call_soon(hold_dispatch)
             try:
                 loop.run_forever()
             finally:
@@ -40,6 +52,7 @@ def run_blocked_ws_child(markers_path: Path) -> None:
 
         async def _disconnect(self) -> None:
             mark("disconnect-requested")
+            disconnect_seen.set_result(None)
 
     async def run_ws() -> None:
         adapter = PatchingAdapter(
@@ -60,14 +73,22 @@ def run_blocked_ws_child(markers_path: Path) -> None:
                     adapter.begin_shutdown()
         finally:
             await adapter.stop()
-            await asyncio.sleep(0)
+            request_submitted.set()
+            if responsive:
+                # stop() submits a best-effort request, without waiting for
+                # the SDK. Only this responsive fixture needs proof that its
+                # worker consumed the request before the real hard exit.
+                await asyncio.wait_for(asyncio.wrap_future(disconnect_seen), timeout=5)
             mark("cleanup-ran")
 
     daemon.run = run_ws
     daemon.main()
 
 
-def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(tmp_path: Path) -> None:
+@pytest.mark.parametrize("responsive", [True, False], ids=["delayed-dispatch", "wedged-loop"])
+def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(
+    tmp_path: Path, responsive: bool
+) -> None:
     markers_path, log_path = tmp_path / "markers.txt", tmp_path / "im-feishu.log"
     home = tmp_path / "ava-home"
     home.mkdir()
@@ -83,6 +104,7 @@ def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(tmp_path: Path) -
         "AVA_HOME": str(home),
         "AVA_TELEMETRY_OTLP_ENDPOINT": endpoint,
         "DAEMON_SHUTDOWN_TEST_MARKERS": str(markers_path),
+        "FEISHU_TEST_RESPONSIVE_LOOP": str(int(responsive)),
     }
     env.pop("AVA_PERMISSIONS_HELPER_PID", None)
     log_file = log_path.open("wb")
@@ -93,7 +115,8 @@ def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(tmp_path: Path) -
             "import os; from pathlib import Path; "
             "from services.entrypoints.im_bridge.tests.test_feishu_worker_exit "
             "import run_blocked_ws_child; "
-            "run_blocked_ws_child(Path(os.environ['DAEMON_SHUTDOWN_TEST_MARKERS']))",
+            "run_blocked_ws_child(Path(os.environ['DAEMON_SHUTDOWN_TEST_MARKERS']), "
+            "responsive=bool(int(os.environ['FEISHU_TEST_RESPONSIVE_LOOP'])))",
         ],
         cwd=Path(__file__).resolve().parents[4],
         env=env,
@@ -107,7 +130,10 @@ def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(tmp_path: Path) -
         child.wait_bounded_exit(what="blocked Feishu SDK worker")
         assert "[im_bridge] interrupted" in child.log_tail(), child.log_tail()
         assert "cleanup-ran" in child.markers(), child.log_tail()
-        assert "disconnect-requested" in child.markers(), child.log_tail()
+        if responsive:
+            assert "disconnect-requested" in child.markers(), child.log_tail()
+        else:
+            assert "disconnect-requested" not in child.markers(), child.log_tail()
         assert "worker-exited" not in child.markers()
     finally:
         child.close()
