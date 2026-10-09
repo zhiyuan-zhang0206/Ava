@@ -16,6 +16,7 @@ from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
+from base.agents.incarnation.resources import ResourceBirth, decode_resources
 from base.config import settings
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.hold_driver import HoldDriver
@@ -134,7 +135,10 @@ class _RuntimeRow(NamedTuple):
             and self.generation is None
             and self.fresh is not True
             and self.pid is None
-            and self.resources is None
+            and (
+                self.resources is None
+                or isinstance(decode_resources(self.resources), ResourceBirth)
+            )
         )
 
     def cold_hosted_idle(self) -> bool:
@@ -471,14 +475,15 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
         raise RuntimeError("maintenance still has unfinished or failed continuations")
     if hold.parked:
         rows = conn.execute(
-            "SELECT id FROM agents_meta WHERE id=ANY(%s) AND status='idling' "
-            "AND ((runtime_owner IS NULL AND runtime_generation IS NULL) OR "
-            "(runtime_kind='hosted' AND (lease_expires_at IS NULL "
-            "OR lease_expires_at<=clock_timestamp()))) "
-            "AND pid IS NULL AND incarnation_resources IS NULL",
+            "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
+            "lease_expires_at>clock_timestamp(),pid,incarnation_resources "
+            "FROM agents_meta WHERE id=ANY(%s)",
             (list(hold.parked),),
         ).fetchall()
-        if {row[0] for row in rows} != set(hold.parked):
+        parked = [_RuntimeRow(*row) for row in rows]
+        if {row.agent_id for row in parked if row.unowned_idle() or row.cold_hosted_idle()} != set(
+            hold.parked
+        ):
             raise RuntimeError("parked agent intent changed during maintenance")
     for agent_id, command_id in hold.commands.items():
         row = conn.execute(
