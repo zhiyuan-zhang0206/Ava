@@ -37,6 +37,12 @@ from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.pin_agent import pin_agent
 
 
+def _fleet_slices() -> AgentSlices:
+    installation = install.installed()
+    assert installation is not None
+    return AgentSlices.resolve(plugin_configs=installation.configs)
+
+
 def _seed_agent(db: psycopg.Connection) -> int:
     """Insert an agents + agents_meta row (log() / set_label() write against an
     existing meta row; the real spawn path always creates it first)."""
@@ -91,13 +97,13 @@ def test_member_torn_down_on_uninstall(_load_activity_plugin: None):
 
 
 def test_plugin_registers_prompt_section(_load_activity_plugin: None):
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
+    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
     assert "ava.self.set_label" in prompt
 
 
 def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     """The rendered prompt carries the reporting contract with the plugin."""
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
+    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
 
     assert prompt.count("one reporter per milestone") == 1
     assert "directly to whoever must act" in prompt
@@ -108,7 +114,7 @@ def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
 
 def test_enabled_fleet_preserves_workflow_choice(_load_activity_plugin: None):
     """Installing Fleet exposes capabilities without imposing a work strategy."""
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
+    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
     assert "Workflow selection belongs to `ava-workflow`" in prompt
     assert (
         "enabling Fleet does not require delegation, a registry task, or a management tree"
@@ -131,8 +137,8 @@ def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
     """Fleet adds collaboration guidance without owning the core lifecycle."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section(AgentSlices.resolve())
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
+    section = _fleet_self_section(_fleet_slices())
+    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
     assert "# Efficient long-running operation" not in section
     assert prompt.count("# Efficient long-running operation") == 1
     assert "do not plan to terminate it yourself" not in section
@@ -146,7 +152,7 @@ def test_peer_communication_survives_human_guidance_toggle(
     """Turning off human interruption guidance must not remove peer discipline."""
 
     set_fleet_configuration(reduce_context_switch=False)
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
+    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
     assert prompt.count("## Agent-to-agent communication") == 1
     assert "## Reduce context switch for the human" not in prompt
     assert "explicit reporting agreements still apply" in prompt
@@ -161,7 +167,7 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin:
     rule is phrased semantically (no dismiss_notice call name)."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section(AgentSlices.resolve())
+    section = _fleet_self_section(_fleet_slices())
     assert "Dismiss a pending notice" in section
     assert "when the dialog resolves it" in section
     assert "dismiss_notice" not in section
@@ -171,7 +177,7 @@ def test_prompt_section_queue_delivery_mandate(_load_activity_plugin: None):
     """Keep asynchronous delivery and resolved-notice semantics resident."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section(AgentSlices.resolve())
+    section = _fleet_self_section(_fleet_slices())
     assert "queue necessary decisions and results" in section
     assert "even while they are offline" in section
     assert "offline" in section
@@ -191,10 +197,10 @@ def test_prompt_section_reduce_context_switch_gating(
     )
 
     set_fleet_configuration(reduce_context_switch=True)
-    assert "Queue, never push" in _reduce_context_switch_section(AgentSlices.resolve())
+    assert "Queue, never push" in _reduce_context_switch_section(_fleet_slices())
 
     set_fleet_configuration(reduce_context_switch=False)
-    assert _reduce_context_switch_section(AgentSlices.resolve()) == ""
+    assert _reduce_context_switch_section(_fleet_slices()) == ""
 
 
 def test_prompt_section_reduce_context_switch_content(
@@ -206,7 +212,7 @@ def test_prompt_section_reduce_context_switch_content(
     )
 
     set_fleet_configuration(reduce_context_switch=True)
-    section = _reduce_context_switch_section(AgentSlices.resolve())
+    section = _reduce_context_switch_section(_fleet_slices())
 
     assert "Queue, never push" in section
     assert "irreversible risk in motion" in section
@@ -225,19 +231,19 @@ def test_reduce_context_switch_reaches_the_prompt(
     """End to end: the toggle gates the section's presence in the assembled
     system prompt."""
 
-    section, slices = "## Reduce context switch for the human", AgentSlices.resolve()
+    section = "## Reduce context switch for the human"
     set_fleet_configuration(reduce_context_switch=True)
-    assert section in build_system_prompt(fleet_registry(), slices, agent_id=1)
+    assert section in build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
 
     set_fleet_configuration(reduce_context_switch=False)
-    assert section not in build_system_prompt(fleet_registry(), slices, agent_id=1)
+    assert section not in build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
 
 
 def test_fleet_operating_contract_is_loaded_on_demand(_load_activity_plugin: None):
     """The prompt routes chosen capabilities to complete, preserved procedures."""
     from ava_builtins.plugins.ava_fleet import agent_runtime
 
-    section = agent_runtime._fleet_self_section(AgentSlices.resolve())
+    section = agent_runtime._fleet_self_section(_fleet_slices())
     skill_directory = Path(agent_runtime.__file__).parent / "skills" / "ava-fleet"
     skill = (skill_directory / "SKILL.md").read_text()
     contract = (skill_directory / "reference" / "operating-contract.md").read_text()
