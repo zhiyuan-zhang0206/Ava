@@ -1,5 +1,6 @@
 "tests.path_scoped.agent_tests" = [
     "test_exec_child.py",
+    "test_exec_child_signals.py",
     "test_lazy_child_imports.py",
 ]
 "tests.path_scoped.ava_tests" = [
