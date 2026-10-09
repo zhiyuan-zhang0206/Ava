@@ -13,13 +13,14 @@ from typing import Any
 
 import pytest
 
-import services.desktop.computer.ax_tools as ax
 from base.db import Database
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.tests.slices import computer_use_config
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import AxNode, AxTreeResult
+
+from ...permissions_helper import client as helper
+from ...permissions_helper.client import AxNode, AxTreeResult
+from .. import ax_tools as ax
+from ..errors import ComputerUseError
+from ..mcp_daemon import ComputerMcpDaemon
+from .slices import computer_use_config
 
 
 def node(
@@ -338,3 +339,19 @@ async def test_ax_tree_is_declared_in_the_tool_list(database: Database) -> None:
     assert resp["ok"] is True
     tools: list[dict[str, Any]] = resp["result"]
     assert "ax_tree" in {t["name"] for t in tools}
+
+
+@pytest.mark.parametrize(
+    "action", ["AXIncrement", "AXDecrement", "AXCancel", "AXExpand", "AXApplicationAction"]
+)
+def test_interactive_tree_exposes_platform_actions_without_a_fixed_action_allowlist(
+    action: str,
+) -> None:
+    nodes = [window(1), node(2, 1, "AXUnknown", depth=1, actions=[action])]
+    assert f"[e2] unknown @120,80 200x80 {action}" in shown(nodes)
+
+
+def test_context_menu_only_nodes_do_not_become_interactive_controls() -> None:
+    nodes = [window(1), node(2, 1, "AXCell", depth=1, actions=["AXShowMenu"])]
+    assert "[e2]" not in shown(nodes)
+    assert "AXShowMenu" in shown(nodes, "full")
