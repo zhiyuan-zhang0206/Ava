@@ -83,17 +83,18 @@ from base.log import logger
 from base.paths import computer_mcp_socket
 from base.telemetry import audit_events
 
+from ..permissions_helper import client as helper
+from ..permissions_helper.client import PermissionsHelperError
+
 # Re-export of the shared OCR module object (test compat: the suite patches
 # mcp_daemon.ocr_mod attributes, and every OCR caller sees the same object).
-from services.desktop.computer.ax_ids import AxSession
-from services.desktop.computer.config import ComputerUseConfig
-from services.desktop.computer.execute import _TOOLS, _execute_tool, _mcp_result, _priority
-from services.desktop.computer.execute import ocr_mod as ocr_mod
-from services.desktop.computer.protocol import Request, Response
-from services.desktop.computer.session import ScreenSession
-from services.desktop.computer.task_sessions import TaskSessionTracker
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import PermissionsHelperError
+from .ax_ids import AxSession
+from .config import ComputerUseConfig
+from .execute import _TOOLS, _execute_tool, _mcp_result, _priority
+from .execute import ocr_mod as ocr_mod
+from .protocol import Request, Response
+from .session import ScreenSession
+from .task_sessions import TaskSessionTracker
 
 # A snapshot PNG can be multi-MB on one line; lift the stream buffer cap well
 # above StreamReader's 64KiB default (same limit as the browser daemon).
@@ -104,6 +105,10 @@ def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None
     """The compact "where / what" string of a computer_action audit row."""
     if tool == "click" and "x" in args:
         return f"{args['x']},{args['y']}"
+    if tool == "drag":
+        return (
+            f"{args.get('start_x')},{args.get('start_y')}->{args.get('end_x')},{args.get('end_y')}"
+        )
     if tool == "click_text" and result is not None:
         # click_text resolves its own target via OCR: audit the center it
         # clicked (physical pixels), not an argument coordinate.
@@ -384,6 +389,8 @@ class ComputerMcpDaemon:
             self._pointer = (float(result["x"]), float(result["y"]))
         if tool == "click" or (tool == "scroll" and "x" in args and "y" in args):
             self._pointer = (float(args["x"]), float(args["y"]))
+        elif tool == "drag":
+            self._pointer = (float(args["end_x"]), float(args["end_y"]))
 
     async def _renew_and_note(self, agent_id: int, tool: str, args: dict[str, Any]) -> None:
         """A live caller renews the lease (success or failure — it is still acting on the
