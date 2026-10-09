@@ -393,16 +393,14 @@ def spawn(
     machine: str | None = None,
     config_overlay: dict[str, object] | None = None,
     *,
-    idempotency_key: str | None = None,
-    require_idempotency: bool = False,
+    idempotency_key: str,
 ) -> int:
     """Start a new agent; does not block.
 
-    Set `require_idempotency=True` with an explicit `idempotency_key` for plain
-    creation that can recover its original identity after a lost response. Reuse
-    the same key, inputs and caller identity; use a new key for another agent.
-    Strong mode rejects `fork_from`. The default mode remains compatible but
-    cannot guarantee key recovery on older servers.
+    An explicit `idempotency_key` identifies this creation or fork. Reuse the
+    same key, inputs and caller identity to recover its original agent after a
+    lost response; use a new key for another agent. Acceptance does not prove
+    execution, and uncertain transport outcomes are not automatically retried.
 
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
     `machine` defaults to yours. `config_overlay={"preset": "name"}` starts from a saved config
@@ -421,7 +419,6 @@ def spawn(
         config=config_overlay,
         label=None,
         idempotency_key=idempotency_key,
-        require_idempotency=require_idempotency,
     )
 
 
@@ -462,8 +459,7 @@ def spawn_impl(
     machine: str | None,
     config: dict[str, object] | None,
     label: str | None,
-    idempotency_key: str | None = None,
-    require_idempotency: bool = False,
+    idempotency_key: str,
 ) -> int:
     # Shared spawn body. `label` is exposed on the public `spawn` only when the
     # ava_fleet plugin wraps it (the plugin passes a real label through here);
@@ -476,11 +472,9 @@ def spawn_impl(
     machine = coerce_str(machine, "machine", allow_none=True)
     config = coerce_typed(config, "config", dict, allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
-    from ava.gateway_client.creation_admission import validate_spawn_admission
+    from base.api_contracts.idempotency import validate_idempotency_key
 
-    idempotency_key = validate_spawn_admission(
-        require_idempotency=require_idempotency, key=idempotency_key, fork_from=fork_from
-    )
+    idempotency_key = validate_idempotency_key(idempotency_key)
     spawner = ava.sdk_surface.agent_identity.require_actor()
     if config:
         # The `preset` key is spawn-boundary metadata, not a Settings field: it
@@ -505,7 +499,6 @@ def spawn_impl(
         config=config,
         label=label,
         idempotency_key=idempotency_key,
-        **({"require_idempotency": True} if require_idempotency else {}),
     )
 
 

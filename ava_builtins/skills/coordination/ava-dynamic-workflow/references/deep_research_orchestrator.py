@@ -30,6 +30,7 @@ Total: ~40 agents / 7 waves
 import json
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 import ava
 from base.paths import workspace_dir
@@ -66,7 +67,7 @@ def hf(wave: int, role: str) -> Path:
 
 
 def spawn(prompt: str, label: str, wave: int, role: str) -> int:
-    wid = ava.agents.spawn(prompt=prompt)
+    wid = ava.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))
     registry[wid] = {"wave": wave, "role": role, "label": label}
     return wid
 
