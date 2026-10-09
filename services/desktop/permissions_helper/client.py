@@ -476,6 +476,11 @@ def ax_act(
     action: str,
     *,
     value: str | None = None,
+    native_action: str | None = None,
+    text: str | None = None,
+    prefix: str | None = None,
+    suffix: str | None = None,
+    selection_type: str | None = None,
     timeout_ms: int = 2000,
     sock_path: str | Path | None = None,
 ) -> AxActResult:
@@ -484,6 +489,15 @@ def ax_act(
     req: dict[str, object] = {"timeout_ms": timeout_ms}
     if value is not None:
         req["value"] = value
+    for name, supplied in (
+        ("native_action", native_action),
+        ("text", text),
+        ("prefix", prefix),
+        ("suffix", suffix),
+        ("selection_type", selection_type),
+    ):
+        if supplied is not None:
+            req[name] = supplied
     return _call("ax_act", app=app, id=raw_id, action=action, sock_path=sock_path, **req)
 
 
