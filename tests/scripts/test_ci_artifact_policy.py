@@ -48,7 +48,7 @@ def test_every_artifact_upload_is_non_blocking() -> None:
 
 def test_coverage_uploads_retry_once_and_expose_the_outcome() -> None:
     """Coverage uploads retry a transient fault before the gate records a gap."""
-    for job_name in ("backend-shard", "backend-serial", "backend-structure"):
+    for job_name in ("backend-shard", "backend-serial", "backend-static"):
         job = _workflow_jobs()[job_name]
         upload = _step(job, "Upload coverage data")
         assert upload["id"] == "coverage-upload"
