@@ -1,0 +1,3 @@
+"tests.path_scoped.gateway_tests" = [
+    "test_creation_identity.py",
+]
