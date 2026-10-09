@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 from base.host.proc import run_bounded
-from services.desktop.permissions_helper import lifecycle
+
+from .. import lifecycle
 
 
 def section(source: str, start: str, end: str) -> str:
