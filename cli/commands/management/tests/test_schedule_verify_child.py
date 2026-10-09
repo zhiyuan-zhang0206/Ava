@@ -39,7 +39,8 @@ def main():
 # The current shape receives `db` and binds it (the shipped templates do
 # `db = Database.from_settings()`); an unbound read is its own red — see the undefined-name tests.
 _NEW_HIERARCHY = (
-    _OLD_HIERARCHY.replace("catch_up([", "catch_up(db, [")
+    _OLD_HIERARCHY.replace("def _fire(_trigger):", "def _fire(_slot, _trigger):")
+    .replace("catch_up([", "catch_up(db, [")
     .replace("fire_slot_once(nxt", "fire_slot_once(db, nxt")
     .replace("def main():\n", "def main():\n    db = None\n")
 )

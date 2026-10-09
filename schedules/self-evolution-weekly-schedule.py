@@ -152,7 +152,7 @@ def _main_loop() -> None:
     db = Database.from_settings()
     thursday_enabled = False
 
-    def fire_weekly_trigger(trigger: str) -> None:
+    def fire_weekly_trigger(_slot: datetime, trigger: str) -> None:
         nonlocal thursday_enabled
         if trigger == MONDAY_TRIGGER:
             if should_fire_monday():
