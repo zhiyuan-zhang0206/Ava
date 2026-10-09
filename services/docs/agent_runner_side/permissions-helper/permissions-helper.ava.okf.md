@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Permissions Helper — macOS Desktop Automation Daemon
-description: A signed Swift daemon on agent-runner that holds Screen Recording / Accessibility permissions — receives JSON requests via Unix socket and performs privileged desktop operations such as screenshot, click, type, window geometry, and whitelisted file reads on behalf of all skills. macOS only.
+description: A signed Swift daemon on agent-runner that holds Screen Recording / Accessibility permissions — receives JSON requests via Unix socket and performs privileged desktop operations such as screenshot, click, drag, type, window geometry, and whitelisted file reads on behalf of all skills. macOS only.
 tags: []
 ---
 
@@ -24,15 +24,16 @@ The launchd-ownership and stable-signing constraint set moved to its own node: [
 
 The helper has two independent macOS TCC grants:
 
-- **Screen Recording** authorizes `screencapture_region`; without it, captures show wallpaper or black pixels.
-- **Accessibility** authorizes `click`, `type`, `key`, `scroll`, `ax_window_info`, `ax_tree`, and `ax_act`; without it, macOS silently drops synthetic input and denies accessibility-tree reads.
+- **Screen Recording** authorizes `screencapture_region`, `screencapture_window` and window metadata; without it, the helper refuses captures before starting a child or SCK request.
+- **Accessibility** authorizes `click`, `drag`, `move`, `focus_app`, `type`, `key`, `scroll`, `ax_window_info`, `ax_tree`, and `ax_act`; without it, macOS silently drops synthetic input and denies accessibility-tree reads.
 
 `ping` reports both facts as `preflight_screen` and `ax_trusted`. The Swift dispatch gate refuses every Accessibility-gated operation with an explicit error when `ax_trusted=false`, and triggers the System Settings authorization prompt at most once per 30 seconds. The request never waits for a human response. Converge preflights both grants with `_ensure_screen_capture` and `_ensure_accessibility`, then agent startup reports either unavailable axis (or one combined notice when both fail).
 
 TCC keys grants on the helper's code identity. A stable certificate plus fixed bundle id preserves both grants across rebuilds; ad-hoc signing or a regenerated identity drops them once and the operator must re-grant in System Settings. Accessibility applies to the already running helper immediately. A changed Screen Recording grant may require an externally coordinated stop and helper restart. A descendant must not kickstart its own ancestor.
 
 ## Three Components
-- `helper/main.swift` — the Swift daemon body (+ `helper/Info.plist`). A socket-less launch (no `AVA_PERMISSIONS_HELPER_SOCKET`, no argv[1]) becomes the user-facing panel instance rather than exiting: [[panel.ava.okf.md|panel mode]]. Wire method names: `ping` (with `preflight_screen` and `ax_trusted`), `screencapture_region`, `file_list`, `file_read`, `click`, `type` (the Python client function is named `type_text`, but the wire method sent is `type`), `key`, `scroll`, `ax_window_info`, `ax_tree` (bounded read-only accessibility walk of one window, advertised as `ping.ax_tree_v1`), `ax_act` (press / show_menu / focus / set_value on an element of the latest walk, advertised as `ping.ax_act_v1`), `window_info`, `session_info`. Accessibility-gated methods are explicitly refused when the helper lacks that grant. File access is limited to `~/Downloads`, `~/Desktop`, and `~/.ava/incoming`; both the requested path and roots are symlink-resolved, then checked as the exact root or the root plus a `/` boundary. `file_list` returns sorted entry metadata; `file_read` returns base64 content for regular files up to 32 MiB.
+- `helper/main.swift` — the Swift daemon body (+ `helper/Info.plist`). A socket-less launch (no `AVA_PERMISSIONS_HELPER_SOCKET`, no argv[1]) becomes the user-facing panel instance rather than exiting: [[panel.ava.okf.md|panel mode]]. Wire method names: `ping` (with `preflight_screen` and `ax_trusted`), `screencapture_region`, `file_list`, `file_read`, `click`, `drag`, `type` (the Python client function is named `type_text`, but the wire method sent is `type`), `key`, `scroll`, `ax_window_info`, `ax_tree` (bounded read-only accessibility walk of one window, advertised as `ping.ax_tree_v1`), `ax_act` (press / show_menu / focus / set_value on an element of the latest walk, advertised as `ping.ax_act_v1`; `ping.ax_act_v2` adds reported platform actions and literal text selection), `window_info`, `session_info`. Accessibility-gated methods are explicitly refused when the helper lacks that grant. File access is limited to `~/Downloads`, `~/Desktop`, and `~/.ava/incoming`; both the requested path and roots are symlink-resolved, then checked as the exact root or the root plus a `/` boundary. `file_list` returns sorted entry metadata; `file_read` returns base64 content for regular files up to 32 MiB.
+- `wire.py` — typed helper results, explicitly re-exported by `client.py` for existing consumers.
 - `client.py` — Python client. Connects to the local cluster helper via Unix socket, each call one line JSON request/response; `PermissionsHelperError` represents unreachable/timeout/remote error. Its `list_dir()` and `read_file()` wrappers expose the whitelisted file operations. `check_screen_capture()` turns `ping().preflight_screen` into a `base.host.converge.screen_capture.ScreenCaptureStatus`; `check_accessibility()` turns `ping().ax_trusted` into a `base.host.converge.accessibility.AccessibilityStatus`. Each result keeps grant denial distinct from helper unreachability.
 - `lifecycle.py` — bounded certificate checks, compilation, stable signing, and
   initial LaunchAgent registration. A current signed artifact is reused
@@ -63,3 +64,16 @@ The helper also seeds `ava-root` (`root_seed` / `root_status` / `root_stop`): [[
 ## Notes
 - macOS only; configuration gate `AVA_PERMISSIONS_HELPER_ENABLED`, capability probe `base.host.system.probes.permissions_helper_incapability` (swift/codesign/display).
 - Outside `ServiceSpec`: launchd owns helper keepalive. Root records read-only protocol/job diagnostics; no diagnostic may repair, re-sign, bootout, or force-restart its ancestor.
+
+The `drag` wire method takes finite numeric `start_x`, `start_y`, `end_x`, and
+`end_y` in logical points. It posts a move, left-button down, twelve dragged
+movements at 10 ms intervals, and left-button up. All events are allocated before
+any is posted; a local `defer` posts the release after the drag. Boolean and
+nonfinite values are rejected. The result carries `start` and `end` point objects.
+
+Mouse buttons/counts/modifier chords and bounded holds are advertised as
+`ping.native_input_v1`: [[../computer-mcp/native-input.ava.okf.md]]. The new
+`move`, `cursor_position`, `list_apps`, `list_windows`, `focus_app` and
+`screencapture_window` methods use the same single-call JSON transport.
+Observation freshness and frame boundaries:
+[[../computer-mcp/observation-frames.ava.okf.md]].
