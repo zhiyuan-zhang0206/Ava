@@ -27,6 +27,7 @@ from base.agents.history.context_response import (
     context_breakdown_response,
     resolve_agent_model,
 )
+from base.agents.messages.caller_protocol import CallerProtocolUnavailableError
 from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls
@@ -275,6 +276,8 @@ async def post_agent_message(
         )
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CallerProtocolUnavailableError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
