@@ -84,7 +84,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import import_cache, lint_common, placement_evidence, service_units
+from scripts.structure import import_cache, lint_common, locality, placement_evidence, service_units
 
 # First-party Python code participates in placement, including runnable templates.
 CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts", "schedules", "commands", "demos")
@@ -271,6 +271,7 @@ class UnitGraph:
     def empirical(self) -> collections.Counter[tuple[str, str]]:
         """Import edges between units in the non-test source (computed on first need)."""
         edges: collections.Counter[tuple[str, str]] = collections.Counter()
+        index = ModuleIndex(self.repo_root)
         for top in CODE_TOPS:
             for path in (self.repo_root / top).rglob("*.py"):
                 rel = path.relative_to(self.repo_root)
@@ -281,7 +282,7 @@ class UnitGraph:
                     tree = ast.parse(path.read_text(encoding="utf-8"))
                 except (SyntaxError, UnicodeDecodeError):
                     continue
-                for module in _imported_modules(tree):
+                for module in _imported_modules(tree, index, rel.as_posix()):
                     target = unit_of(module)
                     if target and target != source:
                         edges[source, target] += 1
@@ -305,12 +306,16 @@ class UnitGraph:
         return (a, b) in self.forbidden or a in self.reach[b]
 
 
-def _imported_modules(tree: ast.AST) -> Iterable[str]:
+def _imported_modules(tree: ast.AST, index: ModuleIndex, rel_path: str) -> Iterable[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             yield from (alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            yield node.module
+        elif isinstance(node, ast.ImportFrom):
+            module = locality._import_base(node, rel_path)
+            if module:
+                for alias in node.names:
+                    candidate = f"{module}.{alias.name}"
+                    yield candidate if index.kind(candidate) else module
 
 
 def _matching_units(name: str, units: list[str]) -> list[str]:
@@ -444,6 +449,7 @@ class _Collector(ast.NodeVisitor):
         self._div_seen: set[int] = set()
         self._roots = placement_evidence.RepoRoots(tree, rel_path)
         self._spawns_python = placement_evidence.spawns_interpreter(tree)
+        self._rel_path = rel_path
 
     def _add(
         self, line: int, kind: str, module: str, via: str = "", names: tuple[str, ...] = ()
@@ -466,15 +472,16 @@ class _Collector(ast.NodeVisitor):
                 self._add_dotted(node.lineno, "import", alias.name, names=(alias.asname or top,))
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.level or not node.module or node.module.split(".")[0] not in CODE_TOPS:
+        module = locality._import_base(node, self._rel_path)
+        if not module or module.split(".")[0] not in CODE_TOPS:
             return
         for alias in node.names:
-            candidate = f"{node.module}.{alias.name}"
+            candidate = f"{module}.{alias.name}"
             names = (alias.asname or alias.name,)
             if self.index.kind(candidate):
                 self._add(node.lineno, "import", candidate, names=names)
             else:
-                self._add_dotted(node.lineno, "import", node.module, names=names)
+                self._add_dotted(node.lineno, "import", module, names=names)
 
     def visit_Call(self, node: ast.Call) -> None:
         callee = _callee(node.func)
@@ -562,7 +569,8 @@ class _Collector(ast.NodeVisitor):
 def collect_references(tree: ast.AST, index: ModuleIndex, rel_path: str = "") -> list[Ref]:
     """Every first-party reference of a parsed file, patch evidence included.
 
-    `rel_path` (repo-relative, POSIX) says which climb from `Path(__file__)` is the repo root.
+    `rel_path` (repo-relative, POSIX) anchors relative imports and root paths. Package
+    initializers keep their own package; an import cannot climb above its top-level package.
     """
     collector = _Collector(index, tree, rel_path)
     collector.visit(tree)
