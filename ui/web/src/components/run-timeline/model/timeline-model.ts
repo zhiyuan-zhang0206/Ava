@@ -5,7 +5,6 @@
 import type {
   RunTimelineMessagePart,
   RunTimelineNode,
-  RunTimelineMessageBar,
   RunTimelineUnit,
 } from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
@@ -17,13 +16,10 @@ export interface TimelineWindow {
 
 export type Selection =
   | { kind: "node"; id: string }
-  | { kind: "unit"; i0: number; i1: number; unitKind: RunTimelineUnit["kind"] }
-  /** A message: its bar in the two context rows, and the block(s) that show it in the Messages row. */
-  | { kind: "message"; idx: number };
+  | { kind: "unit"; i0: number; i1: number; unitKind: RunTimelineUnit["kind"] };
 
 export function isSelected(selection: Selection | null, candidate: Selection): boolean {
   if (selection?.kind === "node" && candidate.kind === "node") return selection.id === candidate.id;
-  if (selection?.kind === "message" && candidate.kind === "message") return selection.idx === candidate.idx;
   if (selection?.kind === "unit" && candidate.kind === "unit") {
     return (
       selection.i0 === candidate.i0 &&
@@ -41,38 +37,8 @@ export function unitKey(unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1">): stri
 }
 
 /**
- * Whether a block shows the message `idx`: a turn block (thinking, text, call) shows its AIMessage;
- * an output block the messages after the AIMessage that opened it; an inbound or note block its own.
- */
-export function unitHasMessage(unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1">, idx: number): boolean {
-  if (unit.kind === "output") return unit.i1 > unit.i0 ? idx > unit.i0 && idx <= unit.i1 : idx === unit.i0;
-  if (unit.kind === "inbound" || unit.kind === "note") return idx >= unit.i0 && idx <= unit.i1;
-  return idx === unit.i0;
-}
-
-const TURN_BLOCK_ORDER: readonly RunTimelineUnit["kind"][] = ["thinking", "text", "call"];
-
-/** The blocks that show the message `idx`. */
-export function messageUnits(idx: number, units: readonly RunTimelineUnit[]): RunTimelineUnit[] {
-  return units.filter((unit) => unitHasMessage(unit, idx));
-}
-
-/**
- * The block the details pane shows for a selected message: its AIMessage's thinking, else its text,
- * else its call block; for another message the first block that shows it. Null when none does.
- */
-export function messageSelection(idx: number, units: readonly RunTimelineUnit[]): Selection | null {
-  const own = messageUnits(idx, units);
-  const pick =
-    TURN_BLOCK_ORDER.map((kind) => own.find((unit) => unit.kind === kind)).find((unit) => unit !== undefined) ??
-    own.at(0);
-  return pick === undefined ? null : { kind: "unit", i0: pick.i0, i1: pick.i1, unitKind: pick.kind };
-}
-
-/**
  * The ids of the nodes a selection lights up: the selected node and every ancestor above it, or,
- * for a layer-0 block, the level-1 node covering it and every ancestor above that; for a message, the
- * same for every block that shows it. The chain stops where a parent is not in `nodes` (outside the loaded window).
+ * for a layer-0 block, the level-1 node covering it and every ancestor above that. The chain stops where a parent is not in `nodes` (outside the loaded window).
  */
 export function chainIds(
   selection: Selection | null,
@@ -89,8 +55,6 @@ export function chainIds(
           unit.i0 === selection.i0 && unit.i1 === selection.i1 && unit.kind === selection.unitKind,
       )?.parent ?? null,
     );
-  } else if (selection?.kind === "message") {
-    starts.push(...messageUnits(selection.idx, units).map((unit) => unit.parent));
   }
   const chain = new Set<string>();
   for (let next = starts.shift(); next !== undefined; next = starts.shift()) {
@@ -370,7 +334,6 @@ export function hoverLit(
 ): { nodeIds: Set<string>; unitKeys: Set<string> } {
   if (hover === null) return { nodeIds: new Set(), unitKeys: new Set() };
   const nodeIds = chainIds(hover, nodes, units);
-  if (hover.kind === "message") return { nodeIds, unitKeys: new Set(messageUnits(hover.idx, units).map(unitKey)) };
   const node = hover.kind === "node" ? nodes.find((candidate) => candidate.id === hover.id) : undefined;
   const covered =
     node === undefined ? [] : units.filter((unit) => unit.i0 >= node.span_start && unit.i0 <= node.span_end);
@@ -394,35 +357,46 @@ export function nodeChildren(node: RunTimelineNode, nodes: readonly RunTimelineN
 }
 
 /**
- * The message index the context breakdown follows: a selected message or block's own (the card reads the
- * request at or after it), a selected node's first; with nothing selected, the last LLM request (an
- * AIMessage with its usage) sent inside the viewport, else the last one before it, else the first.
- * Null when the agent made no request.
+ * The message index the context breakdown follows: a selected block's own (the card reads the request
+ * at or after it), a selected node's first; with nothing selected, the last LLM request (the first
+ * block of an AIMessage with its usage) sent inside the viewport, else the last one before it, else
+ * the first. Null when the agent made no request.
  */
 export function contextPoint(
   selection: Selection | null,
   nodes: readonly RunTimelineNode[],
-  messages: readonly RunTimelineMessageBar[],
+  units: readonly RunTimelineUnit[],
   view: Viewport,
 ): number | null {
-  if (selection?.kind === "message") return selection.idx;
   if (selection?.kind === "unit") return selection.i0;
   if (selection?.kind === "node") return nodes.find((node) => node.id === selection.id)?.span_start ?? null;
-  const sent = messages.filter((message) => message.request !== null).map((message) => ({ message, at: Date.parse(message.start) }));
+  const requests = new Map<number, RunTimelineUnit>();
+  for (const unit of units) {
+    const seen = requests.get(unit.i0);
+    if (unit.request !== null && (seen === undefined || unit.start < seen.start)) requests.set(unit.i0, unit);
+  }
+  const sent = [...requests.values()]
+    .map((unit) => ({ unit, at: Date.parse(unit.start) }))
+    .sort((a, b) => a.unit.i0 - b.unit.i0);
   const inside = sent.filter(({ at }) => at >= view.from && at <= view.to);
   const before = sent.filter(({ at }) => at < view.from);
   const pick = inside.at(-1) ?? before.at(-1) ?? sent.at(0);
-  return pick?.message.idx ?? null;
+  return pick?.unit.i0 ?? null;
 }
 
-/** The largest context total among the messages: what the Context size row scales to. */
-export function maxContextTotal(messages: readonly RunTimelineMessageBar[]): number {
-  return messages.reduce((top, message) => Math.max(top, message.context_total), 0);
+/** The blocks the Context size row draws: those a request has read. */
+export function contextUnits(units: readonly RunTimelineUnit[]): RunTimelineUnit[] {
+  return units.filter((unit) => unit.context_total !== null);
 }
 
-/** The largest single message among the messages: what the Added context row scales to. */
-export function maxContextTokens(messages: readonly RunTimelineMessageBar[]): number {
-  return messages.reduce((top, message) => Math.max(top, message.context_tokens), 0);
+/** The largest context total among the blocks: what the Context size row scales to. */
+export function maxContextTotal(units: readonly RunTimelineUnit[]): number {
+  return units.reduce((top, unit) => Math.max(top, unit.context_total ?? 0), 0);
+}
+
+/** The largest block by tokens: what a Messages row that draws heights by tokens scales to. */
+export function maxBlockTokens(units: readonly RunTimelineUnit[]): number {
+  return units.reduce((top, unit) => Math.max(top, unit.context_tokens ?? 0), 0);
 }
 
 /** Where one block sits in axis coordinates. */
@@ -490,10 +464,4 @@ export function axisBox(
   viewU: Viewport,
 ): { left: number; width: number } | null {
   return projectBox(axis.toU(Date.parse(start)), axis.toU(Date.parse(end)), viewU);
-}
-
-/** Whether a message's bars are lit: it is hovered, or a block that shows it is. */
-export function messageLit(idx: number, hover: Hover | null): boolean {
-  if (hover?.kind === "message") return hover.idx === idx;
-  return hover?.kind === "unit" && unitHasMessage({ kind: hover.unitKind, i0: hover.i0, i1: hover.i1 }, idx);
 }

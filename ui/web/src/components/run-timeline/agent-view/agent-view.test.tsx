@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RunTimelineNode, RunTimelineMessageBar, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 const { getRunTimeline, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings, useMediaQuery } =
   vi.hoisted(() => ({
@@ -21,7 +21,7 @@ vi.mock("@/lib/transport/api", () => ({
 }));
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
-import { itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas";
+import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas";
 import { viewportOf } from "../model/timeline-model";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
@@ -52,20 +52,12 @@ const unit = (i0: number, from: number, to: number, parent: string): RunTimeline
   source: null,
   preview: `unit ${i0}`,
   parent,
-  context_tokens: null,
-  generation_tokens: null,
-  estimated: null,
-});
-
-const bar = (idx: number, minutes: number, total: number, request: boolean): RunTimelineMessageBar => ({
-  idx,
-  start: at(minutes),
-  end: at(minutes + 5),
-  session: 0,
   context_tokens: 50,
+  generation_tokens: null,
   estimated: false,
-  context_total: total,
-  request: request ? { calls: 1, input: total - 50, cache_read: 0, output: 50, cache_write: 0, cost_usd: 0, cost_calls: 0 } : null,
+  session: 0,
+  context_total: 100 + i0 * 100,
+  request: null,
 });
 
 const response = (agent: number, window: [number, number], tree: boolean): RunTimelineResponse => ({
@@ -77,7 +69,6 @@ const response = (agent: number, window: [number, number], tree: boolean): RunTi
     : [node("l", 1, window[0], window[1], null)],
   units: [unit(0, window[0] + 5, window[0] + 10, "l"), unit(1, window[0] + 20, window[0] + 25, "l")],
   events: [],
-  messages: [bar(0, window[0] + 5, 100, false), bar(1, window[0] + 20, 200, true)],
 });
 
 // Agent 7 runs 0-60 min with a two-level tree, agent 8 runs 30-120 min with one level.
@@ -172,16 +163,9 @@ describe("agent view", () => {
     expect(screen.queryByTestId("agent-view-remove-8")).toBeNull();
   });
 
-  it("limits the tree to the top levels and picks the context bars", async () => {
+  it("limits the tree to the top levels", async () => {
     render("7,8");
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
-    // Only the added bars are drawn until the setting says otherwise.
-    expect(rowIn(7, "run-timeline-row-context")).toBeNull();
-    expect(rowIn(7, "run-timeline-row-added")).not.toBeNull();
-    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "both" } });
-    expect(rowIn(7, "run-timeline-row-context")).not.toBeNull();
-    expect(rowIn(7, "run-timeline-row-added")).not.toBeNull();
-
     fireEvent.change(screen.getByTestId("agent-view-levels"), { target: { value: "1" } });
     expect(rowIn(7, "run-timeline-row-level-2")).not.toBeNull();
     expect(rowIn(7, "run-timeline-row-level-1")).toBeNull();
@@ -190,16 +174,31 @@ describe("agent view", () => {
     expect(rowIn(7, "run-timeline-row-level-2")).toBeNull();
     expect(rowIn(8, "run-timeline-row-level-1")).toBeNull();
     expect(rowIn(7, "run-timeline-row-units")).not.toBeNull();
+  });
 
-    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "absolute" } });
+  it("draws the Context size row by default and drops it when switched off; there is no Added context row", async () => {
+    render("7,8");
+    await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
     expect(rowIn(7, "run-timeline-row-context")).not.toBeNull();
-    expect(rowIn(7, "run-timeline-row-added")).toBeNull();
-    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "added" } });
+    expect(rowIn(8, "run-timeline-row-context")).not.toBeNull();
+    expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
+    fireEvent.click(screen.getByTestId("agent-view-context-size"));
     expect(rowIn(7, "run-timeline-row-context")).toBeNull();
-    expect(rowIn(7, "run-timeline-row-added")).not.toBeNull();
-    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "off" } });
     expect(rowIn(8, "run-timeline-row-context")).toBeNull();
-    expect(rowIn(8, "run-timeline-row-added")).toBeNull();
+    expect(rowIn(7, "run-timeline-row-units")).not.toBeNull();
+  });
+
+  it("draws the Messages row by tokens by default, and equal height when asked", async () => {
+    render("7");
+    await screen.findByTestId("run-timeline-chart");
+    expect(screen.getByTestId<HTMLSelectElement>("agent-view-heights").value).toBe("tokens");
+    await paintFrame();
+    const tall = drawn("units").filter((d) => d.op === "fill").map((d) => d.h);
+    fireEvent.change(screen.getByTestId("agent-view-heights"), { target: { value: "equal" } });
+    await paintFrame();
+    const equal = drawn("units").filter((d) => d.op === "fill").map((d) => d.h);
+    expect(new Set(equal).size).toBe(1);
+    expect(equal[0]).toBeGreaterThanOrEqual(Math.max(...tall));
   });
 
   it("walks the arrow keys from one agent's last row into the next agent's first, and back", async () => {
@@ -207,22 +206,32 @@ describe("agent view", () => {
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
     await paintFrame();
     const live = () => screen.getByTestId("run-timeline-selection-live").textContent;
-    // The request bar of agent 7, in its last row (Added context).
-    const x = itemX(BY_AGENT[7], "added", "m1", 1000, BASE_78);
-    fireEvent.click(within(group(7)).getByTestId("run-timeline-canvas-added"), { clientX: x });
+    // The bar of agent 7's second block, in its last row (Context size).
+    const x = itemX(BY_AGENT[7], "input", "utext-1-1", 1000, BASE_78);
+    fireEvent.click(within(group(7)).getByTestId("run-timeline-canvas-input"), { clientX: x });
     expect(live()).toContain("Agent #7");
-    expect(live()).toContain("Message 1");
+    expect(live()).toContain("unit 1");
     fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(live()).toContain("Agent #8");
     expect(live()).toContain("node l");
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(live()).toContain("Agent #7");
-    expect(live()).toContain("Message 1");
-    // Within an agent, up stays in the agent's own rows: Context size, then the Messages row.
+    expect(live()).toContain("unit 1");
+    // Within an agent, up stays in the agent's own rows: the block in the Messages row, then its tree level.
     fireEvent.keyDown(window, { key: "ArrowUp" });
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(live()).toContain("Agent #7");
-    expect(live()).not.toContain("Message 1");
+    expect(live()).toContain("node l");
+  });
+
+  it("puts the Messages row and the Context size row on the same blocks, to the pixel", async () => {
+    render("7");
+    await screen.findByTestId("run-timeline-row-context");
+    await paintFrame();
+    const units = drawn("units").filter((d) => d.op === "fill").map((d) => [d.x, d.w]);
+    const bars = drawn("input").filter((d) => d.op === "fill").map((d) => [d.x, d.w]);
+    expect(bars.length).toBeGreaterThan(0);
+    expect(bars).toEqual(units);
   });
 
   it("does not name an agent in the readout when the view holds one", async () => {

@@ -530,7 +530,7 @@ describe("ContextBreakdownCard (P4-3)", () => {
     expect(subtitle.textContent).toBe("The composition of the current context");
   });
 
-  it("suffixes the total, a category and a section with (estimated) only when flagged", async () => {
+  it("prefixes the total, a category and a section with ~ only when flagged", async () => {
     getContextBreakdown.mockResolvedValue({
       ...breakdown,
       estimated: true,
@@ -542,21 +542,21 @@ describe("ContextBreakdownCard (P4-3)", () => {
     });
     wrap(<ContextBreakdownCard agentId={7} />);
     const total = await screen.findByTestId("context-breakdown-total");
-    expect(total.textContent).toContain("tokens (estimated)");
-    expect(screen.getByText(/^400 \(estimated\)/)).toBeTruthy();
-    expect(screen.getByText(/^600 · /).textContent).not.toContain("estimated");
+    expect(total.textContent).toMatch(/^~[\d.,]+k? .*tokens/);
+    expect(screen.getByText(/^~400/)).toBeTruthy();
+    expect(screen.getByText(/^600 · /).textContent).not.toContain("~");
     fireEvent.click(screen.getByTestId("context-breakdown-sections-toggle"));
-    expect(screen.getAllByText(/\(estimated\)$/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/^~\d/).length).toBeGreaterThanOrEqual(2);
     const sections = screen.getByTestId("context-breakdown-sections");
-    expect(sections.textContent).toContain("100 (estimated)");
-    expect(sections.textContent).toContain("400 (estimated)");
+    expect(sections.textContent).toContain("~100");
+    expect(sections.textContent).toContain("~400");
   });
 
-  it("no suffix when the total and categories are exact", async () => {
+  it("no prefix when the total and categories are exact", async () => {
     getContextBreakdown.mockResolvedValue({ ...breakdown, sections: [] });
     wrap(<ContextBreakdownCard agentId={7} />);
     const total = await screen.findByTestId("context-breakdown-total");
-    expect(total.textContent).not.toContain("estimated");
-    expect(screen.getByTestId("context-breakdown-categories").textContent).not.toContain("estimated");
+    expect(total.textContent).not.toContain("~");
+    expect(screen.getByTestId("context-breakdown-categories").textContent).not.toContain("~");
   });
 });
