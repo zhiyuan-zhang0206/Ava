@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
-import services.desktop.computer.ocr as ocr_mod
-from services.desktop.computer import ax_act, ax_tools
-from services.desktop.computer.ax_ids import AxSession
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.ocr_text import _click_text_tool, _find_text_tool
-from services.desktop.computer.screen import _capture_screen, _current_scale, _to_logical
-from services.desktop.permissions_helper import client as helper
+from ..permissions_helper import client as helper
+from . import ax_act, ax_tools
+from . import ocr as ocr_mod
+from .ax_ids import AxSession
+from .errors import ComputerUseError
+from .ocr_text import _click_text_tool, _find_text_tool
+from .screen import _capture_screen, _current_scale, _to_logical
 
 # Required arguments per tool. The MCP input schemas declare them; the daemon
 # enforces them too, so a missing argument fails with a readable message
 # instead of a bare KeyError leaking out of the helper call.
 _REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
     "click": ("x", "y"),
+    "drag": ("start_x", "start_y", "end_x", "end_y"),
     "type_text": ("text",),
     "scroll": ("dy",),
     "find_text": ("text",),
@@ -195,6 +197,23 @@ def _key_tool(args: dict[str, Any]) -> dict[str, Any]:
     return {"pressed": echoed["key"], "cmd": echoed["cmd"]}
 
 
+def _drag_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+    coordinates: list[float] = []
+    for key in _REQUIRED_ARGS["drag"]:
+        value = args[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ComputerUseError(f"drag requires finite numeric {key}")
+        try:
+            coordinate = float(value)
+        except OverflowError as exc:
+            raise ComputerUseError(f"drag requires finite numeric {key}") from exc
+        if not math.isfinite(coordinate):
+            raise ComputerUseError(f"drag requires finite numeric {key}")
+        coordinates.append(coordinate)
+    scale = _current_scale(scale)
+    return dict(helper.drag(*(_to_logical(value, scale) for value in coordinates)))
+
+
 def _scroll_tool(
     args: dict[str, Any], pointer: tuple[float, float] | None, scale: float | None
 ) -> dict[str, Any]:
@@ -243,6 +262,8 @@ def _execute(
         return _find_text_tool(args, agent_id, ocr_cache)
     if tool == "click":
         return _click_tool(args, scale)
+    if tool == "drag":
+        return _drag_tool(args, scale)
     if tool == "click_text":
         return _click_text_tool(args, agent_id, ocr_cache)
     if tool == "type_text":
@@ -357,6 +378,27 @@ _TOOLS: list[dict[str, Any]] = [
                 "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
             },
             "required": ["x", "y"],
+        },
+    },
+    {
+        "name": "drag",
+        "description": (
+            "Drag the left mouse button from start_x/start_y to end_x/end_y in "
+            "physical-pixel screen coordinates (the same space as snapshot and click). "
+            "The daemon converts both endpoints with the measured scale. "
+            "Performs one short straight-line drag and releases the button."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "start_x": {"type": "number"},
+                "start_y": {"type": "number"},
+                "end_x": {"type": "number"},
+                "end_y": {"type": "number"},
+                "task_id": {"type": "integer"},
+                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
+            },
+            "required": ["start_x", "start_y", "end_x", "end_y"],
         },
     },
     {
