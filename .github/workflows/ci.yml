@@ -755,6 +755,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/merged-tree"
+          # No combined tree exists when the required source checks already
+          # cover a head that contains main. Keep the queue checks unchanged.
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "Source head already contains origin/main." > "$RUNNER_TEMP/merged-tree/merge.out"
+            echo "STATUS=unchanged" >> "$GITHUB_ENV"
+            exit 0
+          fi
           # Hosted runners ship without a git identity, and merge --no-commit
           # still insists on one — pin the GitHub Actions bot identity locally
           # (this checkout is ephemeral).
@@ -826,6 +833,7 @@ jobs:
             echo "### merged tree structure (informational)"
             case "${STATUS:-none}" in
               merged)   echo "Merged-tree lint completed — full log in artifact \`merged-tree-structure\`." ;;
+              unchanged) echo "Skipped: source head already contains origin/main; required source and queue checks cover this tree." ;;
               conflict) echo "Skipped: origin/main does not merge cleanly into the PR head." ;;
               *)        echo "Skipped: merged tree was not materialized." ;;
             esac
