@@ -4,8 +4,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.agents.tests.test_guarded_creation import HEADERS
-from gateway.agents.tests.test_guarded_creation import client as client
+from gateway.agents.tests.creation.test_guarded_creation import HEADERS
+from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.extensions import packages
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 

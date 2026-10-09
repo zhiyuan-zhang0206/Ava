@@ -16,8 +16,8 @@ from ava.gateway_client import spawn, transport
 from base.agents import GatewayUnavailable
 from base.config import settings
 from gateway.agents import router as agent_router
-from gateway.agents.tests.test_guarded_creation import PATH, SECRET
-from gateway.agents.tests.test_guarded_creation import client as client
+from gateway.agents.tests.creation.test_guarded_creation import PATH, SECRET
+from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
