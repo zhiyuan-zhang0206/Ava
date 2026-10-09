@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 from ava.mcp_config import MCPCallError, MCPConnectError, ToolInfo
-from base.config import settings
 
 
 class _RemoteMCPClient:
@@ -41,7 +40,7 @@ class _RemoteMCPClient:
             with suppress(OSError):
                 sock.close()
 
-    def _ensure_connected(self) -> socket.socket:
+    def _ensure_connected(self, timeout_seconds: float) -> socket.socket:
         if self._sock is not None:
             try:
                 self._sock.sendall(b"")
@@ -51,12 +50,12 @@ class _RemoteMCPClient:
                     self._sock.close()
                 self._sock = None
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(settings.sandbox.mcp_connect_timeout_seconds)
+        sock.settimeout(timeout_seconds)
         sock.connect(self._socket_path)
         self._sock = sock
         return sock
 
-    def _request(self, method: str, params: dict[str, Any]) -> Any:
+    def _request(self, method: str, params: dict[str, Any], *, timeout_seconds: float) -> Any:
         with self._lock:
             self._req_id += 1
             req_id = self._req_id
@@ -76,10 +75,10 @@ class _RemoteMCPClient:
                 )
                 + "\n"
             )
-            sock = self._ensure_connected()
+            sock = self._ensure_connected(timeout_seconds)
             try:
                 sock.sendall(req.encode("utf-8"))
-                resp = self._read_response(sock, req_id)
+                resp = self._read_response(sock, req_id, timeout_seconds=timeout_seconds)
             except BaseException as e:
                 # Any failure leaves the stream in an ambiguous state: a
                 # response to this request may still arrive (client deadline
@@ -100,7 +99,9 @@ class _RemoteMCPClient:
                 raise MCPCallError(resp.get("error", "Unknown error"))
             return resp.get("result")
 
-    def _read_response(self, sock: socket.socket, req_id: int) -> dict[str, Any]:
+    def _read_response(
+        self, sock: socket.socket, req_id: int, *, timeout_seconds: float
+    ) -> dict[str, Any]:
         """Read response lines until the one whose id matches `req_id`.
 
         Response-id matching: only the line whose id equals this request's id
@@ -110,10 +111,10 @@ class _RemoteMCPClient:
         stream (this request gets the previous one's result, and the real
         response then shifts every later request — response cross-talk). Foreign
         lines are skipped; the unread tail stays buffered. Bounded by the same
-        deadline as the connect phase (`mcp_connect_timeout_seconds`).
+        timeout budget as the connect phase, supplied by the caller per request.
         """
         buf = b""
-        deadline = time.time() + settings.sandbox.mcp_connect_timeout_seconds
+        deadline = time.time() + timeout_seconds
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -135,8 +136,8 @@ class _RemoteMCPClient:
                 if parsed.get("id") == req_id:
                     return parsed
 
-    def list_tools(self, server: str) -> list[ToolInfo]:
-        result = self._request("list_tools", {"server": server})
+    def list_tools(self, server: str, *, timeout_seconds: float) -> list[ToolInfo]:
+        result = self._request("list_tools", {"server": server}, timeout_seconds=timeout_seconds)
         return [
             {
                 "name": t["name"],
@@ -146,7 +147,9 @@ class _RemoteMCPClient:
             for t in result
         ]
 
-    def call_tool(self, server: str, tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    def call_tool(
+        self, server: str, tool: str, args: dict[str, Any], *, timeout_seconds: float
+    ) -> dict[str, Any]:
         return self._request(
             "call_tool",
             {
@@ -154,6 +157,7 @@ class _RemoteMCPClient:
                 "tool": tool,
                 "args": args,
             },
+            timeout_seconds=timeout_seconds,
         )
 
 
