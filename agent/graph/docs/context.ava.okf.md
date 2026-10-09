@@ -34,3 +34,4 @@ Ava agent's dependency injection container. `AvaContext` is a dataclass that car
 
 - `base/agents/context/__init__.py` is the canonical home; the agent host builds one per turn task and the eval driver builds its own with the handles its path needs
 - The module imports no psycopg / redis / langchain at runtime (the handle types are annotation-only, `extensions` is read through `plugin_registry()`): the exec child builds this type at boot and must stay off that stack
+- `ClientSet` receives lazy builders and an endpoint resolver explicitly. SDK process entry points and the host daemon compose them; a bare context has no implicit Redis or HTTP resource. A supplied Database uses its own dial configuration, while the default SDK database factory refuses a missing resource. Child factories read configuration and credentials only on first use, after its framework overlay; descriptions carry only identity and endpoint.
