@@ -31,7 +31,6 @@ separate dataclass.
 from __future__ import annotations
 
 import secrets
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
@@ -153,14 +152,11 @@ class AvaContext:
         }
 
     @classmethod
-    def from_description(
-        cls, description: dict[str, Any], *, database: Callable[[], Database]
-    ) -> Self:
-        """The context an exec child builds from the envelope's description; `database` is how its
-        own process names the cluster database (the child resolves credentials itself)."""
+    def from_description(cls, description: dict[str, Any], *, clients: ClientSet) -> Self:
+        """Rebuild identity with clients explicitly supplied by the child's composition root."""
         return cls(
             identity=AgentIdentity.from_description(description["identity"]),
-            clients=ClientSet(gateway_url=description["gateway_url"], database=database),
+            clients=clients,
         )
 
     def plugin_registry(self) -> ExtensionRegistry:
