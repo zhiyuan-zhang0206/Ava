@@ -15,6 +15,7 @@ import ava
 from agent import state as state_module
 from agent.extensions import registry as registry_module
 from ava import external
+from ava.sdk_surface.install import Installation
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
@@ -50,6 +51,17 @@ def native_checkpoint(
     extensions = ExtensionRegistry(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
     )
+    installation = Installation(
+        registry=extensions,
+        expansions=(),
+        wrap_layers={},
+        skill_providers=(),
+        metered=(),
+        disabled=frozenset(),
+        faces=True,
+        undo=(),
+    )
+    monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
     # The attachment builds its state class from the loaded plugins' registry; hand it ours.
     monkeypatch.setattr(registry_module, "build_registry", lambda: extensions)
     handle = state_module.PluginStateHandle(IntegrationPlugin, "integration")

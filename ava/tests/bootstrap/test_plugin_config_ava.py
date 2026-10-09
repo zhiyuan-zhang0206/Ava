@@ -4,8 +4,6 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from base.packages.plugins.config_registration import (
-    _PLUGIN_CONFIG_CLASSES,
-    _PLUGIN_CONFIGS,
     bind_plugin_config,
 )
 
@@ -17,27 +15,31 @@ class _FixtureConfig(BaseModel):
 
 
 @pytest.fixture
-def isolated_registry():
-    """Per-test clean registry — avoids cross-test pollution.
+def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> dict[str, BaseModel]:
+    """The SDK reads its current installation's own config bindings."""
+    import ava
+    from ava.sdk_surface.install import Installation
+    from base.packages.plugins.extensions import EMPTY
 
-    This fixture teardown re-registers to restore initial state
-    (note: registration order doesn't matter; zero cross-test impact).
-    """
-    # Snapshot before
-    snap_classes = dict(_PLUGIN_CONFIG_CLASSES)
-    snap_configs = dict(_PLUGIN_CONFIGS)
-    _PLUGIN_CONFIG_CLASSES.clear()
-    _PLUGIN_CONFIGS.clear()
-    yield
-    _PLUGIN_CONFIG_CLASSES.clear()
-    _PLUGIN_CONFIGS.clear()
-    _PLUGIN_CONFIG_CLASSES.update(snap_classes)
-    _PLUGIN_CONFIGS.update(snap_configs)
+    configs: dict[str, BaseModel] = {}
+    installation = Installation(
+        registry=EMPTY,
+        expansions=(),
+        wrap_layers={},
+        skill_providers=(),
+        metered=(),
+        disabled=frozenset(),
+        faces=False,
+        undo=(),
+        configs=configs,
+    )
+    monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
+    return configs
 
 
-def test_ava_settings_plugins_attribute_access(isolated_registry, unit_home):
+def test_ava_settings_plugins_attribute_access(isolated_registry: dict[str, BaseModel], unit_home):
     """`ava.sdk_surface.settings.plugins.<n>` returns instance; unregistered plugin name raise + lists known plugins."""
-    bind_plugin_config("test_plugin", _FixtureConfig)
+    bind_plugin_config("test_plugin", _FixtureConfig, isolated_registry)
 
     import ava.sdk_surface.settings as _ava_settings
 

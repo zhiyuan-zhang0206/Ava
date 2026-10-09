@@ -67,21 +67,12 @@ def test_effective_config_snapshot_is_flat_framework_keys() -> None:
     plain JSON on every restart_completed row (2026-08-08 audit, P2-7), so a
     sensitive value must not get a second plaintext copy there."""
     from base.packages.plugins.config_registration import (
-        _PLUGIN_CONFIG_CLASSES,
-        _PLUGIN_CONFIGS,
         _framework_field_is_sensitive,
         effective_config_snapshot,
     )
 
     # No plugins bound -> pure framework snapshot.
-    held_classes, held_configs = dict(_PLUGIN_CONFIG_CLASSES), dict(_PLUGIN_CONFIGS)
-    _PLUGIN_CONFIG_CLASSES.clear()
-    _PLUGIN_CONFIGS.clear()
-    try:
-        snap = effective_config_snapshot()
-    finally:
-        _PLUGIN_CONFIG_CLASSES.update(held_classes)
-        _PLUGIN_CONFIGS.update(held_configs)
+    snap = effective_config_snapshot({})
 
     assert {
         name for name in config.field_names() if not _framework_field_is_sensitive(name)
