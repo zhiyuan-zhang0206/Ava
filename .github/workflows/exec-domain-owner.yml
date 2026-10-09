@@ -17,7 +17,7 @@ on:
       - 'agent/tests/test_resource_admission.py'
       - 'agent/tests/path_scopes.toml'
       - 'agent/graph/exec/tests/admission_fixture.py'
-      - 'agent/graph/exec/tests/test_resource_admission_exec.py'
+      - 'agent/graph/exec/tests/resources/test_resource_admission_exec.py'
       - 'base/agents/incarnation/tests/test_resource_admission.py'
 permissions:
   contents: read
@@ -46,8 +46,8 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          uv run pyright agent/graph/exec/tests/admission_fixture.py base/agents/incarnation/resources.py base/agents/incarnation/resource_admission.py base/agents/incarnation/exec_owner_protocol.py base/agents/incarnation/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/execution/domain_owner.py agent/execution/owner_child.py base/agents/incarnation/tests/test_resources.py tests/components/ava/test_migration_baseline.py agent/tests/test_resource_admission.py agent/graph/exec/tests/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py
-          timeout 240 uv run pytest base/agents/incarnation/tests/test_resources.py tests/components/ava/test_migration_baseline.py agent/tests/test_resource_admission.py agent/graph/exec/tests/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py -q --junitxml=proof/resource-fences.xml
+          uv run pyright agent/graph/exec/tests/admission_fixture.py base/agents/incarnation/resources.py base/agents/incarnation/resource_admission.py base/agents/incarnation/exec_owner_protocol.py base/agents/incarnation/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/execution/domain_owner.py agent/execution/owner_child.py base/agents/incarnation/tests/test_resources.py tests/components/ava/test_migration_baseline.py agent/tests/test_resource_admission.py agent/graph/exec/tests/resources/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py
+          timeout 240 uv run pytest base/agents/incarnation/tests/test_resources.py tests/components/ava/test_migration_baseline.py agent/tests/test_resource_admission.py agent/graph/exec/tests/resources/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py -q --junitxml=proof/resource-fences.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

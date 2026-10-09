@@ -322,23 +322,17 @@ repos:
         files: ^(ava/|ava_builtins/plugins/|AGENTS\.md$|scripts/lint/agent_docstrings\.py$)
         pass_filenames: false
 
-      # Structural lints for agent legibility — bans `if TYPE_CHECKING:` import
-      # folding; budgets are 800 lines/file, 20 direct entries/directory,
-      # CC <15 (10-14 warn), and nesting <=5 over packages + tests/scripts,
-      # with a frozen shrink-only baseline checked against the base revision.
-      # Also locality: no `_`-private import from outside its owning package
-      # (package doors), and single decision owners (scripts/structure/
-      # locality.py DECISIONS, e.g. postgres-dial -> base/db/connections.py) —
-      # both frozen in the baseline shards as exact site counts. Rules + the
-      # _TYPE_CHECKING_ALLOWED list live in scripts/lint/code_structure.py
-      # header. (print() bans are enforced by ruff T20, not here.)
+      # Structural lints: 20 tracked direct entries in every non-root directory.
+      # Python file/function budgets and AST rules retain their own scope.
+      # Only the remaining ambient-state site maps are exact and shrink-only;
+      # file/directory, locality and patch-target allowances have been retired.
       - id: lint-code-structure
         name: lint code structure (AST rules, file/directory budgets, package doors, single owners)
         entry: .venv/bin/python scripts/lint/code_structure.py --only
         language: system
-        # The baseline JSON is an input: editing it (like any lint tooling file) widens the run
-        # to the full scan. One process, so a `--all-files` run is that single full scan.
-        files: ^(.*\.py|scripts/structure/baseline/.*\.json)$
+        # Every tracked path can add a directory slot, including symlinks and gitlinks.
+        # Tooling and baseline edits widen this one process to the full scan.
+        types: []
         require_serial: true
 
       # Library components receive database and event-bus handles from composition roots.

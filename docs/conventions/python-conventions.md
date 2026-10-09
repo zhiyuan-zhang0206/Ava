@@ -35,24 +35,24 @@ and cannot be reintroduced. Enforced by `scripts/lint/code_structure.py`.
 
 ## Directory budget: ≤20 direct entries
 
-Each directory in the same scope may have at most 20 direct entries:
-`.py` and `.pyi` files plus direct subdirectories. A subdirectory counts as
-one regardless of its contents — unless it holds nothing but `__pycache__` /
-dot-prefixed entries (or nothing), the leftover a local package rename or
-removal leaves and a fresh checkout never has, or it is a `docs/` or `tests/`
-layer without `__init__.py` (such a package with `__init__.py` counts). A `tests/`
-layer has no entry cap of its own either: a test is a file under any `tests/`
-directory, the top-level one or a package's own `<pkg>/**/tests/`, and
-`lint_common.is_test_path` is the one predicate every lint uses for it. Each
-level is checked independently. `__pycache__`, dot-prefixed entries, and symlinks do not count
-and are not traversed. `migrations` subtrees are entirely exempt. The repo-root `docs/` and
-`ui/` are outside the scope.
+Every directory except the repository root may have at most 20 direct
+Git-tracked entries. All files count regardless of suffix or language: Python,
+TypeScript, Markdown, SQL, binary assets and other tracked files use one slot.
+Hidden entries, `docs/`, `tests/`, migrations, symlinks and gitlinks also count.
+A subdirectory takes one slot in its parent and has its own independent limit;
+nesting depth is unrestricted. Symlink targets, gitlink contents and untracked
+local artifacts are not traversed or counted.
 
-Every over-limit directory in this scope fails the gate; directory-budget
-baselines have been removed and cannot be reintroduced. A full gate run checks
-the whole scope; an explicit directory target checks itself and its descendants,
-and an explicit file target checks the file and its containing directory.
-The remaining site-exemption guard runs in both modes.
+Directory-budget baselines and per-directory exemptions are not allowed. A full
+gate run checks the entire tracked tree. An explicit directory target checks
+itself, its tracked descendants and its ancestors; a file target checks every
+ancestor directory. `--only` accepts every tracked file type, including dangling
+symlinks. Git query failures fail the gate rather than weakening the count.
+The remaining site-exemption guard runs in both modes. Python file, function and
+AST rules keep their existing scope; the universal directory limit does not
+apply those rules to documentation or frontend source.
+
+Enforced by the existing `scripts/lint/code_structure.py` and its pre-commit hook.
 
 ## Locality: package doors and single owners
 

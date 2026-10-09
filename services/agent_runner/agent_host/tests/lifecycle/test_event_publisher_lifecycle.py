@@ -17,8 +17,8 @@ from base.agents.context import AvaContext
 from base.events.live.publisher import AgentEventPublisher
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
-from ..invocation import driver
-from ..runtime import TurnOutcome
+from ...invocation import driver
+from ...runtime import TurnOutcome
 
 
 class _Redis:
