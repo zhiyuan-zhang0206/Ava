@@ -226,7 +226,7 @@ def iter_sources(repo: Path) -> tuple[list[_Source], list[str]]:
     for d in _repo_skill_dirs(repo / "ava_builtins" / "skills"):
         add(d.name, d, "repo", "builtin", bootstrap_only=True)
     # The repo's `.agents/skills/` project skills (the kernel-contributor
-    # family: ship-a-change, write-a-pr-description, …) are deliberately NOT a
+    # family: ava-self-development, review-contribution, …) are deliberately NOT a
     # converge source (issue #146 / decision 2026-08-20). They reach agents
     # only through the project-local mount — `project_skill_roots` in
     # `ava_builtins/plugins/ava_code/_walk.py` resolves `.agents/skills/` from

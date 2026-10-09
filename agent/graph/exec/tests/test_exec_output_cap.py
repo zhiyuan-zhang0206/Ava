@@ -170,7 +170,8 @@ def test_envelope_still_has_both_ends_after_the_accumulation_cap(
         crop_config=crop_config,
         clock=output_clock,
         timeout_seconds=60,
-    )
+        elapsed_seconds=1.0,
+    ).text
 
     assert "HEAD_START" in out, "head must survive both caps"
     assert "TAIL_END" in out, "tail must survive both caps"
@@ -193,7 +194,8 @@ def test_envelope_banner_reports_the_true_produced_length(
         crop_config=crop_config,
         clock=output_clock,
         timeout_seconds=60,
-    )
+        elapsed_seconds=1.0,
+    ).text
 
     assert f"{250_000:,} chars produced" in out
     assert "the dropped middle is unrecoverable" in out
@@ -214,7 +216,8 @@ def test_envelope_still_promises_the_full_output_when_uncapped(
         crop_config=crop_config,
         clock=output_clock,
         timeout_seconds=60,
-    )
+        elapsed_seconds=1.0,
+    ).text
 
     assert "full output at" in out
     assert "produced" not in out
@@ -238,6 +241,7 @@ def test_overflow_archive_says_it_is_not_the_full_output(
         crop_config=crop_config,
         clock=output_clock,
         timeout_seconds=60,
+        elapsed_seconds=1.0,
     )
 
     (archived,) = list(_overflow.glob("exec_*.txt"))
@@ -277,6 +281,7 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
         crop_config=crop_config,
         clock=output_clock,
         timeout_seconds=60,
+        elapsed_seconds=1.0,
     )
 
     assert logged == [250_000]

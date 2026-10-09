@@ -1,6 +1,6 @@
 """Write-path config policy shared by the gateway router and the ops config op.
 
-`put_config` (gateway/routers/config.py) and `config_write_op`
+`put_config` (gateway/routers/configuration/runtime.py) and `config_write_op`
 (ops/host_config.py) each implemented the same editability gate and
 JSON-merge-patch reducer in their own shape; this module is the single
 definition both call so the policy cannot drift apart again. Everything here is

@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from base.log import logger
-from base.native_process.os_platform import IS_MACOS
+from base.native_process.os_platform import is_macos
 
 # How long the cluster may stay unresponsive before we call it stalled and
 # fail fast. Probe cadence is deliberately coarse: the cluster is disposable
@@ -110,7 +110,7 @@ def capture_stall_evidence(port: int, admin_url: str) -> str | None:
     )
     for pid, state_line in postmaster_pids(port):
         _append([f"process: {state_line}"])
-        if IS_MACOS:
+        if is_macos():
             try:
                 sample = subprocess.run(  # noqa: S603 -- host utility, fixed argv
                     ["sample", str(pid), "2", "1"],

@@ -31,7 +31,7 @@ def result(second: int) -> ToolMessage:
     return ToolMessage(
         content="ok",
         tool_call_id="tc",
-        additional_kwargs={"ava_msg_type": "exec_output", **ts(second)},
+        additional_kwargs={"ava_msg_type": "exec_output", "ava_exec_body_start": 0, **ts(second)},
     )
 
 

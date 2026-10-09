@@ -163,7 +163,7 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/commands/observability/trace.py": "which recovery ingress does this host serve: gateway-local Tempo or a pure-runner relay target (what do I serve)",
     "services/agent_runner/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
     "ops/inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
-    "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
+    "gateway/routers/configuration/runtime.py": "for the gateway itself, local role is authoritative (what do I serve)",
 }
 
 
@@ -371,13 +371,21 @@ def _parse_baseline(
 
     The comparison revision may still contain empty budget or locality sections from
     before retirement. They convey no allowance and are discarded after validation.
+    Historical patch-target counts are parsed and discarded; current fields are forbidden.
     """
     retired = (
         ("directories", "files", *quality_budget.QUALITY_SECTIONS, *locality.STRICT_SECTIONS)
         if historical
         else ()
     )
-    baseline = baseline_shards.merge(shards, (*_SITE_SECTIONS, *retired))
+    historical_patch = ("patch_targets",) if historical else ()
+    baseline = baseline_shards.merge(shards, (*_SITE_SECTIONS, *retired, *historical_patch))
+    # Immutable comparison revisions may retain old patch debt; it grants no allowance.
+    historical_entries = baseline.pop("patch_targets", {})
+    if historical_entries:
+        locality.validate_entries(
+            "patch_targets", historical_entries, (*_SCAN_DIRS, "tests", "scripts")
+        )
     for kind in retired:
         if baseline.pop(kind):
             raise ValueError(f"retired {kind} baseline must be empty")

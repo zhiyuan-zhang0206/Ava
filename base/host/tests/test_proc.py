@@ -30,7 +30,7 @@ from base.host.proc import (
     timeout_stderr_tail as proc_timeout_stderr_tail,
 )
 from base.native_process import ownership, pid_starttime_ticks
-from base.native_process.os_platform import IS_LINUX, IS_WINDOWS
+from base.native_process.os_platform import IS_WINDOWS, is_linux
 from base.native_process.ownership import OwnedProcess
 from base.paths import run_dir
 from base.sessions.record import SessionRecord
@@ -67,7 +67,7 @@ def test_hosting_supervised_session_resolves_home_when_called(unit_home: Path) -
         path.unlink(missing_ok=True)
 
 
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_hosting_supervised_session_uses_starttime_despite_wall_clock_drift(
     unit_home: Path,
 ) -> None:
