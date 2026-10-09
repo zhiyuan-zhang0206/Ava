@@ -10,7 +10,7 @@ accumulates across many commits with no single owner or door, which
 `docs/conventions/engineering/lint-vs-sweeper.md`'s graduation test puts on the sweeper side —
 detection needs a rolling window of history and the fix needs judgement, so
 neither half of the lint test holds. It always exits 0 on a successful scan
-(an index, not a wall) and reuses `scripts.structure.locality._package_of`
+(an index, not a wall) and reuses `scripts.structure.imports.package_of`
 for Python package resolution, so "package" here means exactly what Rule 4
 (package doors, `scripts/lint/code_structure.py`) means by it.
 
@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from scripts.structure import locality
+from scripts.structure import imports
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DAYS = 90
@@ -118,14 +118,14 @@ def _is_src(rel_path: str) -> bool:
 def _package_of_file(rel_path: str) -> str:
     """The package (a `/`-joined path key) owning a source file.
 
-    Python files reuse Rule 4's own resolution (`locality._package_of`), so
+    Python files reuse the shared package anchor (`imports.package_of`), so
     "package" agrees with the lint exactly. Everything else uses its
     containing directory, except `ui/web/src/...`, which keeps one extra
     level of granularity (`ui/web/src/<first dir>`) instead of collapsing to
     the whole frontend source tree.
     """
     if rel_path.endswith(".py"):
-        return "/".join(locality._package_of(rel_path))  # same package (scripts.structure)
+        return "/".join(imports.package_of(rel_path))
     parts = rel_path.split("/")
     if parts[:3] == ["ui", "web", "src"] and len(parts) > 4:
         return "/".join(parts[:4])
