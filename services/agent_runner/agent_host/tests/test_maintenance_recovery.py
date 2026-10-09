@@ -33,9 +33,9 @@ from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from tests.factories.maintenance import WHEN, maintenance_agent, start_cluster_through_ready_gate

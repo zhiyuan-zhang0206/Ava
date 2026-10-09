@@ -25,8 +25,8 @@ from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import HostedTurnResources
 from base.lm.catalog import ModelCatalog
+from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
@@ -190,6 +190,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
 async def test_actual_force_observation_then_admission_recovered_stop(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
 ) -> None:
     target, successor, force = await _force_successor(db_conn, aops_pool)
     proof = db_conn.execute(

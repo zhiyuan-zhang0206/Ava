@@ -22,9 +22,9 @@ from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from base.lm.catalog import ModelCatalog
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module

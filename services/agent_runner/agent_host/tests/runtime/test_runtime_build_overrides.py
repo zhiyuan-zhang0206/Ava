@@ -35,7 +35,9 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
     monkeypatch.setattr(host_module, "reconcile_claimed_inbounds_at_startup", AsyncMock())
     monkeypatch.setattr(host_module, "repair_dangling_tool_use_at_startup", AsyncMock())
     monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
-    host = AgentHost(pool=Mock(), checkpointer=Mock(), graph=Mock(), bus=Mock(), db=Mock(), catalog=model_catalog)
+    host = AgentHost(
+        pool=Mock(), checkpointer=Mock(), graph=Mock(), bus=Mock(), db=Mock(), catalog=model_catalog
+    )
     pins = {"reasoning_effort": "low", "claude_thinking_budget_tokens": 777} if pinned else {}
     slices = AgentSlices.resolve({"llm_model": "pinned-model", **pins})
 

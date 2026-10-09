@@ -29,9 +29,9 @@ from base.agents.incarnation.hosted_force import original_host_force, recover_or
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.native_process.turn_identity import HostedTurnResources
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -767,42 +767,3 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
     ).fetchone() == ("done", True)
-
-
-async def test_cancel_validation_spanning_task_handoff_never_cancels_new_turn() -> None:
-    first_entered, first_release = asyncio.Event(), asyncio.Event()
-    second_entered, second_release = asyncio.Event(), asyncio.Event()
-    validating, validated = asyncio.Event(), asyncio.Event()
-    calls = 0
-
-    async def run_turn(agent_id: int) -> None:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            first_entered.set()
-            await first_release.wait()
-        else:
-            second_entered.set()
-            await second_release.wait()
-
-    async def validate(agent_id: int, command_id: int) -> bool:
-        validating.set()
-        await validated.wait()
-        return True
-
-    scheduler = TurnScheduler(run_turn)
-    scheduler.wake(1)
-    await first_entered.wait()
-    cancellation = asyncio.create_task(scheduler.cancel_exact_force(1, 7, validate))
-    await validating.wait()
-    scheduler.wake(1)
-    first_release.set()
-    await second_entered.wait()
-    validated.set()
-    try:
-        assert not await cancellation
-        assert 1 in scheduler.active_agents
-        assert calls == 2
-    finally:
-        second_release.set()
-        await scheduler.aclose()

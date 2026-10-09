@@ -14,9 +14,9 @@ from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
-from base.native_process.turn_identity import HostedTurnResources
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (

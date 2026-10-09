@@ -26,8 +26,8 @@ from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import HostedTurnResources
 from base.lm.catalog import ModelCatalog
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults

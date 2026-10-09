@@ -344,7 +344,11 @@ def _record_kills(
 
 
 async def _run_terminating_turn(
-    aops_pool: AsyncConnectionPool, agent_id: int, *, incarnation: RuntimeIncarnation, model_catalog: ModelCatalog
+    aops_pool: AsyncConnectionPool,
+    agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation,
+    model_catalog: ModelCatalog,
 ) -> None:
     graph = Mock()
     graph.ainvoke = AsyncMock(

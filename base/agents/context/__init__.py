@@ -41,9 +41,9 @@ from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.tally import SdkCallTally
 from base.lm.call import ProviderCallBinding
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from base.lm.catalog import ModelCatalog
 
 # The handle types are annotations only: the exec child builds this same type from its request
 # envelope, and its start must not import psycopg / redis / langchain for handles it never holds.

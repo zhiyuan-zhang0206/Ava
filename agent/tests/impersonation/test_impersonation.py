@@ -47,7 +47,7 @@ def gate_ctx(
     event_bus: EventBus,
     relays: RelaySupervision,
 ) -> AvaContext:
-    return AvaContext(db=database, bus=event_bus, relays=relays)
+    return AvaContext(db=database, bus=event_bus, relays=relays, catalog=build_model_catalog())
 
 
 @pytest.fixture

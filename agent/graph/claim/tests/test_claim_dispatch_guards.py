@@ -15,11 +15,11 @@ from agent.tests.claim.claim_support import (
     _make_runtime,
 )
 from base.agents.incarnation.native_work_models import NativeWorkTarget
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
-from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.units import spawn_agent
 
 

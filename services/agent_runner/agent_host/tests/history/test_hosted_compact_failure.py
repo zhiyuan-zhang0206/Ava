@@ -31,9 +31,9 @@ from base.events.live.projection import Error
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.redis_client import open_async_redis
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from base.lm.plugin_providers import build_model_catalog
 
 from ...host import AgentHost
 from ...runtime import TurnOutcome

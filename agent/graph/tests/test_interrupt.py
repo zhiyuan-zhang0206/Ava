@@ -25,11 +25,10 @@ from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
