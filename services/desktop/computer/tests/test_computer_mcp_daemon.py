@@ -15,14 +15,15 @@ from typing import Any
 
 import pytest
 
-import services.desktop.computer.mcp_daemon as daemon_mod
-import services.desktop.computer.ocr_text as ocr_text_mod
-import services.desktop.computer.screen as screen_mod
 from base.db import Database
-from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.protocol import Request, Response
-from services.desktop.computer.tests.slices import computer_use_config
+
+from .. import mcp_daemon as daemon_mod
+from .. import ocr_text as ocr_text_mod
+from .. import screen as screen_mod
+from ..errors import ComputerUseError
+from ..mcp_daemon import ComputerMcpDaemon
+from ..protocol import Request, Response
+from .slices import computer_use_config
 
 
 def _daemon(**config: Any) -> ComputerMcpDaemon:
@@ -187,6 +188,7 @@ async def test_list_tools_and_ping() -> None:
         "snapshot",
         "find_text",
         "click",
+        "drag",
         "click_text",
         "type_text",
         "key",

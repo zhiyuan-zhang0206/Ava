@@ -1264,6 +1264,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/desktop/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/entrypoints/gate/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
