@@ -1,4 +1,4 @@
-"""`base.lm.billing` contract tests for Ava's v1 billing span schema."""
+"""`base.lm.pricing.billing` contract tests for Ava's v1 billing span schema."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def test_emit_billing_event_records_schema_v1_attributes(monkeypatch: pytest.Mon
     The regression this catches is a billed provider call missing an attribute,
     losing its original start time, or opening a span without closing it.
     """
-    from base.lm.billing import emit_billing_event
+    from base.lm.pricing.billing import emit_billing_event
 
     tracer = _enable_tracing(monkeypatch)
 
@@ -97,7 +97,7 @@ def test_message_billing_accounts_for_both_cache_write_ttls(
     monkeypatch: pytest.MonkeyPatch,
     path: str,
 ) -> None:
-    from base.lm.billing import emit_billing_from_message
+    from base.lm.pricing.billing import emit_billing_from_message
     from base.lm.usage import log_usage_from_message
 
     tracer = _enable_tracing(monkeypatch)
@@ -131,7 +131,7 @@ def test_emit_billing_from_message_marks_unpriced_model(monkeypatch: pytest.Monk
     The regression this catches is treating an unknown catalog price as a
     priced $0 call, which makes ledger gaps invisible.
     """
-    from base.lm.billing import emit_billing_from_message
+    from base.lm.pricing.billing import emit_billing_from_message
 
     tracer = _enable_tracing(monkeypatch)
     message = AIMessage(
@@ -155,7 +155,7 @@ def test_emit_billing_from_message_skips_missing_usage_metadata(
     The regression this catches is converting unknown usage into a misleading
     zero-token ledger event.
     """
-    from base.lm.billing import emit_billing_from_message
+    from base.lm.pricing.billing import emit_billing_from_message
 
     tracer = _enable_tracing(monkeypatch)
 
@@ -188,7 +188,7 @@ def test_vendor_of_model_recognizes_registered_core_and_plugin_prefixes(
     vendor: str | None,
 ) -> None:
     """Vendor attribution uses registered manufacturer identities without guessing."""
-    from base.lm.billing import vendor_of_model
+    from base.lm.pricing.billing import vendor_of_model
 
     assert vendor_of_model(model) == vendor
 
@@ -199,7 +199,7 @@ def test_vendor_of_model_uses_registered_plugin_display_name(add_bindings: AddBi
     The regression this catches is silently skipping a billable plugin call
     after provider registration has made the model invokable.
     """
-    from base.lm.billing import vendor_of_model
+    from base.lm.pricing.billing import vendor_of_model
 
     add_bindings(
         {
@@ -223,7 +223,7 @@ def test_emit_billing_event_is_noop_when_tracing_is_disabled(
     The regression this catches is the observability kill switch still
     allocating billing spans.
     """
-    from base.lm.billing import emit_billing_event
+    from base.lm.pricing.billing import emit_billing_event
 
     tracer = _RecordingTracer()
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", False)
@@ -247,7 +247,7 @@ def test_emit_billing_event_absorbs_tracing_failure(monkeypatch: pytest.MonkeyPa
     The regression this catches is observability availability changing the
     caller's successful LLM behavior.
     """
-    from base.lm.billing import emit_billing_event
+    from base.lm.pricing.billing import emit_billing_event
 
     _enable_tracing(monkeypatch)
 
