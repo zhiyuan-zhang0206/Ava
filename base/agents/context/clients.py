@@ -9,8 +9,9 @@ owner of those objects:
   needs it, which keeps a child that never touches the database off that stack;
 - a set built in a child resolves credentials from the child's own settings and environment; the
   description a host sends (`AvaContext.describe`) carries endpoints, never a secret;
+  its composition root supplies lazy builders and the endpoint resolver;
 - `close()` releases everything the set built. A client a test or an embedder supplied with
-  `provide` is not the set's to close.
+  `using_gateway` is not the set's to close.
 
 A failure to build a client raises at the call that needed it; nothing here swallows one.
 """
@@ -29,6 +30,10 @@ if TYPE_CHECKING:
     import psycopg
 
     from base.db import Database
+
+
+type DatabaseHandle = Database
+type DatabaseFactory = Callable[[], DatabaseHandle]
 
 
 def _connection_dead(conn: object) -> bool:
@@ -92,14 +97,19 @@ class ClientSet:
     def __init__(
         self,
         *,
-        gateway_url: str | None = None,
-        database: Callable[[], Database] | None = None,
+        gateway_url: str | Callable[[], str] | None = None,
+        database: DatabaseFactory | None = None,
+        redis: Callable[[], object] | None = None,
+        gateway: Callable[[str], httpx.Client] | None = None,
     ) -> None:
         """`database` hands over the cluster database handle, which is the composition root's to
         name (the exec child's is built from its settings, the host passes the one it holds); a set
-        without one has no SQL connection to offer."""
+        without one has no SQL connection to offer. The other builders and endpoint resolver are
+        also supplied explicitly; this owner never discovers process configuration."""
         self._gateway_url = gateway_url
         self._database = database
+        self._redis_factory = redis
+        self._gateway_factory = gateway
         self._lock = threading.RLock()
         self._sql: LazyConnection | None = None
         self._redis: LazyConnection | None = None
@@ -111,12 +121,13 @@ class ClientSet:
 
     @property
     def gateway_url(self) -> str:
-        """The gateway API base this set dials: the one it was given, else this process's own."""
-        if self._gateway_url is None:
-            from base.cluster.machine import gateway_api_base
-
-            self._gateway_url = gateway_api_base()
-        return self._gateway_url
+        """The explicitly supplied endpoint, resolved once on first use."""
+        with self._lock:
+            if self._gateway_url is None:
+                raise RuntimeError("this context has no gateway endpoint")
+            if callable(self._gateway_url):
+                self._gateway_url = self._gateway_url()
+            return self._gateway_url
 
     @property
     def sql(self) -> LazyConnection:
@@ -203,58 +214,18 @@ class ClientSet:
     # ── builders ─────────────────────────────────────────────────────────
 
     def _connect_sql(self) -> psycopg.Connection[Any]:
-        from base.config import settings
-
         if self._database is None:
             raise RuntimeError(
                 "this context has no database: its ClientSet was built without a database handle"
             )
-        if not settings.data_plane.db_url:
-            raise RuntimeError(
-                "AVA_DB_URL not set — SQL ops should not be called in container mode"
-            )
         return self._database().connect(autocommit=True)
 
-    def _connect_redis(self) -> Any:
-        import redis as redis_lib
-
-        from base.config import settings
-        from base.events.live.redis_client import RESILIENCE_KWARGS
-
-        if not settings.data_plane.redis_url:
-            raise RuntimeError(
-                "AVA_REDIS_URL not set — Redis ops should not be called in container mode"
-            )
-        client_class: Any = redis_lib.Redis
-        return client_class.from_url(
-            settings.data_plane.redis_url,
-            decode_responses=True,
-            # The explicit 10s read bound overrides the shared None instead of colliding with it
-            # as a duplicate keyword.
-            **{**RESILIENCE_KWARGS, "socket_timeout": 10.0},
-        )
+    def _connect_redis(self) -> object:
+        if self._redis_factory is None:
+            raise RuntimeError("this context has no Redis client factory")
+        return self._redis_factory()
 
     def _build_gateway(self) -> httpx.Client:
-        import httpx
-
-        from base.cluster.auth import bearer_header
-        from base.cluster.machine import gateway_bearer
-        from base.config import settings
-        from base.host.net.http_dial import transport_for_url
-
-        url = self.gateway_url
-        # The gateway requires auth on every API route of an authenticated cluster. The SDK is a
-        # script/agent caller, so it presents a bearer (the cookie path is the browser's): the
-        # machine API token its launch environment carries, else the human secret (an operator on
-        # the gateway home; never an agent or runner process, which raises instead). Neither (the
-        # open posture / an unprovisioned checkout) sends no header, matching the gateway's own
-        # fail-open when its secret is unset.
-        bearer = gateway_bearer()
-        return httpx.Client(
-            base_url=url,
-            timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
-            headers=bearer_header(bearer) if bearer else {},
-            # Pins the dial when the host is an IPv4 literal (see base/host/net/http_dial.py);
-            # None (a hostname target) is httpx's own default transport.
-            transport=transport_for_url(url),
-        )
+        if self._gateway_factory is None:
+            raise RuntimeError("this context has no gateway client factory")
+        return self._gateway_factory(self.gateway_url)

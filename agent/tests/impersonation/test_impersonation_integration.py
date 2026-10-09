@@ -24,6 +24,7 @@ from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_c
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from ava.external.state import encode_plugin_delta
+from ava.sdk_surface.process_context import process_clients
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
@@ -151,6 +152,7 @@ async def _prepare_graph(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        clients=process_clients(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
     )
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
