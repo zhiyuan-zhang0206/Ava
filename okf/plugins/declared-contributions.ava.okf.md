@@ -22,10 +22,13 @@ frozen declaration.
   `inspector.py` instead (see below).
 - The SDK surface, declared by `plugin.py`: `sdk_namespaces` (`SdkNamespace(name, module, expand)`), `sdk_members`
   (`SdkMember(namespace, name, fn)` on an existing namespace), `sdk_expansions` (dotted paths promoted into the
-  prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`), `skill_sources` and `flags`
-  (`<domain>.<field>` core settings the plugin may read through `read_flag`).
+  prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`) and `skill_sources`.
 - `config`, declared by the plugin's `default_config.py` (the config face): one frozen BaseModel bound from
   `~/.ava/configs/<plugin>/config.json`, schema drift points at `ava plugins update`.
+- `flags`, also declared by the pure config face: non-sensitive `<domain>.<field>` Core dependencies.
+  Config-face admission and SDK installation validate every key. A service reads a dependency through
+  `read_declared_flag(key, contributions.flags)` using that declaration directly; there is no separate
+  flag registry. Unknown or sensitive keys, undeclared reads and unavailable process domains fail.
 
 `agent/extensions/registry.py:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
 order, and returns an `ExtensionRegistry` — plugin name beside its contributions, so attribution is the entry,

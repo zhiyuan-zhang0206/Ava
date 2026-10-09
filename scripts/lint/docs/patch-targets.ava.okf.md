@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Patch-target lint
-description: Structure Rule 8 — a test may not patch a private name of a package it does not belong to; how a test's package is derived, the A-E classes, the frozen patch_targets baseline section and the --report census.
+description: Structure Rule 8 — a test may not patch a private name of a package it does not belong to; how a test's package is derived, the A-E classes, strict rejection without baseline allowances and the --report census.
 tags:
 - scripts
 - lint
@@ -35,9 +35,12 @@ The verdict does not change when a test moves into `<pkg>/tests/`, but it follow
 
 Test references and empirical production edges resolve relative imports from the importing file's package, including `__init__.py` and namespace test directories loaded with pytest's `importlib` mode. Module members and local aliases resolve exactly as absolute imports do. Imports that climb above the top-level package cannot become repository-root module references. Changes to import normalization invalidate the per-file cache version.
 
-## Baseline
+## Strict rejection
 
-Today's violations are frozen in the `patch_targets` section of the structure baseline shards as `path::target -> site count`, guarded by `scripts/lint/code_structure.py` like Rules 4 and 5: growth fails, a fixed site fails until its entry is lowered, and against the base revision the section is shrink-only (a moved owner may carry a key; `git -M` renames carry keys). Introducing a lint or upgrading its measurement rule does not permit new baseline targets. Every section remains shrink-only by key and count, including across rule versions. Keep removing existing exemptions until the baseline machinery can be deleted.
+Every foreign-private patch fails directly. Patch-target exemptions and their
+count/rename/version allowances have been removed. Current structure shards reject
+`patch_targets`, even empty; historical fields are parsed and discarded without
+permitting current sites. Fix the ownership or use an existing public boundary.
 
 Checks: pre-commit passes only the changed test files (a changed lint, placement module or shard scans everything); the pre-push hook `lint-patch-targets-full` and the CI structure job scan everything, because a production import change can move the home of a test that did not change.
 
