@@ -1,4 +1,4 @@
-"""base.agents.uploads — url <-> path mapping + traversal-safe resolution + base64.
+"""base.agents.upload_delivery.paths — url <-> path mapping + traversal-safe resolution + base64.
 
 Pure unit (no DB / no gateway). The traversal guard is security-critical: a
 crafted image reference must never resolve outside the agent's upload dir.
@@ -11,21 +11,21 @@ from pathlib import Path
 
 import pytest
 
-from base.agents import uploads
+from base.agents.upload_delivery import paths
 
 
 class TestParseUploadUrl:
     def test_valid(self) -> None:
-        assert uploads.parse_upload_url("/api/agents/7/uploads/foo.png") == (7, "foo.png")
+        assert paths.parse_upload_url("/api/agents/7/uploads/foo.png") == (7, "foo.png")
 
     def test_rejects_foreign_url(self) -> None:
-        assert uploads.parse_upload_url("http://evil.example/x.png") is None
-        assert uploads.parse_upload_url("/api/agents/7/timeline") is None
-        assert uploads.parse_upload_url("/api/agents/abc/uploads/x.png") is None
+        assert paths.parse_upload_url("http://evil.example/x.png") is None
+        assert paths.parse_upload_url("/api/agents/7/timeline") is None
+        assert paths.parse_upload_url("/api/agents/abc/uploads/x.png") is None
 
     def test_keeps_nested_name_for_resolver_to_reject(self) -> None:
         # parse does not itself sanitize; it hands the raw name to the resolver.
-        assert uploads.parse_upload_url("/api/agents/7/uploads/../secret") == (7, "../secret")
+        assert paths.parse_upload_url("/api/agents/7/uploads/../secret") == (7, "../secret")
 
 
 class TestResolveUploadPath:
@@ -38,12 +38,12 @@ class TestResolveUploadPath:
         directory.mkdir(parents=True)
         directory.chmod(0o755)
 
-        assert uploads.agent_upload_dir(7) == directory
+        assert paths.agent_upload_dir(7) == directory
         assert directory.stat().st_mode & 0o777 == 0o700
 
     def test_resolves_inside_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        p = uploads.resolve_upload_path(7, "foo.png")
+        p = paths.resolve_upload_path(7, "foo.png")
         assert p == (tmp_path / "Downloads" / "AvaAgent-7" / "foo.png").resolve()
 
     def test_rejects_parent_traversal(
@@ -51,24 +51,24 @@ class TestResolveUploadPath:
     ) -> None:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         with pytest.raises(ValueError, match="escapes"):
-            uploads.resolve_upload_path(7, "../../etc/passwd")
+            paths.resolve_upload_path(7, "../../etc/passwd")
 
     def test_rejects_absolute(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         with pytest.raises(ValueError, match="escapes"):
-            uploads.resolve_upload_path(7, "/etc/passwd")
+            paths.resolve_upload_path(7, "/etc/passwd")
 
 
 class TestImageMime:
     def test_known_image_suffixes(self) -> None:
-        assert uploads.image_mime_for("a.png") == "image/png"
-        assert uploads.image_mime_for("a.JPG") == "image/jpeg"
-        assert uploads.image_mime_for("a.webp") == "image/webp"
+        assert paths.image_mime_for("a.png") == "image/png"
+        assert paths.image_mime_for("a.JPG") == "image/jpeg"
+        assert paths.image_mime_for("a.webp") == "image/webp"
 
     def test_non_image_returns_none(self) -> None:
-        assert uploads.image_mime_for("a.pdf") is None
-        assert uploads.image_mime_for("a.txt") is None
-        assert uploads.image_mime_for("noext") is None
+        assert paths.image_mime_for("a.pdf") is None
+        assert paths.image_mime_for("a.txt") is None
+        assert paths.image_mime_for("noext") is None
 
 
 class _FakeResp:
@@ -107,7 +107,7 @@ class TestFetchUploadB64:
         from base.config import settings
 
         monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-        mime, b64 = uploads.fetch_upload_b64(7, "shot.png")
+        mime, b64 = paths.fetch_upload_b64(7, "shot.png")
         assert mime == "image/png"
         assert base64.standard_b64decode(b64) == raw
         assert seen["url"] == "http://gw.test:8000/api/agents/7/uploads/shot.png"
@@ -118,7 +118,7 @@ class TestFetchUploadB64:
 
         monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: pytest.fail("must not fetch"))  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(ValueError, match="not a recognized image"):
-            uploads.fetch_upload_b64(7, "notes.txt")
+            paths.fetch_upload_b64(7, "notes.txt")
 
     def test_missing_upload_raises_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A 404 (or any failed fetch) surfaces as OSError — the claim node's
@@ -128,8 +128,8 @@ class TestFetchUploadB64:
         monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: _FakeResp(b"", status=404))  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw.test:8000")
         with pytest.raises(OSError, match="404"):
-            uploads.fetch_upload_b64(7, "gone.png")
+            paths.fetch_upload_b64(7, "gone.png")
 
 
 def test_upload_url_roundtrips() -> None:
-    assert uploads.parse_upload_url(uploads.upload_url(3, "a.png")) == (3, "a.png")
+    assert paths.parse_upload_url(paths.upload_url(3, "a.png")) == (3, "a.png")

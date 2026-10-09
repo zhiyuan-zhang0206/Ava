@@ -9,7 +9,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from base.agents.uploads import MAX_UPLOAD_BYTES
+from base.agents.upload_delivery.paths import MAX_UPLOAD_BYTES
 from base.cluster.authority.unit import UnitIdentity
 from base.cluster.machine import machine_name
 from base.paths import ava_home
