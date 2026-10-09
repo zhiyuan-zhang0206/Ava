@@ -16,6 +16,12 @@ kinds return a failed result, including retired updater requests with historical
 idempotency keys. There is no updater/bootstrap wire mode or restricted child
 proxy.
 
+Agent creation wakes use only `spawn-launch-v2`. `LaunchAgentRequest` requires
+the committed UUID `launch_attempt_id`; the runner validates the idling row's
+attempt and placement before publishing a repeatable wake. Prompt, source and
+label are committed by the gateway and are forbidden in the launch payload.
+The retired `spawn-launch` kind has no handler or wire registration.
+
 Agent launch and lifecycle operations run asynchronously. Blocking maintenance,
 configuration, inventory and shell operations run through
 `services/agent_runner/agent_ops/dispatch_sync.py:dispatch_sync` on the daemon's worker pool.

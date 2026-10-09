@@ -121,6 +121,8 @@ class SpawnAgentRequest(BaseModel):
     explicitly identify themselves.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     prompt: UserContent | None = None
     spawner: str = Field(default="user", min_length=1, max_length=64)
     fork_from: int | None = Field(default=None, gt=0)
@@ -133,12 +135,6 @@ class SpawnAgentRequest(BaseModel):
     # named preset's stored overlay as the base, explicit fields win per-key, and
     # the runner only ever sees the resolved map.
     config: dict[str, object] | None = Field(default=None)
-    # RETIRED top-level preset — a refusal-only placeholder kept for one
-    # compatibility window (task #4086): a non-null value gets a 400 pointing at
-    # `config["preset"]`, while null is tolerated as unset so an old client
-    # rolling through the window keeps spawning. The field itself is removed
-    # once the window closes.
-    preset: str | None = Field(default=None, max_length=64)
     # Optional initial label (spawner-assigned role). Stored sticky so the
     # labeler does not overwrite it; the agent can change it via ava.self.set_label.
     label: str | None = Field(default=None, max_length=64)
@@ -158,32 +154,19 @@ class SpawnAgentRequest(BaseModel):
 
 
 class LaunchAgentRequest(BaseModel):
-    """The cross-machine LAUNCH op payload (Task #1236 follow-up).
+    """Wake a gateway-created agent using its committed launch attempt.
 
-    The gateway creates the agent row (agents + agents_meta, main role) and
-    forwards only the launch to the target runner — the runner's ops server
-    runs as the least-privilege `ava_runner` role, which by design cannot
-    INSERT agents. `config` / `birth_config` are the per-agent overlay the
-    child replays (carried in the child env, never argv). `launch_attempt_id`
-    fences delayed responses and gives an explicit retry a new RPC dedupe key.
-    The gateway has already committed the first prompt; `prompt` and `label`
-    remain for old gateway compatibility.
+    The gateway commits the row and first prompt before dispatch. The runner
+    validates placement and attempt identity; it never inserts another prompt.
+    Config snapshots carry the per-agent settings used for admission.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     agent_id: int
-    launch_attempt_id: UUID | None = None
+    launch_attempt_id: UUID
     config: dict[str, object] | None = None
     birth_config: dict[str, object] | None = None
-    prompt: str | None = None
-    prompt_source: str | None = None
-    label: str | None = None
-
-    @field_validator("prompt_source")
-    @classmethod
-    def _check_prompt_source(cls, value: str | None) -> str | None:
-        if value is not None:
-            validate_writable_source(value)
-        return value
 
 
 class ConfigNormalization(BaseModel):
@@ -405,7 +388,6 @@ class SessionInfo(BaseModel):
 # The op vocabulary — the discriminator the daemon's `_dispatch` switches on;
 # lives here (not cluster_rpc.py) beside its models; `ops.cluster.rpc` re-exports it.
 OpKind = Literal[
-    "spawn-launch",
     "spawn-launch-v2",
     "launch-reconcile-v1",
     "lifecycle",
@@ -455,7 +437,7 @@ class OpFailure(BaseModel):
     reason: str | None = None
 
 
-# ── per-OpKind request payloads (spawn-launch uses LaunchAgentRequest above;
+# ── per-OpKind request payloads (spawn-launch-v2 uses LaunchAgentRequest above;
 # SpawnAgentRequest is the REST body, not an op payload) ──
 
 

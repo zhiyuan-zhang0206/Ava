@@ -301,24 +301,10 @@ def _normalize_and_resolve_preset(
     separately: it is stored on the agent row (`agents_meta.preset_name`) purely
     for display, next to the resolved overlay.
 
-    The former top-level `body.preset` field is retired (task #4086): a non-null
-    value is refused with a 400 pointing at the overlay key, while a null — the
-    field default, which a client rolling through the compatibility window may
-    still send explicitly — is tolerated as unset so such a client keeps
-    spawning.
-
     400 when the overlay key is not a non-empty string, or when the named preset
     does not exist (a spawn referencing a missing preset is a caller error,
     surfaced up front rather than silently ignored).
     """
-    if body.preset is not None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "the top-level preset field is retired — pass the preset as "
-                'config_overlay={"preset": "<name>"}'
-            ),
-        )
     explicit = body.config or {}
     preset_name = explicit.get(_PRESET_KEY)
     if preset_name is None:
@@ -509,8 +495,6 @@ async def _dispatch_committed_launch(
     pool: ConnectionPool, db: Database, bus: EventBus, target: str, launch: LaunchAgentRequest
 ) -> SpawnedAgent:
     attempt_id = launch.launch_attempt_id
-    if attempt_id is None:
-        raise RuntimeError("committed launch is missing its attempt ID")
     try:
         spawned = await forward_spawn_to_remote(db, target, launch)
         _require_matching_launch_receipt(spawned, launch.agent_id, target)
