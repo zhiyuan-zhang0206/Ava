@@ -67,6 +67,7 @@ def _terminate(agent_id: int) -> None:
     wait_for_status(agent_id, "terminated")
 
 
+@pytest.mark.usefixtures("authenticated_gateway")
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.budget_handoff:build")
 @pytest.mark.parametrize("role", ["goal supervisor", "dynamic workflow orchestrator"])
 def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
