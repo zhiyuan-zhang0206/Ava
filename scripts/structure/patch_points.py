@@ -23,6 +23,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from scripts.structure import imports
 from scripts.structure.placement import PATCH_TOPS
 
 _STDLIB = frozenset(sys.stdlib_module_names)
@@ -128,11 +129,11 @@ def _joinpath_literal(node: ast.AST) -> str | None:
 class _Names:
     """Local name -> (dotted origin, loaded_by_path) for one file."""
 
-    def __init__(self, nodes: Sequence[ast.AST]) -> None:
+    def __init__(self, nodes: Sequence[ast.AST], rel_path: str) -> None:
         self.names: dict[str, tuple[str, bool]] = {}
         self.values: dict[str, ast.expr] = {}
         for node in nodes:
-            self._bind(node)
+            self._bind(node, rel_path)
         self.specs = {
             name: module for name, value in self.values.items() if (module := self._spec(value))
         }
@@ -141,25 +142,14 @@ class _Names:
                 if name not in self.names and name not in self.specs:
                     self._alias(name, value)
 
-    def _bind(self, node: ast.AST) -> None:
-        if isinstance(node, ast.Import):
-            self._bind_import(node)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            for alias in node.names:
-                if alias.name != "*":
-                    self.names[alias.asname or alias.name] = (f"{node.module}.{alias.name}", False)
+    def _bind(self, node: ast.AST, rel_path: str) -> None:
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            clause = imports.normalize(node, rel_path)
+            self.names.update((name, (origin, False)) for name, origin in clause.origins.items())
         elif isinstance(node, ast.Assign | ast.AnnAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             if len(targets) == 1 and isinstance(targets[0], ast.Name) and node.value is not None:
                 self.values.setdefault(targets[0].id, node.value)
-
-    def _bind_import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            if alias.asname:
-                self.names[alias.asname] = (alias.name, False)
-            else:
-                top = alias.name.split(".")[0]
-                self.names.setdefault(top, (top, False))
 
     def _alias(self, name: str, value: ast.expr) -> None:
         """Bind `name = <imported thing>` / `name = Klass(...)` / a path-loaded module."""
@@ -262,8 +252,8 @@ class _Names:
 
 
 class _Extractor:
-    def __init__(self, nodes: Sequence[ast.AST]) -> None:
-        self.names = _Names(nodes)
+    def __init__(self, nodes: Sequence[ast.AST], rel_path: str) -> None:
+        self.names = _Names(nodes, rel_path)
         self.points: list[Point] = []
 
     def _add(
@@ -368,9 +358,9 @@ class _Extractor:
                 self._object(line, name, first, attr)
 
 
-def extract_points(nodes: Sequence[ast.AST]) -> list[Point]:
-    """Every patch point in `nodes` (`list(ast.walk(tree))` of a parsed test file)."""
-    extractor = _Extractor(nodes)
+def extract_points(nodes: Sequence[ast.AST], rel_path: str = "") -> list[Point]:
+    """Patch points of a parsed test file; rel_path anchors its relative imports."""
+    extractor = _Extractor(nodes, rel_path)
     for node in nodes:
         if not isinstance(node, ast.Call):
             continue
