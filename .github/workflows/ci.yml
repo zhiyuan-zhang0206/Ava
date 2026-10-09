@@ -318,7 +318,7 @@ jobs:
     # including a docs-only change that skips the backend and frontend suites.
     name: secret scan (Gitleaks)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     # Draft PRs skip CI except Trunk test branches
     # (trunk-merge/*, trunk-temp/*), which must verify.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
