@@ -241,7 +241,10 @@ def send_message(
     """
     import httpx
 
+    from ava.sdk_surface import agent_identity
     from base.agents.messages import delivery_outbox
+
+    origin_agent_id = agent_identity.agent_id()
 
     body = {
         "content": content,
@@ -274,6 +277,7 @@ def send_message(
         if key is not None:
             delivery_outbox.record_failed_send(
                 agent_id=agent_id,
+                origin_agent_id=origin_agent_id,
                 source=source,
                 content=content,
                 client_message_id=key,
@@ -284,6 +288,7 @@ def send_message(
         if resp.status_code in _TRANSIENT_HTTP_STATUSES:
             delivery_outbox.record_failed_send(
                 agent_id=agent_id,
+                origin_agent_id=origin_agent_id,
                 source=source,
                 content=content,
                 client_message_id=key,

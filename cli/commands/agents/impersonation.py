@@ -228,7 +228,9 @@ def _send(args: argparse.Namespace) -> int:
     lease_id = sessions.private_id(db, args.agent_id, args.session_id)
     lease = control.require_active(db, lease_id, caller)
     source = f"agent:{lease['agent_id']}"
-    status = send_agent_message(args.target_agent_id, content, source=source)
+    status = send_agent_message(
+        args.target_agent_id, content, source=source, origin_agent_id=int(lease["agent_id"])
+    )
     _emit({"status": status, "to": args.target_agent_id, "source": source})
     return 0
 

@@ -450,6 +450,7 @@ def test_agents_send_transport_failure_is_recorded(monkeypatch: pytest.MonkeyPat
             "source": "shell:3",
             "content": "notice",
             "client_message_id": "key-cli-1",
+            "origin_agent_id": None,
             "completion_notice": False,
         }
     ]

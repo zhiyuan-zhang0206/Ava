@@ -737,13 +737,9 @@ class TestConcurrentAgentIsolation:
 
     async def test_nothing_leaks_after_a_turn_ends(self, wired: _Build) -> None:
         """Host turns carry their identity explicitly and never change the shared SDK slot."""
-        from base.native_process.turn_identity import current_turn_agent_id
-
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
-        assert current_turn_agent_id() is None
         child_context = getattr(ava, "context", None)
         await asyncio.wait_for(host.run_turn(11), 2)
-        assert current_turn_agent_id() is None
         assert getattr(ava, "context", None) is child_context
 
 

@@ -162,15 +162,10 @@ class _RemoteMCPClient:
 
 
 def _current_agent_id() -> int | None:
-    """This process's agent identity, from the bootstrap env (same source
-    `ava.self.AGENT_ID` reads). None outside an agent process — background
-    scripts recovered an identity only when AVA_AGENT_ID is set; a hosted
-    turn context (turn contextvar bound) wins over the ambient env."""
-    from ava.sdk_surface.agent_identity import validate_external_identity
-    from base.native_process.turn_identity import effective_agent_id
+    """The explicit SDK process identity, validating any borrowed lease on use."""
+    from ava.sdk_surface import agent_identity
 
-    borrowed = validate_external_identity()
-    return borrowed if borrowed is not None else effective_agent_id()
+    return agent_identity.agent_id()
 
 
 def connect_remote(socket_path: str) -> _RemoteMCPClient:
