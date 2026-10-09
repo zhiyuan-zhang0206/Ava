@@ -25,20 +25,25 @@ from base.agents.history.hierarchy.store import load_generation_costs, load_node
 from base.db import Database
 from base.log import logger
 from services.derived.insights.run_timeline import _lifecycle
-from services.derived.insights.run_timeline.context import llm_requests
 from services.derived.insights.run_timeline.context import router as context_router
 from services.derived.insights.run_timeline.history import HistoryView, HistoryViewCache
 from services.derived.insights.run_timeline.messages import router as messages_router
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineEvent,
     RunTimelineGeneration,
+    RunTimelineMessageBar,
     RunTimelineNode,
     RunTimelineResponse,
     RunTimelineUnit,
     RunTimelineUsage,
     RunTimelineWindow,
 )
-from services.derived.insights.run_timeline.tokens import block_tokens, span_tokens
+from services.derived.insights.run_timeline.tokens import (
+    MessageBar,
+    block_tokens,
+    message_bars,
+    span_tokens,
+)
 
 router = APIRouter()
 router.include_router(messages_router)
@@ -112,6 +117,19 @@ def _node(view: HistoryView, node: ServedNode) -> RunTimelineNode:
     )
 
 
+def _message(bar: MessageBar) -> RunTimelineMessageBar:
+    return RunTimelineMessageBar(
+        idx=bar.idx,
+        start=bar.start,
+        end=bar.end,
+        session=bar.session,
+        context_tokens=bar.context_tokens,
+        estimated=bar.estimated,
+        context_total=bar.context_total,
+        request=RunTimelineUsage(**vars(bar.request)) if bar.request is not None else None,
+    )
+
+
 def _window(
     lifetime: tuple[datetime, datetime] | None,
     from_: datetime | None,
@@ -166,5 +184,7 @@ def get_run_timeline(
         nodes=[_node(view, node) for node in nodes],
         units=_units(view, served, start, end),
         events=_events(db, agent_id, start, end),
-        requests=[r for r in llm_requests(view) if start <= r.ts <= end],
+        messages=[
+            _message(bar) for bar in message_bars(view) if bar.start <= end and bar.end >= start
+        ],
     )

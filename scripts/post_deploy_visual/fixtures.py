@@ -153,7 +153,7 @@ RUN_TIMELINE = {
         }
     ],
     "events": [],
-    "requests": [],
+    "messages": [],
 }
 FIXTURES: dict[str, object] = {
     "/api/agents/roster": {"agents": [AGENT_CARD], "ancestors": []},
