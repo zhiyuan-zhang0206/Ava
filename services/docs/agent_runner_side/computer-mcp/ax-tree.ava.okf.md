@@ -36,18 +36,41 @@ fresh one, and an unscoped walk makes the elements it did not see unactionable
 (their ids stay reserved so a scrolled-away row regains its id).
 
 ## Element actions (`ax_act`)
-`ax_act(id, action, value?)` with `action` = `press` | `set_value` | `focus` |
-`show_menu` acts through the accessibility API: no pointer movement, the target
-app need not be frontmost (it does still take the screen lease and the action
+`ax_act(id, action, ...)` with `action` = `press` | `set_value` | `focus` |
+`show_menu` | `perform_action` | `select_text` acts through the accessibility API:
+no pointer movement, the target app need not be frontmost (it does still take the screen lease and the action
 lock). The helper acts by the raw id of its latest walk and answers `stale`
 when the element is gone or its role / identifier / title / description changed
-since it was read; the daemon then re-walks the app, re-finds the element by
-fingerprint and acts exactly once more, else fails with "call ax_tree again" —
-a wrong element is never acted on. An app that does not answer within the
-timeout yields `completed=false` plus a note (the action may still have run).
+since it was read, or its original window identity cannot be confirmed. The
+daemon fails with "call ax_tree again" and never re-walks another focused
+window automatically. Observe the tree again before retrying. An app that does
+not answer within the timeout yields `completed=false` plus a note (the action may still have run).
 `set_value` writes text into the field and is never echoed in the result, an
 error or the `computer_action` audit row; the row carries the element center
 and the action (`x,y,action`).
+
+`perform_action` requires `native_action` copied exactly from the element's
+reported actions in `ax_tree`. These platform identifiers are not model-input
+enum members: the helper checks the element's current action list before
+performing one, including platform actions such as increment, decrement,
+confirm, cancel or expand when that element offers them. A window root that
+reports `AXRaise` can be raised through this same path; `focus` sets
+`AXFocused` and does not promise to raise a window. All tree modes show
+reported actions on kept nodes. The action result includes `native_action` for
+the audit row to identify the performed platform action; interactive mode
+includes nodes with actions
+other than context-menu-only `AXShowMenu`.
+
+`select_text` requires a nonempty `text` substring of the element's freshly read
+string value. Matching is literal and case-sensitive. Optional `prefix` and
+`suffix` must immediately precede and follow the match, respectively; zero or
+multiple matches fail, including overlapping matches. `selection_type` defaults
+to `text` (select the match); `cursor_before` and `cursor_after` place a zero-length
+selection at either boundary. The helper uses NSString UTF-16 offsets for
+`AXSelectedTextRange`, preserving non-BMP text. Secure fields and elements
+without a settable selected-text range fail. Text and context are never echoed
+in results, errors or action audit rows. These new actions require helper
+capability `ax_act_v2`; older helpers fail with a rebuild instruction.
 
 ## Chromium-based apps and the visual gap
 Electron, CEF and the Chrome family build their accessibility tree only when an
@@ -68,5 +91,6 @@ reason for a thin tree: `electron_ax_disabled`, `electron_enable_failed`,
 (`services/desktop/computer/ax_gap.py`) and appends the text whose center falls in no
 control or text element of the tree as `[px:N]` lines, the same fusion as UFO2's
 UIA + vision merge. `px:` ids belong to that one call; the only action is
-`ax_act(id="px:N", action="press")`, a click at the text center. An OCR failure
-is reported beside the tree (`ocr_gap_error`), never failing the read.
+`ax_act(id="px:N", action="press")`, a foreground desktop click at the text
+center. These visual IDs do not carry an app/window target. An OCR failure is
+reported beside the tree (`ocr_gap_error`), never failing the read.
