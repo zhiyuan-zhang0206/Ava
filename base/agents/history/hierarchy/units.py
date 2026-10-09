@@ -221,8 +221,6 @@ def divide_units(messages: Sequence[BaseMessage]) -> list[MessageUnit]:
 # type and drops the time.
 _SENDER_LINE = re.compile(r"^[^\n]*?\s*\[\d{4}-\d{2}-\d{2}[^\]\n]*\]:[ \t]*\n+")
 _USER_STAMP = re.compile(r"^\[\d{4}-\d{2}-\d{2}[^\]\n]*\][ \t]*\n+")
-# The line a tool result opens with ("Code execution output [2026-10-03 Sat 09:35:08]:").
-_RESULT_HEAD = re.compile(r"^Code execution output \[[^\]\n]*\]:[ \t]*\n*")
 
 # Characters of an inbound / text unit's content in a catalog line, and of each part (reasoning,
 # call, output) of a work unit's line.
@@ -283,11 +281,23 @@ def _inbound_content(msg: BaseMessage) -> str:
     return text
 
 
+def _result_body(msg: ToolMessage) -> str:
+    """A tool result's output without its envelope header, cut where the writer recorded
+    the body to start. A result written before that field existed is rejected, not parsed."""
+    start = read_ava_kwargs(msg).get("ava_exec_body_start")
+    if start is None:
+        raise ValueError(
+            f"tool result {msg.tool_call_id!r} has no ava_exec_body_start; "
+            "it predates structured exec results and cannot be split from its header"
+        )
+    return msg.text[start:]
+
+
 def _output_part(messages: Sequence[BaseMessage], unit: MessageUnit) -> str | None:
     """The start of a work unit's tool output; None for no output or an empty one."""
     for msg in messages[unit.i0 : unit.i1 + 1]:
         if isinstance(msg, ToolMessage):
-            return _flat(_RESULT_HEAD.sub("", msg.text, count=1), PART_CHARS) or None
+            return _flat(_result_body(msg), PART_CHARS) or None
     return None
 
 
@@ -431,7 +441,8 @@ def _output_block(
     if end is None:
         return None
     msg = messages[results[0]]
-    preview = _flat(_RESULT_HEAD.sub("", msg.text, count=1), PREVIEW_CHARS)
+    assert isinstance(msg, ToolMessage)  # noqa: S101
+    preview = _flat(_result_body(msg), PREVIEW_CHARS)
     return DisplayBlock("output", unit.i0, unit.i1, start or end, end, None, preview)
 
 

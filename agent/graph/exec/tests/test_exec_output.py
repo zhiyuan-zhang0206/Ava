@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from agent.graph.exec.output import wrap_code_output
+from agent.graph.exec.output import format_elapsed, wrap_code_output
 from agent.graph.exec.tests.output_inputs import CropConfig
 from base.clock import Clock
 from tests.fixtures.pin_agent import pin_agent
@@ -34,7 +34,8 @@ def test_wrap_code_output_structured(crop_config: CropConfig, output_clock: Cloc
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "Code execution output" in out
     assert _TS in out
     assert "hello" in out and "warn" in out
@@ -52,7 +53,8 @@ def test_wrap_code_output_cancelled_marker(crop_config: CropConfig, output_clock
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "[cancelled by user]" in out
     assert _TS in out
     assert "part" in out
@@ -70,7 +72,8 @@ def test_wrap_code_output_appends_trailing_newline_when_missing(
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "partial output" in out
     assert _TS in out
 
@@ -87,7 +90,8 @@ def test_wrap_code_output_no_stderr_marker_in_envelope(
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "--- stderr ---" not in out
 
 
@@ -101,7 +105,8 @@ def test_wrap_code_output_no_output_marker_when_empty(crop_config: CropConfig, o
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "Code execution output" in out
     assert "(no output)" in out
     assert _TS in out
@@ -119,7 +124,8 @@ def test_wrap_code_output_no_output_marker_omitted_when_output_present(
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "(no output)" not in out
 
 
@@ -136,7 +142,8 @@ def test_wrap_code_output_no_output_marker_with_cancelled(
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "[cancelled by user]" in out
     assert "(no output)" in out
     assert _TS in out
@@ -154,9 +161,10 @@ def test_wrap_code_output_header_body_double_newline_split(
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     # header must be followed by double \n
-    assert f"Code execution output {_TS}:\n\nbody line" in out
+    assert f"Code execution output after running for 1.0s {_TS}:\n\nbody line" in out
 
 
 def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
@@ -188,7 +196,8 @@ def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
         clock=output_clock,
         timeout_seconds=60,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
 
     assert head_marker in out, "head must be preserved (help overview at start)"
     assert tail_marker in out, "tail must be preserved (error / result usually at end)"
@@ -230,6 +239,7 @@ def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
             clock=output_clock,
             timeout_seconds=60,
             timestamp=_TS,
+            elapsed_seconds=1.0,
         )
     files = list((tmp_path / "overflow").glob("exec_*.txt"))
     assert len(files) == 3, "only keep recent 3"
@@ -248,7 +258,8 @@ def test_wrap_code_output_no_truncation_when_under_limit(
         timeout_seconds=60,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "output truncated" not in out
     assert just_under in out
 
@@ -264,7 +275,8 @@ def test_wrap_code_output_timed_out_marker(crop_config: CropConfig, output_clock
         clock=output_clock,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "[timeout after 60s]" in out
     assert "[cancelled by user]" not in out
     assert "part" in out
@@ -283,27 +295,36 @@ def test_wrap_code_output_timed_out_carries_strategy_hint(
         clock=output_clock,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "run_background" in out
     assert "ava.watcher.launch" in out
-    assert "run_background" not in wrap_code_output(
-        "part\n",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
-        timestamp=_TS,
+    assert (
+        "run_background"
+        not in wrap_code_output(
+            "part\n",
+            agent_id=7,
+            crop_config=crop_config,
+            clock=output_clock,
+            timeout_seconds=60,
+            max_chars=30_000,
+            timestamp=_TS,
+            elapsed_seconds=1.0,
+        ).text
     )
-    assert "run_background" not in wrap_code_output(
-        "part\n",
-        agent_id=7,
-        cancelled=True,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
-        timestamp=_TS,
+    assert (
+        "run_background"
+        not in wrap_code_output(
+            "part\n",
+            agent_id=7,
+            cancelled=True,
+            crop_config=crop_config,
+            clock=output_clock,
+            timeout_seconds=60,
+            max_chars=30_000,
+            timestamp=_TS,
+            elapsed_seconds=1.0,
+        ).text
     )
 
 
@@ -318,7 +339,8 @@ def test_wrap_code_output_timed_out_empty(crop_config: CropConfig, output_clock:
         clock=output_clock,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "[timeout after 60s]" in out
     assert "(no output)" in out
     assert "run_background" in out
@@ -340,7 +362,8 @@ def test_wrap_code_output_cancelled_wins_over_timed_out_marker(
         clock=output_clock,
         max_chars=30_000,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     assert "[cancelled by user]" in out
     assert "[timeout after 60s]" not in out
 
@@ -357,14 +380,19 @@ def test_wrap_code_output_no_timestamp_when_disabled(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    ).startswith("Code execution output:\n\n")
-    assert _TS not in wrap_code_output(
-        "hello\n",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        elapsed_seconds=1.0,
+    ).text.startswith("Code execution output after running for 1.0s:\n\n")
+    assert (
+        _TS
+        not in wrap_code_output(
+            "hello\n",
+            agent_id=7,
+            crop_config=crop_config,
+            clock=output_clock,
+            timeout_seconds=60,
+            max_chars=30_000,
+            elapsed_seconds=1.0,
+        ).text
     )
     # marker survives, still no timestamp / stray space
     out = wrap_code_output(
@@ -375,8 +403,9 @@ def test_wrap_code_output_no_timestamp_when_disabled(
         clock=output_clock,
         timeout_seconds=60,
         max_chars=30_000,
-    )
-    assert "Code execution output [cancelled by user]:\n\n" in out
+        elapsed_seconds=1.0,
+    ).text
+    assert "Code execution output after running for 1.0s [cancelled by user]:\n\n" in out
     assert _TS not in out
 
 
@@ -393,7 +422,14 @@ def _dispatch(result: object, monkeypatch: pytest.MonkeyPatch) -> tuple[bool, st
     from agent.graph.exec.node import _dispatch_exec_result
 
     del monkeypatch
-    return _dispatch_exec_result(result, None, 7, referenced_messages=())  # type: ignore[arg-type]
+    halted, envelope, _ = _dispatch_exec_result(
+        result,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        7,
+        referenced_messages=(),
+        elapsed_seconds=1.0,
+    )
+    return halted, envelope.text
 
 
 def test_dispatch_boot_crash_reports_not_executed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -461,7 +497,13 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
     from agent.graph.exec.node import _dispatch_exec_result
 
     boot_exc = ExecChildError("BootstrapFetchError", "down", None)
-    _dispatch_exec_result(_boot_crash(boot_exc, False), None, 42, referenced_messages=())  # type: ignore[arg-type]
+    _dispatch_exec_result(
+        _boot_crash(boot_exc, False),  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        42,
+        referenced_messages=(),
+        elapsed_seconds=1.0,
+    )
     boot = [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
     assert len(boot) == 1
     assert boot[0]["level"].name == "WARNING"
@@ -471,7 +513,13 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
 
     loguru_records.clear()
     unknown_exc = ExecChildError("exec_subprocess_aborted", "gone", None)
-    _dispatch_exec_result(_boot_crash(unknown_exc, None), None, 42, referenced_messages=())  # type: ignore[arg-type]
+    _dispatch_exec_result(
+        _boot_crash(unknown_exc, None),  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        42,
+        referenced_messages=(),
+        elapsed_seconds=1.0,
+    )
     assert not [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
 
 
@@ -500,7 +548,8 @@ def test_overflow_archive_uses_explicit_host_identity(
         clock=output_clock,
         timeout_seconds=60,
         timestamp=_TS,
-    )
+        elapsed_seconds=1.0,
+    ).text
     directory = unit_home / "workspaces" / "11" / ".exec_output"
     files = list(directory.glob("exec_*.txt"))
     assert len(files) == 1
@@ -527,10 +576,98 @@ def test_archive_clock_and_rendered_timestamp_are_explicit(
         timeout_seconds=17,
         max_chars=100,
         timestamp="[caller supplied timestamp]",
+        elapsed_seconds=1.0,
+    ).text
+    assert wrapped.startswith(
+        "Code execution output after running for 1.0s [caller supplied timestamp]:\n\n"
     )
-    assert wrapped.startswith("Code execution output [caller supplied timestamp]:\n\n")
     # The runtime owns workspace layout; inspect the path announced in the body.
     files = list(unit_home.rglob("exec_20261009_090203_456789.txt"))
     assert len(files) == 1
     assert str(files[0]) in wrapped
     assert files[0].read_text() == "x" * 200
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [
+        (0.0, "0ms"),
+        (0.85, "850ms"),
+        (4.24, "4.2s"),
+        (53.4, "53s"),
+        (60.0, "1min 0s"),
+        (113.0, "1min 53s"),
+        (1200.0, "20min 0s"),
+        (3723.0, "1h 2min 3s"),
+    ],
+)
+def test_format_elapsed(seconds: float, text: str):
+    assert format_elapsed(seconds) == text
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "header"),
+    [
+        ({}, "Code execution output after running for 1min 53s [ts]:"),
+        (
+            {"cancelled": True},
+            "Code execution output after running for 1min 53s [cancelled by user] [ts]:",
+        ),
+        (
+            {"timed_out": True},
+            "Code execution output after running for 1min 53s [timeout after 60s] [ts]:",
+        ),
+        ({"timestamp": None}, "Code execution output after running for 1min 53s:"),
+    ],
+)
+def test_header_carries_elapsed_in_every_ending(
+    kwargs: dict[str, object], header: str, crop_config: CropConfig, output_clock: Clock
+):
+    params: dict[str, object] = {"timestamp": "[ts]", **kwargs}
+    out = wrap_code_output(
+        "x\n",
+        agent_id=7,
+        crop_config=crop_config,
+        clock=output_clock,
+        timeout_seconds=60,
+        max_chars=30_000,
+        elapsed_seconds=113.0,
+        **params,  # type: ignore[arg-type]
+    ).text
+    assert out.startswith(header + "\n\n")
+
+
+@pytest.mark.parametrize(
+    ("kind", "status", "halted"),
+    [
+        ("done", "completed", False),
+        ("timed_out", "timed_out", False),
+        ("cancelled", "cancelled", True),
+        ("crashed", "failed", False),
+    ],
+)
+def test_dispatch_reports_status_and_body_start(kind: str, status: str, halted: bool) -> None:
+    from agent.graph.exec._result import _ExecCancelled, _ExecCrashed, _ExecDone, _ExecTimedOut
+    from agent.graph.exec.node import _dispatch_exec_result
+
+    class _Events:
+        def emit(self, _event: str) -> None: ...
+
+    class _Ctx:
+        event_publisher = _Events()
+
+    results: dict[str, object] = {
+        "done": _ExecDone(output="o\n"),
+        "timed_out": _ExecTimedOut(output="o\n"),
+        "cancelled": _ExecCancelled(output="o\n"),
+        "crashed": _ExecCrashed(output="o\n", exc=ValueError("x"), full_traceback=None),
+    }
+    got_halted, envelope, got_status = _dispatch_exec_result(
+        results[kind],  # type: ignore[arg-type]
+        _Ctx(),  # type: ignore[arg-type]
+        7,
+        elapsed_seconds=113.0,
+    )
+    assert (got_halted, got_status.value) == (halted, status)
+    assert envelope.text[envelope.body_start :].startswith("o\n")
+    assert envelope.text.startswith("Code execution output after running for 1min 53s")
