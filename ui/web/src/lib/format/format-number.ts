@@ -41,3 +41,8 @@ function formatScaled(n: number, mDecimals: number): string {
   }
   return String(n);
 }
+
+/** The prefix of an estimated count: "~" for a share or a fitted value, nothing for the provider's own number. */
+export function approx(estimated: boolean | null | undefined): string {
+  return estimated === true ? "~" : "";
+}
