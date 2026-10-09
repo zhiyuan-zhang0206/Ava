@@ -120,9 +120,12 @@ const lifetimeResponse: RunTimelineResponse = {
       source: "user",
       preview: "please fix the bug",
       parent: "1",
-      context_tokens: null,
+      context_tokens: 100,
       generation_tokens: null,
-      estimated: null,
+      estimated: true,
+      session: 0,
+      context_total: 800,
+      request: null,
     },
     {
       kind: "output",
@@ -133,10 +136,14 @@ const lifetimeResponse: RunTimelineResponse = {
       source: null,
       preview: "look at the failing test",
       parent: "1",
-      context_tokens: null,
+      context_tokens: 300,
       generation_tokens: null,
-      estimated: null,
+      estimated: false,
+      session: 0,
+      context_total: 1350,
+      request: null,
     },
+    // The AIMessage 2 was an LLM request; so was 7, in the second session (after a compaction).
     {
       kind: "text",
       i0: 2,
@@ -146,19 +153,31 @@ const lifetimeResponse: RunTimelineResponse = {
       source: null,
       preview: "on it",
       parent: "1",
-      context_tokens: null,
+      context_tokens: 50,
       generation_tokens: null,
-      estimated: null,
+      estimated: false,
+      session: 0,
+      context_total: 1050,
+      request: { calls: 1, input: 1000, cache_read: 400, output: 50, cache_write: 0, cost_usd: 0.0021, cost_calls: 1 },
+    },
+    {
+      kind: "thinking",
+      i0: 7,
+      i1: 7,
+      start: "2026-10-04T14:00:00.000000Z",
+      end: "2026-10-04T14:00:00.000000Z",
+      source: null,
+      preview: "second session",
+      parent: "2",
+      context_tokens: 20,
+      generation_tokens: null,
+      estimated: true,
+      session: 1,
+      context_total: 420,
+      request: { calls: 1, input: 400, cache_read: 0, output: 20, cache_write: 0, cost_usd: 0, cost_calls: 0 },
     },
   ],
   events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
-  // Messages 2 and 7 are LLM requests (7 in the second session, after a compaction); 3 is the tool result of 2.
-  messages: [
-    { idx: 1, start: "2026-10-04T12:00:00.123456Z", end: "2026-10-04T12:00:00.123456Z", session: 0, context_tokens: 100, estimated: true, context_total: 800, request: null },
-    { idx: 2, start: "2026-10-04T12:05:00.000000Z", end: "2026-10-04T12:05:00.000000Z", session: 0, context_tokens: 50, estimated: false, context_total: 1050, request: { calls: 1, input: 1000, cache_read: 400, output: 50, cache_write: 0, cost_usd: 0.0021, cost_calls: 1 } },
-    { idx: 3, start: "2026-10-04T12:05:00.000000Z", end: "2026-10-04T12:06:00.000000Z", session: 0, context_tokens: 300, estimated: false, context_total: 1350, request: null },
-    { idx: 7, start: "2026-10-04T14:00:00.000000Z", end: "2026-10-04T14:00:00.000000Z", session: 1, context_tokens: 20, estimated: true, context_total: 420, request: { calls: 1, input: 400, cache_read: 0, output: 20, cache_write: 0, cost_usd: 0, cost_calls: 0 } },
-  ],
 };
 
 const messagesResponse: RunTimelineMessages = {
@@ -246,8 +265,8 @@ beforeEach(() => {
   getContextBreakdown.mockResolvedValue(cbdFixture);
   getRunTimelineContext.mockReset();
   getRunTimelineContext.mockImplementation((_agent, at) => {
-    const requests = lifetimeResponse.messages.filter((candidate) => candidate.request !== null);
-    const request = requests.find((candidate) => candidate.idx >= at) ?? requests[1];
+    const requests = lifetimeResponse.units.filter((candidate) => candidate.request !== null);
+    const request = requests.find((candidate) => candidate.i0 >= at) ?? requests[1];
     return Promise.resolve({
       ...cbdFixture,
       categories: [
@@ -255,7 +274,7 @@ beforeEach(() => {
         { kind: "user_input", tokens: 200, estimated: false, exact_fraction: 1 },
         { kind: "reasoning", tokens: 100, estimated: true, exact_fraction: 0 },
       ],
-      request: request.idx,
+      request: request.i0,
       session: request.session,
       sessions: 2,
       ts: request.start,
@@ -286,7 +305,7 @@ describe("the default window", () => {
       "run-timeline-row-level-2",
       "run-timeline-row-level-1",
       "run-timeline-row-units",
-      "run-timeline-row-added",
+      "run-timeline-row-context",
     ]);
     // The rows are canvases: one per row, no element per node or block.
     expect(screen.queryAllByTestId("run-timeline-node")).toHaveLength(0);
@@ -379,7 +398,7 @@ describe("selecting", () => {
     clickItem(await nodeOf("1"));
     const list = await screen.findByTestId("run-timeline-messages");
     expect((await within(list).findByText("bold")).tagName).toBe("STRONG");
-    expect(within(list).getByTestId("run-timeline-message-tokens").textContent).toBe("1.2k tokens (estimated)");
+    expect(within(list).getByTestId("run-timeline-message-tokens").textContent).toBe("~1.2k tokens");
     const detail = screen.getByTestId("run-timeline-node-detail");
     expect(within(detail).getByText("Details")).toBeTruthy();
   });
@@ -546,6 +565,9 @@ describe("failure and loading", () => {
           context_tokens: null,
           generation_tokens: null,
           estimated: null,
+          session: 0,
+          context_total: null,
+          request: null,
         },
         {
           kind: "call",
@@ -559,6 +581,9 @@ describe("failure and loading", () => {
           context_tokens: null,
           generation_tokens: null,
           estimated: null,
+          session: 0,
+          context_total: null,
+          request: null,
         },
       ],
     };
@@ -585,7 +610,7 @@ describe("failure and loading", () => {
       "run-timeline-canvas-level-2",
       "run-timeline-canvas-level-1",
       "run-timeline-canvas-units",
-      "run-timeline-canvas-added",
+      "run-timeline-canvas-input",
     ]);
     const legend = screen.getByTestId("run-timeline-legend");
     expect(within(legend).getAllByRole("listitem")).toHaveLength(7);
@@ -705,7 +730,7 @@ describe("hover", () => {
     expect(text).toContain("The agent read the repo");
     expect(text).not.toContain("and planned");
     expect(text).toContain("3 calls · 3.0k in · 120 out");
-    expect(text).toContain("4.2k tokens (estimated)");
+    expect(text).toContain("~4.2k tokens");
   });
 
   it("lights a hovered block's ancestor chain softly", async () => {
@@ -808,7 +833,7 @@ describe("context breakdown follows the point", () => {
   });
 
   it("says so when the agent has made no request", async () => {
-    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, messages: [] });
+    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, units: lifetimeResponse.units.map((u) => ({ ...u, context_tokens: null, context_total: null, request: null })) });
     render();
     expect((await screen.findByTestId("context-breakdown-empty")).textContent).toContain("no LLM request");
     expect(getRunTimelineContext).not.toHaveBeenCalled();
@@ -816,48 +841,60 @@ describe("context breakdown follows the point", () => {
 });
 
 describe("context size row", () => {
-  it("draws one bar per message, as tall as the context through it, and reads its value on hover", async () => {
+  it("draws one bar per block, as tall as the context through it, and reads its value on hover", async () => {
     render();
     await screen.findByTestId("run-timeline-chart");
-    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "both" } });
     await paintFrame();
-    const key = (row: string, k: string) => ({ row, key: k });
+    const key = (k: string) => ({ row: "input", key: k });
     const barAt = (k: string) => {
-      const x = xOf(key("input", k));
+      const x = xOf(key(k));
       return drawn("input").filter((d) => d.op === "fill" && d.x <= x && x <= d.x + d.w).at(-1);
     };
-    const first = barAt("m2");
-    const second = barAt("m7");
+    const first = barAt("utext-2-2");
+    const second = barAt("uthinking-7-7");
     expect(second?.h ?? 0).toBeGreaterThan(0);
     expect((second?.h ?? 0) / (first?.h ?? 1)).toBeCloseTo(420 / 1050);
     // Session 0 is blue, session 1 amber.
     expect(first?.color).toContain("#3b82f6");
     expect(second?.color).toContain("#f59e0b");
-    pointAt("input", xOf(key("input", "m7")));
-    const readout = screen.getByTestId("run-timeline-readout").textContent;
-    expect(readout).toContain("Message 7 · session 2");
-    expect(readout).toContain("20 tokens (estimated) · context through it 420");
+    pointAt("input", xOf(key("uthinking-7-7")));
+    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("~20 tokens · context through it 420");
   });
 
-  it("shows the LLM request of an AIMessage in the details, not on the timeline", async () => {
+  it("has exactly the blocks of the Messages row, to the pixel", async () => {
     render();
     await screen.findByTestId("run-timeline-chart");
-    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "both" } });
     await paintFrame();
-    clickAt("added", xOf({ row: "added", key: "m2" }));
+    const fillsOf = (row: string) => drawn(row).filter((d) => d.op === "fill").map((d) => [d.x, d.w]);
+    expect(fillsOf("input")).toEqual(fillsOf("units"));
+    expect(fillsOf("input")).toHaveLength(lifetimeResponse.units.length);
+  });
+
+  it("shows the LLM request of an AIMessage in the details of each of its blocks, not on the timeline", async () => {
+    render();
+    await screen.findByTestId("run-timeline-chart");
+    await paintFrame();
+    clickAt("input", xOf({ row: "input", key: "utext-2-2" }));
     const request = await screen.findByTestId("run-timeline-request");
     expect(request.textContent).toContain("1.0k");
     expect(request.textContent).toContain("$0.0021");
-    // A message that was no request has no such section.
-    clickAt("added", xOf({ row: "added", key: "m1" }));
+    // A block that was no request has no such section.
+    clickAt("input", xOf({ row: "input", key: "uinbound-1-1" }));
     await waitFor(() => expect(screen.queryByTestId("run-timeline-request")).toBeNull());
   });
 
-  it("has no context rows for an agent with no weighed message", async () => {
-    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, messages: [] });
+  it("switches off, and has no Added context row", async () => {
+    render();
+    await screen.findByTestId("run-timeline-chart");
+    expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
+    fireEvent.click(screen.getByTestId("agent-view-context-size"));
+    expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
+  });
+
+  it("has no context row for an agent no request has read", async () => {
+    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, units: lifetimeResponse.units.map((u) => ({ ...u, context_tokens: null, context_total: null, request: null })) });
     render();
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
-    expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
   });
 });
