@@ -17,7 +17,7 @@ import pytest
 
 from base.config import settings
 from base.db import Database
-from schedules.catchup import catch_up, claimed_slot, fire_slot_once
+from schedules.catchup import catch_up, fire_slot_once
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "c9-daily-report-schedule.py"
@@ -185,7 +185,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """_fire derives its window from the CLAIMED slot (the fire_slot_once
-    binding), not from the wall clock — the layer QA's simulation flagged."""
+    callback argument), not from the wall clock — the layer QA's simulation flagged."""
     module = _load_schedule_module()
 
     def fake_init_gateway(name: str) -> None:
@@ -275,16 +275,15 @@ def test_fire_reports_failure_without_raising(
     assert "RuntimeError" in failures[0]
     assert "gh api down" in failures[0]
     assert not fire_slot_once(
-        database, slot, None, fire=lambda _payload: pytest.fail("unexpected retry")
+        database, slot, None, fire=lambda _slot, _payload: pytest.fail("unexpected retry")
     )
     assert len(failures) == 1
 
 
-def test_fire_outside_a_claim_fails_loud() -> None:
+def test_fire_requires_an_explicit_slot() -> None:
     module = _load_schedule_module()
-    assert claimed_slot() is None
-    with pytest.raises(RuntimeError, match="outside a claimed slot"):
-        module._fire(None)
+    with pytest.raises(TypeError, match="slot_end"):
+        module._fire(_payload=None)
 
 
 def test_report_agent_override_rejects_nonnumeric_value(
