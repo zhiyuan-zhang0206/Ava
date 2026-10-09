@@ -28,6 +28,8 @@ from loguru import logger
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.config.domains.lm import LmSettings
+from base.config.profiles import PROCESS_PROFILES, profile_unknown_error
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -57,6 +59,25 @@ def labeler_config() -> LabelerConfig:
     return LabelerConfig(
         labeler_model=settings.lm.labeler_model,
         labeler_max_chars=settings.services.labeler_max_chars,
+    )
+
+
+def labeler_model_overrides(*, profile: str | None, lm: LmSettings) -> ModelOverrides:
+    """Freeze this caller's tuning at the composition boundary.
+
+    Gateway boot removes agent-only tuning aliases, so the old model factory
+    resolved this caller through model defaults. Do not read those stripped
+    fields. A full or agent-side boot retains its explicit tuning as before.
+    """
+    if profile is not None and profile not in PROCESS_PROFILES:
+        raise profile_unknown_error(profile)
+    if profile == "gateway":
+        return ModelOverrides.from_pins({})
+    return ModelOverrides.from_pins(
+        {
+            "reasoning_effort": lm.reasoning_effort,
+            "claude_thinking_budget_tokens": lm.claude_thinking_budget_tokens,
+        }
     )
 
 
@@ -342,12 +363,7 @@ async def run() -> None:
             labeler_config(),
             catalog=build_model_catalog(),
             llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {
-                    "reasoning_effort": settings.lm.reasoning_effort,
-                    "claude_thinking_budget_tokens": settings.lm.claude_thinking_budget_tokens,
-                }
-            ),
+            overrides=labeler_model_overrides(profile=settings.profile, lm=settings.lm),
         )
     finally:
         pool.close()
