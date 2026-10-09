@@ -39,7 +39,7 @@ from ops import lifecycle as _ops
 router = APIRouter()
 
 # Reminders cannot be disabled, so remind_interval_seconds is capped at 24h and must be
-# positive — mirrors ava_builtins/plugins/ava_fleet/task_registry._MAX_REMIND_INTERVAL_SECONDS
+# positive — mirrors base.agents.tasks.priority.MAX_REMIND_INTERVAL_SECONDS
 # across the SDK/gateway layer boundary (gateway may not import plugins).
 _MAX_REMIND_INTERVAL_SECONDS = 86400
 

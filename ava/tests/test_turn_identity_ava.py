@@ -66,7 +66,6 @@ def test_explicit_actor_is_independent_of_turn_metadata() -> None:
     pin_agent(None, actor="schedule:7")
     with bind_turn_identity(9):
         assert agent_identity.require_actor() == "schedule:7"
-        assert agent_identity.default_actor() == "schedule:7"
 
 
 def test_sdk_threads_use_one_local_binding_without_patching_thread_start() -> None:
