@@ -17,6 +17,7 @@ def fake_config(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return unit_home / "mcp.json"
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_help_on_mcps_module_is_index_only(
     fake_config: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

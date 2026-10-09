@@ -79,3 +79,15 @@ def model_installation(
         authority=config_authority,
         delivery_sender=DeliverySenderConfig(config_authority),
     )
+
+
+@pytest.fixture
+def sdk_model_owner(monkeypatch: pytest.MonkeyPatch, model_installation: Installation) -> None:
+    """Bind model facts for direct SDK consumers that do not exercise installation.
+
+    Installation/rollback tests pass model facts to their real installer instead.
+    This fixture is opt-in; it never supplies a catalog to an unbound production root.
+    """
+    import ava
+
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)

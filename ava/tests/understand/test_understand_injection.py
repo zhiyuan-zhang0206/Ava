@@ -10,6 +10,8 @@ import pytest
 from ava.tests.understand._understand_helpers import mock_deepseek as mock_deepseek
 from ava.tests.understand._understand_helpers import understand_mod
 
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+
 # ─── injection scan (audit round-2 up-security-trust P1-4) ────────────────
 
 

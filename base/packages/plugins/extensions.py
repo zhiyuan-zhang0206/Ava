@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.provider_api import ProviderContribution
+from base.lm.provider_contract import ProviderContribution
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.inspector import InspectWidgetSpec
 from base.telemetry.metrics.plugin_metrics import MetricSpec

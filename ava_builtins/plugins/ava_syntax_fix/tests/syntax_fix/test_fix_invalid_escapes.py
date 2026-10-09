@@ -412,6 +412,7 @@ class TestRenderSyntaxError:
         assert "<agent_code>" in rendered
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 class TestLlmRepairSyntax:
     async def test_returns_repaired_text(self):
         from unittest.mock import patch

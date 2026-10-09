@@ -21,6 +21,7 @@ TARGET = NativeWorkTarget(
 COMMAND = uuid4()
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_work_namespace_is_discoverable_in_sdk_help() -> None:
     assert "work" in ava.agents.__all_for_ava__
     output = io.StringIO()

@@ -311,6 +311,7 @@ def test_auto_promote_deep_nesting(fake_skills_dir: Path) -> None:
     assert "a:b:c" in by_id
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_auto_promote_help_renders_root_skill(
     fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

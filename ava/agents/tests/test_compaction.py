@@ -49,6 +49,7 @@ STATUS = CompactStatus(
 )
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_compaction_namespace_is_discoverable_in_sdk_help() -> None:
     assert "compaction" in ava.agents.__all_for_ava__
     output = io.StringIO()

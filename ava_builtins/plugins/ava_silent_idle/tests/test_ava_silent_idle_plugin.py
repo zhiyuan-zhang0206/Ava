@@ -15,6 +15,8 @@ Covered:
 """
 
 import sys
+from collections.abc import Iterator
+from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -28,12 +30,13 @@ from agent.state import build_agent_state
 from base.agents.context import AvaContext
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
 
 
 @pytest.fixture
-def _loaded():
+def _loaded() -> Iterator[ModuleType]:
     """Import the ava_silent_idle agent-runtime face fresh; teardown unloads the module."""
     for name in list(sys.modules):
         if name.startswith("ava_builtins.plugins.ava_silent_idle"):
@@ -52,12 +55,13 @@ def _state(messages: list[AnyMessage]):
     return build_agent_state(EMPTY)(messages=messages)
 
 
-def _runtime() -> Runtime[AvaContext]:
+def _runtime(catalog: ModelCatalog) -> Runtime[AvaContext]:
     ctx = AvaContext(
         ops_pool=MagicMock(),
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
+        catalog=catalog,
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
     )
@@ -74,9 +78,13 @@ def _reasoning_only_ai() -> AIMessage:
     return AIMessage(content=[{"type": "thinking", "thinking": "hmm", "signature": "s"}])
 
 
-async def test_injects_nudge_when_tail_is_reasoning_only(_loaded):
+async def test_injects_nudge_when_tail_is_reasoning_only(
+    _loaded: ModuleType, model_catalog: ModelCatalog
+):
     state = _state([HumanMessage(content="hi"), _reasoning_only_ai()])
-    result = await _loaded.silent_idle_continue_before_llm(state, _runtime(), _config())  # pyright: ignore[reportUnknownMemberType]
+    result = await _loaded.silent_idle_continue_before_llm(
+        state, _runtime(model_catalog), _config()
+    )  # pyright: ignore[reportUnknownMemberType]
     assert result is not None
     msgs = result["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -85,31 +93,48 @@ async def test_injects_nudge_when_tail_is_reasoning_only(_loaded):
     assert note.additional_kwargs["ava_note_tag"] == NoteTag.SILENT_IDLE_CONTINUE  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_noop_when_tail_has_text(_loaded):
+async def test_noop_when_tail_has_text(_loaded: ModuleType, model_catalog: ModelCatalog):
     state = _state([HumanMessage(content="hi"), AIMessage(content="done")])
-    assert await _loaded.silent_idle_continue_before_llm(state, _runtime(), _config()) is None  # pyright: ignore[reportUnknownMemberType]
+    assert (
+        await _loaded.silent_idle_continue_before_llm(state, _runtime(model_catalog), _config())
+        is None
+    )  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_noop_when_tail_has_tool_call(_loaded):
+async def test_noop_when_tail_has_tool_call(_loaded: ModuleType, model_catalog: ModelCatalog):
     ai = AIMessage(
         content="", tool_calls=[{"name": "execute_code", "args": {"code": "1"}, "id": "c1"}]
     )
     state = _state([HumanMessage(content="hi"), ai])
-    assert await _loaded.silent_idle_continue_before_llm(state, _runtime(), _config()) is None  # pyright: ignore[reportUnknownMemberType]
+    assert (
+        await _loaded.silent_idle_continue_before_llm(state, _runtime(model_catalog), _config())
+        is None
+    )  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_noop_when_tail_is_human(_loaded):
+async def test_noop_when_tail_is_human(_loaded: ModuleType, model_catalog: ModelCatalog):
     # A reasoning-only AIMessage that is NOT the tail must not trigger.
     state = _state([_reasoning_only_ai(), HumanMessage(content="hi")])
-    assert await _loaded.silent_idle_continue_before_llm(state, _runtime(), _config()) is None  # pyright: ignore[reportUnknownMemberType]
+    assert (
+        await _loaded.silent_idle_continue_before_llm(state, _runtime(model_catalog), _config())
+        is None
+    )  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_noop_when_empty(_loaded):
-    assert await _loaded.silent_idle_continue_before_llm(_state([]), _runtime(), _config()) is None  # pyright: ignore[reportUnknownMemberType]
+async def test_noop_when_empty(_loaded: ModuleType, model_catalog: ModelCatalog):
+    assert (
+        await _loaded.silent_idle_continue_before_llm(
+            _state([]), _runtime(model_catalog), _config()
+        )
+        is None
+    )  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_defers_when_auto_compact_would_fire(
-    _loaded, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    _loaded: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
 ):
     """When auto-compact would replace messages this turn, the nudge defers
     (returns None) so it does not collide with compaction's `messages` write —
@@ -122,9 +147,19 @@ async def test_defers_when_auto_compact_would_fire(
     budget = ContextBudget(
         max_context_tokens=1_000_000, soft_compact_tokens=600_000, hard_compact_tokens=1
     )
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_: budget)  # pyright: ignore[reportUnknownArgumentType]
+
+    def pinned_budget(
+        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
+    ) -> ContextBudget:
+        assert catalog is model_catalog
+        return budget
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", pinned_budget)
     state = _state([HumanMessage(content="a long history " * 20), _reasoning_only_ai()])
-    assert await _loaded.silent_idle_continue_before_llm(state, _runtime(), _config()) is None  # pyright: ignore[reportUnknownMemberType]
+    assert (
+        await _loaded.silent_idle_continue_before_llm(state, _runtime(model_catalog), _config())
+        is None
+    )  # pyright: ignore[reportUnknownMemberType]
     assert any(
         record["extra"].get("label") == "silent-idle"
         and record["extra"].get("event") == "silent_idle"

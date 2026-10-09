@@ -44,7 +44,9 @@ when no external attachment exists. The attachment temporarily overrides an
 external caller profile so peer operations carry `agent:N`, then restores the
 ordinary profile when closed.
 
-Plugins load through the existing extension loader. Framework and plugin config
+Plugins load through the existing extension loader before the attachment binds
+its borrowed context, so that context receives the Installation's model catalog.
+Framework and plugin config
 views bind the agent's stored configuration, while `ava.external.state.load_snapshot`
 reads its checkpoint without writing it. Pending journal entries are replayed
 through their registered reducers after the checkpoint's applied receipt.
