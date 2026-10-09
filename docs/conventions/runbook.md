@@ -243,7 +243,7 @@ while per-agent model/runtime caches remain bounded.
   warm-up above), but it does not eagerly connect to every configured MCP
   server: each server connection opens only on that tool's first call, and the
   tool schema itself is cached on disk for 24h so repeat discovery costs no
-  round trip. [`okf/mcps/mcps.ava.okf.md`](../../okf/mcps/mcps.ava.okf.md).
+  round trip. [`docs/mcps/mcps.ava.okf.md`](../mcps/mcps.ava.okf.md).
 - **Fixed, small per-agent connection budget** — 2 pooled Postgres
   connections (shared with the LangGraph checkpoint saver) + one Redis
   subscription per agent, with pgbouncer transaction pooling in front of the

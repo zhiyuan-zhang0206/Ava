@@ -136,7 +136,7 @@ model that becomes a private channel in the agent's state graph — typed
 read/write handles, fail-fast on conflicts, persisted with the framework
 checkpoint. Write a `plugin.py`, drop it in a directory, done.
 
-→ [How plugins work](../okf/plugins/plugins.ava.okf.md)
+→ [How plugins work](plugins/plugins.ava.okf.md)
 
 ### 8. Skills — the open Agent Skills standard, zero rewrite
 
@@ -146,7 +146,7 @@ folder installs unmodified: from a git URL or straight off disk, no manifest,
 no conversion. A hundred installed skills cost a hundred description lines in
 the prompt, not a hundred bodies — full text loads on demand.
 
-→ [How skills work](../okf/skills/skills.ava.okf.md)
+→ [How skills work](skills/skills.ava.okf.md)
 
 ### 9. Memory — a shared pool that outlives any conversation
 
@@ -271,7 +271,7 @@ flowchart LR
 The `gateway` and `agent-runner` capabilities can live on **one box** or be
 **split** across machines. Full component breakdown, data-flow walkthrough, and
 the agent graph topology are in the OKF knowledge graph, rooted at
-[`okf/index.ava.okf.md`](../okf/index.ava.okf.md).
+[`docs/index.ava.okf.md`](index.ava.okf.md).
 
 **No terminal UI, by design.** The Next.js console above is the only
 supervision surface — plus chat channels (e.g. X, via `ava mcp install`)
@@ -341,14 +341,14 @@ node for the full design.
 | When you need to… | Read |
 |---|---|
 | Get started | **[QUICKSTART.md](../QUICKSTART.md)** |
-| Understand architecture | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) |
+| Understand architecture | [`docs/index.ava.okf.md`](index.ava.okf.md) |
 | Install / deploy | [`.agents/skills/ava-guide/deploy/SKILL.md`](../ava_builtins/skills/platform/ava-guide/deploy/SKILL.md) |
 | Set up dev environment | [`docs/conventions/dev-setup.md`](conventions/dev-setup.md) |
 | Run ops / troubleshoot | [`docs/conventions/runbook.md`](conventions/runbook.md) |
 | Write a PR | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Follow coding conventions | [`docs/conventions/python-conventions.md`](conventions/python-conventions.md) |
 | Know what NOT to do | [`docs/conventions/non-goals.md`](conventions/non-goals.md) |
-| See glossary | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) (OKF terminology sections) |
+| See glossary | [`docs/index.ava.okf.md`](index.ava.okf.md) (OKF terminology sections) |
 
 ## Agent instruction files
 
