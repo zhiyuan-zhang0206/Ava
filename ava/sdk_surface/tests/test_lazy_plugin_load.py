@@ -27,6 +27,8 @@ import pytest
 import ava
 from ava.sdk_surface import install
 from base.agents.sdk import call_policy
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
@@ -52,12 +54,16 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     install.uninstall()
     install.clear_load_attempt()
     if prior is not None:
-        install.install(prior.registry)
+        install.install(prior.registry, catalog=prior.catalog, authority=prior.authority)
 
 
-def _installing(*plugins: tuple[str, PluginContributions]) -> None:
+def _installing(
+    *plugins: tuple[str, PluginContributions],
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
+) -> None:
     """What a real `load_extensions` does to the surface: install these plugins' declarations."""
-    install.install(ExtensionRegistry(plugins))
+    install.install(ExtensionRegistry(plugins), catalog=catalog, authority=authority)
 
 
 def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
@@ -68,7 +74,7 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
 
     calls: list[int] = []
 
-    def fake(*, surface: bool = False) -> None:
+    def fake(*, catalog: ModelCatalog, authority: ConfigAuthority, surface: bool = False) -> None:
         calls.append(1)
         if register is not None:
             _installing(
@@ -81,8 +87,14 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
                             ),
                         )
                     ),
-                )
+                ),
+                catalog=catalog,
+                authority=authority,
             )
+            installed = install.installed()
+            assert installed is not None
+            assert installed.require_catalog() is catalog
+            assert installed.authority is authority
 
     monkeypatch.setattr(extensions, "load_extensions", fake)
     return calls
@@ -190,7 +202,7 @@ def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
     error = error_type(message)
     calls: list[int] = []
 
-    def boom(*, surface: bool = False) -> None:
+    def boom(*, catalog: ModelCatalog, authority: ConfigAuthority, surface: bool = False) -> None:
         calls.append(1)
         raise error
 
@@ -212,7 +224,7 @@ def test_failed_lazy_lookup_repeats_the_original_boot_error(
     _as_launched_child(monkeypatch)
     error = RuntimeError("lazy boot failed")
 
-    def boom(*, surface: bool = False) -> None:
+    def boom(*, catalog: ModelCatalog, authority: ConfigAuthority, surface: bool = False) -> None:
         raise error
 
     monkeypatch.setattr(extensions, "load_extensions", boom)
@@ -321,7 +333,7 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     """
     calls: list[int] = []
 
-    def fake(*, surface: bool = False) -> None:
+    def fake(*, catalog: ModelCatalog, authority: ConfigAuthority, surface: bool = False) -> None:
         calls.append(1)
 
     def during_import() -> None:
@@ -352,7 +364,7 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
 
     calls: list[int] = []
 
-    def fake(*, surface: bool = False) -> None:
+    def fake(*, catalog: ModelCatalog, authority: ConfigAuthority, surface: bool = False) -> None:
         calls.append(1)
         _installing(
             (
@@ -364,7 +376,9 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
                         ),
                     )
                 ),
-            )
+            ),
+            catalog=catalog,
+            authority=authority,
         )
 
     def during_import() -> None:
@@ -389,13 +403,15 @@ def _spy_member_loader(
 
     calls: list[int] = []
 
-    def fake(*, surface: bool = False) -> None:
+    def fake(*, catalog: ModelCatalog, authority: ConfigAuthority, surface: bool = False) -> None:
         calls.append(1)
         _installing(
             (
                 "member-plugin",
                 PluginContributions(sdk_members=(SdkMember(namespace, member, lambda: "pong"),)),
-            )
+            ),
+            catalog=catalog,
+            authority=authority,
         )
 
     monkeypatch.setattr(extensions, "load_extensions", fake)
