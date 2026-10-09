@@ -52,10 +52,6 @@ _INTERACTIVE_ROLES = frozenset(
         "AXSwitch",
     }
 )
-# AXShowMenu is deliberately absent: many non-controls (rows, cells) list it.
-_INTERACTIVE_ACTIONS = frozenset(
-    {"AXPress", "AXIncrement", "AXDecrement", "AXConfirm", "AXPick", "AXOpen"}
-)
 _TEXT_ROLES = frozenset({"AXStaticText", "AXHeading", "AXTextField", "AXTextArea"})
 _CONTAINER_ROLES = frozenset(
     {"AXGroup", "AXToolbar", "AXTabGroup", "AXList", "AXTable", "AXOutline", "AXSplitGroup"}
@@ -89,7 +85,9 @@ def _is_interactive(node: AxNode) -> bool:
         return True
     if "selected" in node and node.get("role") == "AXRow":
         return True
-    return any(a in _INTERACTIVE_ACTIONS for a in node.get("actions", ()))
+    # A reported action is a platform capability, not a model-input enum.
+    # AXShowMenu alone is common on non-controls (rows and cells).
+    return any(action != "AXShowMenu" for action in node.get("actions", ()))
 
 
 def _rank(node: AxNode, mode: Mode) -> int | None:
@@ -225,10 +223,9 @@ def _line(node: AxNode, scale: float, mode: Mode) -> str:
     value = node.get("value")
     if value and value != label and node.get("role") not in ("AXStaticText", "AXHeading"):
         parts.append(f"val={_quote(value)}")
-    if mode == "full":
-        if "ident" in node:
-            parts.append("#" + node["ident"])
-        parts.extend(node.get("actions", ()))
+    if mode == "full" and "ident" in node:
+        parts.append("#" + node["ident"])
+    parts.extend(node.get("actions", ()))
     return " ".join(parts)
 
 

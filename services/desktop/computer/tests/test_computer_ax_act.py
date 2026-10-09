@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from base.db import Database
+from services.desktop.computer import ax_act as ax_action_tools
 from services.desktop.computer.ax_ids import AxIdTable, AxSession
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
@@ -50,7 +51,7 @@ class FakeAxApp:
         self.table: dict[int, str] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.acted: list[tuple[str, str, str | None]] = []
-        self.caps = {"ax_tree_v1": True, "ax_act_v1": True}
+        self.caps = {"ax_tree_v1": True, "ax_act_v1": True, "ax_act_v2": True}
         self.unanswered = False
         self.act_error: str | None = None
 
@@ -124,7 +125,7 @@ class FakeAxApp:
     def ax_act(
         self, app: str, raw_id: int, action: str, *, value: str | None = None, **kw: Any
     ) -> dict[str, Any]:
-        self.calls.append(("ax_act", {"app": app, "raw_id": raw_id, "action": action}))
+        self.calls.append(("ax_act", {"app": app, "raw_id": raw_id, "action": action, **kw}))
         fp = self.table.get(raw_id)
         found = next((e for e in self.elements if e["fp"] == fp), None)
         if found is None:
@@ -280,15 +281,16 @@ async def test_ids_stay_the_same_when_the_app_renumbers_and_a_new_element_appear
     assert second["Cc"] not in first.values()
 
 
-async def test_a_stale_raw_id_is_refound_by_fingerprint_and_retried_once(
+async def test_a_stale_raw_id_requires_observation_without_rewalking_or_acting(
     app: FakeAxApp, daemon: ComputerMcpDaemon
 ) -> None:
     ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
     app.forget_table()  # the helper's table was replaced since
     app.calls.clear()
-    await call(daemon, "ax_act", {"id": ids["Send"], "action": "press"})
-    assert [name for name, _ in app.calls] == ["ax_act", "ax_tree", "ax_act"]
-    assert app.acted == [("send", "press", None)]
+    with pytest.raises(ComputerUseError, match="call ax_tree again"):
+        await call(daemon, "ax_act", {"id": ids["Send"], "action": "press"})
+    assert [name for name, _ in app.calls] == ["ax_act"]
+    assert app.acted == []
 
 
 async def test_an_element_that_is_gone_is_never_guessed_at(
@@ -319,7 +321,7 @@ async def test_a_restarted_app_invalidates_every_id(
     ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
     app.forget_table()
     app.pid = 9999
-    with pytest.raises(ComputerUseError, match="was restarted"):
+    with pytest.raises(ComputerUseError, match="call ax_tree again"):
         await call(daemon, "ax_act", {"id": ids["Send"], "action": "press"})
 
 
@@ -406,3 +408,173 @@ async def test_ax_act_is_declared_with_its_required_arguments(database: Database
     tools: list[dict[str, Any]] = resp["result"]
     declared = next(t for t in tools if t["name"] == "ax_act")
     assert declared["input_schema"]["required"] == ["id", "action"]
+
+
+async def test_perform_action_forwards_a_reported_platform_identifier(
+    app: FakeAxApp, daemon: ComputerMcpDaemon
+) -> None:
+    app.elements[1]["actions"] = ["AXIncrement", "AXCustomApplicationAction"]
+    ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
+    out = await call(
+        daemon,
+        "ax_act",
+        {
+            "id": ids["Send"],
+            "action": "perform_action",
+            "native_action": "AXCustomApplicationAction",
+        },
+    )
+    assert app.calls[-1][1]["native_action"] == "AXCustomApplicationAction"
+    assert out["action"] == "perform_action" and out["completed"] is True
+
+
+@pytest.mark.parametrize("selection", [None, "text", "cursor_before", "cursor_after"])
+async def test_select_text_forwards_matching_context_without_echoing_or_auditing_it(
+    app: FakeAxApp,
+    daemon: ComputerMcpDaemon,
+    audit_log: list[dict[str, Any]],
+    selection: str | None,
+) -> None:
+    ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
+    args = {
+        "id": ids["To"],
+        "action": "select_text",
+        "text": TYPED_TEXT,
+        "prefix": "",
+        "suffix": "after-private",
+    }
+    if selection is not None:
+        args["selection_type"] = selection
+    out = await call(daemon, "ax_act", args)
+    sent = app.calls[-1][1]
+    assert (sent["text"], sent["prefix"], sent["suffix"], sent["selection_type"]) == (
+        TYPED_TEXT,
+        "",
+        "after-private",
+        selection or "text",
+    )
+    assert TYPED_TEXT not in json.dumps(out) + json.dumps(audit_log)
+    assert "after-private" not in json.dumps(out) + json.dumps(audit_log)
+    acted = [e for e in audit_log if e["payload"]["action"] == "ax_act"]
+    assert acted[0]["payload"]["coords"] == "120,80,select_text"
+
+
+@pytest.mark.parametrize(
+    "action,extra",
+    [
+        ("select_text", {"text": "private"}),
+        ("perform_action", {"native_action": "AXIncrement"}),
+    ],
+)
+async def test_extended_actions_require_new_helper_capability_before_any_action(
+    app: FakeAxApp, daemon: ComputerMcpDaemon, action: str, extra: dict[str, str]
+) -> None:
+    ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
+    app.caps.pop("ax_act_v2")
+    app.calls.clear()
+    with pytest.raises(ComputerUseError, match="predates ax_act"):
+        await call(daemon, "ax_act", {"id": ids["To"], "action": action, **extra})
+    assert app.calls == [] and app.acted == []
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {},
+        {"text": ""},
+        {"text": None},
+        {"text": 12},
+        {"text": "x" * 10_001},
+        {"text": "private", "prefix": None},
+        {"text": "private", "suffix": 3},
+        {"text": "private", "selection_type": None},
+        {"text": "private", "selection_type": "replace"},
+        {"text": "private", "selection_type": ["text"]},
+        {"text": "private", "native_action": "AXPress"},
+        {"text": "private", "value": "other-private"},
+    ],
+)
+async def test_invalid_selection_arguments_fail_without_content_leak_or_helper_call(
+    app: FakeAxApp, daemon: ComputerMcpDaemon, extra: dict[str, Any]
+) -> None:
+    with pytest.raises(ComputerUseError) as error:
+        await call(daemon, "ax_act", {"id": "e1", "action": "select_text", **extra})
+    assert "private" not in str(error.value)
+    assert app.calls == []
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {},
+        {"native_action": ""},
+        {"native_action": 2},
+        {"native_action": "AXPress", "text": "private"},
+    ],
+)
+async def test_invalid_platform_action_arguments_fail_before_helper(
+    app: FakeAxApp, daemon: ComputerMcpDaemon, extra: dict[str, Any]
+) -> None:
+    with pytest.raises(ComputerUseError):
+        await call(daemon, "ax_act", {"id": "e1", "action": "perform_action", **extra})
+    assert app.calls == []
+
+
+@pytest.mark.parametrize(
+    "action,extra",
+    [
+        ("select_text", {"text": "private"}),
+        ("perform_action", {"native_action": "AXIncrement"}),
+    ],
+)
+async def test_extended_actions_never_rewalk_a_stale_window(
+    app: FakeAxApp, daemon: ComputerMcpDaemon, action: str, extra: dict[str, str]
+) -> None:
+    ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
+    app.forget_table()
+    app.calls.clear()
+    with pytest.raises(ComputerUseError, match="call ax_tree again"):
+        await call(daemon, "ax_act", {"id": ids["To"], "action": action, **extra})
+    assert [name for name, _ in app.calls] == ["ax_act"] and app.acted == []
+
+
+async def test_a_failed_selection_keeps_text_and_context_out_of_the_audit(
+    app: FakeAxApp, daemon: ComputerMcpDaemon, audit_log: list[dict[str, Any]]
+) -> None:
+    ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
+    app.act_error = "text selection is ambiguous; add prefix or suffix"
+    with pytest.raises(ComputerUseError, match="ambiguous"):
+        await call(
+            daemon,
+            "ax_act",
+            {
+                "id": ids["To"],
+                "action": "select_text",
+                "text": TYPED_TEXT,
+                "prefix": "private-context",
+            },
+        )
+    assert TYPED_TEXT not in json.dumps(audit_log) and "private-context" not in json.dumps(
+        audit_log
+    )
+    assert [e["payload"]["outcome"] for e in audit_log if e["payload"]["action"] == "ax_act"] == [
+        "error"
+    ]
+
+
+@pytest.mark.parametrize(
+    "extra", [{"text": "private"}, {"native_action": None}, {"selection_type": "text"}]
+)
+def test_visual_ids_reject_ax_only_fields_before_any_foreground_click(
+    monkeypatch: pytest.MonkeyPatch, extra: dict[str, Any]
+) -> None:
+    clicked: list[tuple[float, float]] = []
+
+    def record_click(x: float, y: float) -> None:
+        clicked.append((x, y))
+
+    monkeypatch.setattr(helper, "click", record_click)
+    session = AxSession(visual={1: (10, 20, "Label")})
+    with pytest.raises(ComputerUseError, match="only support action=press"):
+        ax_action_tools.ax_act_tool({"id": "px:1", "action": "press", **extra}, 1, 1.0, session)
+    assert clicked == []
