@@ -558,17 +558,7 @@ def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> 
 
 
 def _ambient_agent_id() -> int | None:
-    """The agent an event belongs to when the caller named none.
-
-    Turn first, then the process binding: a hosted runner emits on behalf of
-    every local agent, so its process binding is None and the turn contextvar
-    (`base/native_process/turn_identity.py`) is the only truthful answer. An exec child or
-    standalone script may instead carry the process-level `init_telemetry` value."""
-    from base.native_process.turn_identity import current_turn_agent_id
-
-    bound = current_turn_agent_id()
-    if bound is not None:
-        return bound
+    """Default identity established at process startup, if this process owns an agent."""
     return _state["agent_id"]
 
 
