@@ -10,9 +10,9 @@ import { buttonVariants } from "@/components/ui/button";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import type { ContextBars } from "../model/timeline-nav";
+import type { UnitHeights } from "../canvas/run-timeline-paint";
 
-const CONTEXT_OPTIONS: readonly ContextBars[] = ["off", "absolute", "added", "both"];
+const HEIGHT_OPTIONS: readonly UnitHeights[] = ["equal", "tokens"];
 const FIELD = "rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground";
 
 export function AgentViewToolbar({
@@ -21,8 +21,10 @@ export function AgentViewToolbar({
   levels,
   maxLevels,
   onLevels,
-  context,
-  onContext,
+  contextSize,
+  onContextSize,
+  unitHeights,
+  onUnitHeights,
 }: {
   agentIds: readonly number[];
   onAdd: (agent: number) => void;
@@ -31,19 +33,16 @@ export function AgentViewToolbar({
   /** The most levels any loaded agent has. */
   maxLevels: number;
   onLevels: (levels: number | null) => void;
-  context: ContextBars;
-  onContext: (context: ContextBars) => void;
+  contextSize: boolean;
+  onContextSize: (on: boolean) => void;
+  unitHeights: UnitHeights;
+  onUnitHeights: (heights: UnitHeights) => void;
 }) {
   const t = useTranslations("runTimeline");
   const [draft, setDraft] = useState("");
   const parsed = Number(draft);
   const valid = draft.trim() !== "" && Number.isInteger(parsed) && parsed >= 0 && !agentIds.includes(parsed);
-  const contextLabel: Record<ContextBars, string> = {
-    off: t("contextOff"),
-    absolute: t("contextAbsolute"),
-    added: t("contextAdded"),
-    both: t("contextBoth"),
-  };
+  const heightLabel: Record<UnitHeights, string> = { equal: t("heightEqual"), tokens: t("heightTokens") };
   return (
     <div className={cn(FLEX, "flex-wrap items-end gap-x-4 gap-y-2")} data-testid="agent-view-toolbar">
       <form
@@ -91,24 +90,33 @@ export function AgentViewToolbar({
           ))}
         </select>
       </label>
-      <label className="grid gap-1 text-xs text-muted-foreground">
-        {t("contextLabel")}
+      <label className="grid gap-1 text-xs text-muted-foreground" title={t("heightTitle")}>
+        {t("heightLabel")}
         <select
-          value={context}
+          value={unitHeights}
           onChange={(event) => {
-            const next = CONTEXT_OPTIONS.find((option) => option === event.target.value);
-            if (next === undefined) throw new Error(`unknown context bars option: ${event.target.value}`);
-            onContext(next);
+            const next = HEIGHT_OPTIONS.find((option) => option === event.target.value);
+            if (next === undefined) throw new Error(`unknown messages height option: ${event.target.value}`);
+            onUnitHeights(next);
           }}
-          data-testid="agent-view-context"
+          data-testid="agent-view-heights"
           className={FIELD}
         >
-          {CONTEXT_OPTIONS.map((option) => (
+          {HEIGHT_OPTIONS.map((option) => (
             <option key={option} value={option}>
-              {contextLabel[option]}
+              {heightLabel[option]}
             </option>
           ))}
         </select>
+      </label>
+      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground")}>
+        <input
+          type="checkbox"
+          checked={contextSize}
+          onChange={(event) => onContextSize(event.target.checked)}
+          data-testid="agent-view-context-size"
+        />
+        {t("contextSizeLabel")}
       </label>
     </div>
   );
