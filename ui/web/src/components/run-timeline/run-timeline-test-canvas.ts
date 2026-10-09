@@ -8,7 +8,7 @@ import { vi } from "vitest";
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 
 import { layoutsFor } from "./timeline-canvas-model";
-import { buildAxisMap, viewportOf, type Viewport } from "./timeline-model";
+import { timeAxis, viewportOf, type Viewport } from "./timeline-model";
 
 /** One thing a canvas drew: a fill, a stroke or a text, with the color and geometry it used. */
 export interface Drawn {
@@ -119,7 +119,7 @@ export function itemX(
   trackPx = 1000,
   base: Viewport = viewportOf(data.window),
 ): number {
-  const axis = buildAxisMap(data.units, base, "time");
+  const axis = timeAxis(base);
   const layout = layoutsFor(data, axis, axis.viewU(base), trackPx).get(row);
   const place = layout?.wide.find((p) => p.key === key);
   if (place !== undefined) return (place.x0 + place.x1) / 2;

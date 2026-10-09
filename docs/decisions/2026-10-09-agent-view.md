@@ -10,10 +10,13 @@ Why: comparing agents (a coordinator and its workers) needs their rows on one
 axis; a separate cluster page or a second single-agent page would duplicate the
 canvas, selection and keyboard model.
 
+Axis: time only. A token (hybrid) axis was built first and removed after review
+(no use for it in the view; its code, control and strings are gone). Context bars
+default to added.
+
 Mechanics: each agent is read by the existing per-agent `run-timeline` endpoint,
 so no new cluster route. A selection is `{agent, selection}` because node ids and
-block indices repeat across agents; the token axis lays every agent's blocks in
-one time order, keyed by owner. Arrow keys continue from an agent's last row into
+block indices repeat across agents. Arrow keys continue from an agent's last row into
 the next agent's first.
 
 Rejected: a cluster-level endpoint (one more read model to keep consistent with

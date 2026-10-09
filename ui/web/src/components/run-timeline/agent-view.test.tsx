@@ -176,6 +176,10 @@ describe("agent view", () => {
   it("limits the tree to the top levels and picks the context bars", async () => {
     render("7,8");
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
+    // Only the added bars are drawn until the setting says otherwise.
+    expect(rowIn(7, "run-timeline-row-context")).toBeNull();
+    expect(rowIn(7, "run-timeline-row-added")).not.toBeNull();
+    fireEvent.change(screen.getByTestId("agent-view-context"), { target: { value: "both" } });
     expect(rowIn(7, "run-timeline-row-context")).not.toBeNull();
     expect(rowIn(7, "run-timeline-row-added")).not.toBeNull();
 

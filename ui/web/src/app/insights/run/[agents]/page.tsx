@@ -67,7 +67,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   // null = the whole loaded extent.
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [levels, setLevels] = useState<number | null>(null);
-  const [context, setContext] = useState<ContextBars>("both");
+  const [context, setContext] = useState<ContextBars>("added");
   const options: RowOptions = useMemo(() => ({ levels, context }), [levels, context]);
 
   useEffect(() => {

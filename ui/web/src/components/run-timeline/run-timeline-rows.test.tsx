@@ -59,7 +59,7 @@ const ENTRIES = (data: Partial<RunTimelineResponse>) => [
   { id: 42, status: "loaded" as const, data: { nodes: [], units: [], events: [], requests: [], ...data } as RunTimelineResponse },
 ];
 
-function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null, hybrid = false) {
+function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null) {
   const onSelect = vi.fn();
   render(
     <RunTimelineRows
@@ -76,8 +76,6 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
       onRetry={vi.fn()}
     />,
   );
-  // These cases are about positions on the plain time axis.
-  if (hybrid) fireEvent.click(screen.getByTestId("run-timeline-axis-hybrid"));
   return onSelect;
 }
 
@@ -205,35 +203,13 @@ describe("RunTimelineRows narrow items", () => {
 
 });
 
-describe("RunTimelineRows hybrid axis", () => {
-  const tokens = (u: RunTimelineUnit, n: number): RunTimelineUnit => ({ ...u, context_tokens: n });
-
-  it("starts on the time axis and sizes blocks by tokens once switched to hybrid", async () => {
-    const units = [tokens(unit("text", 0, 0, 100), 1000), tokens(unit("text", 1, 100, 110), 3000)];
-    renderRows({ units }, null, false);
-    const toggle = screen.getByTestId("run-timeline-axis-mode");
+describe("RunTimelineRows time axis", () => {
+  it("places blocks by time, whatever their tokens, and offers no other axis", async () => {
+    const units = [{ ...unit("text", 0, 0, 100), context_tokens: 1000 }, { ...unit("text", 1, 100, 110), context_tokens: 3000 }];
+    renderRows({ units });
     await paintFrame();
-    expect(toggle.dataset.mode).toBe("time");
     expect(fills("units").map((d) => [d.x, d.x + d.w])).toEqual([[0, 100], [100, 110]]);
-    // Both modes are always shown; the current one is the pressed one.
-    expect(screen.getByTestId("run-timeline-axis-time").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("run-timeline-axis-hybrid").getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(screen.getByTestId("run-timeline-axis-hybrid"));
-    await paintFrame();
-    expect(toggle.dataset.mode).toBe("hybrid");
-    expect(screen.getByTestId("run-timeline-axis-hybrid").getAttribute("aria-pressed")).toBe("true");
-    const [a, b] = fills("units");
-    expect(b.w / a.w).toBeCloseTo(3, 0);
-  });
-
-  it("puts a node over the blocks it covers", async () => {
-    const units = [tokens(unit("text", 0, 0, 100), 1000), tokens(unit("text", 1, 600, 700), 1000), tokens(unit("text", 2, 900, 950), 1000)];
-    renderRows({ units, nodes: [{ ...node("n", 0, 1000), span_start: 1, span_end: 2 }] }, null, true);
-    await paintFrame();
-    const [, second, third] = fills("units");
-    const [covering] = fills("level-1");
-    expect(covering.x).toBeCloseTo(second.x, 0);
-    expect(covering.x + covering.w).toBeCloseTo(third.x + third.w, 0);
+    expect(screen.queryByTestId("run-timeline-axis-mode")).toBeNull();
   });
 });
 
