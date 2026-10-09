@@ -125,15 +125,17 @@ def test_line_budget_boundary(
 def test_directory_cap_counts_py_pyi_and_subdirectories(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    directory = _entries(tmp_path, "tests/package", 18)
+    directory = _entries(tmp_path, "tests/package", 16)
     _write(directory, "types.pyi", 1)
     _write(directory / "child", "module.py", 1)
     _write(directory, "README.md", 1)
     _write(directory, "config.json", 1)
+    _git(tmp_path, "add", "tests/package")
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
 
     _write(directory, "extra.pyi", 1)
+    _git(tmp_path, "add", "tests/package/extra.pyi")
     assert lcs.main([]) == 1
     output = capsys.readouterr().out
     assert "tests/package: directory has 21 direct entries" in output
@@ -145,17 +147,19 @@ def test_directory_budgets_are_recursive_and_independent(
 ) -> None:
     parent = _entries(tmp_path, "tests/package", 19)
     child = _entries(parent, "child", 20)
+    _git(tmp_path, "add", "tests/package")
     assert lcs.main([str(parent)]) == 0
     assert capsys.readouterr().out == ""
 
     _write(child, "extra.py", 1)
+    _git(tmp_path, "add", "tests/package/child/extra.py")
     assert lcs.main([str(parent)]) == 1
     output = capsys.readouterr().out
     assert "tests/package/child: directory has 21 direct entries" in output
     assert "tests/package: directory" not in output
 
 
-def test_hidden_cache_migrations_and_symlink_entries_are_exempt(
+def test_file_budgets_do_not_traverse_hidden_cache_migrations_or_links(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     directory = _entries(tmp_path, "tests/package", 20)
@@ -176,23 +180,29 @@ def test_hidden_cache_migrations_and_symlink_entries_are_exempt(
 
 @pytest.mark.parametrize("name", [".hidden", "__pycache__", "migrations"])
 @pytest.mark.parametrize("target_file", [False, True])
-def test_explicit_excluded_targets_stay_exempt(
+def test_explicit_hidden_cache_migrations_targets_check_directory_but_not_file_size(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], name: str, target_file: bool
 ) -> None:
     directory = _entries(tmp_path, f"tests/{name}", 21)
     path = _write(directory, "oversized.py", 801)
-    assert lcs.main([str(path if target_file else directory)]) == 0
-    assert capsys.readouterr().out == ""
+    _git(tmp_path, "add", "-f", "--", str(directory))
+    assert lcs.main([str(path if target_file else directory)]) == 1
+    output = capsys.readouterr().out
+    assert f"tests/{name}: directory has 22 direct entries" in output
+    assert "file is 801 lines" not in output
 
 
 @pytest.mark.parametrize("scope", ["docs", "ui"])
-def test_docs_and_frontend_are_out_of_scope(
+def test_docs_and_frontend_check_directories_without_widening_python_rules(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], scope: str
 ) -> None:
     directory = _entries(tmp_path, scope, 21)
     _write(directory, "oversized.py", 801)
-    assert lcs.main([]) == 0
-    assert capsys.readouterr().out == ""
+    _git(tmp_path, "add", scope)
+    assert lcs.main([]) == 1
+    output = capsys.readouterr().out
+    assert f"{scope}: directory has 22 direct entries" in output
+    assert "file is 801 lines" not in output
 
 
 def test_baseline_introduction_skips_guard_when_absent_from_head(
@@ -290,7 +300,7 @@ def test_explicit_missing_target_is_an_error(
 
 
 @pytest.mark.parametrize("target_is_directory", [False, True])
-def test_explicit_out_of_scope_target_is_silent_but_guard_still_runs(
+def test_explicit_docs_target_checks_directories_and_baseline_guard(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], target_is_directory: bool
 ) -> None:
     _baseline(tmp_path)
@@ -300,9 +310,11 @@ def test_explicit_out_of_scope_target_is_silent_but_guard_still_runs(
     directory = _entries(tmp_path, "docs", 21)
     path = _write(directory, "oversized.py", 801)
     args = [str(directory if target_is_directory else path)]
-    assert lcs.main(args) == 0
+    _git(tmp_path, "add", "docs")
+    assert lcs.main(args) == 1
     captured = capsys.readouterr()
-    assert captured.out == captured.err == ""
+    assert "docs: directory has 22 direct entries" in captured.out
+    assert "file is 801 lines" not in captured.out
 
     _baseline(tmp_path, files={"tests/unrelated.py": 801})
     assert lcs.main(args) == 1
@@ -315,10 +327,12 @@ def test_explicit_file_checks_parent_count_without_scanning_siblings(
     directory = _entries(tmp_path, "tests/package", 19)
     target = _write(directory, "selected.py", 1)
     _write(directory, "entry_0.py", 801)
+    _git(tmp_path, "add", "tests/package")
     assert lcs.main([str(target)]) == 0
     assert capsys.readouterr().out == ""
 
     _write(directory, "extra.py", 1)
+    _git(tmp_path, "add", "tests/package/extra.py")
     assert lcs.main([str(target)]) == 1
     output = capsys.readouterr().out
     assert "tests/package: directory has 21 direct entries" in output
@@ -332,6 +346,7 @@ def test_explicit_directory_checks_itself_and_descendants_only(
     _entries(tmp_path, "tests/unrelated", 21)
     _write(tmp_path, "tests/unrelated/oversized.py", 801)
     _write(selected, "nested/oversized.py", 801)
+    _git(tmp_path, "add", "tests/selected", "tests/unrelated")
 
     assert lcs.main([str(selected)]) == 1
     output = capsys.readouterr().out
