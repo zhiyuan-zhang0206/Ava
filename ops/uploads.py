@@ -9,7 +9,7 @@ gateway dial uses) and writes it into its own `~/Downloads/AvaAgent-<id>/`.
 The op result carries this host's absolute path — the gateway's notification
 message then tells the agent where the file physically landed.
 
-The fetch is a plain GET of the upload URL, NOT `base.agents.uploads.fetch_upload_b64`:
+The fetch is a plain GET of the upload URL, NOT `base.agents.upload_delivery.paths.fetch_upload_b64`:
 that helper is image-only (it base64-inlines for the multimodal claim path).
 This op must accept arbitrary file types.
 """
@@ -23,7 +23,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.upload_delivery import storage
 from base.agents.upload_delivery.models import NAMESPACE
-from base.agents.uploads import (
+from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_BYTES,
     MAX_AGENT_UPLOAD_FILES,
     agent_upload_dir,

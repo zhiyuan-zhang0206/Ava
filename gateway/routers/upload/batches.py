@@ -20,7 +20,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents import AgentNotFound
 from base.agents.upload_delivery.models import NAMESPACE
-from base.agents.uploads import upload_url
+from base.agents.upload_delivery.paths import upload_url
 from base.db import agent_exists
 from base.db.transaction import write_transaction
 from base.host.private_storage import create_private_bytes, ensure_private_dir

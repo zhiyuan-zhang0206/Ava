@@ -35,7 +35,7 @@ from fastapi.responses import FileResponse
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentNotFound
-from base.agents.uploads import (
+from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_BYTES,
     MAX_AGENT_UPLOAD_FILES,
     MAX_UPLOAD_BYTES,
