@@ -25,7 +25,7 @@ from base.agents.sdk.tally import SdkCallTally
 
 
 def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[str], Path]:
-    context = AvaContext(identity=AgentIdentity(agent_id, True))
+    context = AvaContext(identity=AgentIdentity(agent_id, True), clients=process_clients())
     request = make_request_path(tmp_path / "exec", agent_id=agent_id)
     result = make_result_path(tmp_path / "exec", agent_id=agent_id)
     write_request(

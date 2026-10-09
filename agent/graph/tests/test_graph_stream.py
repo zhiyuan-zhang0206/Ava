@@ -26,6 +26,7 @@ from langgraph.types import Command
 from agent.graph import LlmLedger, exec_node, llm_node
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
+from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
@@ -57,6 +58,7 @@ def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        clients=process_clients(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
     )
     return Runtime(context=ctx)
