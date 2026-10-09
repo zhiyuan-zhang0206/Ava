@@ -66,6 +66,11 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("INSERT, UPDATE, DELETE", ("api_idempotency",)),
     # SDK surfaces the runner writes directly: ava.tasks and impersonation.
     ("INSERT, UPDATE", ("agent_tasks", "agent_impersonation_messages")),
+    # Task-receipt tombstones: ava.tasks.update/log/create append one row per
+    # accepted operation (idempotency admission and replay). The tables shipped
+    # 2026-10-07 without a matrix row; task writes failed fleet-wide with
+    # InsufficientPrivilege until the 2026-10-10 hot fix.
+    ("INSERT", ("task_creation_receipts", "task_update_receipts")),
     # The understanding tree: chunk and group writers (and their pruning of superseded rows).
     ("SELECT, INSERT, UPDATE, DELETE", ("understanding_nodes",)),
     # Chunk-triggered understanding queue: enqueued by the llm node and compact
