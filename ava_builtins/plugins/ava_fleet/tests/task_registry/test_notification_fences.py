@@ -33,7 +33,9 @@ def test_reassigned_task_refuses_delayed_home_wake(
     pin_agent(actor)
     owner = _terminated(db_conn, ResourceBirth(birth=uuid4()).model_dump(mode="json"))
     next_owner = _seed_agent(db_conn)
-    task = task_registry.create("fenced", "work", parent=root_task_id, owner=owner)
+    task = task_registry.create(
+        "fenced", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
+    )
     note_pool = db_pool()
     assert note_pool is not None
     selected = select_terminated_owners_with_pending(note_pool, 86400)
@@ -65,7 +67,9 @@ def test_assignment_deadline_has_inspectable_failure(
     actor = _seed_agent(db_conn)
     pin_agent(actor)
     owner = _seed_agent(db_conn, status="terminated")
-    task_registry.create("expires", "work", parent=root_task_id, owner=owner)
+    task_registry.create(
+        "expires", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
+    )
     db_conn.execute(
         "UPDATE inbound_messages SET created_at=now()-interval '25 hours' WHERE agent_id=%s",
         (owner,),
@@ -92,7 +96,9 @@ def test_reminder_policy_never_resurrects_terminated_owner(
     actor = _seed_agent(db_conn)
     pin_agent(actor)
     owner = _seed_agent(db_conn, status="terminated")
-    task = task_registry.create("reminder", "work", parent=root_task_id, owner=owner)
+    task = task_registry.create(
+        "reminder", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
+    )
     db_conn.execute(
         "UPDATE inbound_messages SET payload=%s WHERE agent_id=%s",
         (

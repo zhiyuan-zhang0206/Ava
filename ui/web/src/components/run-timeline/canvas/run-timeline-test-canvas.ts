@@ -7,8 +7,8 @@ import { vi } from "vitest";
 
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 
-import { layoutsFor } from "./timeline-canvas-model";
-import { timeAxis, viewportOf, type Viewport } from "./timeline-model";
+import { layoutsFor } from "../model/timeline-canvas-model";
+import { timeAxis, viewportOf, type Viewport } from "../model/timeline-model";
 
 /** One thing a canvas drew: a fill, a stroke or a text, with the color and geometry it used. */
 export interface Drawn {

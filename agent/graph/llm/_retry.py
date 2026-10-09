@@ -8,7 +8,7 @@ or that the failure ends the node.
 
 The schedule is the one the policy used to have:
 
-- transient failures (network jitter, provider drift, rate limits): `max_attempts` tries (a
+- trusted transient provider failures and owned stream stalls: `max_attempts` tries (a
   per-model cap, an explicit `AVA_LLM_RETRY_MAX_ATTEMPTS` / overlay wins), waits of
   `llm_retry_initial_interval_seconds` doubling up to `llm_retry_max_interval_seconds`, plus up to
   one second of random jitter; the node attaches its remaining wall-clock retry budget to the
@@ -19,7 +19,7 @@ The schedule is the one the policy used to have:
   `llm_stall_retry_max_interval_seconds`, jittered ±`llm_stall_retry_jitter_fraction`, for at most
   `llm_stall_retry_max_consecutive` consecutive pairs (a spent streak ends the turn at the node's
   entry check, so refusing here is the backstop);
-- fatal stream / provider errors and a failed compaction are never retried.
+- unknown errors, protocol validation failures, fatal errors and failed compaction are never retried.
 
 Retry-wave de-phasing: a correlated failure hits every agent at the same moment and an identical
 schedule would retry in lockstep, each wave re-synchronizing the burst. The transient schedule
@@ -38,10 +38,12 @@ from agent.graph.llm_errors import (
     FatalProviderError,
     LlmLedger,
     LLMStreamStallPairError,
+    LLMStreamStallTimeoutError,
 )
 from agent.hooks.compact import CompactionFailedError
 from base.config import settings
 from base.host.net.resilience import jittered
+from base.lm.errors import is_retryable_provider_error
 
 RETRY_JITTER_SPAN_S = 10.0
 RETRY_REMAINING_ATTR = "_ava_retry_budget_remaining_seconds"
@@ -83,6 +85,12 @@ def delayed_stall_sleep(streak: int) -> float:
     return jittered(base, span=base * settings.lm.llm_stall_retry_jitter_fraction, mode="random")
 
 
+def _retryable_failure(exc: Exception) -> bool:
+    if isinstance(exc, _NEVER_RETRIED):
+        return False
+    return isinstance(exc, LLMStreamStallTimeoutError) or is_retryable_provider_error(exc)
+
+
 def retry_wait(
     exc: Exception, attempts: int, *, model: str, agent_id: int, ledger: LlmLedger
 ) -> float | None:
@@ -90,7 +98,7 @@ def retry_wait(
 
     `attempts` counts failed tries (1 after the first failure); `ledger` holds the stall-pair streak.
     """
-    if isinstance(exc, _NEVER_RETRIED):
+    if not _retryable_failure(exc):
         return None
     from base.lm.registry import resolve_setting
 

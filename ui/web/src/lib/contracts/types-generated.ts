@@ -316,7 +316,7 @@ export interface paths {
         put?: never;
         /**
          * Post Guarded Agents
-         * @description Create a plain agent through a versioned, principal-bound keyed entry.
+         * @description Create or fork an agent through principal-bound keyed admission.
          *
          *     Older routing cannot execute this path. Callers must keep it fixed for an
          *     intent and never fall back to the legacy path after an uncertain response.
@@ -954,10 +954,9 @@ export interface paths {
          *     owner, while plain update / reminder notices must not (user ruling
          *     2026-08-27 — notification messages never resurrect a terminated owner).
          *
-         *     An optional Idempotency-Key names one logical note, including its
+         *     A required Idempotency-Key names one logical note, including its
          *     resurrection policy. Replays return the original inbound id and repair
-         *     its wake tail; changed requests conflict (409). Keyless legacy requests
-         *     create a fresh note. The inbound remains kind='system_note'.
+         *     its wake tail; changed requests conflict (409). The inbound remains kind='system_note'.
          *
          *     404: agent_id does not exist. 413: content exceeds the 1 MiB transport
          *     limit. 422: note_tag is not a NoteTag value, or source is not a legal
@@ -3853,7 +3852,7 @@ export interface paths {
          *     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
          *     reassigned, completed, cancelled, or otherwise edited.
          *
-         *     An optional Idempotency-Key commits an immutable response with the write.
+         *     A required Idempotency-Key commits an immutable response with the write.
          *     Reusing that key with different fields returns 409; replay returns the original
          *     task snapshot without another update or wake, even if the task later changes.
          *
@@ -10657,8 +10656,8 @@ export interface operations {
     post_agent_system_note_api_agents__agent_id__system_note_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -11659,8 +11658,8 @@ export interface operations {
     post_notice_resolve_api_agents__agent_id__notices__notice_id__resolve_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -11697,8 +11696,8 @@ export interface operations {
     post_notice_create_api_agents__agent_id__notices_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header: {
+                "Idempotency-Key": string;
             };
             path: {
                 agent_id: number;
@@ -14367,7 +14366,9 @@ export interface operations {
     patch_task_api_tasks__task_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 task_id: number;
             };

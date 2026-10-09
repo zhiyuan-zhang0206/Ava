@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from langchain_core.exceptions import ModelAPIError, ModelInvalidRequestError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from base.agents.history.hierarchy.chunk_generate import (
@@ -16,6 +17,7 @@ from base.agents.history.hierarchy.chunk_generate import (
     build_chunk_instruction,
     generate_chunk,
 )
+from base.agents.history.hierarchy.chunks import ChunkCall
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.history.hierarchy.units import divide_units
@@ -253,7 +255,9 @@ class _Recorder:
     """A chat model double: records the bound tools and the request it receives."""
 
     def __init__(self, replies: list[AIMessage]) -> None:
-        self.replies, self.requests, self.bound = replies, [], None
+        self.replies = replies
+        self.requests: list[list[Any]] = []
+        self.bound: list[Any] | None = None
 
     def bind_tools(self, tools: list[Any]) -> _Recorder:
         self.bound = tools
@@ -358,7 +362,7 @@ def test_a_provider_error_in_a_correction_fails_the_call_and_is_recorded() -> No
         def invoke(self, messages: list[Any]) -> AIMessage:
             if self.replies:
                 return super().invoke(messages)
-            raise ValueError("500")
+            raise ModelAPIError("500")
 
     seen: list[Any] = []
     with pytest.raises(GenerateError):
@@ -385,12 +389,28 @@ def test_every_provider_call_is_reported_including_the_failed_one() -> None:
 
     class Boom(_Recorder):
         def invoke(self, messages: list[Any]) -> AIMessage:
-            raise ValueError("400 bad request")
+            raise ModelInvalidRequestError("400 bad request")
 
     failed: list[Any] = []
     with pytest.raises(GenerateError):
         _gen(Boom([]), retry_attempts=0, on_call=failed.append)
     assert len(failed) == 1 and failed[0].response is None and "400" in failed[0].error
+
+
+@pytest.mark.parametrize("error", [TypeError("bad code"), ValueError("bad input")])
+def test_unknown_chunk_invocation_error_is_recorded_once_and_preserved(error: Exception) -> None:
+    class Broken(_Recorder):
+        def invoke(self, messages: list[Any]) -> AIMessage:
+            self.requests.append(list(messages))
+            raise error
+
+    llm = Broken([])
+    calls: list[ChunkCall] = []
+    with pytest.raises(type(error)) as raised:
+        _gen(llm, corrections=2, retry_attempts=2, on_call=calls.append)
+    assert raised.value is error
+    assert len(llm.requests) == len(calls) == 1
+    assert calls[0].response is None and calls[0].error == str(error)
 
 
 def test_a_chunk_is_numbered_from_its_own_first_unit() -> None:

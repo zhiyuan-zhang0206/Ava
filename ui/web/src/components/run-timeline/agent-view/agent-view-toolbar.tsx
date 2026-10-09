@@ -10,7 +10,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import type { ContextBars } from "./timeline-nav";
+import type { ContextBars } from "../model/timeline-nav";
 
 const CONTEXT_OPTIONS: readonly ContextBars[] = ["off", "absolute", "added", "both"];
 const FIELD = "rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground";

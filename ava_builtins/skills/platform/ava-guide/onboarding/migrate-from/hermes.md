@@ -21,7 +21,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 | `hermes bundles` (skill groups) | N/A | |
 | SOUL.md persona | System prompt + role-card skills (`be-a-<role>`) | |
 | Channels (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, SMS, …) | Platform dialog + `ava.ui.notify`; Telegram via the IM Bridge where it runs | |
-| Command approval (`hermes approvals`) | Memory gates + `ava.ui.notify(require_response=True)` | No approval-history ledger. |
+| Command approval (`hermes approvals`) | Memory gates + `ava.ui.notify(require_response=True, idempotency_key=notice_key)` | No approval-history ledger. |
 | Terminal backends (local, Docker, SSH, Daytona, Modal) | Multi-machine agents (`ava.agents.spawn(machine=...)`), `ava.shell.sessions`, containers via shell | Daytona/Modal serverless hibernation has no Ava equivalent. |
 | `hermes cron` | `ava schedules` + `ava.watcher` | |
 | MCP (`hermes mcp`) | `ava mcp` | |
@@ -71,3 +71,6 @@ Official Hermes Agent docs, accessed 2026-08-12:
 
 - https://hermes-agent.nousresearch.com/docs/ — overview, install, concepts, learning loop
 - https://github.com/NousResearch/hermes-agent — website/docs/reference/cli-commands.md (CLI reference), releases (v0.19 line)
+
+A new notice intent requires its own retained `notice_key`; retries reuse that
+key and the original payload. See `ava.ui.notify` for the full parameters.

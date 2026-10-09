@@ -164,7 +164,7 @@ ava presets ls
 ava presets get my-preset
 
 # Run a saved evaluation case through the named preset when verifying resolution.
-# SDK: ava.agents.spawn(prompt=case_prompt, config_overlay={"preset": "my-preset"})
+# SDK: ava.agents.spawn(prompt=case_prompt, config_overlay={"preset": "my-preset"}, idempotency_key=creation_key)
 ```
 
 Read the saved row back and check that its effective config and skill revisions

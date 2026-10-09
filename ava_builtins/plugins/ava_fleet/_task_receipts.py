@@ -12,10 +12,8 @@ from base.api_contracts.idempotency import validate_idempotency_key
 from ._task_update import _UNSET
 
 
-def update_identity(key: str | None, *, context: AvaContext) -> tuple[int | None, str | None]:
-    """Keyless tooling remains compatible; keyed calls need an established actor."""
-    if key is None:
-        return agent_identity.agent_id(context), None
+def update_identity(key: str, *, context: AvaContext) -> tuple[int, str]:
+    """Validate the required key and established actor before mutation admission."""
     validated = validate_idempotency_key(key)
     return agent_identity.require_agent_id(context), validated
 
@@ -31,18 +29,14 @@ def update_request(values: dict[str, object]) -> dict[str, object]:
 
 def replay_update(
     cur: psycopg.Cursor[Any],
-    actor: int | None,
+    actor: int,
     task_id: int,
-    key: str | None,
+    key: str,
     request: dict[str, object],
     *,
     context: AvaContext,
 ) -> bool:
     """Serialize a logical update and recheck identity after any lock wait."""
-    if key is None:
-        return False
-    if actor is None:
-        raise RuntimeError("keyed task update requires an established agent identity")
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
         (f"task-update:{actor}:{task_id}:{key}",),
@@ -64,16 +58,12 @@ def replay_update(
 
 def record_update(
     cur: psycopg.Cursor[Any],
-    actor: int | None,
+    actor: int,
     task_id: int,
-    key: str | None,
+    key: str,
     request: dict[str, object],
 ) -> None:
     """A retained row proves this void-returning mutation committed once."""
-    if key is None:
-        return
-    if actor is None:
-        raise RuntimeError("keyed task update requires an established agent identity")
     cur.execute(
         "INSERT INTO task_update_receipts (actor_agent_id, task_id, operation_key, request) "
         "VALUES (%s, %s, %s, %s)",

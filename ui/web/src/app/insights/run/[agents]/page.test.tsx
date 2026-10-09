@@ -53,7 +53,7 @@ import {
   mockCanvas,
   paintFrame,
   pointAt,
-} from "@/components/run-timeline/run-timeline-test-canvas";
+} from "@/components/run-timeline/canvas/run-timeline-test-canvas";
 import RunTimelinePage from "./page";
 import Loading from "./loading";
 

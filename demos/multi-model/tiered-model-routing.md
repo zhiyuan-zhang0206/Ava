@@ -13,11 +13,13 @@ Phase 1 — Plan (expensive model):
 Spawn a planner agent with a top-tier model. It must produce a concrete plan: file structure, key design decisions, a checklist of implementation steps.
 
 ```python
+from uuid import uuid4
+
 planner_id = ava.agents.spawn(
     prompt="Design a plan for: <your task>. Output: file tree, key decisions, implementation checklist.",
     config_overlay={"llm_model": "claude-opus-5"},
     label="planner"
-)
+, idempotency_key=str(uuid4()))
 ```
 
 Wait for the planner, then read its plan via `ava.agents.get_last_message(planner_id)`.
@@ -26,13 +28,15 @@ Phase 2 — Execute (cheap models, parallel):
 Based on the plan, spawn 2-3 worker agents in parallel, each responsible for a different file or module. Use a cheap model — the work is straightforward implementation from a clear spec.
 
 ```python
+from uuid import uuid4
+
 worker_ids = []
 for i, file_spec in enumerate(file_specs):
     wid = ava.agents.spawn(
         prompt=f"Implement this file per the plan:\n{plan}\n\nYour file: {file_spec}",
         config_overlay={"llm_model": "deepseek-flash"},
         label=f"worker-{i}"
-    )
+    , idempotency_key=str(uuid4()))
     worker_ids.append(wid)
 ```
 
@@ -43,28 +47,32 @@ Phase 3 — Check (mixed models):
 - Spawn a **functional checker** with a cheap model to verify the code runs and meets the spec.
 
 ```python
+from uuid import uuid4
+
 reviewer_id = ava.agents.spawn(
     prompt=f"Review this code for correctness, edge cases, and code quality:\n{combined_output}",
     config_overlay={"llm_model": "claude-sonnet-5"},
     label="reviewer"
-)
+, idempotency_key=str(uuid4()))
 
 checker_id = ava.agents.spawn(
     prompt=f"Verify this code meets the spec and would run correctly. Flag anything broken:\n{combined_output}",
     config_overlay={"llm_model": "deepseek-flash"},
     label="checker"
-)
+, idempotency_key=str(uuid4()))
 ```
 
 Phase 4 — Reflect (expensive model):
 Spawn a reflector with a top-tier model. Give it the full output — plan, implementation, review, check results — and ask: what architectural decisions held up? What would you change? What pattern should be reused next time?
 
 ```python
+from uuid import uuid4
+
 reflector_id = ava.agents.spawn(
     prompt=f"Reflect on this project: what worked, what didn't, what patterns to reuse.\n\nPlan:\n{plan}\n\nCode:\n{combined_output}\n\nReview:\n{review}\n\nCheck:\n{check}",
     config_overlay={"llm_model": "claude-opus-5"},
     label="reflector"
-)
+, idempotency_key=str(uuid4()))
 ```
 
 Final output:

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
+from langchain_core.exceptions import ModelAPIError
 from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
@@ -41,7 +42,7 @@ async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> Non
     conversation with the wipe fallback."""
     msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
     llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=RuntimeError("provider 502"))
+    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=ModelAPIError("provider 502"))
 
     with pytest.raises(CompactionFailedError, match="no usable summary"):
         await emergency_compact_summary(msgs, llm, AgentSlices.resolve())

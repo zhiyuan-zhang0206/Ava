@@ -31,7 +31,7 @@ from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls
 from base.agents.model_overrides import agent_overrides
-from base.agents.uploads import image_mime_for, parse_upload_url, resolve_upload_path
+from base.agents.upload_delivery.paths import image_mime_for, parse_upload_url, resolve_upload_path
 from base.config import settings
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
@@ -283,9 +283,7 @@ async def post_agent_system_note(
     agent_id: int,
     body: SystemNoteIn,
     request: Request,
-    idempotency_key: str | None = Header(
-        None, alias="Idempotency-Key", min_length=1, max_length=128
-    ),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
     """Deliver a framework system note to the specified agent.
 
@@ -300,10 +298,9 @@ async def post_agent_system_note(
     owner, while plain update / reminder notices must not (user ruling
     2026-08-27 — notification messages never resurrect a terminated owner).
 
-    An optional Idempotency-Key names one logical note, including its
+    A required Idempotency-Key names one logical note, including its
     resurrection policy. Replays return the original inbound id and repair
-    its wake tail; changed requests conflict (409). Keyless legacy requests
-    create a fresh note. The inbound remains kind='system_note'.
+    its wake tail; changed requests conflict (409). The inbound remains kind='system_note'.
 
     404: agent_id does not exist. 413: content exceeds the 1 MiB transport
     limit. 422: note_tag is not a NoteTag value, or source is not a legal
@@ -319,18 +316,15 @@ async def post_agent_system_note(
         )
     from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 
-    if not isinstance(idempotency_key, str):
-        idempotency_key = None
-    if idempotency_key is not None:
-        try:
-            idempotency_key = request_key(
-                request,
-                idempotency_key,
-                method="POST",
-                path=f"/api/agents/{agent_id}/system-note",
-            )
-        except PrincipalScopeError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        idempotency_key = request_key(
+            request,
+            idempotency_key,
+            method="POST",
+            path=f"/api/agents/{agent_id}/system-note",
+        )
+    except PrincipalScopeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     inbound_id = await asyncio.to_thread(
         _system_note_blocking,

@@ -28,17 +28,19 @@ def test_invalid_key_fails_without_receipt(
     assert db_conn.execute("SELECT count(*) FROM task_update_receipts").fetchone() == (0,)
 
 
-def test_keyed_requires_identity_but_keyless_system_write_remains(
+def test_mutation_requires_key_and_established_actor(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, tid = _setup(db_conn, root_task_id)
     pin_agent(None)
     with pytest.raises(RuntimeError, match="no established agent identity"):
         task_registry.log(tid, "forbidden", operation_key="system")
-    task_registry.log(tid, "legacy system")
+    missing: dict[str, str] = {}
+    with pytest.raises(TypeError, match="operation_key"):
+        task_registry.log(tid, "keyless", **missing)
     assert db_conn.execute("SELECT count(*) FROM task_update_receipts").fetchone() == (0,)
     result = task_registry.get(tid).results
-    assert result is not None and "legacy system" in result and "forbidden" not in result
+    assert result is None
 
 
 def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
