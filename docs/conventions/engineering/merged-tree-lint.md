@@ -23,7 +23,12 @@ while the PR is still being reviewed.
 ## How it works
 
 The job checks out the PR head (`github.event.pull_request.head.sha`, full
-history) and runs `git merge --no-commit --no-ff origin/main` — a real 3-way
+history). When the head already contains `origin/main`, no separate combined
+tree exists: the job records `unchanged` in its summary and artifact, then skips
+tool installation and the duplicate lint run. Required source checks and the
+queue's combined-tree checks remain unchanged.
+
+Otherwise it runs `git merge --no-commit --no-ff origin/main` — a real 3-way
 merge staged in the index and working tree, with NO commit and no branch refs
 created. The restore step then runs unconditionally: `git reset --hard HEAD`
 clears the staged merge (including `MERGE_HEAD`) and `git clean -fd` removes
@@ -33,7 +38,7 @@ With the merged tree staged in the real index, `pre-commit run --all-files`
 enumerates exactly the merged tree. Its `SKIP` list excludes hooks owned by
 other CI jobs and the local hook-installation warning. Unlike the required
 `backend-structure` job's conditional codegen segment, this informational job
-runs all four freshness hooks whenever the merged tree is available.
+runs all four freshness hooks whenever main contributes to a merged tree.
 
 A merge conflict is not a failed lint: the job records the conflicted paths
 (`git diff --name-only --diff-filter=U`), marks the run skipped, and does not
