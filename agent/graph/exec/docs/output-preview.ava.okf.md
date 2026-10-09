@@ -17,6 +17,13 @@ change tool execution, automatically rerun code, or call a model.
 
 ## Configuration
 
+The node supplies explicit accumulation and inline budgets, timeout, structural
+`_CropConfig`, archive `Clock`, and optional rendered timestamp. Formatter and
+stream components never read global settings. Both subprocess ownership paths
+receive the same accumulation budget. `SandboxSettings` owns defaults and
+validation; the structural view also accepts boot-lite configuration. Resolution
+stays at the existing run/result boundaries and keeps these fields cluster-level.
+
 These `sandbox` settings are cluster-pinned and take effect on agent restart,
 matching the existing exec limits. The corresponding environment aliases use
 the `AVA_` prefix and uppercase field names.

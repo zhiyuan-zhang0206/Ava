@@ -38,6 +38,7 @@ async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
         asyncio.Event(),
         30,
         exec_dir=tmp_path,
+        accumulation_max_chars=1_000_000,
     )
     assert isinstance(result, _ExecDone), result.output
     assert payload is not None and payload.kind == "done"
@@ -84,6 +85,7 @@ async def test_managed_exec_streams_output_and_keepalive_before_completion(
             30,
             publisher,
             exec_dir=tmp_path,
+            accumulation_max_chars=1_000_000,
         )
     )
     try:
@@ -127,6 +129,7 @@ async def test_execution_domain_cancellation_consumes_exact_owner_receipt(
             asyncio.Event(),
             30,
             exec_dir=tmp_path,
+            accumulation_max_chars=1_000_000,
         )
     )
     deadline = asyncio.get_running_loop().time() + 10
@@ -197,6 +200,7 @@ async def test_execution_domain_cancellation_waits_for_inflight_registration(
             asyncio.Event(),
             30,
             exec_dir=tmp_path,
+            accumulation_max_chars=1_000_000,
         )
     )
     assert await asyncio.to_thread(entered.wait, 10)

@@ -54,6 +54,7 @@ import ava
 import ava.files as _ava_files_mod
 from ava.sdk_surface.agent_identity import require_agent_id
 from ava.sdk_surface.validation import coerce_str
+from base.clock import Clock
 from base.config import settings
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
@@ -194,7 +195,10 @@ def _process_context_file(
     note_body = content
     if len(note_body) > settings.sandbox.exec_output_max_chars:
         note_body = truncate_both_ends(
-            note_body, settings.sandbox.exec_output_max_chars, agent_id=require_agent_id()
+            note_body,
+            settings.sandbox.exec_output_max_chars,
+            agent_id=require_agent_id(),
+            clock=Clock.from_settings(),
         )
     update_state(
         {

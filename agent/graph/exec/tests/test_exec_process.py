@@ -173,7 +173,7 @@ async def test_reader_join_uses_its_own_bound() -> None:
     )
     await _collect_child(
         proc,  # type: ignore[arg-type]
-        StreamingTextIO(),
+        StreamingTextIO(max_chars=1_000_000),
         None,
         cancelled=False,
         timed_out=False,
@@ -544,6 +544,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
                 asyncio.Event(),
                 20,
                 exec_dir=tmp_path / "exec",
+                accumulation_max_chars=1_000_000,
             )
         assert isinstance(outcome, _ExecCrashed)
         assert isinstance(outcome.exc, ExecTeardownError)
@@ -607,6 +608,7 @@ async def test_teardown_failure_is_returned_as_crash_with_partial_output(
         30.0,
         None,
         exec_dir=tmp_path / "exec",
+        accumulation_max_chars=1_000_000,
     )
 
     assert isinstance(result, _ExecCrashed)
