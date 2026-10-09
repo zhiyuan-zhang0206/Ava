@@ -396,6 +396,42 @@ def test_runtime_proof_captures_dynamic_bindings_and_each_execution_once(
     assert isinstance(times, list) and len(cast(list[float], times)) == 4
 
 
+def test_duration_measurements_preserve_the_runtime_input_generation(tmp_path: Path) -> None:
+    manifest, data = plan(tmp_path)
+    original = (tmp_path / ".test_durations").read_bytes()
+    for index, group in enumerate(data["groups"], 1):
+        durations = tmp_path / f"durations-{index}.json"
+        durations.write_bytes(original)
+        directory = tmp_path / f"measured-{index}"
+        directory.mkdir()
+        result = run(
+            tmp_path,
+            "-m",
+            "not flaky",
+            "-n",
+            "2",
+            "--file-shard-check",
+            str(manifest),
+            "--file-shard-group",
+            str(index),
+            "--file-shard-report",
+            str(directory / "collection.json"),
+            "--file-shard-execute",
+            "--file-shard-runtime-report",
+            str(directory / "runtime.json"),
+            "--store-durations",
+            "--clean-durations",
+            "--durations-path",
+            str(durations),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert set(json.loads(durations.read_text())) == {node["nodeid"] for node in group["nodes"]}
+        assert durations.read_bytes() != original
+        reports = [json.loads(path.read_text()) for path in directory.glob("runtime-*.json")]
+        assert {report["worker"] for report in reports} == {"controller", "gw0", "gw1"}
+        assert all(report["durations_sha256"] == data["durations_sha256"] for report in reports)
+
+
 @pytest.mark.parametrize(
     "defect",
     ["dynamic-binding", "missing-worker", "duplicate-node", "failed-generation", "lost-coverage"],
