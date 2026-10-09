@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from scripts.structure import placement
+from scripts.structure import imports, placement
 from scripts.structure.tests.patch_repo import make_repo, write
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -55,9 +55,13 @@ def test_pytest_importlib_relative_imports_match_ast_with_or_without_test_initia
         "from .. import retry as subject\n"
         "from ..retry import backoff as call\n"
         "from .. import local_backoff as exported\n\n"
+        "import base.net.retry as absolute_subject\n"
+        "from ..retry import backoff as first, backoff as second\n\n"
         "def test_relative_contract():\n"
+        "    from ..retry import backoff as lazy\n"
         "    assert __package__ == 'base.net.tests'\n"
-        "    assert call() == subject.backoff() == exported() == 1\n"
+        "    assert call() == subject.backoff() == exported() == absolute_subject.backoff() == 1\n"
+        "    assert first() == second() == lazy() == 1\n"
     )
     write(root, rel, text)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
@@ -74,7 +78,15 @@ def test_pytest_importlib_relative_imports_match_ast_with_or_without_test_initia
     result.assert_outcomes(passed=1)
     index = placement.ModuleIndex(root)
     refs = placement.collect_references(ast.parse(text), index, rel)
-    assert [ref.module for ref in refs] == ["base.net.retry", "base.net.retry", "base.net"]
+    assert [ref.module for ref in refs] == [
+        "base.net.retry",
+        "base.net.retry",
+        "base.net",
+        "base.net.retry",
+        "base.net.retry",
+        "base.net.retry",
+    ]
+    assert refs[4].names == ("first", "second")
     init_refs = placement.collect_references(ast.parse(initializer), index, "base/net/__init__.py")
     assert [(ref.module, ref.names) for ref in init_refs] == [
         ("base.net.retry", ("local_backoff",))
@@ -97,4 +109,5 @@ def test_relative_imports_cannot_escape_the_package_into_repository_modules(
     result = pytester.runpython(probe)
     assert result.ret != 0
     assert error in "\n".join(result.errlines)
-    assert placement.collect_references(ast.parse(text), placement.ModuleIndex(root), rel) == []
+    with pytest.raises(imports.InvalidRelativeImportError, match=rel):
+        placement.collect_references(ast.parse(text), placement.ModuleIndex(root), rel)
