@@ -16,24 +16,12 @@ the build completes against a partially-initialized `base.config` when one is
 already in flight (for example, the standalone `load_ava_env()` boot path), and
 the double build that results is idempotent.
 
-**Unique declaration point** (R2 design, convergence point A): a new env key is
-declared exactly once —
-
-- a Settings field: declare the field + its `json_schema_extra` metadata on the
-  owning sub-model (`base/config/<domain>.py`); the build picks it up and
-  every projection in `base/host/env/registry.py` updates automatically (the "env
-  allowlist six-gap" class becomes structurally impossible — a new
-  cluster-scoped field is force/dropped by the env-authority pass, forwarded to
-  sessions, and distributed via /api/bootstrap without a single hand-written
-  set edit);
-- a non-Settings key (DISPLAY, Windows system keys, the overlay/birth JSON
-  carriers, ...): add one passthrough row in `base/host/env/registry.py`.
-
-The authority for which projection a key lands in is the **consumption matrix**
-(which process kind actually reads the key — declared per projection in
-`base/host/env/registry.py`); `capability` / `scope` metadata is validation, not
-the derivation axis (deriving process env sets from capability was the
-2026-08-06 #1570 P0).
+Settings fields and their `json_schema_extra` metadata are declared on the
+owning domain sub-model. This registry exposes those declarations; non-Settings
+keys are declared in `base/host/env/registry.py`. Consumer projections combine
+scope/capability metadata with their explicit classification rules. Declaring a
+field does not decide every projection automatically. See
+`base/host/env/docs/registry.ava.okf.md` for the current projection boundaries.
 
 Everything here is a pure function of the class declarations: building reads no
 environment and constructs no Settings.

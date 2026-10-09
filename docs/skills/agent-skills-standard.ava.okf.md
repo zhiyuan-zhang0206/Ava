@@ -40,7 +40,7 @@ Every install runs **two gates over all discovered packages** (`cli/commands/ext
 `ava plugins install` stays the entry point for a Claude Code **plugin** bundle (`.claude-plugin/plugin.json` with agents / commands / `.mcp.json`, of which skills are one part); its bare-skill case shares this module's copy + registry write.
 
 ## Key Dependencies
-- [[okf/skills/skills.ava.okf.md|Skill System]] — the skill system this compatibility claim is about
+- [[docs/skills/skills.ava.okf.md|Skill System]] — the skill system this compatibility claim is about
 - `base/packages/docs/frontmatter.py` — the `---` parser both the runtime loader and the merge-time lint use
 - `base/packages/extensions/install_registry.py` — the per-machine origin/enabled registry each installed package lands in
 
