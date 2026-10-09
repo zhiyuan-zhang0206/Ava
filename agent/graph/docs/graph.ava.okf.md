@@ -85,6 +85,8 @@ boundaries; a later chat or work UUID cannot consume that command.
 - `agent/nodes.py` — Node name constants (`CLAIM`, `BEFORE_LLM`, `LLM`, `BEFORE_EXEC`, `EXEC`, `AFTER_EXEC`, `AFTER_INIT`, `INIT_CONTEXT`; located in `agent/` top-level, not under `agent/graph/`; `agent/graph/_nodes.py` is a compatibility re-export—see `agent/nodes.py` docstring for the hooks⇄graph circular dependency explanation)
 - `agent/graph/__init__.py` — Public API re-exports
 
+Claim regressions live in `agent/graph/claim/tests/`.
+
 ## Notes
 
 - No LangGraph conditional edges—all routing is explicit `Command(goto=...)`, so completeness is verifiable at compile time
