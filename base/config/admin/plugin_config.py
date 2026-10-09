@@ -22,6 +22,7 @@ from base.packages.plugins.config_registration import (
     config_from_image,
     disk_image_path,
     read_authority_config,
+    reconcile_config_image,
 )
 
 
@@ -161,7 +162,10 @@ def write_plugin_patch(
 def import_legacy_config(owner: PluginConfigOwner) -> bool:
     """Import declared old env inputs once, preserving conflicts and retryability.
 
-    Commit the image first. Removing the old aliases is a separate owned write;
+    Reconcile the schema in memory before interpreting legacy inputs. Explicit
+    current image fields remain authority; missing fields may adopt legacy
+    values instead of the schema's new defaults. Commit the complete candidate
+    once. Removing the old aliases is a separate owned write;
     failure leaves the imported image and legacy values available for a same-value
     retry. No multi-file transaction is promised.
     """
@@ -179,13 +183,15 @@ def import_legacy_config(owner: PluginConfigOwner) -> bool:
     if not legacy:
         return False
     captured = owner.path.read_text() if owner.path.exists() else None
-    current = (
-        config_from_image(owner.cls, captured, owner.path) if captured is not None else owner.cls()
-    )
+    current, added, _removed = reconcile_config_image(owner.cls, captured, owner.path)
     updates = {aliases[alias]: value for alias, value in legacy.items()}
     imported = owner.cls.model_validate({**current.model_dump(), **updates})
     if captured is not None:
-        conflicts = [name for name in updates if getattr(current, name) != getattr(imported, name)]
+        conflicts = [
+            name
+            for name in updates
+            if name not in added and getattr(current, name) != getattr(imported, name)
+        ]
         if conflicts:
             raise ValueError(
                 f"plugin {owner.name!r} image conflicts with legacy env fields {sorted(conflicts)}"
