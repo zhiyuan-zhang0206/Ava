@@ -598,3 +598,106 @@ def test_incomplete_prefix_still_participates_in_a_restored_block(
     assert code == 1
     assert "3 dead line(s)" in out
     assert f"deleted by {deleting[:9]}" in out
+
+
+def _pattern_query_alive(repo: Path, candidates: set[str], tmp_path: Path) -> set[str]:
+    """The original byte-pattern query, retained only as a parity oracle."""
+    patterns = tmp_path / "patterns"
+    patterns.write_text("\n".join(sorted(candidates)) + "\n", encoding="utf-8")
+    result = subprocess.run(  # noqa: S603
+        [
+            "git",
+            "-c",
+            "color.ui=false",
+            "-c",
+            "core.quotepath=false",
+            "grep",
+            "-h",
+            "-I",
+            "-F",
+            "-f",
+            str(patterns),
+            "main",
+            "--",
+            ".",
+            *[f":(exclude){path}" for path in sorted(resurrection.SKIPPED_FILES)],
+            *[f":(exclude){directory}" for directory in resurrection.SKIPPED_DIRS],
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode in (0, 1), result.stderr
+    return {line.strip() for line in result.stdout.splitlines()} & candidates
+
+
+@pytest.mark.parametrize(
+    ("content", "candidates", "expected"),
+    [
+        (
+            b" \tresult = compute(total, rate)\t \r\n",
+            {_GENERIC_LINE.strip()},
+            {_GENERIC_LINE.strip()},
+        ),
+        (b"prefix result = compute(total, rate) suffix\n", {_GENERIC_LINE.strip()}, set[str]()),
+        (b"result = compute(total, rate)", {_GENERIC_LINE.strip()}, {_GENERIC_LINE.strip()}),
+        (b"result = compute(total, rate)\n\x00binary\n", {_GENERIC_LINE.strip()}, set[str]()),
+        (
+            "prefix\u2028result = compute(total, rate)\u0085suffix\n".encode(),
+            {_GENERIC_LINE.strip()},
+            {_GENERIC_LINE.strip()},
+        ),
+        (
+            b"result = compute(total, \xffrate)\n",
+            {"result = compute(total, \ufffdrate)"},
+            set[str](),
+        ),
+        (
+            b"result = compute(total, rate)\vresult = compute(total, \xffrate)\n",
+            {_GENERIC_LINE.strip(), "result = compute(total, \ufffdrate)"},
+            {_GENERIC_LINE.strip(), "result = compute(total, \ufffdrate)"},
+        ),
+        (
+            "result = compute(total, \ufffdrate)\n".encode(),
+            {"result = compute(total, \ufffdrate)"},
+            {"result = compute(total, \ufffdrate)"},
+        ),
+    ],
+)
+def test_streamed_alive_lines_match_original_pattern_query(
+    tmp_path: Path, content: bytes, candidates: set[str], expected: set[str]
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "a.txt").write_bytes(content)
+    _commit(repo, "base content")
+    assert _pattern_query_alive(repo, candidates, tmp_path) == expected
+    assert resurrection._alive_candidates(candidates, "main", repo) == expected
+
+
+def test_streamed_alive_scan_preserves_exclusions_and_reads_the_base_tree(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    _write(repo, "a.py", _BLOCK_A)
+    paths = sorted(resurrection.SKIPPED_FILES) + [
+        f"{d}excluded.py" for d in resurrection.SKIPPED_DIRS
+    ]
+    excluded = {
+        f"excluded_candidate_{number} = resolve_config(state)" for number in range(len(paths))
+    }
+    for path, text in zip(paths, sorted(excluded), strict=True):
+        _write(repo, path, text + "\n")
+    _commit(repo, "base with generated and source content")
+    _write(repo, "a.py", _BLOCK_B)  # Uncommitted content must not enter the base scan.
+    source = set(_BLOCK_A.splitlines())
+    candidates = source | excluded | set(_BLOCK_B.splitlines())
+    assert _pattern_query_alive(repo, candidates, tmp_path) == source
+    assert resurrection._alive_candidates(candidates, "main", repo) == source
+
+
+def test_streamed_alive_scan_empty_candidates_and_git_failure(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    assert resurrection._alive_candidates(set(), "no-such-ref", repo) == set()
+    with pytest.raises(resurrection.GitError, match="`git grep` over no-such-ref failed:"):
+        resurrection._alive_candidates({_GENERIC_LINE.strip()}, "no-such-ref", repo)
