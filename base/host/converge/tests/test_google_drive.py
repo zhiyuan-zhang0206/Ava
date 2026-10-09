@@ -98,7 +98,7 @@ def test_linux_candidates_include_fixed_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(gd, "IS_MACOS", False)
-    monkeypatch.setattr(gd, "IS_LINUX", True)
+    monkeypatch.setattr(gd, "is_linux", lambda: True)
     monkeypatch.setattr(gd, "_MNT_ROOT", tmp_path / "no-mnt")  # isolate from the host's real /mnt
     with patch.dict(os.environ, {"HOME": str(tmp_path)}):
         cands = gd.candidate_drive_dirs()
@@ -114,7 +114,7 @@ def test_wsl_drive_letter_mount_matched_by_my_drive(
     (mnt / "g" / "My Drive").mkdir(parents=True)
     (mnt / "c").mkdir()  # plain Windows drive, no `My Drive`
     monkeypatch.setattr(gd, "IS_MACOS", False)
-    monkeypatch.setattr(gd, "IS_LINUX", True)
+    monkeypatch.setattr(gd, "is_linux", lambda: True)
     monkeypatch.setattr(gd, "_MNT_ROOT", mnt)
     with patch.dict(os.environ, {"HOME": str(tmp_path)}):
         cands = gd.candidate_drive_dirs()
@@ -125,5 +125,5 @@ def test_wsl_drive_letter_mount_matched_by_my_drive(
 
 def test_unsupported_platform_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gd, "IS_MACOS", False)
-    monkeypatch.setattr(gd, "IS_LINUX", False)
+    monkeypatch.setattr(gd, "is_linux", lambda: False)
     assert gd.candidate_drive_dirs() == []

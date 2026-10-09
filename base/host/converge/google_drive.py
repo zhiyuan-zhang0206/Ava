@@ -11,7 +11,7 @@ from __future__ import annotations
 import secrets
 from pathlib import Path
 
-from base.native_process.os_platform import IS_LINUX, IS_MACOS
+from base.native_process.os_platform import IS_MACOS, is_linux
 
 __all__ = ["candidate_drive_dirs", "find_writable_google_drive"]
 
@@ -71,7 +71,7 @@ def candidate_drive_dirs() -> list[Path]:
     home = Path.home()
     if IS_MACOS:
         return _macos_candidates(home)
-    if IS_LINUX:
+    if is_linux():
         return _linux_candidates(home)
     return []
 
