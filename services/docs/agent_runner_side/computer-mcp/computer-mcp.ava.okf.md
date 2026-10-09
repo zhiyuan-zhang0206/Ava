@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Computer-mcp — computer-use executor (task #1101)"
-description: "The computer-use capability's executor layer: one per-machine daemon that drives the shared desktop through the signed permissions helper, serializes actions machine-wide, coordinates screen ownership (lease + FIFO queue), adds Vision OCR to snapshots, and audits every action as computer_action events. No code-enforced governance: per-agent permission division is a prompt-level peer convention (user ruling 2026-08-10); the cluster's security boundary is its entry point."
+description: "One per-machine daemon drives the shared desktop through the signed permissions helper, serializes actions machine-wide, coordinates screen ownership (lease + FIFO queue), adds Vision OCR to snapshots, and audits every action as computer_action events. No code-enforced governance: per-agent permission division is a prompt-level peer convention (user ruling 2026-08-10); the cluster's security boundary is its entry point."
 tags:
 - services
 - computer-use
@@ -72,7 +72,7 @@ may be unknown and a desktop action could repeat; a closed socket detected
 before writing remains retryable.
 
 ## Tool surface
-`snapshot` / `click` / `type_text` / `key` / `scroll` / `window_info` /
+`snapshot` / `click` / [[drag.ava.okf.md|drag]] / `type_text` / `key` / `scroll` / `window_info` /
 `session_info` / `frontmost_app` / `release_control`, plus `find_text` /
 `click_text` (OCR), `ax_tree` and `ax_act` (accessibility, below). Coordinates are
 **physical pixels** (the screenshot space); the daemon converts to the
