@@ -84,7 +84,7 @@ class EventBus:
         self, payload: str, *, channel: str | None = None, context: str = ""
     ) -> int | None:
         """Publish `payload` on the shared async client (the events channel unless `channel`
-        names another), best-effort: never raises. The receiver count, or None on failure."""
+        names another). Known Redis/network failures return None; unknown errors propagate."""
         return await publish_via(
             self.async_redis,
             self.channel if channel is None else channel,
@@ -101,7 +101,7 @@ class EventBus:
         decode_responses: bool = True,
         context: str = "",
     ) -> int | None:
-        """Sync counterpart: a one-off client, never raises."""
+        """Sync counterpart: recover known Redis/network errors, propagate unknown ones."""
         return publish_sync_via(
             lambda: self.sync_redis(decode_responses=decode_responses),
             self.channel if channel is None else channel,
