@@ -1100,8 +1100,8 @@ private func fnv1a(_ text: String) -> String {
 
 /// The identity text that distinguishes siblings of one role: the explicit
 /// identifier, else the title, else the description. Values are excluded
-/// (they change as the user types). A window keeps its title so two windows of
-/// one app never share a fingerprint.
+/// (they change as the user types). A window title participates in its fingerprint;
+/// a fingerprint alone cannot prove window identity.
 private func axDiscriminator(_ values: [AnyObject?]) -> String {
     for index in [5, 2, 3] {
         if let v = axString(values[index]) { return String(v.prefix(60)) }
@@ -1355,7 +1355,6 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
     return meta
 }
 
-// Suggested additions to main.swift, integrated by the shared native owner.
 // NSString ranges are UTF-16 offsets; do not derive offsets from String.count.
 private func axSelectionRange(_ req: [String: Any], value: String) throws -> CFRange {
     guard let text = req["text"] as? String, !text.isEmpty else {
