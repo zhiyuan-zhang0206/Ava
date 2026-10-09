@@ -69,6 +69,7 @@ def inbound_message(
     content: str | list[dict[str, Any]],
     source: str,
     inbound_id: int,
+    body_start: int,
     created_at: datetime | None = None,
     image_urls: list[str] | None = None,
 ) -> HumanMessage:
@@ -87,6 +88,8 @@ def inbound_message(
             reconciliation reads this back from state.messages to confirm
             whether a 'claimed' inbound's commit actually landed (see
             agent/db/__init__.py:reconcile_claimed_inbounds + claim_inbound_batch).
+        ava_inbound_body_start: index in the (first text block of) `content` where the
+            sender's content begins, after the envelope header (`inbound_head`).
         ava_created_at: ISO-8601 wall-clock the inbound entered the conversation
             (the source row's stored created_at, i.e. its ARRIVAL time).
             Omitted when not supplied.
@@ -100,6 +103,7 @@ def inbound_message(
         "ava_msg_type": AvaMsgType.INBOUND.value,
         "ava_source": source,
         "ava_inbound_id": inbound_id,
+        "ava_inbound_body_start": body_start,
     }
     if image_urls:
         kwargs["ava_image_urls"] = image_urls
