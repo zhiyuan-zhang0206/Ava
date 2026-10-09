@@ -607,3 +607,122 @@ def test_http_cache_cannot_prune_or_overwrite_ops_receipt(
     assert db_conn.execute(
         "SELECT method, path, op_status FROM api_idempotency WHERE key='ops-intent'"
     ).fetchone() == ("ops", "lifecycle", "completed")
+
+
+def _inject_delivery_failure(patch: pytest.MonkeyPatch, step: str) -> None:
+    from gateway.agents import delivery
+    from ops import lifecycle
+    from ops.cluster import rpc
+
+    async def fail_async(*_args: object, **_kwargs: object) -> None:
+        raise AttributeError("injected postcommit bug")
+
+    def fail_sync(*_args: object, **_kwargs: object) -> None:
+        raise AttributeError("injected postcommit bug")
+
+    targets = {
+        "wake": (delivery, "publish_inbound_wake", fail_sync),
+        "live": (lifecycle, "publish_inbound_arrived", fail_async),
+        "resurrection": (lifecycle, "resurrect_if_terminated", fail_async),
+        "resurrection_rpc": (rpc, "dispatch_to_machine", fail_async),
+    }
+    target, name, failure = targets[step]
+    patch.setattr(target, name, failure)
+
+
+@pytest.mark.parametrize("step", ["wake", "live", "resurrection", "resurrection_rpc"])
+def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+    step: str,
+) -> None:
+    """Unknown tail failures fail this request, preserve its row and permit keyed healing."""
+    from ops import lifecycle
+
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+
+    path = f"/api/agents/{agent_id}/messages"
+    key = f"postcommit-{step}"
+    body = {"content": "one logical message", "source": "user"}
+    with monkeypatch.context() as patch:
+        _inject_delivery_failure(patch, step)
+        # The fixture already owns the real app lifespan. This client only
+        # observes the HTTP error body instead of re-raising server exceptions.
+        observer = TestClient(app, raise_server_exceptions=False)
+        try:
+            failed = observer.post(path, json=body, headers={"Idempotency-Key": key})
+            assert failed.status_code == 500, failed.text
+            error = failed.json()
+            assert error["committed"] is True
+            assert error["idempotency_key"] == key
+            assert error["retryable"] is False
+            assert _count_inbounds(db_conn, agent_id, body["content"]) == 1
+            # Another request is still served by the same app after this bug.
+            healthy = observer.get(f"/api/agents/{agent_id}")
+            assert healthy.status_code == 200, healthy.text
+        finally:
+            observer.close()
+
+    async def heal_once(_db: object, _bus: object, aid: int, **_kwargs: object) -> AgentStatus:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status='idling' WHERE id=%s AND status='terminated'",
+                (aid,),
+            )
+            if cur.rowcount == 1:
+                cur.execute(
+                    "INSERT INTO inbound_messages (agent_id,content,kind,source) "
+                    "VALUES (%s,'','resurrect','system')",
+                    (aid,),
+                )
+        db_conn.commit()
+        return AgentStatus.IDLING
+
+    monkeypatch.setattr(lifecycle, "resurrect_if_terminated", heal_once)
+    healed = client.post(path + "/reconcile", json=body, headers={"Idempotency-Key": key})
+    assert healed.status_code == 200, healed.text
+    assert healed.json()["inbound_id"] == error["inbound_id"]
+    repeated = client.post(path, json=body, headers={"Idempotency-Key": key})
+    assert repeated.status_code == 201, repeated.text
+    assert repeated.json()["inbound_id"] == error["inbound_id"]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT kind,count(*) FROM inbound_messages WHERE agent_id=%s GROUP BY kind ORDER BY kind",
+            (agent_id,),
+        )
+        assert cur.fetchall() == [("chat", 1), ("resurrect", 1)]
+
+
+def test_large_message_response_waits_for_live_publish(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The near-limit HTTP message commits before its awaited live publish returns."""
+    from ops import lifecycle
+
+    content = "x" * (1024 * 1024 - 1)
+    published: list[int] = []
+    real_publish = lifecycle.publish_inbound_arrived
+
+    async def publish(
+        bus: EventBus, aid: int, inbound_id: int, kind: str, source: str, text: str
+    ) -> None:
+        assert text == content
+        assert _count_inbounds(db_conn, agent_id, content) == 1
+        await real_publish(bus, aid, inbound_id, kind, source, text)
+        published.append(inbound_id)
+
+    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", publish)
+    response = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json={"content": content, "source": "user"},
+        headers={"Idempotency-Key": "large-awaited-live"},
+    )
+    assert response.status_code == 201, response.text
+    assert published == [response.json()["inbound_id"]]
