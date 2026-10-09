@@ -109,6 +109,29 @@ def test_the_config_carries_the_live_value_of_every_field(monkeypatch: pytest.Mo
     monkeypatch.setattr(settings.data_plane, "db_pool_max_size", 7)
     config = db_config_from_settings()
     for field in dataclasses.fields(config):
-        assert getattr(config, field.name) == get_field(field.name), field.name
+        if field.name != "db_authority_refusal":
+            assert getattr(config, field.name) == get_field(field.name), field.name
+    assert config.db_authority_refusal == settings.env_boot.db_authority_refusal
     assert config.db_pool_max_size == 7
     assert "handle_user" not in repr(_config())
+
+
+@pytest.mark.parametrize("operation", ["connect", "direct", "pool", "direct_pool", "async_pool"])
+def test_all_handle_dials_use_their_retained_authority_refusal(operation: str) -> None:
+    """Every configured connection entry point refuses before opening a client."""
+    from psycopg_pool import AsyncConnectionPool
+
+    handle = Database(
+        _config(db_url="postgresql://ava@127.0.0.1:1/x", db_authority_refusal="unadmitted runtime")
+    )
+    with pytest.raises(connections.NoDatabaseAuthorityError, match="unadmitted runtime"):
+        if operation == "connect":
+            handle.connect()
+        elif operation == "direct":
+            handle.connect(direct=True)
+        elif operation == "pool":
+            handle.pool()
+        elif operation == "direct_pool":
+            handle.pool(direct=True)
+        else:
+            handle.async_pool(AsyncConnectionPool, min_size=1, max_size=2, timeout=1)
