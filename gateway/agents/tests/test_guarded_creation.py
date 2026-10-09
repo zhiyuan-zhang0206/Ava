@@ -155,25 +155,33 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
         credentials = mcp.post("/api/mcp/clients", json={"name": "prior", "scope": "write"}).json()
         token = credentials["token"]
         original = _tool_result(
-            _tool_call(mcp, token, "spawn_agent", {"prompt": "prior goal", "machine": "local-test"})
+            _tool_call(
+                mcp,
+                token,
+                "spawn_agent_guarded_v1",
+                {"prompt": "prior goal", "machine": "local-test", "idempotency_key": "prior-key"},
+            )
         )
         canonical = principal_key(
-            AuthPrincipal("mcp_client", str(credentials["id"])), "POST", "/api/agents", "prior-key"
+            AuthPrincipal("mcp_client", str(credentials["id"])),
+            "POST",
+            "/mcp/tools/spawn_agent_guarded_v1",
+            "prior-key",
         )
         body = SpawnAgentRequest(
             prompt="prior goal", prompt_source="user", spawner="mcp", machine="local-test"
         )
         fingerprint = creation_request_hash(body.model_dump(mode="json"))
-        db_conn.execute(
-            "UPDATE agents_meta SET creation_key=%s, creation_request_hash=%s WHERE id=%s",
-            (canonical, fingerprint, original["id"]),
-        )
-        db_conn.commit()
+        recorded = db_conn.execute(
+            "SELECT creation_key, request_hash FROM agent_creation_snapshots WHERE agent_id=%s",
+            (original["id"],),
+        ).fetchone()
+        assert recorded == (canonical, fingerprint)
         replay = _tool_result(
             _tool_call(
                 mcp,
                 token,
-                "spawn_agent",
+                "spawn_agent_guarded_v1",
                 {"prompt": "prior goal", "machine": "local-test", "idempotency_key": "prior-key"},
             )
         )
