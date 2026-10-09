@@ -16,7 +16,7 @@ def test_sdk_external_profile_overrides_inherited_agent_identity(
     pin_agent(405)
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     assert agent_identity.require_actor() == "external_agent:codex"
-    assert agent_identity.default_actor() == "external_agent:codex"
+    assert agent_identity.require_actor() == "external_agent:codex"
 
 
 def test_explicit_host_context_remains_authoritative(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -140,27 +140,6 @@ def require_actor(context: AvaContext | None = None) -> str:
     return f"agent:{identity.agent_id}"
 
 
-def default_actor() -> str:
-    """Provenance principal for the *default*-source paths (terminate / restart /
-    resurrect when the caller passes no source). Same as `require_actor` but
-    tolerant of absent identity: with none it returns the pre-actor
-    ``agent:None`` sentinel, preserving the legacy default-source behavior rather
-    than turning an unset identity into an error at these lower-stakes sites.
-    An invalid borrowed lease still raises instead of falling back."""
-    borrowed = validate_external_identity()
-    if borrowed is not None:
-        return f"agent:{borrowed}"
-    from base.agents.messages.external_caller import external_caller
-
-    external = external_caller()
-    if external is not None:
-        return external.source()
-    identity = _bound()
-    if identity is not None and identity.actor is not None:
-        return identity.actor
-    return f"agent:{None if identity is None else identity.agent_id}"
-
-
 def assert_self_action(action: str) -> None:
     """Refuse a lifecycle self-action unless this process is a bootstrapped agent
     process — one that both owns the turn loop and has an established identity.
