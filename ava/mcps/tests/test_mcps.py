@@ -521,7 +521,7 @@ def test_get_remote_client_caches_instance(monkeypatch: pytest.MonkeyPatch) -> N
 def test_list_tools_propagates_tool_error_from_remote(monkeypatch: pytest.MonkeyPatch) -> None:
     # A server-reported tool error must NOT silently fall back to a local re-run.
     class _Remote:
-        def list_tools(self, _server: str) -> object:
+        def list_tools(self, _server: str, *, timeout_seconds: float) -> object:
             raise mcps_mod.MCPCallError("tool blew up")
 
     monkeypatch.setattr(mcps_mod, "_get_remote_client", _Remote)
@@ -532,7 +532,7 @@ def test_list_tools_propagates_tool_error_from_remote(monkeypatch: pytest.Monkey
 def test_list_tools_falls_back_to_cache_on_transport_error(monkeypatch: pytest.MonkeyPatch) -> None:
     # A transport failure (daemon unreachable) falls back to cache/local.
     class _Remote:
-        def list_tools(self, _server: str) -> object:
+        def list_tools(self, _server: str, *, timeout_seconds: float) -> object:
             raise mcps_mod.MCPConnectError("daemon gone")
 
     cached = [{"name": "t1", "description": "", "input_schema": {}}]
@@ -543,7 +543,9 @@ def test_list_tools_falls_back_to_cache_on_transport_error(monkeypatch: pytest.M
 
 def test_call_raw_propagates_tool_error_from_remote(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Remote:
-        def call_tool(self, _server: str, _tool: str, _args: dict) -> object:
+        def call_tool(
+            self, _server: str, _tool: str, _args: dict, *, timeout_seconds: float
+        ) -> object:
             raise mcps_mod.MCPCallError("permission denied")
 
     monkeypatch.setattr(mcps_mod, "_get_remote_client", _Remote)
