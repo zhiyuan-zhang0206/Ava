@@ -51,4 +51,5 @@ pytest_plugins = [
     # and the split-directory collection guard — see each docstring.
     "tests._asyncio_stall_probe",
     "tests.fixtures.collection_guard",
+    "pytester",
 ]
