@@ -175,12 +175,6 @@ from base.host.env.config_registry import (
 from base.host.env.dotenv_boot import (
     load_ava_env as load_ava_env,
 )
-from base.host.net.predicates import (
-    is_loopback_host as is_loopback_host,  # re-export: tests use config.is_loopback_host
-)
-from base.host.net.url_secret import (
-    url_with_host as url_with_host,  # re-export: tests use config.url_with_host
-)
 
 if TYPE_CHECKING:
     # Heavy dependencies used ONLY as types: the aggregate and the per-domain
