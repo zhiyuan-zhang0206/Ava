@@ -44,10 +44,11 @@ Currently 5: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `plugin_activa
 ## SDK event collection
 
 The SDK wraps its public static functions at import and after plugin loading; dynamic
-MCP tools share a wrapped call funnel. `recording()` only collects the complete
-per-execution tally. Async wrappers measure the awaited call, including errors and
-cancellation; context-local frames prevent concurrent tasks from suppressing one
-another. Nested SDK implementation calls count once at the outer public boundary.
+MCP tools share a wrapped call funnel. Each public entry records independently,
+including nested fan-out and recursion. Plugin layers retain one installed recorder
+for their public function. Async wrappers measure the awaited call, including errors
+and cancellation. The execution owner supplies its complete unsampled tally through
+`AvaContext.sdk_calls`; calls and ordinary threads share that owner explicitly.
 
 `AVA_SDK_CALL_SAMPLING_ENABLED=false` is the default (every call). When enabled,
 `AVA_SDK_CALL_SAMPLE_EVERY=N` sets inclusion probability 1/N, with N >= 1. These
@@ -58,7 +59,7 @@ authenticated bootstrap endpoint on an enrolled runner. Fetch failures warn and 
 calls never wait for a remote configuration fetch.
 
 Events go directly to the unified emitter, so external callers need no logger
-initialization or `recording()` context. Call-time agent/source attribution uses
-cached SDK provenance, including borrowed identities, without validating a lease
+initialization or an execution tally. Call-time agent/source attribution snapshots
+explicit SDK provenance, including borrowed identities, without validating a lease
 or doing database I/O. Sampling is an explicit
 loss of detail: sampled events cannot reconstruct a complete call history.
