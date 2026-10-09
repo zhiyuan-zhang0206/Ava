@@ -22,7 +22,7 @@ import psycopg
 import pytest
 
 from base.db import create_agent
-from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import is_windows
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
@@ -34,7 +34,7 @@ from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
 
 pytestmark = [
-    pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"),
+    pytest.mark.skipif(is_windows(), reason="pty sessions are POSIX-only"),
 ]
 
 # A stand-in for the agent host: a separate process that creates a session through the
