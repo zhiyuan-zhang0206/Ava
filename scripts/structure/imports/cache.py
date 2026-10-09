@@ -10,7 +10,7 @@ and is never committed.
 What is cached is the file's own text only: its first-party import statements with relative
 imports made absolute. Which name in `from a import b` is a submodule depends on the rest of
 the tree, so that resolution is not cached; the caller resolves the statements against the
-current checkout with the placement rule's own import parsing (`collect_references`).
+current checkout with the shared clause resolver (`scripts.structure.imports.dependencies`).
 
 The scope is that of `UnitGraph.empirical`: every `.py` under the code tops except files
 below a `tests` or `docs` directory.
@@ -25,10 +25,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import locality
+from scripts.structure import imports
 
 CACHE_PATH = ".cache/structure/production-imports.json"
-_VERSION = 2
+_VERSION = 3
 _SKIPPED_DIRS = frozenset({"tests", "docs", "__pycache__"})
 
 Entry = tuple[int, int, str]  # (mtime_ns, size, import statements, one per line)
@@ -71,13 +71,10 @@ def _statements(path: Path, rel: str, tops: Sequence[str]) -> str:
         return ""  # unparsable members are skipped, as every structure lint skips them
     lines: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            if any(alias.name.split(".")[0] in tops for alias in node.names):
-                lines.append(ast.unparse(node))
-        elif isinstance(node, ast.ImportFrom):
-            base = locality._import_base(node, rel)
-            if base and base.split(".")[0] in tops:
-                lines.append(ast.unparse(ast.ImportFrom(module=base, names=node.names, level=0)))
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            clause = imports.normalize(node, rel)
+            if any(target.split(".")[0] in tops for target in clause.candidates):
+                lines.append(clause.statement)
     return "\n".join(lines)
 
 
