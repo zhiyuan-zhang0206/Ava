@@ -30,8 +30,9 @@ from base.events.live.projection import Error
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.redis_client import open_async_redis
 from base.host.env.agent_slices import AgentSlices
-from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.runtime import TurnOutcome
+
+from ...host import AgentHost
+from ...runtime import TurnOutcome
 
 
 def _cold_reader(pool: AsyncConnectionPool[Any]) -> AsyncPostgresSaver:
@@ -198,38 +199,39 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         bus=EventBus.from_settings(),
     )
     host = _build_host_driving_invoke_until_done(aops_pool, saver, graph, ctx, monkeypatch)
-    try:
-        async with redis.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType] — redis stubs
-            await subscription.subscribe(channel)
-            await publisher.start()
-            await asyncio.wait_for(host.run_turn(agent), 5)
-            await _assert_failure_is_visible_and_durable(
-                db_conn,
-                aops_pool,
-                subscription,
-                config,
-                agent=agent,
-                compact_id=compact_id,
-                history=history,
-            )
-            assert not replies
-            assert summary.await_count == COMPACT_MAX_ATTEMPTS
+    async with asyncio.TaskGroup() as tasks:
+        try:
+            async with redis.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType] — redis stubs
+                await subscription.subscribe(channel)
+                await publisher.start(tasks)
+                await asyncio.wait_for(host.run_turn(agent), 5)
+                await _assert_failure_is_visible_and_durable(
+                    db_conn,
+                    aops_pool,
+                    subscription,
+                    config,
+                    agent=agent,
+                    compact_id=compact_id,
+                    history=history,
+                )
+                assert not replies
+                assert summary.await_count == COMPACT_MAX_ATTEMPTS
 
-            insert_inbound_message(
-                db_conn,
-                agent,
-                "Continue without compacting",
-                "user",
-                bus=event_bus,
-                database=database,
-            )
-            await asyncio.wait_for(host.run_turn(agent), 5)
-            assert replies == ["continued"]
-            assert summary.await_count == COMPACT_MAX_ATTEMPTS
-            await _assert_new_inbound_resumes_with_history(
-                db_conn, aops_pool, config, compact_id=compact_id, history=history
-            )
-    finally:
-        await publisher.aclose()
-        await redis.aclose()
-        await host.aclose()
+                insert_inbound_message(
+                    db_conn,
+                    agent,
+                    "Continue without compacting",
+                    "user",
+                    bus=event_bus,
+                    database=database,
+                )
+                await asyncio.wait_for(host.run_turn(agent), 5)
+                assert replies == ["continued"]
+                assert summary.await_count == COMPACT_MAX_ATTEMPTS
+                await _assert_new_inbound_resumes_with_history(
+                    db_conn, aops_pool, config, compact_id=compact_id, history=history
+                )
+        finally:
+            await publisher.aclose()
+            await redis.aclose()
+            await host.aclose()
