@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 
 import pytest
 
@@ -22,6 +23,7 @@ def _inputs(text: str) -> executed.Inputs:
         "subprocess.Popen((sys.executable, '-B', '-c', code))",
         "subprocess.check_output(args=[sys.executable, '-c', code])",
         "asyncio.create_subprocess_exec(sys.executable, '-c', code)",
+        "asyncio.create_subprocess_exec(sys.executable, '-X', 'utf8', '-c', code, *data)",
     ],
 )
 def test_single_literal_binding_reaches_real_python_argv(launch: str) -> None:
@@ -202,13 +204,117 @@ def test_method_bodies_use_python_lexical_imports_not_class_attributes() -> None
 @pytest.mark.parametrize(
     "argv",
     [
-        "[sys.executable, '-X', 'utf8', '-c', 'import base.config']",
-        "[sys.executable, '-W', '-c', 'import base.config']",
+        "[sys.executable, '-I', '-X', 'utf8', '-c', source, *data]",
+        "[sys.executable, '-W', 'ignore', '-X', 'utf8', '-c', source, dynamic]",
+        "[sys.executable, '-W', '-c', '-c', source]",
+        "[sys.executable, '-Xutf8', '-Wignore', '-c', source]",
     ],
 )
-def test_interpreter_option_operands_do_not_silently_erase_or_misidentify_source(argv: str) -> None:
-    found = _inputs(f"import sys, subprocess\nsubprocess.run({argv})")
+def test_literal_interpreter_operands_preserve_source_and_ignore_argv_data(argv: str) -> None:
+    found = _inputs(
+        f"import sys, subprocess\nsource = 'import base.config'\nsubprocess.run({argv})"
+    )
+    assert [source.text for source in found.sources] == ["import base.config"]
+    assert found.unresolved == []
+
+
+@pytest.mark.parametrize("operand", ["dynamic", "*options", "make_option()"])
+def test_unknown_option_operand_still_retains_a_gap(operand: str) -> None:
+    found = _inputs(
+        "import sys, subprocess\n"
+        f"subprocess.run([sys.executable, '-X', {operand}, '-c', 'import base.config'])"
+    )
     assert found.sources == []
     assert found.unresolved == [
-        executed.Unresolved(_PATH, 2, "Python interpreter option operands are not resolved")
+        executed.Unresolved(_PATH, 2, "Python interpreter option operands are not literal")
     ]
+
+
+def test_option_operand_named_c_is_data_not_the_command_selector() -> None:
+    found = _inputs(
+        "import sys, subprocess\n"
+        "subprocess.run([sys.executable, '-W', '-c', 'script.py', 'import base.config'])"
+    )
+    assert found == executed.Inputs()
+
+
+def test_one_helper_binding_and_trailing_starred_data_preserve_source() -> None:
+    found = _inputs(
+        "import sys, subprocess\n"
+        "def spawn(code, *data):\n"
+        " source = code\n"
+        " return subprocess.run([sys.executable, '-c', source, *data])\n"
+        "def test_driver(data):\n"
+        " source = 'import base.config'\n"
+        " spawn(source, *data)\n"
+    )
+    assert [source.text for source in found.sources] == ["import base.config"]
+    assert found.unresolved == []
+
+
+def test_keyword_only_helper_source_is_independent_of_starred_argv_data() -> None:
+    found = _inputs(
+        "import sys, subprocess\n"
+        "def spawn(*data, code):\n"
+        " return subprocess.run([sys.executable, '-c', code, *data])\n"
+        "spawn(*data, code='import base.config')\n"
+    )
+    assert [source.text for source in found.sources] == ["import base.config"]
+    assert found.unresolved == []
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "spawn(*data)",
+        "spawn(*data, code='import base.config')",
+        "spawn('import base.config', **options)",
+        "spawn('import base.config', code='import agent.child')",
+    ],
+)
+def test_ambiguous_helper_source_slot_does_not_become_complete(call: str) -> None:
+    found = _inputs(
+        "import sys, subprocess\n"
+        "def spawn(code, *data):\n"
+        " return subprocess.run([sys.executable, '-c', code, *data])\n" + call
+    )
+    assert found.sources == []
+    assert [(gap.path, gap.line) for gap in found.unresolved] == [(_PATH, 4)]
+
+
+@pytest.mark.parametrize(
+    "body", ["source = code\n source = build()", "first = code\n source = first"]
+)
+def test_rebound_or_two_binding_helper_source_stays_unknown(body: str) -> None:
+    found = _inputs(
+        "import sys, subprocess\n"
+        "def spawn(code):\n " + body + "\n"
+        " return subprocess.run([sys.executable, '-c', source])\n"
+        "spawn('import base.config')\n"
+    )
+    assert found.sources == []
+    assert len(found.unresolved) == 1
+
+
+def test_known_option_and_argv_data_match_python_execution(pytester: pytest.Pytester) -> None:
+    source = "import sys\nprint(sys.argv[1])\n"
+    child = pytester.run(sys.executable, "-X", "utf8", "-W", "ignore", "-c", source, "payload")
+    assert child.ret == 0
+    assert child.outlines == ["payload"]
+    found = _inputs(
+        "import sys, subprocess\n"
+        f"subprocess.run([sys.executable, '-X', 'utf8', '-W', 'ignore', '-c', {source!r}, data])"
+    )
+    assert [item.text for item in found.sources] == [source]
+    assert found.unresolved == []
+
+
+def test_keyword_only_literal_default_does_not_depend_on_starred_data() -> None:
+    found = _inputs(
+        "import sys, subprocess\n"
+        "def spawn(*data, code='import base.config'):\n"
+        " return subprocess.run([sys.executable, '-c', code, *data])\n"
+        "spawn(*data)\n"
+    )
+    assert [source.text for source in found.sources] == ["import base.config"]
+    assert found.unresolved == []
