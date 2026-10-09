@@ -4,13 +4,13 @@
 
 import {
   layoutSpans,
-  maxContextTokens,
+  maxBlockTokens,
   maxContextTotal,
   NARROW_DRAW_PX,
   type AxisMap,
   type Viewport,
 } from "./timeline-model";
-import { ADDED_ROW, INPUT_ROW, navItems, navRowIds, selectionKey, type NavData, type NavItem } from "./timeline-nav";
+import { INPUT_ROW, UNITS_ROW, navItems, navRowIds, selectionKey, type NavData, type NavItem } from "./timeline-nav";
 
 export { selectionKey };
 
@@ -167,36 +167,29 @@ function spanLayout(
   return layoutOf(places, items, values);
 }
 
-/** The layout of a level or Messages row. */
-export function blockLayout(row: string, data: NavData, axis: Placer, viewU: Viewport, trackPx: number): RowLayout {
-  return spanLayout(navItems(row, data, axis), viewU, trackPx);
-}
-
-/** What a message bar's height is: the context through it (Context size) or its own weight, by square root (Added context). */
-export function barValue(row: string, message: { context_tokens: number; context_total: number }): number {
-  return row === ADDED_ROW ? Math.sqrt(message.context_tokens) : message.context_total;
+/** What a block's height is in the rows that draw one: its tokens by square root (Messages), or the context through it (Context size). */
+export function barValue(row: string, unit: { context_tokens: number | null; context_total: number | null }): number {
+  return row === UNITS_ROW ? Math.sqrt(unit.context_tokens ?? 0) : (unit.context_total ?? 0);
 }
 
 /** The value the row's tallest bar stands for. */
 export function barTop(row: string, data: NavData): number {
-  return row === ADDED_ROW ? Math.sqrt(maxContextTokens(data.messages)) : maxContextTotal(data.messages);
+  return row === UNITS_ROW ? Math.sqrt(maxBlockTokens(data.units)) : maxContextTotal(data.units);
 }
 
-/** The layout of a context row: one bar per message, exactly under the block(s) that show it in the Messages row, the tallest standing for a crowded column. */
-export function barLayout(row: string, data: NavData, axis: Placer, viewU: Viewport, trackPx: number): RowLayout {
-  const items = navItems(row, data, axis).filter((item) => item.message !== undefined);
+/**
+ * The layout of any row of the page by its id. The Messages and Context size rows hold the same blocks
+ * (the second only those a request has read) at the same x and width; each block's value decides which
+ * of several narrow ones stands for a pixel column.
+ */
+export function rowLayout(row: string, data: NavData, axis: Placer, viewU: Viewport, trackPx: number): RowLayout {
+  const items = navItems(row, data, axis);
+  if (row !== UNITS_ROW && row !== INPUT_ROW) return spanLayout(items, viewU, trackPx);
   const values = new Map<string, number>();
   for (const item of items) {
-    if (item.message !== undefined) values.set(selectionKey(item.selection), barValue(row, item.message));
+    if (item.unit !== undefined) values.set(selectionKey(item.selection), barValue(row, item.unit));
   }
   return spanLayout(items, viewU, trackPx, values);
-}
-
-/** The layout of any row of the page by its id. */
-export function rowLayout(row: string, data: NavData, axis: Placer, viewU: Viewport, trackPx: number): RowLayout {
-  return row === INPUT_ROW || row === ADDED_ROW
-    ? barLayout(row, data, axis, viewU, trackPx)
-    : blockLayout(row, data, axis, viewU, trackPx);
 }
 
 interface CachedLayouts {
