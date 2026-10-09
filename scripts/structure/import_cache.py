@@ -28,7 +28,7 @@ from typing import cast
 from scripts.structure import locality
 
 CACHE_PATH = ".cache/structure/production-imports.json"
-_VERSION = 1
+_VERSION = 2
 _SKIPPED_DIRS = frozenset({"tests", "docs", "__pycache__"})
 
 Entry = tuple[int, int, str]  # (mtime_ns, size, import statements, one per line)

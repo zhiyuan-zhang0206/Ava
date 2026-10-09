@@ -27,6 +27,7 @@ Every test runs with a private `AVA_HOME` and autouse host guards. The default n
 - `log_capture`, `retry_waits` — opt-in `loguru_records` and `retry_waits` (records the waits `base.host.net.resilience` retry loops request instead of sleeping them; never autouse, because a no-op wait under a wall-clock-bounded loop spins until memory runs away, issue #1001)
 - `path_scopes` — registers the per-directory fixture modules of `tests/path_scoped/` for the paths the `path_scopes.toml` files name (`PATH_SCOPES`, below); a plugin with hooks only, it adds no fixture of its own
 - `_asyncio_stall_probe`, `collection_guard` — hook-only plugins (stall forensics; one collector node per directory)
+- `pytester` — opt-in subprocess harness; no autouse fixtures
 - **List order is load order and is load-bearing.** Same-scope autouse fixtures are set up in registration order and, inside one module, alphabetically — which is why `leak_guard` precedes everything (it must tear down last) and `provisioning` (`_clean_state`) precedes `guards` (`_guard_*`). Adding a plugin means checking its autouse names against that order.
 
 ### Path-scoped fixtures (the former directory conftests)
