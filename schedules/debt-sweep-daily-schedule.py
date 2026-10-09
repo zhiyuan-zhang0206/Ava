@@ -27,7 +27,7 @@ import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.db import Database
-from schedules.catchup import catch_up, claimed_slot, cluster_timezone, fire_slot_once
+from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.log import init_gateway_process
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.paths import ava_home
@@ -209,13 +209,7 @@ def _slot_day(slot: datetime) -> str:
     return slot.astimezone(ZoneInfo(cluster_timezone())).strftime("%Y-%m-%d")
 
 
-def _fire(_payload: None) -> None:
-    slot = claimed_slot()
-    if slot is None:
-        detail = "RuntimeError: debt-sweep-daily fired outside a claimed slot"
-        print(f"debt-sweep-daily failed: {detail}")
-        _report_failure(detail)
-        return
+def _fire(slot: datetime, _payload: None) -> None:
     try:
         day = _slot_day(slot)
         scan = _run_mechanical_scan(
