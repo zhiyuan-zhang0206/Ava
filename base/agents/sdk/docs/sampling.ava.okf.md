@@ -37,4 +37,12 @@ side-channel contract. The fixed lazy import of local capture admission must
 succeed before the SDK body: import, configuration and code errors propagate to
 the caller instead of permitting an uncaptured operation. An absent participant
 is a normal no-op decided by the manifest gate itself; its receipt/admission
-lifecycle remains unchanged. Caller-identity capture retains its separate boundary.
+lifecycle remains unchanged.
+
+The SDK recorder snapshots caller identity at entry and explicitly passes it through
+`run_metered` / `run_metered_async` to the final event. The call retains its own copy;
+an attachment change, nested call or concurrent call cannot relabel it. Low-level
+metering and direct `emit()` callers supply their identity mapping explicitly. A caller
+identity error rejects admission before the body, preserving the original exception.
+Outermost frame suppression, execution tallies and capture admission retain their
+existing semantics.
