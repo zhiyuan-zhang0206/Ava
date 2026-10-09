@@ -17,6 +17,12 @@ tags:
   a CLI request acquires control; delivery failures stop the relay without a
   Pending-mode queue fallback. Unacknowledged messages remain for normal handoff
   ([[base/agents/impersonation/docs/impersonation.ava.okf.md|impersonation]]).
+  The relay's entered `TaskGroup` owns its heartbeat until inbox shutdown. A
+  heartbeat failure ends that worker and retains the original error until the
+  command cancels and joins it, allowing the inbox to finish at its existing
+  boundary. Joining does not wrap the error: the CLI retains its existing error
+  message/exit-1 handling and interrupt exit 130. A terminal or revoked lease
+  stops the heartbeat normally; the heartbeat never renews executor authority.
 
 - `ava agents ls/send/cancel/restart/resurrect/terminate/kill`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
