@@ -94,7 +94,7 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
     passes = 0
 
     async def execute_pass(
-        target_pool: ConnectionPool, _progress: LoopProgress, run: Any, **_kw: object
+        target_pool: ConnectionPool, _progress: LoopProgress, run: Any, *, tasks: asyncio.TaskGroup
     ) -> None:
         nonlocal passes
         run(target_pool)

@@ -164,7 +164,9 @@ async def test_wedged_dispatch_parks_without_entering_retry_sleep(
 ) -> None:
     """A timed-out worker parks by ending its loop without entering either sleep path."""
 
-    async def wedge(_pool: object, progress: LoopProgress, _run: object, **_kw: object) -> None:
+    async def wedge(
+        _pool: object, progress: LoopProgress, _run: object, *, tasks: asyncio.TaskGroup
+    ) -> None:
         progress.fail("dispatch exceeded hard deadline")
         raise daemon.WedgedPassError("dispatch exceeded hard deadline")
 
@@ -379,13 +381,18 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     configs: list[object] = []
 
     async def dispatch(
-        _pool: object, progress: LoopProgress, config: object, _db: object, **_kw: object
+        _pool: object,
+        progress: LoopProgress,
+        config: object,
+        _db: object,
+        *,
+        tasks: asyncio.TaskGroup,
     ) -> None:
         received["dispatch"] = progress
         configs.append(config)
 
     async def resolution(
-        _pool: object, progress: LoopProgress, config: object, **_kw: object
+        _pool: object, progress: LoopProgress, config: object, *, tasks: asyncio.TaskGroup
     ) -> None:
         received["resolution"] = progress
         configs.append(config)
@@ -447,7 +454,8 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
             closed.append("pool")
 
     def loop(name: str) -> Callable[..., Any]:
-        async def run_loop(*_args: object, **_kw: object) -> None:
+        # Dispatch/resolution receive the service group; registry gauge does not.
+        async def run_loop(*_args: object, tasks: asyncio.TaskGroup | None = None) -> None:
             if name == crashing:
                 await asyncio.sleep(0.01)
                 raise RuntimeError(f"{name} crashed")
@@ -494,7 +502,8 @@ def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -
         def close(self) -> None:
             return None
 
-    async def parked(*_args: object, **_kw: object) -> None:
+    # This fixture serves both group-injected maintenance and the gauge loop.
+    async def parked(*_args: object, tasks: asyncio.TaskGroup | None = None) -> None:
         return None
 
     async def alert_loop(

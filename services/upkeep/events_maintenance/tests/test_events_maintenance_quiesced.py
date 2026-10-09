@@ -54,7 +54,9 @@ async def test_a_quiesced_unit_runs_no_pass(
     entered = asyncio.Event()
     suspended = asyncio.Event()
 
-    async def held_pass(pool: Any, _progress: LoopProgress, run: Any, **_kw: object) -> None:
+    async def held_pass(
+        pool: Any, _progress: LoopProgress, run: Any, *, tasks: asyncio.TaskGroup
+    ) -> None:
         run(pool)
         entered.set()
         await suspended.wait()
