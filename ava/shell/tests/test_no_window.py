@@ -17,14 +17,14 @@ import subprocess
 
 import pytest
 
-from base.native_process.os_platform import CREATE_NO_WINDOW, IS_WINDOWS
+from base.native_process.os_platform import CREATE_NO_WINDOW, is_windows
 
 _WIN_FLAG = 0x08000000  # subprocess.CREATE_NO_WINDOW on Windows
 
 
 def test_platform_constant_matches_os() -> None:
     """Windows exposes CREATE_NO_WINDOW (0x08000000); POSIX has none (0)."""
-    assert (_WIN_FLAG if IS_WINDOWS else 0) == CREATE_NO_WINDOW
+    assert (_WIN_FLAG if is_windows() else 0) == CREATE_NO_WINDOW
 
 
 def test_windows_flag_value_is_documented_constant() -> None:
