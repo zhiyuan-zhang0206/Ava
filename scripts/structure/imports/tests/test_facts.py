@@ -192,6 +192,56 @@ def test_known_external_absolute_resource_does_not_depend_on_checkout(tmp_path: 
     assert found.records == found.unknown == ()
 
 
+@pytest.mark.parametrize("method", ["read_text", "read_bytes"])
+@pytest.mark.parametrize(
+    "source, line, receiver",
+    [
+        ("def helper():\n return build()\nhelper().{method}()\n", 3, "helper()"),
+        ("def helper():\n return build()\nfile = helper()\nfile.{method}()\n", 4, "file"),
+        ("def load(file):\n return file.{method}()\n", 2, "file"),
+        ("def load(owner):\n return owner.file.{method}()\n", 2, "owner.file"),
+        pytest.param("from pathlib import Path\nPath().{method}()\n", 2, "Path()", id="empty-path"),
+    ],
+)
+def test_unproven_file_read_receiver_retains_resource_unknown(
+    tmp_path: Path, method: str, source: str, line: int, receiver: str
+) -> None:
+    found = evidence(make_repo(tmp_path), source.format(method=method))
+    assert found.records == ()
+    assert found.unknown == (
+        facts.Unknown(
+            "cli/tests/test_probe.py",
+            line,
+            f"{receiver}.{method}()",
+            "Resource read has no proven repository or external path anchor",
+            facts.FactKind.RESOURCE,
+        ),
+    )
+
+
+@pytest.mark.parametrize("method", ["read", "open"])
+def test_other_opaque_methods_do_not_claim_a_file_read(tmp_path: Path, method: str) -> None:
+    found = evidence(make_repo(tmp_path), f"def helper():\n return build()\nhelper().{method}()\n")
+    assert found.records == found.unknown == ()
+
+
+@pytest.mark.parametrize("method", ["read_text", "read_bytes"])
+def test_file_read_mode_keyword_does_not_prove_an_output(tmp_path: Path, method: str) -> None:
+    found = evidence(make_repo(tmp_path), f"def load(file):\n return file.{method}(mode='w')\n")
+    assert found.records == ()
+    assert [(gap.line, gap.expression, gap.kind) for gap in found.unknown] == [
+        (2, f"file.{method}(mode='w')", facts.FactKind.RESOURCE)
+    ]
+
+
+def test_builtin_open_of_a_factory_result_retains_resource_unknown(tmp_path: Path) -> None:
+    found = evidence(make_repo(tmp_path), "def helper():\n return build()\nopen(helper())\n")
+    assert found.records == ()
+    assert [(gap.line, gap.expression, gap.kind) for gap in found.unknown] == [
+        (3, "open(helper())", facts.FactKind.RESOURCE)
+    ]
+
+
 def test_repository_root_traversal_records_the_directory(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),

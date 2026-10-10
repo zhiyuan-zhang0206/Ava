@@ -110,6 +110,14 @@ Binding collection skips nodes that cannot bind names without pruning the public
 lexical walker. `clear_scopes()` releases the query's scope references; neither
 scopes nor helper proofs cross analyses, source files or checkout generations.
 
+`read_text()` and `read_bytes()` retain a resource Unknown whenever their receiver
+has no proven repository or external anchor, including factory results, aliases
+and parameters. The collector does not infer a factory's return type or execute
+it to discover a path; a `mode` keyword on either read method does not prove an
+output. Other method names such as an arbitrary `read()` or
+`open()` do not establish a file read; built-in/imported `open` and recognized
+Path operations retain their existing resource grammar.
+
 Import-linter contracts, private package doors and test-placement rules remain
 responsible for their existing boundaries.
 
