@@ -47,7 +47,9 @@ through this ordered seam.
   including this drain (`os._exit`); the queued batch is deliberately not
   flushed — hard-exit semantics win (accepted, task #4320).
 - A deferred hold can begin its existing exporter attempt at shutdown without
-  waiting on SDK construction in the caller. Empty holds construct nothing;
+  waiting on SDK construction in the caller, subject to the same startup-frozen
+  enabled gate as live completion. Disabled holds keep their unexported records
+  and report unfinished; they do not construct SDK resources. Empty holds construct nothing;
   interpreter finalization still refuses first construction. The existing age
   timer is canceled and observed finitely. An in-flight completion remains
   owned, and its providers remain available until metric replay has finished.
