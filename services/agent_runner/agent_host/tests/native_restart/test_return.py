@@ -116,7 +116,6 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
 ) -> None:
     from agent.ownership.hosted import apply_hosted_lifecycle
     from agent.tests.claim.test_inbound_ownership import _admit
-    from services.agent_runner.agent_host import host as host_owner
 
     incarnation, initial = await managed_work(db_conn, aops_pool)
     _insert(db_conn, initial.agent_id)
@@ -150,7 +149,9 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
             raise psycopg.OperationalError("test lost original lifecycle response")
         return await apply_hosted_lifecycle(pool, token, **kwargs)
 
-    monkeypatch.setattr(host_owner, "apply_hosted_lifecycle", interrupted_apply)
+    monkeypatch.setattr(
+        "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle", interrupted_apply
+    )
     running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
     try:
         await asyncio.wait_for(entered.wait(), 5)

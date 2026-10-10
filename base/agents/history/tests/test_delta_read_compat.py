@@ -16,7 +16,6 @@ import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import CheckpointTuple
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.graph import END, START, StateGraph
@@ -25,6 +24,9 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint import _is_delta_snapshot_blob
+from base.agents.history.checkpoint_postgres_walks import (
+    HistoryAsyncPostgresSaver as AsyncPostgresSaver,
+)
 from base.agents.history.delta_read_compat import (
     _fold_messages,
     areconstruct_delta_messages,
@@ -153,33 +155,35 @@ async def test_recovery_cache_exact_key_and_invalidation() -> None:
         }
     }
     other_thread = _config("thread-b", "checkpoint-a")
-    with recovery_reconstruction_scope(saver, "thread-a"):
-        initial = await saver.aget_tuple(first)
+    with recovery_reconstruction_scope(saver, "thread-a") as scope:
+        assert scope is not None
+        reader = scope.reader()
+        initial = await reader.aget_tuple(first)
         pending[:] = [("task", "other", "after")]
-        reused = await saver.aget_tuple(first)
+        reused = await reader.aget_tuple(first)
         assert initial is not None and reused is not None
         assert len(walks) == 1
         assert reused.pending_writes == pending
         initial.checkpoint["channel_values"]["messages"].clear()
-        copied = cast(CheckpointTuple, await saver.aget_tuple(first))
+        copied = cast(CheckpointTuple, await reader.aget_tuple(first))
         assert len(copied.checkpoint["channel_values"]["messages"]) == 1
         copied.checkpoint["channel_values"]["messages"][0].content = "changed on hit"
-        isolated = cast(CheckpointTuple, await saver.aget_tuple(first))
+        isolated = cast(CheckpointTuple, await reader.aget_tuple(first))
         assert isolated.checkpoint["channel_values"]["messages"][0].content != "changed on hit"
 
         await saver._ava_nstep_flush("thread-a")  # type: ignore[attr-defined]
-        await saver.aget_tuple(first)
+        await reader.aget_tuple(first)
         assert len(walks) == 2
         await saver.aput_writes(first, [], "task")
-        await saver.aget_tuple(first)
+        await reader.aget_tuple(first)
         assert len(walks) == 3
         await saver.aput(first, {}, {}, {})  # type: ignore[arg-type]
-        await saver.aget_tuple(first)
+        await reader.aget_tuple(first)
         assert len(walks) == 4
 
-        await saver.aget_tuple(changed)
-        await saver.aget_tuple(namespace)
-        await saver.aget_tuple(other_thread)
+        await reader.aget_tuple(changed)
+        await reader.aget_tuple(namespace)
+        await reader.aget_tuple(other_thread)
         assert walks[-3:] == [
             ("thread-a", "checkpoint-b", ""),
             ("thread-a", "checkpoint-a", "other"),
@@ -218,7 +222,8 @@ async def test_recovery_cache_write_commit_revokes_fill_and_flush_reuse(operatio
         saver._ava_nstep_flush = write  # type: ignore[attr-defined]
     with recovery_reconstruction_scope(saver, "thread-a") as scope:
         assert scope is not None
-        first = cast(CheckpointTuple, await saver.aget_tuple(config))
+        reader = scope.reader()
+        first = cast(CheckpointTuple, await reader.aget_tuple(config))
         flushed_generation = scope.generation
         if operation == "aput":
             writer = asyncio.create_task(saver.aput(config, {}, {}, {}))  # type: ignore[arg-type]
@@ -227,11 +232,11 @@ async def test_recovery_cache_write_commit_revokes_fill_and_flush_reuse(operatio
         else:
             writer = asyncio.create_task(saver._ava_nstep_flush("thread-a"))  # type: ignore[attr-defined]
         await entered.wait()
-        during = cast(CheckpointTuple, await saver.aget_tuple(config))
+        during = cast(CheckpointTuple, await reader.aget_tuple(config))
         generation_during_write = scope.generation
         commit.set()
         await writer
-        after = cast(CheckpointTuple, await saver.aget_tuple(config))
+        after = cast(CheckpointTuple, await reader.aget_tuple(config))
         values = [
             item.checkpoint["channel_values"]["messages"][0].content
             for item in (first, during, after)
@@ -241,16 +246,20 @@ async def test_recovery_cache_write_commit_revokes_fill_and_flush_reuse(operatio
         assert scope.generation > generation_during_write > flushed_generation
 
 
-async def test_recovery_cache_concurrent_reads_and_cancelled_reconstruction(
-    loguru_records: list[Any],
-) -> None:
+async def test_recovery_cache_concurrent_reads() -> None:
     saver, walks, _pending = _synthetic_recovery_saver()
     config = _config("thread-a", "checkpoint-a")
-    with recovery_reconstruction_scope(saver, "thread-a"):
-        reads = await asyncio.gather(*(saver.aget_tuple(config) for _ in range(3)))
+    with recovery_reconstruction_scope(saver, "thread-a") as scope:
+        assert scope is not None
+        reader = scope.reader()
+        reads = await asyncio.gather(*(reader.aget_tuple(config) for _ in range(3)))
         assert all(read is not None for read in reads)
         assert len(walks) == 1
 
+
+async def test_recovery_cache_cancelled_reconstruction(loguru_records: list[Any]) -> None:
+    saver, _walks, _pending = _synthetic_recovery_saver()
+    config = _config("thread-a", "checkpoint-a")
     original_history = saver.aget_delta_channel_history
     entered = asyncio.Event()
     attempts = 0
@@ -264,8 +273,10 @@ async def test_recovery_cache_concurrent_reads_and_cancelled_reconstruction(
         return await original_history(config=config, channels=channels)
 
     saver.aget_delta_channel_history = blocked_history  # type: ignore[method-assign]
-    with recovery_reconstruction_scope(saver, "thread-a"):
-        task = asyncio.create_task(saver.aget_tuple(config))
+    with recovery_reconstruction_scope(saver, "thread-a") as scope:
+        assert scope is not None
+        reader = scope.reader()
+        task = asyncio.create_task(reader.aget_tuple(config))
         await entered.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -279,7 +290,7 @@ async def test_recovery_cache_concurrent_reads_and_cancelled_reconstruction(
         assert cancelled[0]["failed_phase"] == "history_read"
         assert cancelled[0]["cache_hit"] is None
         assert cancelled[0]["message_count"] is None
-        assert await saver.aget_tuple(config) is not None
+        assert await reader.aget_tuple(config) is not None
         assert attempts == 2
     assert await saver.aget_tuple(config) is not None
     assert attempts == 3
@@ -290,9 +301,11 @@ async def test_recovery_cache_isolated_across_concurrent_agents() -> None:
 
     async def read_twice(thread_id: str) -> None:
         config = _config(thread_id, "same-checkpoint-id")
-        with recovery_reconstruction_scope(saver, thread_id):
-            await saver.aget_tuple(config)
-            await saver.aget_tuple(config)
+        with recovery_reconstruction_scope(saver, thread_id) as scope:
+            assert scope is not None
+            reader = scope.reader()
+            await reader.aget_tuple(config)
+            await reader.aget_tuple(config)
 
     await asyncio.gather(read_twice("thread-a"), read_twice("thread-b"))
     assert walks.count(("thread-a", "same-checkpoint-id", "")) == 1
@@ -336,3 +349,67 @@ def test_fold_fast_path_equals_per_write_add_messages() -> None:
         fast = _fold_messages(base, writes)
         assert _ids(fast) == _ids(expected)
         assert [m.content for m in fast] == [m.content for m in expected]
+
+
+async def test_scope_requires_explicit_binding_and_parent() -> None:
+    saver, walks, _pending = _synthetic_recovery_saver()
+    config = _config("thread-a", "checkpoint-a")
+    with recovery_reconstruction_scope(saver, "thread-a") as scope:
+        assert scope is not None
+        reader = scope.reader()
+        await reader.aget_tuple(config)
+        await saver.aget_tuple(config)
+        await reader.aget_tuple(config)
+        assert len(walks) == 2
+        with recovery_reconstruction_scope(saver, "thread-a", parent=scope) as nested:
+            assert nested is scope and nested is not None
+            await nested.reader().aget_tuple(config)
+        assert len(walks) == 2
+        with (
+            pytest.raises(RuntimeError, match="concurrent checkpoint recovery"),
+            recovery_reconstruction_scope(saver, "thread-a"),
+        ):
+            pass
+        with (
+            pytest.raises(ValueError, match="parent does not match"),
+            recovery_reconstruction_scope(saver, "thread-b", parent=scope),
+        ):
+            pass
+    assert scope.messages is None and scope.active is False
+    with pytest.raises(RuntimeError, match="scope has ended"):
+        scope.reader()
+
+
+async def test_ordinary_empty_checkpoint_is_not_delta() -> None:
+    saver, walks, _pending = _synthetic_recovery_saver()
+    config = _config("thread-a", "checkpoint-a")
+    checkpoint = await saver.aget_tuple(config)
+    assert checkpoint is not None
+    checkpoint.checkpoint["channel_values"].clear()
+    checkpoint = checkpoint._replace(metadata={})
+    assert await areconstruct_delta_messages(saver, checkpoint) is False
+    assert len(walks) == 1
+
+
+async def test_missing_delta_history_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    saver, _walks, _pending = _synthetic_recovery_saver()
+
+    async def missing(**_kwargs: Any) -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(saver, "aget_delta_channel_history", missing)
+    with pytest.raises(RuntimeError, match="messages history is missing"):
+        await saver.aget_tuple(_config("thread-a", "checkpoint-a"))
+
+
+async def test_scope_sync_bridge_shares_async_reconstruction() -> None:
+    saver, walks, _pending = _synthetic_recovery_saver()
+    config = _config("thread-a", "checkpoint-a")
+    with recovery_reconstruction_scope(saver, "thread-a") as scope:
+        assert scope is not None
+        reader = scope.reader()
+        sync = await asyncio.to_thread(reader.get_tuple, config)
+        asynchronous = await reader.aget_tuple(config)
+        assert sync is not None and asynchronous is not None
+        assert sync.checkpoint["channel_values"] == asynchronous.checkpoint["channel_values"]
+        assert len(walks) == 1

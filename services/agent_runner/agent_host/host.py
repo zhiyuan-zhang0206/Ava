@@ -35,7 +35,6 @@ from agent.impersonation import (
     active_lease,
     flush_checkpoint,
     native_status,
-    settle_checkpoint,
     supervise_relay,
 )
 from agent.ownership.corpse_reap import reap_crash_corpses
@@ -46,9 +45,6 @@ from agent.ownership.hosted import (
     renew_hosted_owner,
     settle_hosted_runtime,
 )
-from agent.ownership.hosted_completion import (
-    completed_hosted_lifecycle_kind,
-)
 from agent.startup import reconcile_claimed_inbounds_at_startup, repair_dangling_tool_use_at_startup
 from agent.state import BaseAgentState
 from agent.turn.runloop import (
@@ -56,7 +52,6 @@ from agent.turn.runloop import (
     emit_error_event,
     graph_config,
 )
-from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
@@ -82,7 +77,7 @@ from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
 from services.agent_runner.agent_host import maintenance as maintenance_receipts
-from services.agent_runner.agent_host.db_recovery import database_phase, recover_database
+from services.agent_runner.agent_host.db_recovery import recover_database
 from services.agent_runner.agent_host.dispatcher import PendingInboundWake
 from services.agent_runner.agent_host.force_termination import (
     force_termination_outcome,
@@ -91,17 +86,17 @@ from services.agent_runner.agent_host.force_termination import (
 )
 from services.agent_runner.agent_host.invocation import (
     PendingWorkResult,
+    finish_completed_invocation,
     finish_pending_failure,
     recover_completed_work,
-    returned_lifecycle_request,
 )
+from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.driver import drive_context
 from services.agent_runner.agent_host.invocation.native_work import (
     NativeWorkContinuation,
     hold_native_cancel,
     invoke_prepared_graph,
     recover_native_cancel,
-    settle_native_invocation,
 )
 from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 from services.agent_runner.agent_host.runtime import (
@@ -364,7 +359,12 @@ class AgentHost:
                 # The identity and the recovery scope wrap the whole turn; the agent's
                 # configuration travels as its slices (the exec child gets it via the
                 # re-emitted overlay env — see the module docstring).
-                with recovery_reconstruction_scope(self._checkpointer, str(agent_id)):
+                with recovery_reconstruction_scope(
+                    self._checkpointer, str(agent_id)
+                ) as reconstruction:
+                    checkpoints = TurnCheckpoints(self._checkpointer, self._graph).bind(
+                        reconstruction
+                    )
                     await publish_agent_updated(self._bus, agent_id)
                     slices = AgentSlices.resolve(
                         pins, plugin_pins, plugin_configs=self._plugin_configs
@@ -374,16 +374,25 @@ class AgentHost:
                     compact_continuation = await resumable_compact(self._control_pool, incarnation)
                     if compact_continuation is not None or await recover_native_cancel(
                         self._control_pool,
-                        self._checkpointer,
-                        self._graph,
+                        checkpoints.saver,
+                        checkpoints.graph,
                         incarnation,
                         resources=resources,
                     ):
                         runtime = await self._runtime_for(
-                            agent_id, stored.fingerprint, slices, incarnation=incarnation
+                            agent_id,
+                            stored.fingerprint,
+                            slices,
+                            incarnation=incarnation,
+                            checkpoints=checkpoints,
                         )
                         outcome = await self._drive_turns(
-                            agent_id, runtime, slices, incarnation=incarnation, resources=resources
+                            agent_id,
+                            runtime,
+                            slices,
+                            incarnation=incarnation,
+                            resources=resources,
+                            checkpoints=checkpoints,
                         )
                     else:
                         self.drop_agent(agent_id)
@@ -488,15 +497,17 @@ class AgentHost:
         slices: AgentSlices,
         *,
         incarnation: RuntimeIncarnation,
+        checkpoints: TurnCheckpoints | None = None,
     ) -> _AgentRuntime:
         """Build a cold/stale model from this turn's slices, or retain its cache."""
+        checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         return await cached_runtime(
             self._runtimes,
             self.stats,
             agent_id,
             fingerprint,
             slices,
-            partial(self._build_runtime, incarnation=incarnation),
+            partial(self._build_runtime, incarnation=incarnation, checkpoints=checkpoints),
             self._evict,
         )
 
@@ -507,12 +518,14 @@ class AgentHost:
         slices: AgentSlices,
         *,
         incarnation: RuntimeIncarnation | None,
+        checkpoints: TurnCheckpoints | None = None,
     ) -> _AgentRuntime:
         """Repair checkpoint/inbound state, then prepare the model."""
+        checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         await reconcile_claimed_inbounds_at_startup(
-            self._pool, self._checkpointer, agent_id, incarnation=incarnation
+            self._pool, checkpoints.saver, agent_id, incarnation=incarnation
         )
-        await repair_dangling_tool_use_at_startup(self._graph, agent_id)
+        await repair_dangling_tool_use_at_startup(checkpoints.graph, agent_id)
         return await build_runtime(
             agent_id,
             fingerprint,
@@ -552,8 +565,10 @@ class AgentHost:
         *,
         incarnation: RuntimeIncarnation,
         resources: HostedTurnResources | None,
+        checkpoints: TurnCheckpoints | None = None,
     ) -> TurnOutcome:
         """Build this invocation's context; the driver owns its publisher lifecycle."""
+        checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         event_publisher = AgentEventPublisher(
             self._bus.async_redis(), self._bus.channel, agent_id=agent_id
         )
@@ -578,28 +593,38 @@ class AgentHost:
         )
         return await drive_context(
             self._control_pool,
-            self._checkpointer,
-            self._graph,
+            checkpoints.saver,
+            checkpoints.graph,
             agent_id,
             ctx,
             self.database_waits,
             self._peek_lock,
-            self._invoke_until_done,
+            partial(self._invoke_until_done, checkpoints=checkpoints),
             self.drop_agent,
+            reconstruction=checkpoints.reconstruction,
         )
 
     async def _invoke_native_graph(
-        self, agent_id: int, config: RunnableConfig, ctx: AvaContext, initial: dict[str, object]
+        self,
+        agent_id: int,
+        config: RunnableConfig,
+        ctx: AvaContext,
+        initial: dict[str, object],
+        *,
+        graph: _HostGraph | None = None,
     ) -> dict[str, object] | PendingTurnFailure:
         try:
             return await run_invocation_with_stall_guard(
-                self._graph, agent_id, ctx, config, initial
+                graph if graph is not None else self._graph, agent_id, ctx, config, initial
             )
         except (FatalLLMStreamError, FatalProviderError, CompactionFailedError) as exc:
             return PendingTurnFailure(exc)
 
-    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:
+    async def _invoke_until_done(
+        self, agent_id: int, ctx: AvaContext, *, checkpoints: TurnCheckpoints | None = None
+    ) -> TurnOutcome:
         """Run to idle or lifecycle completion, settling each returned invocation."""
+        checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         tags = ["ava", f"agent-{agent_id}", "hosted"]
         metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
         config: RunnableConfig = graph_config(
@@ -618,8 +643,8 @@ class AgentHost:
                     try:
                         if pending_failure is not None:
                             return await finish_pending_failure(
-                                self._graph,
-                                self._checkpointer,
+                                checkpoints.graph,
+                                checkpoints.saver,
                                 agent_id,
                                 ctx,
                                 config,
@@ -632,8 +657,8 @@ class AgentHost:
                             if pending is not None
                             else await invoke_prepared_graph(
                                 self._control_pool,
-                                self._checkpointer,
-                                self._graph,
+                                checkpoints.saver,
+                                checkpoints.graph,
                                 agent_id,
                                 ctx,
                                 config,
@@ -641,7 +666,12 @@ class AgentHost:
                                 db=self._db,
                                 bus=self._bus,
                                 relays=self.relays,
-                                invoke=partial(self._invoke_native_graph, agent_id, config),
+                                invoke=partial(
+                                    self._invoke_native_graph,
+                                    agent_id,
+                                    config,
+                                    graph=checkpoints.graph,
+                                ),
                             )
                         )
                         if isinstance(prepared, PendingTurnFailure):
@@ -649,13 +679,26 @@ class AgentHost:
                             continue
                         if pending is None:
                             pending = PendingWorkResult(prepared, native_work=work.target)
-                        outcome = await self._finish_completed_invocation(agent_id, ctx, pending)
+                        outcome = await finish_completed_invocation(
+                            self._control_pool,
+                            checkpoints,
+                            agent_id,
+                            ctx,
+                            pending,
+                            self.drop_agent,
+                            kill_terminating_agent_shells,
+                            db=self._db,
+                            bus=self._bus,
+                            relays=self.relays,
+                        )
                         if outcome is not None:
                             return outcome
                         break
                     except (psycopg.OperationalError, PoolTimeout):
                         incarnation = ctx.require_original_incarnation(agent_id)
-                        kind = await self._recover_completed_work(incarnation, pending, work.target)
+                        kind = await self._recover_completed_work(
+                            incarnation, pending, work.target, checkpoints=checkpoints
+                        )
                         failure_recovered = pending_failure is not None
                         if kind is not None:
                             return TurnOutcome(exited=kind == "terminate", crashed=False)
@@ -680,85 +723,25 @@ class AgentHost:
                     finally:
                         flush_node_exit_aggregate(agent_id)
 
-    async def _finish_completed_invocation(
-        self, agent_id: int, ctx: AvaContext, pending: PendingWorkResult
-    ) -> TurnOutcome | None:
-        # Correlate the original trace only after its checkpoint is durable.
-        async with database_phase():
-            if not pending.checkpoint_flushed:
-                await flush_checkpoint(self._checkpointer, agent_id)
-                pending.checkpoint_flushed = True
-            if not pending.native_settled:
-                incarnation = ctx.require_original_incarnation(agent_id)
-                pending.native_cancelled = await settle_native_invocation(
-                    self._control_pool,
-                    self._checkpointer,
-                    self._graph,
-                    incarnation,
-                    pending.native_work,
-                    {"configurable": {"thread_id": str(agent_id)}},
-                    resources=ctx.hosted_resources,
-                )
-                pending.native_settled = True
-            if not pending.trace_attached:
-                await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
-                pending.trace_attached = True
-        if await returned_lifecycle_request(
-            self._control_pool, agent_id, pending, incarnation=ctx.original_incarnation
-        ):
-            incarnation = ctx.require_original_incarnation(agent_id)
-            self.drop_agent(agent_id)
-            async with database_phase():
-                if pending.lifecycle_command_id is None:
-                    return TurnOutcome(exited=False, crashed=False)
-                kind = await apply_hosted_lifecycle(
-                    self._control_pool,
-                    incarnation,
-                    bus=self._bus,
-                    kill_shell_sessions=kill_terminating_agent_shells,
-                    expected_command_id=pending.lifecycle_command_id,
-                    resources=ctx.hosted_resources,
-                )
-                if kind is None:
-                    kind = await completed_hosted_lifecycle_kind(
-                        self._control_pool, incarnation, pending.lifecycle_command_id
-                    )
-            logger.info(
-                "hosted lifecycle return settled",
-                agent_id=agent_id,
-                generation=str(incarnation.generation),
-                command_kind=kind,
-            )
-            return TurnOutcome(exited=kind == "terminate", crashed=False)
-        if pending.native_cancelled or pending.result["turn_idle"]:
-            async with database_phase():
-                await settle_checkpoint(
-                    self._graph,
-                    self._db,
-                    self._bus,
-                    agent_id,
-                    self.relays,
-                    incarnation=ctx.original_incarnation,
-                    resources=ctx.hosted_resources,
-                )
-            return TurnOutcome(exited=False, crashed=False)
-        return None
-
     async def _recover_completed_work(
         self,
         incarnation: RuntimeIncarnation,
         pending: PendingWorkResult | None,
         native_work: NativeWorkTarget | None = None,
+        *,
+        checkpoints: TurnCheckpoints | None = None,
     ) -> str | None:
+        checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         return await recover_completed_work(
             lambda: recover_database(
                 pool=self._control_pool,
-                checkpointer=self._checkpointer,
-                graph=self._graph,
+                checkpointer=checkpoints.saver,
+                graph=checkpoints.graph,
                 incarnation=incarnation,
                 database_waits=self.database_waits,
                 peek_lock=self._peek_lock,
                 work=native_work,
+                reconstruction_parent=checkpoints.reconstruction,
             ),
             self._control_pool,
             incarnation,

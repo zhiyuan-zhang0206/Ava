@@ -186,6 +186,17 @@ async def _flush_if_needed(
     return reconstruction.generation if reconstruction is not None else None
 
 
+def _recovery_readers(
+    checkpointer: AsyncPostgresSaver,
+    graph: CompiledStateGraph[Any, Any, Any, Any],
+    reconstruction: RecoveryReconstructionScope | None,
+) -> tuple[AsyncPostgresSaver, CompiledStateGraph[Any, Any, Any, Any]]:
+    if reconstruction is None:
+        return checkpointer, graph
+    reader = reconstruction.reader()
+    return reader, graph.copy({"checkpointer": reader})
+
+
 async def recover_database(
     *,
     pool: AsyncConnectionPool,
@@ -195,6 +206,7 @@ async def recover_database(
     database_waits: DatabaseWaits,
     peek_lock: asyncio.Lock,
     work: NativeWorkTarget | None,
+    reconstruction_parent: RecoveryReconstructionScope | None = None,
 ) -> None:
     """Recover inside the original single-flight task, without an inbound wake.
 
@@ -221,9 +233,14 @@ async def recover_database(
     flushed_generation: int | None = None
     logger.warning("host turn waiting for checkpoint recovery", agent_id=incarnation.agent_id)
     with (
-        recovery_reconstruction_scope(checkpointer, str(incarnation.agent_id)) as reconstruction,
+        recovery_reconstruction_scope(
+            reconstruction_parent.saver if reconstruction_parent is not None else checkpointer,
+            str(incarnation.agent_id),
+            parent=reconstruction_parent,
+        ) as reconstruction,
         database_waits.wait(incarnation) as waiting,
     ):
+        checkpointer, graph = _recovery_readers(checkpointer, graph, reconstruction)
         while True:
             started = time.monotonic()
             total_elapsed = started - recovery_started

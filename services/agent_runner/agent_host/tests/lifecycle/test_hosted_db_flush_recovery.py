@@ -19,6 +19,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host import host as host_module
+from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
@@ -68,7 +69,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
     await broken.close()
     failed = False
     queued: int | None = None
-    original_flush = host_module.flush_checkpoint
+    original_flush = invocation_owner.flush_checkpoint
     invocation = AsyncMock(wraps=host_module.run_invocation_with_stall_guard)
     monkeypatch.setattr(host_module, "run_invocation_with_stall_guard", invocation)
 
@@ -101,9 +102,9 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
         return await apply_hosted_lifecycle(pool, token, **kwargs)
 
     if failure_site in ("flush", "after_flush"):
-        monkeypatch.setattr(host_module, "flush_checkpoint", fail_flush_once)
+        monkeypatch.setattr(invocation_owner, "flush_checkpoint", fail_flush_once)
     else:
-        monkeypatch.setattr(host_module, "apply_hosted_lifecycle", fail_lifecycle_once)
+        monkeypatch.setattr(invocation_owner, "apply_hosted_lifecycle", fail_lifecycle_once)
     outcome = await host._invoke_until_done(
         agent,
         replace(ctx, original_incarnation=incarnation, hosted_resources=None, native_work=None),

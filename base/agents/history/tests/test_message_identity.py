@@ -7,14 +7,16 @@ from typing import Any, cast
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.base import CheckpointTuple, empty_checkpoint
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.types import Overwrite
 from psycopg import Connection
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.history.checkpoint_postgres_walks import (
+    HistoryAsyncPostgresSaver as AsyncPostgresSaver,
+)
+from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import (
     _areconstruct_in_recovery,
     _fold_history,
@@ -264,8 +266,8 @@ async def test_recovery_cache_hit_normalizes_newly_decoded_pending_writes() -> N
     second.checkpoint["id"] = first.checkpoint["id"]
     with recovery_reconstruction_scope(saver, "identity") as scope:
         assert scope is not None
-        await _areconstruct_in_recovery(saver, first, scope.generation, _ReadSpan())
-        await _areconstruct_in_recovery(saver, second, scope.generation, _ReadSpan())
+        await _areconstruct_in_recovery(saver, first, scope.generation, _ReadSpan(), scope)
+        await _areconstruct_in_recovery(saver, second, scope.generation, _ReadSpan(), scope)
     assert len(walks) == 1
     assert (
         second.checkpoint["channel_values"]["messages"][0].additional_kwargs[

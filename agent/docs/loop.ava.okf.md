@@ -81,7 +81,16 @@ and graph invocation. The key is the exact thread, namespace and checkpoint;
 only a copied message list is reused, while checkpoint metadata and pending
 writes are reread. Saver writes and flushes invalidate the entry before and
 after completion, including writes from another task. Nested database recovery
-shares the same entry, and admission exit discards it.
+receives the parent entry explicitly, and admission exit discards it.
+`TurnCheckpoints` passes a scoped saver view and LangGraph's public graph copy
+through admission, startup repair, compact/restart continuation, ordinary
+invocation and settlement. The view shares the original write/flush owner,
+connection, serializer and N-step buffers; it binds the scope only to reads.
+Unbound reads and other admissions cannot discover or reuse that entry.
+`HistoryPostgresSaver` and `HistoryAsyncPostgresSaver` own the pinned pagination
+fix and reset-aware message suffix reads. Their construction validates the
+checkpoint-postgres extension seam; importing history changes no upstream class
+or shared serializer.
 A turn that dies again under its own crash mark has spent its grace: the
 settlement boundary terminates that corpse on the spot with the reaper's own
 termination and events (`hosted_recrash_prompt_reap_enabled`), instead of

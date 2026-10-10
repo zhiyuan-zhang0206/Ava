@@ -10,13 +10,16 @@ import pytest
 from langchain_core.messages import HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base.id import uuid6
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.postgres import PostgresSaver as UpstreamPostgresSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.types import Overwrite
 
 from base.agents.history import checkpoint_postgres_walks as history
+from base.agents.history.checkpoint_postgres_walks import (
+    HistoryAsyncPostgresSaver as AsyncPostgresSaver,
+)
+from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import (
     _fold_history,
     wrap_saver_reads_with_delta_reconstruction,
@@ -25,7 +28,7 @@ from base.config import settings
 from base.events.contract import EVENTS, payload_keys
 
 
-def _checkpoint(saver: PostgresSaver, parent: Any, *, seed: Any = None) -> Any:
+def _checkpoint(saver: UpstreamPostgresSaver, parent: Any, *, seed: Any = None) -> Any:
     checkpoint_id = str(uuid6(clock_seq=-1))
     return saver.put(
         parent,
@@ -54,7 +57,7 @@ def _message(name: str, size: int = 0) -> HumanMessage:
 
 @contextmanager
 def _record_bodies(
-    saver: PostgresSaver, monkeypatch: pytest.MonkeyPatch
+    saver: UpstreamPostgresSaver, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[list[list[bytes]]]:
     original = saver._cursor
     bodies: list[list[bytes]] = []
@@ -136,7 +139,7 @@ async def test_suffix_matches_upstream_and_skips_dead_blobs(
         )
         _checkpoint(saver, sibling)
 
-        baseline = cast(Any, PostgresSaver.get_delta_channel_history).__wrapped__(
+        baseline = UpstreamPostgresSaver.get_delta_channel_history(
             saver, config=target, channels=["messages"]
         )
         with _record_bodies(saver, monkeypatch) as bodies:
@@ -183,8 +186,8 @@ def test_empty_and_no_reset_match_upstream(db_conn: psycopg.Connection) -> None:
             target,
             {"configurable": {"thread_id": "missing", "checkpoint_id": str(uuid4())}},
         ]:
-            expected = cast(Any, PostgresSaver.get_delta_channel_history).__wrapped__(
-                saver, config=config, channels=["messages"]
+            expected = UpstreamPostgresSaver.get_delta_channel_history(
+                saver, config=cast(RunnableConfig, config), channels=["messages"]
             )
             assert (
                 saver.get_delta_channel_history(

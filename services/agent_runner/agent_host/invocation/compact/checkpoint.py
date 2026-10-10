@@ -9,6 +9,7 @@ from agent.hooks.compact import compose_summary_message
 from agent.state import CompactState, ContextReset
 from base.agents.compaction.execution import CompactCommand
 from base.agents.compaction.models import CompactHeldError, CompactMarker
+from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.kwargs import AvaMsgType
@@ -16,7 +17,7 @@ from base.agents.messages.kwargs import AvaMsgType
 
 def cold_reader(saver: AsyncPostgresSaver) -> AsyncPostgresSaver:
     """A fresh persisted delta reconstruction, without runtime/pending-write caches."""
-    reader = AsyncPostgresSaver(saver.conn, serde=saver.serde)
+    reader = HistoryAsyncPostgresSaver(saver.conn, serde=saver.serde)
     wrap_saver_reads_with_delta_reconstruction(reader)
     return reader
 
