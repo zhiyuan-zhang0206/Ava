@@ -15,7 +15,6 @@ imports back into ``llm/node.py``.
 
 from __future__ import annotations
 
-from base.config import settings
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.lm.catalog import ModelCatalog
 from base.lm.errors import ErrorClass, classify_error, emit_provider_error
@@ -368,13 +367,12 @@ class LlmLedger:
         """The (exception type name, count) the thread has recorded, if any."""
         return self._consecutive_errors.get(thread_id)
 
-    def check_consecutive_error_cap(self, thread_id: str) -> None:
+    def check_consecutive_error_cap(self, thread_id: str, *, max_cap: int) -> None:
         """Raise FatalLLMStreamError if the same error has hit the retry cap.
 
         Called at the top of _llm_node_impl before the stream starts -- if we
         already know this error is deterministic, skip another 30-480s retry cycle.
         """
-        max_cap = settings.lm.llm_retry_max_consecutive_same_error
         if max_cap <= 0:
             return  # Disabled: always exhaust retries
         entry = self._consecutive_errors.get(thread_id)
@@ -389,7 +387,7 @@ class LlmLedger:
                 f"failing fast with ERROR event."
             )
 
-    def record_consecutive_error(self, thread_id: str, exc: BaseException) -> None:
+    def record_consecutive_error(self, thread_id: str, exc: BaseException, *, max_cap: int) -> None:
         """Update the consecutive-error record after a stream error.
 
         Only tracks retryable stream stalls. Protocol errors fail once and
@@ -398,7 +396,7 @@ class LlmLedger:
         letting this record's cap (default 3) count them would fail the turn
         before the schedule's 4th grant.
         """
-        if settings.lm.llm_retry_max_consecutive_same_error <= 0:
+        if max_cap <= 0:
             return
         if not isinstance(exc, LLMStreamStallTimeoutError) or isinstance(
             exc, LLMStreamStallPairError
@@ -436,7 +434,7 @@ class LlmLedger:
         """Clear the streak (successful stream, or an exhausted sequence)."""
         self._stall_pair_streaks.pop(thread_id, None)
 
-    def check_stall_pair_cap(self, thread_id: str) -> None:
+    def check_stall_pair_cap(self, thread_id: str, *, max_pairs: int) -> None:
         """Raise the fatal pair error once the delayed schedule is spent.
 
         Called at the top of `_llm_node_impl` beside `check_consecutive_error_cap`:
@@ -446,7 +444,6 @@ class LlmLedger:
         provider recovers) instead of burning another stalled segment. Pops the
         streak before raising so the next turn starts with a fresh budget.
         """
-        max_pairs = settings.lm.llm_stall_retry_max_consecutive
         streak = self._stall_pair_streaks.get(thread_id)
         if max_pairs <= 0 or streak is None or streak < max_pairs:
             return

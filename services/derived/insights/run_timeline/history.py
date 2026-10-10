@@ -35,6 +35,7 @@ from base.agents.history.message_tokens import (
     history_message_tokens,
     history_segment_tokens,
 )
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.db import Database
 
 # Short enough that a live agent's growth shows within a click or two; the cache
@@ -106,7 +107,8 @@ class HistoryViewCache:
     per agent, so the burst of requests one page load makes costs one checkpoint read, not one each.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, timeline_inputs: TimelineReadInputs) -> None:
+        self._timeline_inputs = timeline_inputs
         self._lock = threading.Lock()
         self._entries: dict[int, _Entry] = {}
         self._building: dict[int, threading.Lock] = {}
@@ -147,8 +149,12 @@ class HistoryViewCache:
                     self._entries[agent_id] = _Entry(now, head, hit.view)
                 return hit.view
             history = load_checkpoint_history_full(db, agent_id)
-            read = read_times(history.messages)
-            units = display_blocks(divide_units(history.messages), history.messages, read)
+            read = read_times(history.messages, timeline_inputs=self._timeline_inputs)
+            units = display_blocks(
+                divide_units(history.messages, timeline_inputs=self._timeline_inputs),
+                history.messages,
+                read,
+            )
             view = HistoryView.of(history, units, MessageUsage(history.messages), read)
             with self._lock:
                 self._entries.pop(agent_id, None)

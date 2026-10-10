@@ -24,7 +24,6 @@ from agent import state as _state
 from agent.hooks._registry import Hook
 from agent.messages import security_note_message
 from base.agents.context import AvaContext
-from base.config import settings
 from base.log import logger
 
 
@@ -45,7 +44,7 @@ class _DeliverSecurityFindingsHook(Hook):
         findings = state.security_findings
         if not findings:
             return None
-        if not settings.agent.security_scan_enabled:
+        if not _runtime.context.require_agent().read("agent", "security_scan_enabled"):
             logger.warning(
                 "dropping {} pending prompt-injection finding(s): security scanning is disabled",
                 len(findings),

@@ -37,7 +37,6 @@ from ava import gateway_client
 from base.agents import GatewayUnavailable, IndexerUnavailable
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.content import content_blocks
 from base.log import logger
@@ -231,7 +230,7 @@ async def passive_memory_recall(
         log_key,
         catalog=context.require_catalog(),
         overrides=agent.overrides,
-        llm_override=settings.lm.llm_override,
+        llm_override=agent.read("lm", "llm_override"),
     )
     # Leg timings keep the recall pass diagnosable from its events alone: the
     # search leg is the one a congested gateway stretches (a fleet wake queues

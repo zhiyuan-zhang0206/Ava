@@ -10,6 +10,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from base.db import create_agent
 from gateway.agents.history.tests.test_timeline import CompactHistoryCases
 from gateway.agents.history.tests.test_timeline import test_client as test_client
+from gateway.app import app
 
 
 class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
@@ -29,15 +30,15 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         self._put_checkpoint(
             tid,
             self._current(AIMessage(content="current item")),
             version="1",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
+        )
 
         response = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -56,7 +57,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         from langchain_core.messages import AIMessage
 
         import gateway.agents.history.timeline as timeline_router
-        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -64,7 +64,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="1",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
+        )
 
         def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
             del limit
@@ -94,8 +96,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage, HumanMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
             tid, self._segment("history", 1), version="1", boundary=True
@@ -113,7 +113,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(standing_note, AIMessage(content="current item")),
             version="2",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
+        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "2.0", "limit": 50}
@@ -139,7 +141,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
 
         import gateway.agents.history.timeline as timeline_router
         from base.agents.history.checkpoint import CheckpointReadError
-        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -148,7 +149,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             version="1",
         )
         checkpoint_id = "1f0b9b12-0000-6000-8000-000000000000"
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
+        )
 
         def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
             del limit
@@ -333,8 +336,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         notes crosses to the older segment instead of looping on the head."""
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
             tid, self._segment("history", 1), version="1", boundary=True
@@ -360,7 +361,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             ],
             version="2",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
+        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "7.0", "limit": 50}
@@ -395,8 +398,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         as standing context or paging would loop on the segment head (review
         nit, PR #787)."""
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-        from base.config import settings
 
         tid = create_agent(db_conn)
         boundary_2 = self._put_checkpoint(
@@ -434,7 +435,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             ],
             version="3",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
+        )
 
         # Cursor on s1's third standing head note (0.0 = exec_timeout,
         # 1.0 = timezone, 2.0 = memory — the segment's SystemMessage is

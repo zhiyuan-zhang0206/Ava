@@ -19,10 +19,11 @@ import asyncio
 import logging
 import signal
 import sys
+from collections.abc import Callable
 
 import uvicorn
 
-from base.config import settings
+from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
@@ -35,13 +36,13 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.derived.memory_search.daemon")
 
 
-def memory_search_config() -> MemorySearchConfig:
-    """The composition root: the one place this package reads `settings`."""
+def memory_search_config(*, config: ConfigBoot) -> MemorySearchConfig:
+    """The composition root: the one place this package reads its configuration owner."""
     return MemorySearchConfig(
-        memory_search_pidfile=settings.services.memory_search_pidfile,
-        memory_search_data_dir=settings.services.memory_search_data_dir,
-        memory_search_port=settings.services.memory_search_port,
-        memory_search_max_batch_rows=settings.services.memory_search_max_batch_rows,
+        memory_search_pidfile=config.view.services.memory_search_pidfile,
+        memory_search_data_dir=config.view.services.memory_search_data_dir,
+        memory_search_port=config.view.services.memory_search_port,
+        memory_search_max_batch_rows=config.view.services.memory_search_max_batch_rows,
     )
 
 
@@ -51,14 +52,14 @@ def _is_running(config: MemorySearchConfig) -> bool:
     )
 
 
-async def run(config: MemorySearchConfig) -> None:
+async def run(config: MemorySearchConfig, *, embedding_name_reader: Callable[[], str]) -> None:
     """Load the store, then serve until the graceful-shutdown signal fires.
 
     The provider config (`AVA_EMBEDDING_BACKEND`) is read at boot: the
     store's matrix width and wire bound must match the provider that
     produced the vectors, and an unknown provider value fails fast instead
     of serving a half-mismatched search surface."""
-    descriptor = get_descriptor()
+    descriptor = get_descriptor(embedding_name_reader())
     store = MemoryStore(
         config.memory_search_data_dir / "vectors.npz",
         dim=descriptor.dim,
@@ -67,7 +68,7 @@ async def run(config: MemorySearchConfig) -> None:
     await asyncio.to_thread(store.load)
     server = uvicorn.Server(
         uvicorn.Config(
-            build_app(store, config.memory_search_max_batch_rows),
+            build_app(store, config.memory_search_max_batch_rows, embedding_dim=descriptor.dim),
             host="127.0.0.1",
             port=config.memory_search_port,
             log_level="warning",
@@ -80,7 +81,9 @@ async def run(config: MemorySearchConfig) -> None:
 
 def main() -> None:
     """Entry point: pidfile -> log init -> serve -> cleanup."""
-    config = memory_search_config()
+    boot = ConfigBoot()
+    boot.boot()
+    config = memory_search_config(config=boot)
     if _is_running(config):
         sys.exit(1)
     if not acquire_pidfile(config.memory_search_pidfile, "services.derived.memory_search.daemon"):
@@ -99,7 +102,7 @@ def main() -> None:
     # KeyboardInterrupt branch — not a normal return from `run()`.
     runner = asyncio.Runner()
     try:
-        runner.run(run(config))
+        runner.run(run(config, embedding_name_reader=lambda: boot.view.services.embedding_backend))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[memory-search] interrupted, shutting down")

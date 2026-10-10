@@ -115,10 +115,12 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
     code = (
         "import json, sys\n"
         "import base.config as c\n"
+        "from ava.sdk_surface.settings import agent_setting\n"
+        f"pins = {{name: agent_setting(name) for name in {tuple(_PINMAP)!r}}}\n"
         "st = c._boot_state()\n"
         "cfgmods = sorted(m for m in sys.modules if m.startswith('base.config'))\n"
         "print('CANARY ' + json.dumps({'mode': st['mode'], 'upgrades': st['upgrades'],\n"
-        "  'pending': st['pending_count'], 'pydantic_settings': 'pydantic_settings' in sys.modules,\n"
+        "  'pins': pins, 'pydantic_settings': 'pydantic_settings' in sys.modules,\n"
         "  'shared_config_mods': cfgmods}, sort_keys=True))\n"
     )
     request.write_text(
@@ -157,7 +159,7 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
     canary = json.loads(line.removeprefix("CANARY "))
     assert canary["mode"] == "lite"
     assert canary["upgrades"] == 0
-    assert canary["pending"] == len(_PINMAP)
+    assert canary["pins"] == _PINMAP
     assert canary["pydantic_settings"] is False
     assert set(canary["shared_config_mods"]) <= _LITE_CONFIG_MODULES
 

@@ -24,6 +24,7 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
+from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -416,7 +417,13 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     db_conn.commit()
 
     published.clear()  # settle publishes on every flip; keep only reap's
-    reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
+    reaped = await reap_crash_corpses(
+        aops_pool,
+        "host-test",
+        owner,
+        bus=event_bus,
+        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+    )
     assert sorted(corpse.agent_id for corpse in reaped) == sorted([past_grace, abandoned_corpse])
 
     for corpse in reaped:
@@ -445,7 +452,16 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     )
     assert sorted(published) == sorted([past_grace, abandoned_corpse])
     # A second pass finds nothing new (the corpses are terminated).
-    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
+    assert (
+        await reap_crash_corpses(
+            aops_pool,
+            "host-test",
+            owner,
+            bus=event_bus,
+            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+        )
+        == []
+    )
 
 
 async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
@@ -477,11 +493,26 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
     ).fetchone() == (None,)
 
     # Within the grace window the row is dead-but-waiting, not terminated.
-    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
+    assert (
+        await reap_crash_corpses(
+            aops_pool,
+            "host-test",
+            owner,
+            bus=event_bus,
+            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+        )
+        == []
+    )
 
     # Past the grace window the reaper terminates it with the reaper stamp.
     _set_marker(db_conn, agent_id, minutes_ago=16)
-    reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
+    reaped = await reap_crash_corpses(
+        aops_pool,
+        "host-test",
+        owner,
+        bus=event_bus,
+        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+    )
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     row = db_conn.execute(
         "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)
@@ -522,3 +553,53 @@ async def test_renew_hosted_owner_skips_crash_marked_rows(
     assert db_conn.execute(
         "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (live,)
     ).fetchone() == (True,)
+
+
+async def test_recovery_wake_gate_reads_two_independent_live_config_owners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import Any, cast
+    from unittest.mock import MagicMock
+
+    from agent.ownership import corpse_reap
+    from base.config import ConfigBoot
+
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("hosted_crash_recovery_wake_enabled", False)
+    second.set_field("hosted_crash_recovery_wake_enabled", True)
+    conn = cast(psycopg.AsyncConnection[Any], MagicMock())
+    queued: list[int] = []
+
+    async def queue(actual: psycopg.AsyncConnection[Any], agent_id: int) -> int:
+        assert actual is conn
+        queued.append(agent_id)
+        return agent_id + 100
+
+    monkeypatch.setattr(corpse_reap, "_queue_recovery_wake", queue)
+    assert (
+        await corpse_reap._queue_wake_if_enabled(
+            conn, 1, wake_enabled=lambda: first.view.daemon.hosted_crash_recovery_wake_enabled
+        )
+        is None
+    )
+    assert (
+        await corpse_reap._queue_wake_if_enabled(
+            conn, 2, wake_enabled=lambda: second.view.daemon.hosted_crash_recovery_wake_enabled
+        )
+        == 102
+    )
+    first.set_field("hosted_crash_recovery_wake_enabled", True)
+    second.set_field("hosted_crash_recovery_wake_enabled", False)
+    assert (
+        await corpse_reap._queue_wake_if_enabled(
+            conn, 1, wake_enabled=lambda: first.view.daemon.hosted_crash_recovery_wake_enabled
+        )
+        == 101
+    )
+    assert (
+        await corpse_reap._queue_wake_if_enabled(
+            conn, 2, wake_enabled=lambda: second.view.daemon.hosted_crash_recovery_wake_enabled
+        )
+        is None
+    )
+    assert queued == [2, 1]

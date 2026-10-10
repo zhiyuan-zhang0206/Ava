@@ -28,11 +28,11 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.force_termination import kill_terminating_agent_shells
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
 def _graph_blocked_until_released(
@@ -101,70 +101,75 @@ async def test_hosted_applies_only_after_continuation_returns(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
 ) -> None:
-    agent_id = _agent(db_conn)
-    old = await _admit(
-        aops_pool,
-        agent_id,
-    )
-    inbound = _command(db_conn, agent_id, kind)
-    entered, release = asyncio.Event(), asyncio.Event()
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=Mock(),
-        graph=_graph_blocked_until_released(kind, entered, release),
-        machine="claim-test",
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(),
-        catalog=model_catalog,
-    )
-    host._runtimes[agent_id] = Mock()
-    assert [
-        row.id for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=old, work=None)
-    ] == [inbound]
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
-    ).fetchone() == ("claimed",)
-    task = asyncio.create_task(
-        host._invoke_until_done(
+    async with hosted_scope() as resources:
+        agent_id = _agent(db_conn)
+        old = await _admit(
+            aops_pool,
             agent_id,
-            replace(
-                AvaContext(
-                    ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
-                    db=Database.from_settings(),
-                    bus=EventBus.from_settings(),
-                    catalog=model_catalog,
+        )
+        inbound = _command(db_conn, agent_id, kind)
+        entered, release = asyncio.Event(), asyncio.Event()
+        host = AgentHost(
+            policy=configured_policy(),
+            pool=aops_pool,
+            checkpointer=Mock(),
+            graph=_graph_blocked_until_released(kind, entered, release),
+            machine="claim-test",
+            bus=EventBus.from_settings(),
+            db=Database.from_settings(),
+            catalog=model_catalog,
+        )
+        host._runtimes[agent_id] = Mock()
+        assert [
+            row.id
+            for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=old, work=None)
+        ] == [inbound]
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
+        ).fetchone() == ("claimed",)
+        task = asyncio.create_task(
+            host._invoke_until_done(
+                agent_id,
+                replace(
+                    AvaContext(
+                        ops_pool=aops_pool,
+                        agent=AgentSlices.resolve(
+                            default_reader=configured_policy().default_reader
+                        ),
+                        db=Database.from_settings(),
+                        bus=EventBus.from_settings(),
+                        catalog=model_catalog,
+                        clock_factory=configured_policy().clock_factory,
+                    ),
+                    original_incarnation=old,
+                    hosted_resources=resources,
+                    native_work=None,
                 ),
-                original_incarnation=old,
-                hosted_resources=None,
-                native_work=None,
-            ),
+            )
         )
-    )
-    await asyncio.wait_for(entered.wait(), 2)
-    try:
-        _assert_command_unapplied_while_continuation_runs(
-            db_conn, host, old, agent_id=agent_id, inbound=inbound
-        )
-    finally:
-        release.set()
-        await asyncio.wait_for(task, 3)
-    assert agent_id not in host._runtimes
-    record = db_conn.execute(
-        "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (inbound,)
-    ).fetchone()
-    assert record is not None and record[1] is not None
-    if kind == "terminate":
-        assert record[0] == "done" and record[2] is not None
-    else:
-        assert record[0] == "claimed" and record[2] is None
-        await _assert_restart_observed_by_next_admission(
-            db_conn, aops_pool, old, database, event_bus, agent_id=agent_id, inbound=inbound
-        )
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None,)
+        await asyncio.wait_for(entered.wait(), 2)
+        try:
+            _assert_command_unapplied_while_continuation_runs(
+                db_conn, host, old, agent_id=agent_id, inbound=inbound
+            )
+        finally:
+            release.set()
+            await asyncio.wait_for(task, 3)
+        assert agent_id not in host._runtimes
+        record = db_conn.execute(
+            "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (inbound,)
+        ).fetchone()
+        assert record is not None and record[1] is not None
+        if kind == "terminate":
+            assert record[0] == "done" and record[2] is not None
+        else:
+            assert record[0] == "claimed" and record[2] is None
+            await _assert_restart_observed_by_next_admission(
+                db_conn, aops_pool, old, database, event_bus, agent_id=agent_id, inbound=inbound
+            )
+        assert db_conn.execute(
+            "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone() == (None,)
 
 
 @pytest.mark.parametrize("crash", ["after_cache_drop", "before_observe", "after_commit"])
@@ -176,104 +181,113 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(
-        aops_pool,
-        agent_id,
-    )
-    inbound = _command(db_conn, agent_id, "terminate")
-    graph = Mock()
-    graph.ainvoke = AsyncMock(
-        return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
-    )
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=Mock(),
-        graph=graph,
-        machine="claim-test",
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(),
-        catalog=model_catalog,
-    )
-    host._runtimes[agent_id] = Mock()
-    original_execute = psycopg.AsyncConnection.execute
-    original_drop = host.drop_agent
+    async with hosted_scope() as resources:
+        agent_id = _agent(db_conn)
+        owner = await _admit(
+            aops_pool,
+            agent_id,
+        )
+        inbound = _command(db_conn, agent_id, "terminate")
+        graph = Mock()
+        graph.ainvoke = AsyncMock(
+            return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
+        )
+        host = AgentHost(
+            policy=configured_policy(),
+            pool=aops_pool,
+            checkpointer=Mock(),
+            graph=graph,
+            machine="claim-test",
+            bus=EventBus.from_settings(),
+            db=Database.from_settings(),
+            catalog=model_catalog,
+        )
+        host._runtimes[agent_id] = Mock()
+        original_execute = psycopg.AsyncConnection.execute
+        original_drop = host.drop_agent
 
-    async def fail_observe(
-        conn: psycopg.AsyncConnection, query: Any, *args: Any, **kwargs: Any
-    ) -> Any:
-        if "UPDATE inbound_messages SET observed_at=" in str(query):
-            raise RuntimeError("injected observation crash")
-        return await original_execute(conn, query, *args, **kwargs)
+        async def fail_observe(
+            conn: psycopg.AsyncConnection, query: Any, *args: Any, **kwargs: Any
+        ) -> Any:
+            if "UPDATE inbound_messages SET observed_at=" in str(query):
+                raise RuntimeError("injected observation crash")
+            return await original_execute(conn, query, *args, **kwargs)
 
-    def fail_drop(target: int) -> None:
-        original_drop(target)
-        raise RuntimeError("injected cache crash")
+        def fail_drop(target: int) -> None:
+            original_drop(target)
+            raise RuntimeError("injected cache crash")
 
-    async def fail_after_commit(
-        pool: AsyncConnectionPool, token: RuntimeIncarnation, **kwargs: Any
-    ) -> str | None:
-        await apply_hosted_lifecycle(pool, token, **kwargs)
-        raise RuntimeError("injected post-commit crash")
+        async def fail_after_commit(
+            pool: AsyncConnectionPool, token: RuntimeIncarnation, **kwargs: Any
+        ) -> str | None:
+            await apply_hosted_lifecycle(pool, token, **kwargs)
+            raise RuntimeError("injected post-commit crash")
 
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
-    with monkeypatch.context() as patch:
-        if crash == "after_cache_drop":
-            patch.setattr(host, "drop_agent", fail_drop)
-        elif crash == "before_observe":
-            patch.setattr(psycopg.AsyncConnection, "execute", fail_observe)
-        else:
-            patch.setattr(
-                "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle",
-                fail_after_commit,
-            )
-        with pytest.raises(RuntimeError, match="injected"):
-            await host._invoke_until_done(
+        await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+        with monkeypatch.context() as patch:
+            if crash == "after_cache_drop":
+                patch.setattr(host, "drop_agent", fail_drop)
+            elif crash == "before_observe":
+                patch.setattr(psycopg.AsyncConnection, "execute", fail_observe)
+            else:
+                patch.setattr(
+                    "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle",
+                    fail_after_commit,
+                )
+            with pytest.raises(RuntimeError, match="injected"):
+                await host._invoke_until_done(
+                    agent_id,
+                    replace(
+                        AvaContext(
+                            ops_pool=aops_pool,
+                            agent=AgentSlices.resolve(
+                                default_reader=configured_policy().default_reader
+                            ),
+                            db=Database.from_settings(),
+                            bus=EventBus.from_settings(),
+                            catalog=model_catalog,
+                            clock_factory=configured_policy().clock_factory,
+                        ),
+                        original_incarnation=owner,
+                        hosted_resources=resources,
+                        native_work=None,
+                    ),
+                )
+        state = db_conn.execute(
+            "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
+            "FROM inbound_messages WHERE id=%s",
+            (inbound,),
+        ).fetchone()
+        assert state == (
+            ("done", True, True) if crash == "after_commit" else ("claimed", False, False)
+        )
+        db_conn.commit()
+        if crash != "after_commit":
+            # Same admitted continuation can retry; cache absence is not a new owner.
+            assert await host._invoke_until_done(
                 agent_id,
                 replace(
                     AvaContext(
                         ops_pool=aops_pool,
-                        agent=AgentSlices.resolve(),
+                        agent=AgentSlices.resolve(
+                            default_reader=configured_policy().default_reader
+                        ),
                         db=Database.from_settings(),
                         bus=EventBus.from_settings(),
                         catalog=model_catalog,
+                        clock_factory=configured_policy().clock_factory,
                     ),
                     original_incarnation=owner,
-                    hosted_resources=None,
+                    hosted_resources=resources,
                     native_work=None,
                 ),
             )
-    state = db_conn.execute(
-        "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
-        "FROM inbound_messages WHERE id=%s",
-        (inbound,),
-    ).fetchone()
-    assert state == (("done", True, True) if crash == "after_commit" else ("claimed", False, False))
-    db_conn.commit()
-    if crash != "after_commit":
-        # Same admitted continuation can retry; cache absence is not a new owner.
-        assert await host._invoke_until_done(
-            agent_id,
-            replace(
-                AvaContext(
-                    ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
-                    db=Database.from_settings(),
-                    bus=EventBus.from_settings(),
-                    catalog=model_catalog,
-                ),
-                original_incarnation=owner,
-                hosted_resources=None,
-                native_work=None,
-            ),
-        )
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id,status FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None, "terminated")
-    assert db_conn.execute(
-        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (inbound,)
-    ).fetchone() == ("done", True)
+        assert db_conn.execute(
+            "SELECT lifecycle_command_id,status FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone() == (None, "terminated")
+        assert db_conn.execute(
+            "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (inbound,)
+        ).fetchone() == ("done", True)
 
 
 async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
@@ -354,33 +368,35 @@ async def _run_terminating_turn(
     incarnation: RuntimeIncarnation,
     model_catalog: ModelCatalog,
 ) -> None:
-    graph = Mock()
-    graph.ainvoke = AsyncMock(
-        return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
-    )
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=Mock(),
-        graph=graph,
-        machine="claim-test",
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(),
-        catalog=model_catalog,
-    )
-    host._runtimes[agent_id] = Mock()
-    assert await host._invoke_until_done(
-        agent_id,
-        AvaContext(
-            original_incarnation=incarnation,
-            hosted_resources=HostedTurnResources(),
-            ops_pool=aops_pool,
-            agent=AgentSlices.resolve(),
-            db=Database.from_settings(),
+    async with hosted_scope() as resources:
+        graph = Mock()
+        graph.ainvoke = AsyncMock(
+            return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
+        )
+        host = AgentHost(
+            policy=configured_policy(),
+            pool=aops_pool,
+            checkpointer=Mock(),
+            graph=graph,
+            machine="claim-test",
             bus=EventBus.from_settings(),
+            db=Database.from_settings(),
             catalog=model_catalog,
-        ),
-    )
+        )
+        host._runtimes[agent_id] = Mock()
+        assert await host._invoke_until_done(
+            agent_id,
+            AvaContext(
+                original_incarnation=incarnation,
+                hosted_resources=resources,
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+                catalog=model_catalog,
+                clock_factory=configured_policy().clock_factory,
+            ),
+        )
 
 
 @pytest.mark.parametrize("requested", [True, False])

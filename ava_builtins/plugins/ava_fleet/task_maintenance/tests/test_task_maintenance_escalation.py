@@ -19,7 +19,6 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import escalation
@@ -28,6 +27,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 _TASK_TITLE = count(1)
 
@@ -209,7 +209,7 @@ def test_gateway_patch_clears_escalation_marker(db_conn: psycopg.Connection) -> 
             (tid,),
         )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.patch(
             f"/api/tasks/{tid}", json={"priority": "P1"}, headers={"Idempotency-Key": str(uuid4())}
         )

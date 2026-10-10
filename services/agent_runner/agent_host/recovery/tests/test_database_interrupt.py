@@ -16,6 +16,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 @pytest.mark.parametrize("persistent_failure", [False, True])
@@ -70,6 +71,7 @@ async def test_recovery_retries_promptly_but_does_not_execute_or_ack_control(
             database_waits=DatabaseWaits(),
             peek_lock=asyncio.Lock(),
             work=None,
+            reconcile_inputs=configured_policy().reconcile_inputs,
         )
     )
     try:

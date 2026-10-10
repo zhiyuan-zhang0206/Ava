@@ -9,12 +9,18 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.graph.claim._chat_inbound import build_chat_inbound
+from base.agents.messages.envelope import EnvelopeReadInputs
+from base.clock import Clock
 from base.config import settings
 from gateway.app import app
 from gateway.tests.extensions.test_mcp_endpoint import _ACCEPT, _initialize, _tool_call
 from tests.components.gateway.test_caller_protocol_path import (
     _admit,
     _after_proven_old_writer_barrier,
+)
+
+_ENVELOPE_INPUTS = EnvelopeReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
 )
 
 
@@ -60,7 +66,11 @@ async def test_token_derived_mcp_source_reaches_real_claim(
             "instance": str(credential["id"]),
         }
     }
-    message, _ = build_chat_inbound(claimed[0])
+    message, _ = build_chat_inbound(
+        claimed[0],
+        read_security_enabled=lambda: settings.agent.security_scan_enabled,
+        envelope_inputs=_ENVELOPE_INPUTS,
+    )
     content = message.model_dump()["content"]
     assert isinstance(content, str)
     assert "External agent" in content

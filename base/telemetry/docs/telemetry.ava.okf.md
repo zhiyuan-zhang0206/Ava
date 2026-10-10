@@ -17,7 +17,7 @@ Its component nodes describe the current contracts and implementation.
 
 ## Ordinary event delivery lifecycle
 
-`_EventPipeline` owns the bounded queue, admission, one drain worker and its
+`EventPipeline` owns the bounded queue, admission, one drain worker and its
 terminal result. Only that worker writes batches. `flush()` and `sync()` use
 independent FIFO receipts; the worker acknowledges each receipt after writing
 its preceding queued and held records. Every barrier has one finite deadline,
@@ -43,3 +43,20 @@ These results describe the ordinary observation projection. Durable `audit_event
 are committed in the producer's transaction before projection admission; SDK
 capture journals and participant sealing retain their independent durability
 contracts. An unfinished observation barrier is never a commit or seal receipt.
+
+The public `EventPipeline` resource lives in `delivery/pipeline.py`; construction starts
+its worker and requires the root's writer. `build_pipeline(database=...)` binds
+ordinary sinks to that root's database factory. Controlled host/exec logging binds
+this actual writer through `init_telemetry(pipeline=..., machine_reader=...)`;
+legacy process calls remain supported until their own roots migrate. SDK ClientSet roots retain this
+constructor without invoking it until a selected event enqueues. Quiet sync and
+close never build it. Finite close retains an unfinished or failed writer for
+later observation, and an original worker failure propagates after other client
+cleanup. The exec child observes its owned writer before finalizing OTLP and
+forming a successful post-delivery outcome; attachments drain before detach.
+
+The host joins native resources before closing its constructed ClientSet writer
+and releasing settled ownership. A writer failure still permits bounded lease
+release, pool cleanup and pidfile removal. The first original native, boot or
+writer failure remains primary; later cleanup failures are attached as notes.
+Unfinished native resources retain the clients and pools until process exit.

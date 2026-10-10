@@ -91,17 +91,23 @@ import time
 
 sys.path.insert(0, {str(root)!r})
 import agent.execution.child as exec_child
+from base.telemetry.delivery.pipeline import EventPipeline
+from base.telemetry.otlp import telemetry_otlp
 
-exec_child._init_logger(999999)  # the real arm path (task #3816 M4b)
+pipeline = EventPipeline(writer=telemetry_otlp.export_batch)
+exec_child._init_logger(
+    999999,
+    producer=lambda: pipeline,
+    machine_reader=lambda: "lazy-child-probe",
+)  # the real arm path (task #3816 M4b)
 # The boot clock is all the record reads; the SDK modules stay unimported.
 child = exec_child._ChildContext(ava=None, boot_started_at=time.perf_counter())
 exec_child._emit_child_boot_timing(child)  # the record that used to bring OTLP up
 
-from base.telemetry.otlp import telemetry_otlp
-
 deadline = time.monotonic() + 5.0
 while telemetry_otlp.backend._queue.qsize() == 0 and time.monotonic() < deadline:
     time.sleep(0.1)  # the emitter drain tick is on a 0.5 s cadence
+pipeline.stop()
 
 FORBIDDEN = (
     "opentelemetry.sdk._logs",

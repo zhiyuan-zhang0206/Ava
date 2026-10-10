@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import io
+import os
 import sys
 from collections.abc import Callable, Generator, Iterator, Mapping
 from dataclasses import replace
@@ -65,6 +66,7 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, obje
         identity: Mapping[str, Any],
         sampling_owner: call_policy.SamplingPolicyOwner,
         sampling_policy: call_policy.SamplingPolicy | None = None,
+        producer: Callable[[], Any] | None = None,
     ) -> None:
         assert sampling_policy is not None
         calls.append((fn, dict(detail or {}), duration))
@@ -99,11 +101,12 @@ def _help(*targets: object) -> str:
 def _installed(sampling_owner: call_policy.SamplingPolicyOwner) -> Iterator[None]:
     """Install the recorders over the real `ava` singleton, then restore — so a
     wrapped function never leaks into the rest of the suite."""
-    ledger = metering.install(sampling_owner)
-    try:
-        yield
-    finally:
-        metering.uninstall(ledger)
+    with patch.dict(os.environ):
+        ledger = metering.install(sampling_owner)
+        try:
+            yield
+        finally:
+            metering.uninstall(ledger)
 
 
 # ── transparency ──────────────────────────────────────────────────────────────
@@ -170,6 +173,7 @@ def test_install_rejects_a_different_owner_before_wrapping(_installed: None) -> 
 # ── enumeration ───────────────────────────────────────────────────────────────
 
 
+@patch.dict(os.environ)
 def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
     fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
     # plain functions, nested-namespace functions, and top-level functions
@@ -192,6 +196,7 @@ def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
     assert not any(fq.startswith("mcps.") and fq.count(".") > 1 for fq in fqs)
 
 
+@patch.dict(os.environ)
 def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -206,19 +211,22 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
         raise base.cluster.machine.MachineNameMissing("machine name not set")
 
     monkeypatch.setattr(base.cluster.machine, "machine_name", _raise)
-    # sanity: normal attribute access really does raise under this condition
-    with pytest.raises(base.cluster.machine.MachineNameMissing):
-        _ = ava.self.SELF_MACHINE_NAME
+    # Cold SDK installation owns delivery environment changes in this test scope.
+    with patch.dict(os.environ):
+        # sanity: normal attribute access really does raise under this condition
+        with pytest.raises(base.cluster.machine.MachineNameMissing):
+            _ = ava.self.SELF_MACHINE_NAME
 
-    fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
-    assert "self.compact" in fqs  # real functions still enumerated
-    assert "self.SELF_MACHINE_NAME" not in fqs  # dynamic constant skipped, not evaluated
-    assert "self.MACHINE_SPEC" not in fqs
+        fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
+        assert "self.compact" in fqs  # real functions still enumerated
+        assert "self.SELF_MACHINE_NAME" not in fqs  # dynamic constant skipped, not evaluated
+        assert "self.MACHINE_SPEC" not in fqs
 
 
 # ── recorder wrapping (agent side; call / emit logic is in test_sdk_telemetry) ───
 
 
+@patch.dict(os.environ)
 def test_plugin_wrapped_signature_survives_and_counts_once(
     monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:

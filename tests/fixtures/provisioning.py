@@ -33,7 +33,7 @@ import pytest_asyncio
 import redis
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.db import Database, insert_inbound_message, publish_inbound_wake
 from base.db.test_db_guard import assert_test_db_url
 from base.events.live.bus import EventBus
@@ -66,7 +66,7 @@ _OS_JOBS_AT_START = host_ava_os_jobs()
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _provisioned_db(pytestconfig: pytest.Config) -> Iterator[str]:
+def _provisioned_db(pytestconfig: pytest.Config, process_config: ConfigBoot) -> Iterator[str]:
     if static_mode(pytestconfig):
         yield UNPROVISIONED_DB_URL
         return
@@ -77,6 +77,7 @@ def _provisioned_db(pytestconfig: pytest.Config) -> Iterator[str]:
         # loosening the session-start guard above.
         assert_test_db_url(url, context="_provisioned_db")
         settings.data_plane.db_url = url
+        process_config.set_field("db_url", url)
         os.environ["AVA_DB_URL"] = url
         _rewrite_test_env_file_line(_TEST_AVA_HOME / ".env", "AVA_DB_URL", url)
         with PostgresSaver.from_conn_string(url) as saver:
@@ -85,12 +86,13 @@ def _provisioned_db(pytestconfig: pytest.Config) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _provisioned_redis(pytestconfig: pytest.Config) -> Iterator[str]:
+def _provisioned_redis(pytestconfig: pytest.Config, process_config: ConfigBoot) -> Iterator[str]:
     if static_mode(pytestconfig):
         yield UNPROVISIONED_REDIS_URL
         return
     with redis_server() as url:
         settings.data_plane.redis_url = url
+        process_config.set_field("redis_url", url)
         os.environ["AVA_REDIS_URL"] = url
         _rewrite_test_env_file_line(_TEST_AVA_HOME / ".env", "AVA_REDIS_URL", url)
         yield url

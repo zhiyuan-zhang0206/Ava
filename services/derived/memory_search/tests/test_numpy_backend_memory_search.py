@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import uvicorn
 
+from base.config import settings
 from base.db import Database
 from services.derived.memory_indexer.backends import probe
 from services.derived.memory_indexer.backends.numpy import NumPyBackend
@@ -48,7 +49,7 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
     data_file = tmp_path_factory.mktemp("memory-search") / "vectors.npz"
     server = uvicorn.Server(
         uvicorn.Config(
-            build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP), 500),
+            build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP), 500, embedding_dim=_DIM),
             host="127.0.0.1",
             port=port,
             log_level=None,
@@ -70,10 +71,9 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
 
 @pytest.fixture
 def backend(memory_search_uri: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[NumPyBackend]:
-    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
-    b = NumPyBackend()
+    b = NumPyBackend(uri_reader=lambda: settings.services.memory_search_uri)
     b.connect()
     try:
         yield b
@@ -113,7 +113,7 @@ def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
         requests.append(request)
         return httpx.Response(200, json={"status": "ok"})
 
-    backend = NumPyBackend()
+    backend = NumPyBackend(uri_reader=lambda: settings.services.memory_search_uri)
     backend._client = httpx.Client(
         base_url="http://memory-search", transport=httpx.MockTransport(_respond)
     )
@@ -135,10 +135,9 @@ def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
 def test_readonly_upsert_many_connects_but_refuses_write(
     memory_search_uri: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
-    backend = NumPyBackend(readonly=True)
+    backend = NumPyBackend(readonly=True, uri_reader=lambda: settings.services.memory_search_uri)
     backend.connect()
     try:
         with pytest.raises(RuntimeError, match="read-only"):
@@ -157,17 +156,16 @@ def test_search_topk_async_matches_sync(backend: NumPyBackend) -> None:
 
 
 def test_connect_fails_fast_when_service_down(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", f"http://127.0.0.1:{_free_port()}")
-    backend = NumPyBackend()
+    backend = NumPyBackend(uri_reader=lambda: settings.services.memory_search_uri)
     with pytest.raises(httpx.ConnectError):
         backend.connect()
     backend.close()  # idempotent no-op
 
 
 def test_requires_connect_before_use() -> None:
-    backend = NumPyBackend()
+    backend = NumPyBackend(uri_reader=lambda: settings.services.memory_search_uri)
     with pytest.raises(RuntimeError, match="not connected"):
         backend.all_meta()
 
@@ -176,7 +174,13 @@ def test_requires_connect_before_use() -> None:
 
 
 def test_probe_numpy_healthy(memory_search_uri: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
-    assert probe.probe_backend("numpy", Database.from_settings()).message is None
+    assert (
+        probe.probe_backend(
+            "numpy",
+            Database.from_settings(),
+            uri_reader=lambda: settings.services.memory_search_uri,
+        ).message
+        is None
+    )

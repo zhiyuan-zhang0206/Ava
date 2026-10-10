@@ -15,6 +15,7 @@ from agent.ownership.native_cancel import halt_for_native_cancel
 from agent.state import BaseAgentState
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import CheckpointReadError
+from base.agents.impersonation.notes import HandoffNotes
 from base.agents.incarnation.native_work import load_work, prepare_work
 from base.agents.incarnation.native_work_models import (
     NativeCancelAcceptance,
@@ -402,6 +403,7 @@ async def invoke_prepared_graph[T](
     bus: EventBus,
     relays: RelaySupervision,
     invoke: Callable[[AvaContext, dict[str, object]], Awaitable[T]],
+    notes: HandoffNotes,
 ) -> dict[str, object] | T:
     """Execute the prepared original work within its retained resource scope."""
     incarnation = ctx.require_original_incarnation(agent_id)
@@ -426,6 +428,7 @@ async def invoke_prepared_graph[T](
             activate_accepted=False,
             incarnation=ctx.original_incarnation,
             resources=ctx.hosted_resources,
+            notes=notes,
         )
         await prepare_native_invocation(control_pool, work, incarnation)
     return await invoke(

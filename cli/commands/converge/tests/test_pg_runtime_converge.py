@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from base.cluster.dataplane import pg_runtime, runtime_binaries
-from base.config import settings
+from base.config import ConfigBoot, settings
 from cli.commands.converge._steps import _ensure_pg_binaries_step
 from cli.commands.converge.spec import ConvergeCtx
 
@@ -63,7 +63,7 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(installed: Path) -> None:
     _ensure_pg_binaries_step(
-        ConvergeCtx(installed.parent, installed.parent, frozenset({"gateway"}))
+        ConvergeCtx(installed.parent, installed.parent, frozenset({"gateway"}), config=ConfigBoot())
     )
     assert pg_runtime.pg_tool("postgres") == installed / "postgres"
 
@@ -79,4 +79,6 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
 
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(remote))
     monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", forbidden)
-    _ensure_pg_binaries_step(ConvergeCtx(tmp_path, tmp_path, frozenset({"gateway"})))
+    _ensure_pg_binaries_step(
+        ConvergeCtx(tmp_path, tmp_path, frozenset({"gateway"}), config=ConfigBoot())
+    )

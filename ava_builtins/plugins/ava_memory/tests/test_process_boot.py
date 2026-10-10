@@ -55,7 +55,9 @@ def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
         settings.agent.eval_network_allowlist = []
 
         from agent.process_boot import _apply_per_agent_eval_isolation
-        _apply_per_agent_eval_isolation()
+        _apply_per_agent_eval_isolation(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        )
 
         assert not hasattr(ava, "web")
         assert not hasattr(ava, "understand")
@@ -93,7 +95,9 @@ def test_eval_network_allowlist_preserves_explicitly_allowed_web() -> None:
         settings.agent.eval_network_allowlist = ["web"]
 
         from agent.process_boot import _apply_per_agent_eval_isolation
-        _apply_per_agent_eval_isolation()
+        _apply_per_agent_eval_isolation(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        )
 
         assert hasattr(ava, "web")
         assert not hasattr(ava, "understand")
@@ -116,7 +120,9 @@ def test_eval_isolation_off_leaves_sdk_and_memory_unchanged() -> None:
         settings.agent.eval_isolation = False
 
         from agent.process_boot import _apply_per_agent_eval_isolation
-        _apply_per_agent_eval_isolation()
+        _apply_per_agent_eval_isolation(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        )
 
         assert hasattr(ava, "web")
         assert hasattr(ava, "understand")

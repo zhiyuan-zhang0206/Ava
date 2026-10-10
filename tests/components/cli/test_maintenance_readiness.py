@@ -15,6 +15,9 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import _roster
 from gateway.app import app
 from tests.components.agent.test_maintenance import isolate as isolate
+from tests.components.services.test_maintenance_readiness import (
+    gateway_configuration as gateway_configuration,
+)
 from tests.components.services.test_maintenance_readiness import held as held
 
 pytestmark = pytest.mark.real_service_readiness_gate

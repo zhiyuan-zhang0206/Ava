@@ -39,6 +39,7 @@ from typing import Literal, cast
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import AvaMsgType, message_addl_kwargs, read_ava_kwargs
 
 UnitKind = Literal["work", "text", "inbound", "note"]
@@ -110,7 +111,9 @@ def _by_message(items: Sequence[TimelineItem]) -> list[tuple[int, list[TimelineI
     return groups
 
 
-def read_times(messages: Sequence[BaseMessage]) -> list[datetime | None]:
+def read_times(
+    messages: Sequence[BaseMessage], *, timeline_inputs: TimelineReadInputs
+) -> list[datetime | None]:
     """The time each message was read by the model, per message in message order.
 
     A message's own time is `message_read_time` (`ava_picked_up_at` when it records one, else
@@ -121,7 +124,7 @@ def read_times(messages: Sequence[BaseMessage]) -> list[datetime | None]:
     read order back, so units and nodes do not overlap on the time axis. A message without a time
     takes the previous value, None until the first. Stored stamps are not touched.
     """
-    items, _ = build_timeline_items(messages, [])
+    items, _ = build_timeline_items(messages, [], inputs=timeline_inputs)
     own: list[datetime | None] = [None] * len(messages)
     for idx, group in _by_message(items):
         stamps = [ts for item in group if (ts := _stamp(item)) is not None]
@@ -202,13 +205,15 @@ class _Divider:
             raise ValueError(f"message {idx} renders as an uncovered mix of kinds {sorted(kinds)}")
 
 
-def divide_units(messages: Sequence[BaseMessage]) -> list[MessageUnit]:
+def divide_units(
+    messages: Sequence[BaseMessage], *, timeline_inputs: TimelineReadInputs
+) -> list[MessageUnit]:
     """Divide a message list into layer-0 units, ordered by first message index.
 
     Raises:
         ValueError: a message renders as a mix of item kinds no rule covers.
     """
-    items, _ = build_timeline_items(messages, [])
+    items, _ = build_timeline_items(messages, [], inputs=timeline_inputs)
     divider = _Divider()
     for idx, group in _by_message(items):
         divider.message(idx, group)

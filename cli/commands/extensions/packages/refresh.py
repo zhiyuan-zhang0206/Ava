@@ -37,7 +37,7 @@ from pathlib import Path
 from loguru import logger
 
 from base import paths
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.deploy.git.gitenv import git_env
 from base.host.proc import run_bounded
 from base.host.system.cron import os_jobs_enabled
@@ -716,8 +716,12 @@ def run_refresh(
     regardless of cadence; `--check` never stages or applies. A differing local
     copy is replaced (reported as an info line)."""
     moment = now or datetime.now(UTC)
-    if from_job and not os_jobs_enabled():
-        return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
+    if from_job:
+        config = ConfigBoot()
+        if not config.prepared:
+            config.read_process_environment()
+        if not os_jobs_enabled(enabled_reader=lambda: config.view.general.os_jobs_enabled):
+            return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
     if from_job and not settings.packages.refresh_enabled:
         return _skip("refresh disabled (AVA_PACKAGES_REFRESH_ENABLED=false)")
     lock_path = paths.ava_home() / "packages-refresh.lock"

@@ -13,7 +13,6 @@ from typing import Any
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from base.cluster import session_name
-from base.config import settings
 from base.log import logger
 from base.paths import repo_root, workspace_dir
 from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
@@ -463,10 +462,12 @@ def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> st
     `scrollback=False` to get only the current visible screen instead —
     needed for full-screen programs that redraw in place (`lines` is
     ignored then)."""
+    from ava.sdk_surface.settings import config_authority
+
     id = coerce_typed(id, "id", int)
     resolved_lines: int
     if lines is None:
-        resolved_lines = settings.display.shell_capture_default_lines
+        resolved_lines = config_authority().service_field_value("shell_capture_default_lines")
     else:
         resolved_lines = coerce_typed(lines, "lines", int)
     scrollback = coerce_typed(scrollback, "scrollback", bool)

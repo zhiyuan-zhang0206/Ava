@@ -1,15 +1,13 @@
-"""Health observations and their failure signal, without release mutations.
-
-Every unhealthy run emits one `health_probe_failing` event naming the failed
-check; a healthy run emits nothing. Notification grading belongs to the Grafana
-rules that read the event.
-"""
+"""Healthy probes stay silent; unhealthy probes signal without release mutations.
+Grafana rules grade notifications from the recorded health_probe_failing event."""
 
 from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
@@ -17,6 +15,13 @@ import pytest
 
 from base.db.tests.fakes import patch_database
 from cli.commands.cluster import health as cluster_health
+
+
+@pytest.fixture(autouse=True)
+def config_boot_environment() -> Generator[None]:
+    """Restore process delivery from the health operation's boot."""
+    with patch.dict(os.environ):
+        yield
 
 
 def test_schema_health_db_flake_is_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,7 +318,11 @@ def test_wal_archiving_failure_signals_with_its_message(
 ) -> None:
     """A broken archiver fails the probe like the disk check does."""
     failure = "WAL archiving: the archiver is failing"
-    monkeypatch.setattr(cluster_health, "_walg_archive_failure", lambda: failure)
+
+    def failing_archiver(**_inputs: object) -> str:
+        return failure
+
+    monkeypatch.setattr(cluster_health, "_walg_archive_failure", failing_archiver)
 
     assert cluster_health.run_health_probe() == 1
 

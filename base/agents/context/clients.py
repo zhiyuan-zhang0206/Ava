@@ -103,6 +103,7 @@ class ClientSet:
         redis: Callable[[], object] | None = None,
         gateway: Callable[[str], httpx.Client] | None = None,
         factories: Mapping[Callable[..., object], Callable[[], object]] | None = None,
+        pipeline_factory: Callable[[], Any] | None = None,
     ) -> None:
         """`database` hands over the cluster database handle, which is the composition root's to
         name (the exec child's is built from its settings, the host passes the one it holds); a set
@@ -121,8 +122,20 @@ class ClientSet:
         self._gateway_provided = False
         self._factories = dict(factories) if factories is not None else {}
         self._made: dict[Callable[..., object], object] = {}
+        self._pipeline_factory = pipeline_factory
+        self._event_pipeline: Any = None
 
     # ── the three base clients ───────────────────────────────────────────
+
+    def database(self) -> DatabaseHandle:
+        """Build a handle using this context's supplied factory and retained gate.
+
+        The factory owns configuration refresh and process admission. Returning
+        another handle never changes that owner's minimum-check budget.
+        """
+        if self._database is None:
+            raise RuntimeError("this context has no database handle factory")
+        return self._database()
 
     @property
     def gateway_url(self) -> str:
@@ -188,11 +201,34 @@ class ClientSet:
                 self._made[factory] = self._factories.get(factory, factory)()
             return self._made[factory]  # type: ignore[return-value]
 
+    def event_pipeline(self) -> Any:
+        """Construct this owner's event writer only when its producer needs enqueue."""
+        with self._lock:
+            if self._event_pipeline is None:
+                if self._pipeline_factory is None:
+                    raise RuntimeError("this context has no event pipeline factory")
+                self._event_pipeline = self._pipeline_factory()
+            return self._event_pipeline
+
+    def sync_events(self, timeout: float = 5.0) -> Any:
+        """Observe this owner's constructed writer without creating one during flush."""
+        from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
+
+        with self._lock:
+            pipeline = self._event_pipeline
+        if pipeline is None:
+            return DrainResult(DrainStatus.COMPLETED, DrainPhase.DRAIN)
+        return pipeline.sync(timeout=timeout)
+
     # ── release ──────────────────────────────────────────────────────────
 
-    def close(self) -> None:
-        """Close every client this set built, newest first; one that fails to close is logged and
-        does not keep the rest open."""
+    def close(self, *, pipeline_timeout: float = 5.0) -> None:
+        """Close constructed resources; retain a writer with unfinished or failed stop.
+
+        Pipeline failure never prevents closing other clients. The original worker
+        error propagates after that cleanup and remains available to repeated stop.
+        A cold owner does not call its pipeline factory during close.
+        """
         with self._lock:
             owned: list[object] = list(reversed(self._made.values()))
             self._made.clear()
@@ -206,6 +242,20 @@ class ClientSet:
                 owned.append(self._gateway)
             self._gateway = None
             self._gateway_provided = False
+        primary: BaseException | None = None
+        with self._lock:
+            pipeline = self._event_pipeline
+        if pipeline is not None:
+            from base.telemetry.delivery.receipts import DrainStatus
+
+            try:
+                result = pipeline.stop(timeout=pipeline_timeout)
+                if result.status is DrainStatus.COMPLETED:
+                    with self._lock:
+                        if self._event_pipeline is pipeline:
+                            self._event_pipeline = None
+            except BaseException as exc:
+                primary = exc
         for client in owned:
             close = getattr(client, "close", None)
             if close is None:
@@ -217,14 +267,13 @@ class ClientSet:
                     "[clients] closing {} failed; the rest are still closed", type(client).__name__
                 )
 
+        if primary is not None:
+            raise primary
+
     # ── builders ─────────────────────────────────────────────────────────
 
     def _connect_sql(self) -> psycopg.Connection[Any]:
-        if self._database is None:
-            raise RuntimeError(
-                "this context has no database: its ClientSet was built without a database handle"
-            )
-        return self._database().connect(autocommit=True)
+        return self.database().connect(autocommit=True)
 
     def _connect_redis(self) -> object:
         if self._redis_factory is None:

@@ -136,7 +136,16 @@ def backups(
         now = datetime(2026, 9, 27, 3, next(stamps), tzinfo=UTC)
         staging = directory / f"stage-{now.minute}"
         return backup.run_backup(
-            now, db_url="dbname=ava", publish=False, staging=staging, db=database
+            now,
+            db_url="dbname=ava",
+            publish=False,
+            staging=staging,
+            db=database,
+            is_remote_reader=lambda: settings.data_plane.is_remote,
+            keep_reader=lambda: settings.services.backup_keep,
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
         )
 
     return take

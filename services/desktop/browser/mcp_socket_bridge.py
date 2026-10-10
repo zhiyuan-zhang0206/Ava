@@ -13,7 +13,6 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any
 
-from base.config import settings
 from base.host.net.resilience import Policy, aretry
 from services.desktop.browser.protocol import Response
 
@@ -78,11 +77,13 @@ class SocketLink:
         writer: asyncio.StreamWriter,
         *,
         service_label: str,
+        timeout_reader: Callable[[], float],
         extra_fields: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._reader = reader
         self._writer = writer
         self._service_label = service_label
+        self._timeout_reader = timeout_reader
         self._extra_fields = extra_fields
         self._lock = asyncio.Lock()
         self._id = 0
@@ -112,9 +113,7 @@ class SocketLink:
                     raise RuntimeError(resp.get("error", f"{self._service_label} error"))
                 return resp["result"]
 
-            return await asyncio.wait_for(
-                roundtrip(), timeout=settings.sandbox.mcp_connect_timeout_seconds
-            )
+            return await asyncio.wait_for(roundtrip(), timeout=self._timeout_reader())
 
     def close(self) -> None:
         with suppress(OSError):

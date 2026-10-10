@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
+from base.host.env.config_lite_table import FIELD_DOMAINS
 from base.host.env.config_registry import DOMAIN_MODELS, field_alias, fields, schema_extra
 
 __all__ = [
@@ -99,7 +100,7 @@ class ConfigAuthority:
 
     def service_field_value(self, name: str) -> Any:
         """Read an owned model value without recovering arbitrary AttributeError failures."""
-        domain = fields()[name].domain
+        domain = FIELD_DOMAINS[name]
         source = self.runtime if self.runtime.has_domain(domain) else self.all_domains
         return getattr(getattr(source, domain), name)
 

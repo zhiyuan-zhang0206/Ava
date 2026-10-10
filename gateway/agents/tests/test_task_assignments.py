@@ -1,8 +1,10 @@
 """Guarded compound acceptance has one atomic pair and immutable receipt."""
 
+import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+from unittest.mock import patch
 from uuid import UUID
 
 import psycopg
@@ -14,6 +16,7 @@ from gateway.agents import router as agent_router
 from gateway.agents.task_assignment import router as task_assignments
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from tests.fixtures.gateway_config import gateway_test_client
 
 PATH = "/api/keyed/v1/task-assignments"
 HEADERS = {"Idempotency-Key": "compound", "Idempotency-Scope": "principal-v1"}
@@ -30,7 +33,7 @@ def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterat
         return SpawnedAgent(id=body.agent_id)
 
     monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
-    with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
+    with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
         yield value
 
 
@@ -305,3 +308,10 @@ def test_corrupt_snapshot_fails_without_recreating_mutable_state(
     with pytest.raises(ValueError, match="missing or unknown"):
         client.post(PATH, json=body, headers=HEADERS)
     assert _counts(db_conn) == before
+
+
+@pytest.fixture(autouse=True)
+def _restore_cold_gateway_delivery() -> Iterator[None]:
+    """This module owns every environment mutation made by its real gateway lifespan."""
+    with patch.dict(os.environ):
+        yield

@@ -19,6 +19,15 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 - `content` plain text or multimodal block list
 - Two times in metadata: `ava_created_at` keeps its meaning (an inbound's is its ARRIVAL time, the source row's `created_at`; other messages' is when they were produced). `ava_picked_up_at` is when an injected message (inbound, note, attachment) was put into the LLM context, i.e. when the model reads it; the builders stamp it. AIMessage and tool output are produced inside the context, so their `ava_created_at` already is the read time and they carry no `ava_picked_up_at`. Time-ordered readers (timeline, history tree, history dump) use `message_read_time()` (`ava_picked_up_at`, else `ava_created_at`); delivery tracking uses `inbound_messages.created_at`. The body envelope header (`wrap_inbound`) keeps the arrival time so the agent knows when a message came in.
 
+### Inbound timestamp ownership
+
+`base.agents.messages.envelope.EnvelopeReadInputs` carries the producer's live
+clock factory and timestamp-policy reader. `inbound_head` and `wrap_inbound`
+require those inputs; construction reads neither. User and agent headers read
+the display flag first and obtain a clock only when timestamps are enabled.
+System and asserted-caller headers return before either reader. Arrival-time
+formatting and source validation keep their existing order.
+
 ### NoteTag Enum
 - Marks the source and nature of the message
 - Used by agent to distinguish user messages vs agent messages vs system notifications

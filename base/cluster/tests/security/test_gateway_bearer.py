@@ -125,3 +125,45 @@ def test_a_unit_that_does_not_serve_the_gateway_is_never_exempt(
     _remote_managed_gateway_home(monkeypatch, serves_gateway=False)
     with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
         gateway_auth_headers()
+
+
+def test_explicit_readers_preserve_token_first_and_profile_admission_order() -> None:
+    reads: list[str] = []
+
+    def forbidden_secret() -> str:
+        raise AssertionError("a delivered token must not consult the secret")
+
+    assert (
+        machine.resolve_gateway_bearer(
+            token_reader=lambda: TOKEN,
+            secret_reader=forbidden_secret,
+            profile_reader=lambda: pytest.fail("a delivered token must not consult the profile"),
+            no_tokens_reader=lambda: pytest.fail("a delivered token must not inspect the plane"),
+        )
+        == TOKEN
+    )
+
+    def token() -> str:
+        reads.append("token")
+        return ""
+
+    def secret() -> str:
+        reads.append("secret")
+        return SECRET
+
+    def profile() -> str:
+        reads.append("profile")
+        return "agent"
+
+    def no_tokens() -> bool:
+        reads.append("plane")
+        return False
+
+    with pytest.raises(machine.GatewayApiTokenMissing):
+        machine.resolve_gateway_bearer(
+            token_reader=token,
+            secret_reader=secret,
+            profile_reader=profile,
+            no_tokens_reader=no_tokens,
+        )
+    assert reads == ["token", "secret", "profile", "plane"]

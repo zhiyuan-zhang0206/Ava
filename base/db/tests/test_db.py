@@ -26,11 +26,11 @@ from base.native_process import code_version
 from base.telemetry import Event, process_name
 
 
-def _direct_url_x(_config: object = None) -> str:
+def _direct_url_x(_config: object = None, **_kwargs: object) -> str:
     return "postgresql://u:p@db:5432/x"
 
 
-def _direct_url_test(_config: object = None) -> str:
+def _direct_url_test(_config: object = None, **_kwargs: object) -> str:
     return "postgresql://direct-test"
 
 

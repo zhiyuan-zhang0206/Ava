@@ -23,6 +23,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.pin_agent import pin_agent
 
 # ── Two-unit fixtures: model "a gateway unit" and "a runner unit" explicitly ──
@@ -90,7 +91,9 @@ def set_machine_identity() -> Iterator[object]:
 
 
 @pytest.fixture
-def gateway_unit(db_conn: psycopg.Connection) -> Iterator[TestClient]:
+def gateway_unit(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
     """The gateway unit (gateway): owns the test DB/config, runs the
     in-process gateway app, role='gateway'.
 
@@ -104,12 +107,14 @@ def gateway_unit(db_conn: psycopg.Connection) -> Iterator[TestClient]:
     carry auth headers. Tests that specifically exercise the auth middleware
     re-enable it via monkeypatch.
     """
-    from gateway.app import app as _app
+    from gateway import app as gateway_app
 
+    config = snapshot_process_config()
+    monkeypatch.setattr(gateway_app, "ConfigBoot", lambda: config)
     _ = db_conn  # per-test truncate side effect
     with (
         _machine_identity(role="gateway"),
-        TestClient(_app, base_url="http://test-gateway") as client,
+        TestClient(gateway_app.app, base_url="http://test-gateway") as client,
     ):
         yield client
 

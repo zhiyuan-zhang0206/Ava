@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.db import Database
 from tests.skills import load_skill_script
 
 record_module = load_skill_script("platform", "ava-self-evolution", "scripts", "record.py")
@@ -75,7 +76,7 @@ def _label_record(*, turns: int, exec_failed: int) -> dict[str, Any]:
     }
 
 
-def _empty_transcript(_agent_id: int) -> list[dict[str, str]]:
+def _empty_transcript(_agent_id: int, *, database: Database) -> list[dict[str, str]]:
     return []
 
 
@@ -93,11 +94,12 @@ def test_exec_failure_fumble_threshold_scales_with_turns(
 
 
 def test_broadcast_instruction_is_excluded_from_per_agent_corrections(
-    record: Any, monkeypatch: pytest.MonkeyPatch
+    record: Any, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     monkeypatch.setattr(record, "_transcript", _empty_transcript)
 
     rec = record.build_record(
+        database=database,
         agent_id=7,
         week="2026-08-30",
         events=[],
@@ -119,11 +121,12 @@ def test_broadcast_instruction_is_excluded_from_per_agent_corrections(
 
 
 def test_targeted_correction_remains_a_per_agent_correction(
-    record: Any, monkeypatch: pytest.MonkeyPatch
+    record: Any, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     monkeypatch.setattr(record, "_transcript", _empty_transcript)
 
     rec = record.build_record(
+        database=database,
         agent_id=7,
         week="2026-08-30",
         events=[],

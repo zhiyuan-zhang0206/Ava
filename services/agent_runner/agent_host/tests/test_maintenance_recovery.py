@@ -263,10 +263,11 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         llm=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(
@@ -517,12 +518,13 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         llm=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=agent, owns_loop=True),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
     monkeypatch.setattr(
         "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()

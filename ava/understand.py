@@ -17,8 +17,6 @@ from typing import Any, cast, overload
 from ava import files as _files
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava.sdk_surface.validation import coerce_str
-from base.clock import Clock
-from base.config import settings
 from base.lm.attach.constants import ATTACH_MEDIA_MIME
 from base.lm.effort import (
     ReasoningEffort,
@@ -58,6 +56,8 @@ def _save_understand_output(prompt: str, result: str, *, source: str) -> Path | 
     `.exec_output/` dir. Returns the file path, or None when no agent identity
     is established (outside an agent process). Prunes old files to a ring of
     `_OVERFLOW_KEEP`."""
+    from ava.sdk_surface.settings import clock
+
     try:
         from ava.sdk_surface import agent_identity
     except ImportError:
@@ -70,7 +70,7 @@ def _save_understand_output(prompt: str, result: str, *, source: str) -> Path | 
 
     d = workspace_dir(agent_id) / _OVERFLOW_DIRNAME
     d.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(Clock.from_settings().explicit_zone())
+    now = datetime.now(clock().explicit_zone())
     slug = _slugify(prompt, max_len=40)
     path = d / f"understand_{now.strftime('%Y%m%d_%H%M%S_%f')}_{slug}.txt"
     content = "# understand result\n"
@@ -313,19 +313,20 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
     (`max` → deepseek's max, `none` → reasoning off via the thinking switch).
     """
     from ava.sdk_surface import settings as sdk_settings
+    from ava.sdk_surface.settings import config_authority
     from base.lm.call import invoke_text
     from base.lm.factory import build_chat_model
 
     catalog = sdk_settings.model_catalog()
-    model = settings.lm.understand_text_model
+    model = config_authority().service_field_value("understand_text_model")
     try:
         llm = build_chat_model(
             model,
             catalog=catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override=config_authority().service_field_value("llm_override"),
             overrides=sdk_settings.model_overrides(),
             reasoning_effort=effort,
-            timeout=settings.lm.llm_invoke_timeout_seconds,
+            timeout=config_authority().service_field_value("llm_invoke_timeout_seconds"),
         )
     except RuntimeError as e:  # missing API key etc. — surface uniformly
         raise UnderstandError(str(e)) from e
@@ -334,9 +335,13 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
         content,
         desc=f"{model}, text",
         error_type=UnderstandError,
-        retry_attempts=settings.lm.llm_invoke_retry_attempts,
-        retry_delay_seconds=settings.lm.llm_invoke_retry_delay_seconds,
-        retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
+        retry_attempts=config_authority().service_field_value("llm_invoke_retry_attempts"),
+        retry_delay_seconds=config_authority().service_field_value(
+            "llm_invoke_retry_delay_seconds"
+        ),
+        retry_max_delay_seconds=config_authority().service_field_value(
+            "llm_invoke_retry_max_delay_seconds"
+        ),
         model=model,
         usage_source="understand",
         catalog=catalog,
@@ -361,11 +366,12 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     selects the model's lowest thinking level because Gemini cannot turn it off.
     """
     from ava.sdk_surface import settings as sdk_settings
+    from ava.sdk_surface.settings import config_authority
     from base.lm.call import invoke_text
     from base.lm.factory import build_chat_model, provider_key_of_model
 
     catalog = sdk_settings.model_catalog()
-    model = settings.lm.understand_media_model
+    model = config_authority().service_field_value("understand_media_model")
     # The media part shape is Gemini-specific (see the module docstring); only
     # the Gemini provider client understands it. Fail fast at build time with a
     # clear error instead of letting a non-Gemini client crash at invoke time.
@@ -377,14 +383,14 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
             "clients accept). Set AVA_UNDERSTAND_MEDIA_MODEL to a gemini-* model "
             "or wait for a second media provider."
         )
-    res = settings.lm.understand_media_resolution
+    res = config_authority().service_field_value("understand_media_resolution")
     if res not in _MEDIA_RESOLUTION_LEVELS:
         raise UnderstandError(
             f"invalid AVA_UNDERSTAND_MEDIA_RESOLUTION={res!r} — "
             f"must be one of {sorted(_MEDIA_RESOLUTION_LEVELS)}"
         )
 
-    thinking_level = settings.lm.understand_media_thinking_level
+    thinking_level = config_authority().service_field_value("understand_media_thinking_level")
     if effort != ReasoningEffort.MAX:
         spec = catalog.models[model]
         levels = spec.effort_levels
@@ -401,13 +407,13 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
         llm = build_chat_model(
             model,
             catalog=catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override=config_authority().service_field_value("llm_override"),
             overrides=sdk_settings.model_overrides(),
             reasoning_effort=effort,
-            timeout=settings.lm.llm_invoke_timeout_seconds,
+            timeout=config_authority().service_field_value("llm_invoke_timeout_seconds"),
             media_resolution=res,
             media_thinking_level=thinking_level,
-            base_url=settings.lm.understand_media_base_url,
+            base_url=config_authority().service_field_value("understand_media_base_url"),
         )
     except RuntimeError as e:  # missing API key etc. — surface uniformly
         raise UnderstandError(str(e)) from e
@@ -416,9 +422,13 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
         content,
         desc=f"{model}, mime={mime}",
         error_type=UnderstandError,
-        retry_attempts=settings.lm.llm_invoke_retry_attempts,
-        retry_delay_seconds=settings.lm.llm_invoke_retry_delay_seconds,
-        retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
+        retry_attempts=config_authority().service_field_value("llm_invoke_retry_attempts"),
+        retry_delay_seconds=config_authority().service_field_value(
+            "llm_invoke_retry_delay_seconds"
+        ),
+        retry_max_delay_seconds=config_authority().service_field_value(
+            "llm_invoke_retry_max_delay_seconds"
+        ),
         model=model,
         usage_source="understand.media",
         catalog=catalog,

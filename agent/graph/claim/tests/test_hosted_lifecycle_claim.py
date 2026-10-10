@@ -5,6 +5,8 @@ from langchain_core.messages import HumanMessage
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import _BatchState, _handle_restart
 from base.agents.context import AvaContext
+from base.clock import Clock
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 
@@ -12,7 +14,13 @@ from base.lm.plugin_providers import build_model_catalog
 async def test_hosted_restart_marker_does_not_claim_completion() -> None:
     state = _BatchState()
     await _handle_restart(
-        AvaContext(agent=AgentSlices.resolve(), catalog=build_model_catalog()),
+        AvaContext(
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
+            catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
+        ),
         1,
         ClaimedInbound(id=1, agent_id=1, content="", kind="restart", source="self", payload={}),
         state,

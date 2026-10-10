@@ -384,10 +384,9 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
     prod_home = default_home / ".ava"
     (prod_home / "source").mkdir(parents=True)
     monkeypatch.setattr("base.paths.repo_root", lambda: default_home / "Ava" / ".worktrees" / "r4")
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron()
+    cron.register_os_cron(enabled_reader=lambda: True)
 
     assert calls == []  # backend never called; registration refused
 
@@ -399,10 +398,9 @@ def test_register_allowed_from_the_homes_own_source_checkout(
     prod_home = default_home / ".ava"
     (prod_home / "source").mkdir(parents=True)
     monkeypatch.setattr("base.paths.repo_root", lambda: prod_home / "source")
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron()
+    cron.register_os_cron(enabled_reader=lambda: True)
 
     assert calls == ["300"]
 
@@ -412,10 +410,9 @@ def test_register_allowed_for_a_default_home_without_source(
 ) -> None:
     """A default home with no checkout of its own runs whichever checkout registers it."""
     monkeypatch.setattr("base.paths.repo_root", lambda: default_home / "dev-src")
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron()
+    cron.register_os_cron(enabled_reader=lambda: True)
 
     assert calls == ["300"]
 

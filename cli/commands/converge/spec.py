@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster.machine import MachineRole, MachineRoles
+from base.config import ConfigBoot
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
 
@@ -27,7 +28,14 @@ class ConvergeCtx:
     repo: Path
     ava_home: Path
     roles: MachineRoles | None  # None = unit not configured yet (fresh install)
+    config: ConfigBoot
     services: frozenset[str] = frozenset()
+
+    def read_config(self) -> ConfigBoot:
+        """Read startup inputs on first use, retaining an explicitly prepared owner."""
+        if not self.config.prepared:
+            self.config.read_process_environment()
+        return self.config
 
 
 @dataclass(frozen=True)

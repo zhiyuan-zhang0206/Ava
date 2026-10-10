@@ -34,6 +34,8 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -305,10 +307,13 @@ async def test_llm_node_validator_wired(
         ops_pool=ops_db,
         llm=fake_llm,
         event_publisher=pub,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     runtime: Runtime[AvaContext] = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}

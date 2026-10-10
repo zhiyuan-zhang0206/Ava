@@ -46,6 +46,7 @@ from agent.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
+from base.clock import Clock
 from base.config import settings
 from base.config.domains.agent.compaction import AgentCompactionSettings
 from base.config.service_read import ConfigAuthority
@@ -82,7 +83,13 @@ def _patch_dump_enabled(
 
 def _dump(messages: list[AnyMessage]) -> Any:
     """`dump_history` with the slice the patched settings resolve to."""
-    return history_dump.dump_history(messages, 1, AgentSlices.resolve().history_dump)
+    return history_dump.dump_history(
+        messages,
+        1,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).history_dump,
+    )
 
 
 class _FakeClock(datetime):
@@ -187,10 +194,13 @@ def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
             ops_pool=None,
             llm=llm,
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
         )
     )
 
@@ -218,10 +228,13 @@ def _make_runtime(
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
 

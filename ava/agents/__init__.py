@@ -33,8 +33,6 @@ from base.agents import InvalidModelConfig as InvalidModelConfig
 from base.agents import MachineNotRegistered as MachineNotRegistered
 from base.agents import ResurrectError as ResurrectError
 from base.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
-from base.clock import Clock
-from base.config import settings
 
 from . import compaction as compaction
 from . import presets as presets
@@ -160,7 +158,9 @@ class Neighbor:
 
 def _relative_time(dt: datetime) -> str:
     """Convert a datetime into a human-readable relative time string."""
-    zone = Clock.from_settings().zone()
+    from ava.sdk_surface.settings import clock
+
+    zone = clock().zone()
     delta = datetime.now().astimezone(zone) - dt.astimezone(zone)
     seconds = int(delta.total_seconds())
     if seconds < 60:
@@ -263,15 +263,17 @@ def get_neighbors(
     configured defaults (``display.neighbors_default_depth`` /
     ``display.neighbors_default_limit`` - 1 / 20 out of the box).
     """
+    from ava.sdk_surface.settings import config_authority
+
     agent_id = coerce_typed(agent_id, "agent_id", int)
     resolved_depth: int
     if depth is None:
-        resolved_depth = settings.display.neighbors_default_depth
+        resolved_depth = config_authority().service_field_value("neighbors_default_depth")
     else:
         resolved_depth = coerce_typed(depth, "depth", int)
     resolved_limit: int
     if limit is None:
-        resolved_limit = settings.display.neighbors_default_limit
+        resolved_limit = config_authority().service_field_value("neighbors_default_limit")
     else:
         resolved_limit = coerce_typed(limit, "limit", int)
     return [

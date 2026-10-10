@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
+from base.config import ConfigBoot
 from base.deploy.release import collector_artifact as artifact
 from cli.commands.observability import otel_collector as oc
 
@@ -574,6 +575,7 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
         repo=Path(__file__).resolve().parents[4],
         ava_home=home,
         roles=frozenset({"gateway", "agent-runner"}),
+        config=ConfigBoot(),
     )
 
     def must_not_install(*_args: object, **_kwargs: object) -> None:
@@ -604,6 +606,7 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
         repo=Path(__file__).resolve().parents[4],
         ava_home=home,
         roles=frozenset({"gateway"}),
+        config=ConfigBoot(),
     )
 
     installed: list[tuple[object, object, object]] = []
@@ -626,7 +629,10 @@ def test_collector_preparation_never_controls_a_running_service_tree(
     home.mkdir()
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[4], ava_home=home, roles=frozenset({"gateway"})
+        repo=Path(__file__).resolve().parents[4],
+        ava_home=home,
+        roles=frozenset({"gateway"}),
+        config=ConfigBoot(),
     )
 
     def no_root_control() -> None:
@@ -652,6 +658,7 @@ def test_non_lgtm_gateway_reports_and_preserves_residual_config(
         repo=Path(__file__).resolve().parents[4],
         ava_home=home,
         roles=frozenset({"gateway"}),
+        config=ConfigBoot(),
     )
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)

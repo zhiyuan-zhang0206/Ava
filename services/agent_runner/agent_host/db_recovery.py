@@ -22,6 +22,7 @@ from base.agents.history.delta_read_compat import (
     RecoveryReconstructionScope,
     recovery_reconstruction_scope,
 )
+from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.observation.db_wait import DatabaseWait, DatabaseWaits
 from base.config import settings
@@ -206,6 +207,7 @@ async def recover_database(
     database_waits: DatabaseWaits,
     peek_lock: asyncio.Lock,
     work: NativeWorkTarget | None,
+    reconcile_inputs: ReconcileReadInputs,
     reconstruction_parent: RecoveryReconstructionScope | None = None,
 ) -> None:
     """Recover inside the original single-flight task, without an inbound wake.
@@ -298,7 +300,11 @@ async def recover_database(
                 await _run_bounded_stage(
                     waiting,
                     lambda: reconcile_claimed_inbounds_at_startup(
-                        pool, checkpointer, incarnation.agent_id, incarnation=incarnation
+                        pool,
+                        checkpointer,
+                        incarnation.agent_id,
+                        incarnation=incarnation,
+                        inputs=reconcile_inputs,
                     ),
                     phase=phase,
                     agent_id=incarnation.agent_id,

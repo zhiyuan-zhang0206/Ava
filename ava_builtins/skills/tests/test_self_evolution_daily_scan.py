@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.db import Database
 from tests.skills import load_skill_script
 
 
@@ -110,7 +111,7 @@ def test_render_reports_subprocess_and_shell_run_totals(daily_scan: Any) -> None
 
 
 def test_scan_passes_include_test_flag_through(
-    daily_scan: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    daily_scan: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database
 ) -> None:
     """`--include-test` is measurement-only: the nightly scan must stay on the
     default (exclude), and the flag must reach collect untouched."""
@@ -119,18 +120,18 @@ def test_scan_passes_include_test_flag_through(
     class _CollectStub:
         @staticmethod
         def collect_with_counts(
-            days: int, week: str | None, include_test: bool = False
+            days: int, week: str | None, *, database: Database, include_test: bool = False
         ) -> tuple[list[dict], dict[str, int]]:
-            calls.append((days, week, include_test))
+            calls.append((days, week, include_test, database))
             return [], {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
 
     monkeypatch.setattr(daily_scan, "collect", _CollectStub)
     monkeypatch.setattr(daily_scan, "ava_home", lambda: tmp_path)
 
-    result1 = daily_scan.scan(1, week="w1")
-    result2 = daily_scan.scan(2, week="w2", include_test=True)
+    result1 = daily_scan.scan(1, week="w1", database=database)
+    result2 = daily_scan.scan(2, week="w2", database=database, include_test=True)
 
-    assert calls == [(1, "w1", False), (2, "w2", True)]
+    assert calls == [(1, "w1", False, database), (2, "w2", True, database)]
     assert result1.counts == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
     assert result2.counts == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
     # the default run wrote the dataset file, the measurement run too
@@ -268,7 +269,7 @@ def test_main_persists_report_and_prints_pointer(
     ]
     dataset = tmp_path / "daily.jsonl"
 
-    def _fake_scan(days: int, include_test: bool = False) -> Any:
+    def _fake_scan(days: int, include_test: bool = False, **_kwargs: object) -> Any:
         assert days == 1
         assert include_test is False
         return ds.ScanResult(records, dataset, None)
@@ -308,7 +309,7 @@ def test_main_degrades_to_rich_output_when_report_unwritable(
     dataset = tmp_path / "daily.jsonl"
     (tmp_path / "daily.report.txt").mkdir()  # the final replace() onto a directory raises OSError
 
-    def _fake_scan(days: int, include_test: bool = False) -> Any:
+    def _fake_scan(days: int, include_test: bool = False, **_kwargs: object) -> Any:
         assert days == 1
         assert include_test is False
         return ds.ScanResult(records, dataset, None)

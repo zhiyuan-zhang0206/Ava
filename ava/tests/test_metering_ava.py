@@ -45,7 +45,10 @@ from base import telemetry
 from base.agents.sdk import call_policy as sdk_call_policy
 sdk_call_policy.policy = lambda owner: sdk_call_policy.SamplingPolicy()
 rows = []
-telemetry.emit = lambda *args, **kwargs: rows.append(kwargs)
+def capture(*args, producer, **kwargs):
+    assert callable(producer)
+    rows.append(kwargs)
+telemetry.emit = capture
 assert ava.files.read(sys.argv[1]) == "hello"
 print(json.dumps(rows))
 """
@@ -54,9 +57,10 @@ print(json.dumps(rows))
         env={**os.environ, "AVA_AGENT_ID": "42"},
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         timeout=30,
     )
+    assert result.returncode == 0, result.stderr
     rows = json.loads(result.stdout)
     assert len(rows) == 1
     assert rows[0]["agent_id"] == 42

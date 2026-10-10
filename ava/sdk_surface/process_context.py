@@ -16,6 +16,7 @@ from typing import Any
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity
+from base.config import ConfigBoot
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -29,13 +30,12 @@ class ContextOutsideProcessError(AttributeError):
     """The SDK's local context was read outside an execution process."""
 
 
-def _redis() -> object:
+def _redis(*, url_reader: Callable[[], str]) -> object:
     import redis as redis_lib
 
-    from base.config import settings
     from base.events.live.redis_client import RESILIENCE_KWARGS
 
-    url = settings.data_plane.redis_url
+    url = url_reader()
     if not url:
         raise RuntimeError(
             "AVA_REDIS_URL not set — Redis ops should not be called in container mode"
@@ -48,33 +48,33 @@ def _redis() -> object:
     )
 
 
-def _gateway_url() -> str:
-    from base.cluster.machine import gateway_api_base
+def _gateway_url(config: ConfigBoot) -> str:
+    from base.cluster.machine import resolve_gateway_api_base
 
-    return gateway_api_base()
+    return resolve_gateway_api_base(config.view.gateway.gateway_url)
 
 
-def _gateway(url: str) -> Any:
+def _gateway(url: str, *, config: ConfigBoot, timeout_reader: Callable[[], float]) -> Any:
     import httpx
 
-    from base.cluster.auth import bearer_header
-    from base.cluster.machine import gateway_bearer
-    from base.config import settings
+    from base.cluster.auth import bearer_header, delivered_token
+    from base.cluster.machine import resolve_gateway_bearer
+    from base.host.env.bootstrap import config_source_is_local
+    from base.host.env.dotenv_boot import launcher_context
     from base.host.net.http_dial import transport_for_url
 
-    bearer = gateway_bearer()
+    bearer = resolve_gateway_bearer(
+        token_reader=delivered_token,
+        secret_reader=lambda: config.view.data_plane.cluster_secret,
+        profile_reader=launcher_context,
+        no_tokens_reader=lambda: config_source_is_local() and config.view.data_plane.is_remote,
+    )
     return httpx.Client(
         base_url=url,
-        timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
+        timeout=httpx.Timeout(timeout_reader()),
         headers=bearer_header(bearer) if bearer else {},
         transport=transport_for_url(url),
     )
-
-
-def _mcp_timeout_seconds() -> float:
-    from base.config import settings
-
-    return settings.sandbox.mcp_connect_timeout_seconds
 
 
 def process_clients(
@@ -82,34 +82,78 @@ def process_clients(
     gateway_url: str | None = None,
     database: DatabaseFactory | None = None,
     mcp_timeout_seconds: Callable[[], float] | None = None,
+    config: ConfigBoot | None = None,
 ) -> ClientSet:
     """Build lazy process clients without reading their configuration or credentials.
 
-    The MCP timeout reader is passed to each freshly built MCP client, which reads it
-    at its operation and session boundaries. Omission uses this process's settings.
+    Explicit startup owners retain their live views. Omission captures the already
+    delivered environment at the first resource read; SDK use never redelivers it.
     """
+    from ava.gateway_client.transport import GatewayTransportInputs
     from ava.mcps import McpClients
-    from ava.sdk_surface import settings
+    from ava.sdk_surface.settings import database_factory
+
+    owner = config if config is not None else ConfigBoot()
+
+    def read_config() -> ConfigBoot:
+        if config is None:
+            owner.read_process_environment()
+        return owner
 
     timeout_reader = (
-        mcp_timeout_seconds if mcp_timeout_seconds is not None else _mcp_timeout_seconds
+        mcp_timeout_seconds
+        if mcp_timeout_seconds is not None
+        else lambda: read_config().view.sandbox.mcp_connect_timeout_seconds
     )
+
+    def pipeline() -> Any:
+        from base.telemetry import build_pipeline
+
+        return build_pipeline(database=make_database)
+
+    database_builder = database if database is not None else database_factory(config=owner)
+
+    def default_database() -> Any:
+        read_config()
+        return database_builder()
+
+    make_database = database if database is not None else default_database
+
     return ClientSet(
-        gateway_url=gateway_url if gateway_url is not None else _gateway_url,
-        database=database if database is not None else settings.database,
-        redis=_redis,
-        gateway=_gateway,
-        factories={McpClients: lambda: McpClients(timeout_reader)},
+        gateway_url=gateway_url if gateway_url is not None else lambda: _gateway_url(read_config()),
+        database=make_database,
+        pipeline_factory=pipeline,
+        redis=lambda: _redis(url_reader=lambda: read_config().view.data_plane.redis_url),
+        gateway=lambda url: _gateway(
+            url,
+            config=read_config(),
+            timeout_reader=lambda: read_config().view.gateway.gateway_client_http_timeout_seconds,
+        ),
+        factories={
+            McpClients: lambda: McpClients(timeout_reader),
+            GatewayTransportInputs: lambda: GatewayTransportInputs(
+                max_retries_reader=lambda: read_config().view.gateway.gateway_client_max_retries,
+                retry_delay_reader=lambda: (
+                    read_config().view.gateway.gateway_client_retry_delay_seconds
+                ),
+                memory_deadline_reader=lambda: (
+                    read_config().view.services.memory_search_deadline_seconds
+                ),
+            ),
+        },
     )
 
 
 def context_from_description(
-    description: dict[str, Any], *, original_incarnation: RuntimeIncarnation | None = None
+    description: dict[str, Any],
+    *,
+    original_incarnation: RuntimeIncarnation | None = None,
+    config: ConfigBoot | None = None,
 ) -> AvaContext:
     """Rebuild an execution context without copying its host's live clients or secrets."""
     return AvaContext.from_description(
         description,
-        clients=process_clients(gateway_url=description["gateway_url"]),
+        clients=process_clients(gateway_url=description["gateway_url"], config=config),
         original_incarnation=original_incarnation,
     )
 

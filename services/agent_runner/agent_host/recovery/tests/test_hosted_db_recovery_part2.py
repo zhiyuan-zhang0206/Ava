@@ -37,6 +37,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 @pytest.fixture(autouse=True)
@@ -253,6 +254,7 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
         database_waits=DatabaseWaits(),
         peek_lock=asyncio.Lock(),
         work=None,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
     assert repairs == 2
     assert flushes == (2 if write_before_retry else 1)

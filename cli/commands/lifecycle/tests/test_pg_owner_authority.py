@@ -280,7 +280,9 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     """Same catalog, same application privileges, only the dial changed."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
     legacy, current = "ava_lgcy", "ava_auth"
-    _provision_by_owner_login(owned_pg, legacy, get_descriptor().dim)
+    _provision_by_owner_login(
+        owned_pg, legacy, get_descriptor(settings.services.embedding_backend).dim
+    )
     _bind_cluster_url(monkeypatch, owned_pg, current)
 
     assert _provision_by_authority(owned_pg, current) is True

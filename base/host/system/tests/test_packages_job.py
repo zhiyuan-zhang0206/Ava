@@ -27,7 +27,7 @@ def _ok() -> types.SimpleNamespace:
 def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None:
     from base.config import settings
 
-    content = job._launchd_plist_content()
+    content = job._launchd_plist_content(tick_reader=lambda: 900)
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
@@ -53,10 +53,10 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
 
-    assert job._register_macos() == 0
+    assert job._register_macos(tick_reader=lambda: 900) == 0
     plist = job._launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
-    assert job._register_macos() == 0
+    assert job._register_macos(tick_reader=lambda: 900) == 0
 
     assert plist.read_text(encoding="utf-8") == first
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootstrap"]
@@ -84,7 +84,7 @@ def test_linux_registration_replaces_only_its_own_lines(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
 
-    assert job._register_linux() == 0
+    assert job._register_linux(tick_reader=lambda: 900) == 0
     assert other in written["body"]
     assert f"{other}\n\n" in written["body"]
     assert old not in written["body"]
@@ -104,7 +104,7 @@ def test_linux_crontab_failures_and_empty_table(
         return "/usr/bin/crontab"
 
     monkeypatch.setattr(cron.shutil, "which", missing)
-    assert job._register_linux() == 1
+    assert job._register_linux(tick_reader=lambda: 900) == 1
     assert capsys.readouterr().err == (
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered\n"
@@ -125,7 +125,7 @@ def test_linux_crontab_failures_and_empty_table(
         return _ok()
 
     monkeypatch.setattr(cron.subprocess, "run", run)
-    assert job._register_linux() == 1
+    assert job._register_linux(tick_reader=lambda: 900) == 1
     assert writes == []
     assert capsys.readouterr().err == (
         "  * crontab -l failed (permission denied); "
@@ -133,7 +133,7 @@ def test_linux_crontab_failures_and_empty_table(
     )
 
     read.stderr = "no crontab for user"
-    assert job._register_linux() == 0
+    assert job._register_linux(tick_reader=lambda: 900) == 0
     assert (
         len(writes),
         writes[0].startswith("*/15 * * * * "),
@@ -151,7 +151,7 @@ def test_linux_crontab_failures_and_empty_table(
 
     read.stdout = writes[0]
     write_failure = True
-    assert job._register_linux() == 1
+    assert job._register_linux(tick_reader=lambda: 900) == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
     assert job._unregister_linux() == 1
     assert len(writes) == 2
@@ -172,7 +172,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
     monkeypatch.setattr(job.logger, "error", record_error)
-    assert job._register_macos() == 1
+    assert job._register_macos(tick_reader=lambda: 900) == 1
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
     assert errors == [
         ("launchctl bootstrap failed for {}: {}", "com.ava.packages-refresh", "denied")
@@ -188,14 +188,15 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
 def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     skipped: list[str] = []
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: False)
     monkeypatch.setattr(cron, "skip_os_job", skipped.append)
     monkeypatch.setattr(
         "base.host.system.backend.get_backend",
         lambda: pytest.fail("registration reached the backend with the gate off"),
     )
 
-    job.register_packages_job()
+    job.register_packages_job(
+        enabled_reader=lambda: False, refresh_enabled_reader=lambda: False, tick_reader=lambda: 900
+    )
     assert skipped == ["packages refresh"]
 
 
@@ -204,14 +205,17 @@ def test_register_is_skipped_when_refresh_disabled(
 ) -> None:
     from base.config import settings
 
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     monkeypatch.setattr(settings.packages, "refresh_enabled", False)
     monkeypatch.setattr(
         "base.host.system.backend.get_backend",
         lambda: pytest.fail("registration reached the backend with refresh disabled"),
     )
 
-    job.register_packages_job()
+    job.register_packages_job(
+        enabled_reader=lambda: True,
+        refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
+        tick_reader=lambda: 900,
+    )
 
 
 def test_register_dispatches_to_the_backend(
@@ -222,14 +226,17 @@ def test_register_dispatches_to_the_backend(
     calls: list[str] = []
 
     class Backend:
-        def register_packages_job(self) -> None:
+        def register_packages_job(self, *, tick_reader: object) -> None:
             calls.append("register")
 
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     monkeypatch.setattr(settings.packages, "refresh_enabled", True)
     monkeypatch.setattr("base.host.system.backend.get_backend", Backend)
 
-    job.register_packages_job()
+    job.register_packages_job(
+        enabled_reader=lambda: True,
+        refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
+        tick_reader=lambda: 900,
+    )
     assert calls == ["register"]
 
 

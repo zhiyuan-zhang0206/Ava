@@ -15,6 +15,7 @@ from agent.state import AgentState
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
@@ -47,8 +48,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     database: Database,
 ) -> None:
     _plugin(unit_home)
-    # unit_home sets this process's Settings; the real child imports Settings
-    # afresh, so its bootstrap must receive the same isolated home in its env.
+    # The real child builds its own configuration owner from this isolated home.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(unit_home))
     # Ambient carrier leftovers must not become an unbound child's pins.
     monkeypatch.setenv("AVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "deepseek-v4-pro"}))
@@ -60,10 +60,9 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     )
     code = (
         "import json, os\n"
-        "from base.config import settings\n"
-        "from ava.sdk_surface.settings import plugins\n"
-        "print('CONFIG=' + json.dumps([settings.lm.llm_model, "
-        "settings.lm.llm_stream_ttft_timeout_seconds, "
+        "from ava.sdk_surface.settings import agent_setting, plugins\n"
+        "print('CONFIG=' + json.dumps([agent_setting('llm_model'), "
+        "agent_setting('llm_stream_ttft_timeout_seconds'), "
         "plugins.exec_config_probe.exec_probe_marker, "
         "os.environ.get('AVA_AGENT_CONFIG_OVERLAY', 'GONE')]))\n"
     )
@@ -72,7 +71,10 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
         result, *_ = await _run_agent_code(
             AgentState(),
             AvaContext(
-                agent=slices or AgentSlices.resolve(),
+                agent=slices
+                or AgentSlices.resolve(
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                ),
                 db=database,
                 bus=EventBus.from_settings(),
                 clients=process_clients(
@@ -80,6 +82,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
                 ),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
                 catalog=build_model_catalog(),
+                clock_factory=Clock.from_settings,
             ),
             agent_id,
             code,
@@ -98,7 +101,11 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             {"llm_model": model},
             {"llm_model": "deepseek-v4-pro", "llm_stream_ttft_timeout_seconds": timeout},
         )
-        slices = AgentSlices.resolve(pins, {"exec_config_probe": {"exec_probe_marker": marker}})
+        slices = AgentSlices.resolve(
+            pins,
+            {"exec_config_probe": {"exec_probe_marker": marker}},
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        )
         tasks.append(asyncio.create_task(execute(agent_id, slices)))
     assert await asyncio.gather(*tasks) == [
         ["deepseek-v4-pro", 3.0, "agent-a", "GONE"],
@@ -110,3 +117,67 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
         "default-marker",
         "GONE",
     ]
+
+
+async def test_exec_shield_reads_each_owner_at_the_existing_timeout_points() -> None:
+    from agent.graph.exec._result import _ExecTimedOut
+    from agent.graph.exec.node import _exec_with_node_shield
+    from base.config import ConfigBoot
+
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("exec_node_timeout_seconds", 0.002)
+    second.set_field("exec_node_timeout_seconds", 30)
+    first_reads: list[float] = []
+    second_reads: list[float] = []
+
+    def first_timeout() -> float:
+        value = first.view.sandbox.exec_node_timeout_seconds
+        first_reads.append(value)
+        return value
+
+    def second_timeout() -> float:
+        value = second.view.sandbox.exec_node_timeout_seconds
+        second_reads.append(value)
+        return value
+
+    async def stalled():
+        first.set_field("exec_node_timeout_seconds", 5)
+        await asyncio.Future()
+        raise AssertionError("The stalled coroutine must be cancelled")
+
+    async def completed():
+        return _ExecDone(output="done"), None
+
+    timed_out, fast = await asyncio.gather(
+        _exec_with_node_shield(stalled(), 1, read_timeout=first_timeout),
+        _exec_with_node_shield(completed(), 2, read_timeout=second_timeout),
+    )
+    assert isinstance(timed_out[0], _ExecTimedOut)
+    assert "timeout after 5s" in timed_out[0].output
+    assert isinstance(fast[0], _ExecDone)
+    assert first_reads == [0.002, 5, 5]
+    assert second_reads == [30]
+
+
+def test_crop_inputs_are_lazy_and_keep_two_live_readers_separate() -> None:
+    from agent.graph.exec._crop import CropInputs
+    from base.config import ConfigBoot
+
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("exec_output_crop_after_lines", 2)
+    second.set_field("exec_output_crop_after_lines", 7)
+    reads: list[str] = []
+
+    def first_read(field: str) -> int:
+        reads.append(field)
+        return getattr(first.view.sandbox, field)
+
+    first_crop = CropInputs(first_read)
+    second_crop = CropInputs(lambda field: getattr(second.view.sandbox, field))
+    assert reads == []
+    assert first_crop.exec_output_crop_after_lines == 2
+    assert second_crop.exec_output_crop_after_lines == 7
+    first.set_field("exec_output_crop_after_lines", 9)
+    assert first_crop.exec_output_crop_after_lines == 9
+    assert second_crop.exec_output_crop_after_lines == 7
+    assert reads == ["exec_output_crop_after_lines"] * 2

@@ -32,23 +32,25 @@ from __future__ import annotations
 import atexit
 import contextlib
 import json
-import math
-import queue
 import socket
 import sys
-import threading
-import time
-import traceback
 from collections.abc import Callable, Generator
-from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
-from typing import Any, Literal
+from typing import Any
 
 from base.events.contract import EVENTS
 from base.events.contract import category_for_kind as registry_category
 from base.paths import logs_dir
-from base.telemetry.emitter_sync import DrainPhase, DrainResult, DrainStatus, SyncReceipt
+from base.telemetry.delivery.pipeline import EventPipeline
+from base.telemetry.delivery.receipts import (
+    Category,
+    DrainPhase,
+    DrainResult,
+    DrainStatus,
+    Event,
+    Level,
+)
 from base.telemetry.observability import cluster_label
 from base.telemetry.serialization import event_line, event_line_digest, event_payload
 
@@ -58,6 +60,8 @@ __all__ = [
     "DrainResult",
     "DrainStatus",
     "Event",
+    "EventPipeline",
+    "build_pipeline",
     "category_for_kind",
     "emit",
     "emit_prepared",
@@ -71,20 +75,6 @@ __all__ = [
     "stop",
 ]
 
-Category = Literal["audit", "telemetry", "log"]
-Level = Literal["debug", "info", "warning", "error", "critical"]
-
-# Batch-write shape — within the design's 50-500/batch window, and the same
-# cadence the former loguru Postgres sink used (50 / 0.5 s): a burst costs one
-# round-trip per batch while a lone record still lands within half a second.
-_BATCH_SIZE = 100
-_FLUSH_INTERVAL_S = 0.5
-# Queue bound: what stops a producer that outruns the drain thread from growing
-# process memory without limit. Past this point records are shed (see
-# `_EventPipeline.enqueue`) and `dropped` says how much. A shed record is gone
-# from EVERY sink — the JSONL mirror only ever holds what reached the drain
-# thread.
-_QUEUE_MAXSIZE = 10_000
 
 # JSONL mirror retention (day-stamped files, like the trace mirror).
 _JSONL_RETENTION_DAYS = 7
@@ -93,26 +83,6 @@ _JSONL_RETENTION_DAYS = 7
 def event_id(line: str, ts_ns: int) -> int:
     """Return the stable surrogate id shared by mirror and Loki event rows."""
     return int.from_bytes(blake2b(f"{ts_ns}:{line}".encode(), digest_size=8).digest(), "big")
-
-
-@dataclass(frozen=True)
-class Event:
-    """One event in the unified stream — OTel LogRecord semantics (events = logs
-    with names), the shape the event stream carries."""
-
-    ts: datetime
-    trace_id: str | None
-    span_id: str | None
-    agent_id: int | None
-    machine: str
-    cluster: str
-    process: str
-    category: Category
-    event_name: str
-    level: Level
-    source: str
-    target_agent_id: int | None
-    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 def event_row(event: Event) -> dict[str, Any]:
@@ -158,7 +128,7 @@ def capture_trace_ids() -> tuple[str | None, str | None]:
     return None, None
 
 
-def _resolve_machine() -> str:
+def _resolve_machine(name_reader: Callable[[], str] | None = None) -> str:
     """The machine dimension. `machine_name()` is the real identity (set on
     multi-machine units); anything without one (tests, ad-hoc scripts) falls
     back to the hostname so a row always carries the dimension.
@@ -172,7 +142,7 @@ def _resolve_machine() -> str:
     from base.log import logger
 
     try:
-        return machine_name()
+        return (name_reader or machine_name)()
     except MachineNameMissing:
         return socket.gethostname()
     except Exception:
@@ -346,7 +316,7 @@ def failure_isolated(sink: str) -> Generator[None]:
         report_sink_failure(sink, exc)
 
 
-def _write_batch(events: list[Event]) -> None:
+def _write_batch(events: list[Event], *, database: Callable[[], Any]) -> None:
     """Mirror first, then the telemetry_events record, the compact metric projection
     and OTLP export.
 
@@ -357,217 +327,30 @@ def _write_batch(events: list[Event]) -> None:
         return
     _append_jsonl(events)
     with failure_isolated("telemetry_events store"):
-        from base.db import Database
         from base.telemetry.event_store import store_events
 
-        store_events(Database.from_settings(), events)
+        store_events(database(), events)
     try:
-        from base.db import Database
         from base.telemetry.metrics.observed_metrics import project_events
 
-        project_events(Database.from_settings(), events)
+        project_events(database(), events)
     except Exception as exc:
         report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
     _export_otlp(events)
 
 
-class _EventPipeline:
-    """Bounded queue + drain thread owning all event persistence for the process.
-
-    Same shape as the former loguru Postgres sink (which this replaces): the
-    queue bound is the backpressure, the drain thread batches, and shed records
-    are counted and reported as one `event_log_drop` event per flush so the ops
-    monitor panel keeps its backlog metric."""
-
-    def __init__(
-        self,
-        *,
-        writer: Callable[[list[Event]], None] | None = None,
-        batch_size: int = _BATCH_SIZE,
-        flush_interval_s: float = _FLUSH_INTERVAL_S,
-        queue_maxsize: int = _QUEUE_MAXSIZE,
-    ) -> None:
-        if writer is None:
-            writer = _write_batch
-        self._writer = writer
-        self._batch_size = batch_size
-        self._flush_interval_s = flush_interval_s
-        self._queue: queue.Queue[Event | SyncReceipt] = queue.Queue(maxsize=queue_maxsize)
-        self._drop_reported_at = 0.0
-        self._drop_example: Event | None = None
-        self.dropped = 0  # records shed because the queue was full since the last flush
-        # enqueue() runs on producer threads while _flush() (drain thread)
-        # reads and zeroes the counter — `+=` is not atomic under the GIL, so
-        # the read-modify-write pair is serialized.
-        self._dropped_lock = threading.Lock()
-        self._admission_lock = threading.Lock()
-        self._stop_requested = threading.Event()
-        self._finished = threading.Event()
-        self._error: BaseException | None = None
-        self._thread = threading.Thread(target=self._drain, daemon=True, name="event-emitter")
-        self._thread.start()
-
-    def enqueue(self, event: Event) -> None:
-        """Producer path: shed full, closed or failed admission without waiting on writes."""
-        if not self._admit(event):
-            self._record_drop(event)
-
-    def _admit(self, event: Event | SyncReceipt) -> bool:
-        with self._admission_lock:
-            if self._stop_requested.is_set() or self._finished.is_set():
-                return False
-            try:
-                self._queue.put_nowait(event)
-                return True
-            except queue.Full:
-                return False
-
-    def _record_drop(self, event: Event) -> None:
-        with self._dropped_lock:
-            self.dropped += 1
-            self._drop_example = replace(event, ts=datetime.now(UTC))
-            now = time.monotonic()
-            due = self.dropped == 1 or now - getattr(self, "_drop_reported_at", 0.0) >= 5
-            if due:
-                self._drop_reported_at = now
-        if due:
-            from base.telemetry.loss import report_loss
-
-            report_loss(event, 1, "emitter")
-
-    def flush(self) -> DrainResult:
-        """Acknowledge queued and held records through the sole drain writer."""
-        return self.sync()
-
-    def _check_error(self) -> None:
-        if self._error is not None:
-            raise self._error
-
-    def _result(self, *, completed: bool, phase: DrainPhase) -> DrainResult:
-        self._check_error()
-        result = DrainResult(DrainStatus.COMPLETED if completed else DrainStatus.UNFINISHED, phase)
-        if not completed:
-            report_no_pipeline(
-                "[event-emitter] {operation} timed out; telemetry shutdown degraded: "
-                "unfinished ordinary records may be lost or land later",
-                operation="stop()" if phase is DrainPhase.STOP else "sync()",
-            )
-        return result
-
-    def sync(self, timeout: float = 5.0, *, bounded: bool = False) -> DrainResult:
-        """Wait on a distinct FIFO receipt within one end-to-end deadline.
-
-        All ordinary telemetry barriers are finite. ``bounded`` remains accepted
-        for existing close callers. A stuck writer is never rescued by another
-        writer; unfinished delivery is reported and returned to the caller.
-        A terminal worker failure is raised with its original exception.
-        """
-        del bounded  # retained call compatibility; every ordinary barrier is now finite
-        if not math.isfinite(timeout) or timeout < 0:
-            raise ValueError("event drain timeout must be finite and non-negative")
-        if threading.current_thread() is self._thread:
-            raise RuntimeError("event drain cannot wait on its own barrier")
-        deadline = time.monotonic() + timeout
-        receipt = SyncReceipt()
-        admitted = False
-        while not admitted:
-            self._check_error()
-            if self._finished.is_set():
-                return self._result(completed=True, phase=DrainPhase.DRAIN)
-            admitted = self._admit(receipt)
-            remaining = deadline - time.monotonic()
-            if not admitted and remaining <= 0:
-                return self._result(completed=False, phase=DrainPhase.MARKER)
-            if not admitted:
-                self._finished.wait(min(0.01, remaining))
-        while not receipt.done.is_set():
-            self._check_error()
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return self._result(completed=False, phase=DrainPhase.DRAIN)
-            receipt.done.wait(min(0.01, remaining))
-        return self._result(completed=True, phase=DrainPhase.DRAIN)
-
-    def stop(self, timeout: float = 5.0) -> DrainResult:
-        """Close admission, request the owned worker's exit, and join finitely.
-
-        The stop request never enters the bounded event queue. Even a full queue
-        and blocked writer leave the caller with an explicit unfinished result.
-        Repeated stop calls observe late completion or the original failure.
-        """
-        if not math.isfinite(timeout) or timeout < 0:
-            raise ValueError("event drain timeout must be finite and non-negative")
-        deadline = time.monotonic() + timeout
-        with self._admission_lock:
-            self._stop_requested.set()
-        if threading.current_thread() is self._thread:
-            raise RuntimeError("event drain cannot join itself")
-        self._thread.join(timeout=max(0.0, deadline - time.monotonic()))
-        return self._result(completed=not self._thread.is_alive(), phase=DrainPhase.STOP)
-
-    def _flush(self, batch: list[Event]) -> None:
-        """Write loss summaries directly; a saturated queue cannot shed its own alarm."""
-        with self._dropped_lock:
-            n = self.dropped
-            self.dropped = 0
-            example = self._drop_example
-            self._drop_example = None
-        if n and example is not None:
-            from base.telemetry.loss import loss_event
-
-            batch = [*batch, loss_event(example, n, "emitter", dropped_at=example.ts)]
-        if not batch:
-            return
-        self._writer(batch)
-
-    def _drain(self) -> None:
-        """Own all writes and retain terminal failures for barrier/stop callers."""
-        try:
-            self._run_drain()
-        except BaseException as exc:
-            self._error = exc
-            report_no_pipeline("[event-emitter] drain failed: {err}", err=repr(exc), exc=exc)
-            # Early emit-before-init callers may have no logging sink yet.
-            with contextlib.suppress(OSError, ValueError):
-                traceback.print_exception(exc, file=sys.stderr)
-        finally:
-            self._finished.set()
-
-    def _run_drain(self) -> None:
-        """Flush batches and receipts in FIFO order; stop drains closed admission."""
-        batch: list[Event] = []
-        deadline = time.monotonic() + self._flush_interval_s
-        while True:
-            stopping = self._stop_requested.is_set()
-            timeout = 0.0 if stopping else min(0.05, max(0.0, deadline - time.monotonic()))
-            try:
-                event = self._queue.get(timeout=timeout)
-            except queue.Empty:
-                if stopping or time.monotonic() >= deadline:
-                    self._flush(batch)
-                    batch = []
-                    deadline = time.monotonic() + self._flush_interval_s
-                if stopping:
-                    return
-                continue
-            if isinstance(event, SyncReceipt):
-                self._flush(batch)
-                batch = []
-                event.done.set()
-                deadline = time.monotonic() + self._flush_interval_s
-                continue
-            batch.append(event)
-            if len(batch) >= self._batch_size:
-                self._flush(batch)
-                batch = []
-                deadline = time.monotonic() + self._flush_interval_s
+def build_pipeline(*, database: Callable[[], Any]) -> EventPipeline:
+    """Construct the single writer with its root's original database factory."""
+    return EventPipeline(writer=lambda events: _write_batch(events, database=database))
 
 
-def _open_pipeline() -> _EventPipeline:
+def _open_pipeline() -> EventPipeline:
     """Build the process pipeline: queue + drain thread. Startup does not depend on the
     DB: the `telemetry_events` sink connects lazily on the drain thread and backs off
     when the database does not answer, and the JSONL mirror is written first."""
-    return _EventPipeline()
+    from base.db import Database
+
+    return build_pipeline(database=Database.from_settings)
 
 
 def process_name() -> str:
@@ -579,7 +362,13 @@ def process_name() -> str:
     return str(_state["process"])
 
 
-def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> None:
+def init_telemetry(
+    *,
+    process: str = "unknown",
+    agent_id: int | None = None,
+    pipeline: EventPipeline | None = None,
+    machine_reader: Callable[[], str] | None = None,
+) -> None:
     """Bind process identity and bring up the event pipeline. Idempotent.
 
     Called from the loguru `init_*` entry points (the single boot seam every
@@ -588,14 +377,17 @@ def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> 
     first call opens the drain thread; later calls only refresh the identity
     binding. Startup never depends on the DB (the `telemetry_events` sink connects
     lazily on the drain thread)."""
+    bound = _state["pipeline"]
+    if pipeline is not None and bound is not None and bound is not pipeline:
+        raise RuntimeError("this process already binds another event pipeline")
     _state["process"] = process
     _state["agent_id"] = agent_id
-    if _state["machine"] is None:
-        _state["machine"] = _resolve_machine()
+    if machine_reader is not None or _state["machine"] is None:
+        _state["machine"] = _resolve_machine(machine_reader)
     if _state["cluster"] is None:
         _state["cluster"] = cluster_label()
     if _state["pipeline"] is None:
-        _state["pipeline"] = _open_pipeline()
+        _state["pipeline"] = pipeline if pipeline is not None else _open_pipeline()
 
 
 def _ambient_agent_id() -> int | None:
@@ -603,7 +395,7 @@ def _ambient_agent_id() -> int | None:
     return _state["agent_id"]
 
 
-def _ensure_pipeline() -> _EventPipeline | None:
+def _ensure_pipeline() -> EventPipeline | None:
     """Lazy-init fallback for emit-before-init callers. Best-effort: a process
     whose pipeline init fails degrades to dropping (never raises, never
     blocks)."""
@@ -643,6 +435,7 @@ def emit(
     attributes: dict[str, Any] | None = None,
     ts: datetime | None = None,
     capture: Callable[[Event], Event] | None = None,
+    producer: Callable[[], EventPipeline] | None = None,
 ) -> None:
     """Enqueue one event into the unified stream. Never raises — except for a
     contract violation (R2-C): an `event_name` with no `EventSpec` in
@@ -679,7 +472,7 @@ def emit(
         attributes=attributes,
         ts=ts,
     )
-    emit_prepared(event, **({"capture": capture} if capture is not None else {}))
+    emit_prepared(event, capture=capture, producer=producer)
 
 
 def prepare_event(
@@ -730,12 +523,17 @@ def prepare_event(
     )
 
 
-def emit_prepared(event: Event, *, capture: Callable[[Event], Event] | None = None) -> None:
+def emit_prepared(
+    event: Event,
+    *,
+    capture: Callable[[Event], Event] | None = None,
+    producer: Callable[[], EventPipeline] | None = None,
+) -> None:
     """Capture through an explicit producer dependency, then enqueue that exact event."""
     if capture is not None:
         event = capture(event)
     with failure_isolated("emit"):
-        pipeline = _ensure_pipeline()
+        pipeline = producer() if producer is not None else _ensure_pipeline()
         if pipeline is not None:
             pipeline.enqueue(event)
 

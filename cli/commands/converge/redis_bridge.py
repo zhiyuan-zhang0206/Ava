@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -151,10 +152,12 @@ def _bootout_and_wait() -> bool:
     return True
 
 
-def _ensure_launchd(home: Path, repo: Path, config: RedisBridgeConfig) -> None:
+def _ensure_launchd(
+    home: Path, repo: Path, config: RedisBridgeConfig, *, enabled_reader: Callable[[], bool]
+) -> None:
     from base.host.system.cron import os_jobs_enabled, skip_os_job
 
-    if not os_jobs_enabled():
+    if not os_jobs_enabled(enabled_reader=enabled_reader):
         skip_os_job("Redis bridge LaunchAgent")
         return
 
@@ -224,7 +227,12 @@ def ensure_redis_bridge(ctx: ConvergeCtx) -> None:
         if sys.platform == "darwin":
             _retire_launchd_bridge(ctx.ava_home)
         return
-    _ensure_launchd(ctx.ava_home, ctx.repo, config)
+    _ensure_launchd(
+        ctx.ava_home,
+        ctx.repo,
+        config,
+        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
+    )
 
 
 def probe_redis_bridge(home: Path | None = None) -> RedisBridgeStatus:

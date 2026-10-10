@@ -30,3 +30,9 @@ native process identity. Service health imports them without loading rollout
 leases. This evidence grants no startup or mutation authority.
 
 The generic transport mounts only routes explicitly supplied by a caller.
+
+The health wrapper accepts an optional immutable `LoadedCommit` from the process
+entry point. Its handler retains that exact image and reports `image.sha` without
+reading Git or the legacy capture. An explicit unknown stays unknown; callers
+without an image keep their existing legacy source. The SHA enriches probe
+version detail and does not determine readiness or authorize a restart.

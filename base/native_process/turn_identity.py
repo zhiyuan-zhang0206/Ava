@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Coroutine, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,7 @@ class HostedServiceResources:
         self._started = False
         self._closed = False
         self._joined = False
-        self._pending: set[asyncio.Task[None]] = set()
+        self._pending: set[asyncio.Task[Any]] = set()
         self._turns: set[asyncio.Task[Any]] = set()
         self.failures: list[tuple[HostedTurnResources, BaseException]] = []
 
@@ -79,6 +80,27 @@ class HostedServiceResources:
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
         return task
+
+    def retain_task(self, scope: HostedTurnResources, task: asyncio.Task[Any]) -> None:
+        """Retain an original turn child without changing its result or cancelling siblings.
+
+        Existing turns may create settlement work after service stop begins.
+        The same pending set keeps that actual Task inside the original join
+        deadline, even if its caller has already returned or raised.
+        """
+        if scope.service is not self:
+            raise RuntimeError("a hosted task requires its original service scope")
+        if self._closed and self.joined:
+            raise RuntimeError("hosted resource service has already joined")
+        self._pending.add(task)
+        task.add_done_callback(partial(self._collect_task, scope))
+
+    def _collect_task(self, scope: HostedTurnResources, task: asyncio.Task[Any]) -> None:
+        self._pending.discard(task)
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                self.record_failure(scope, error, name=task.get_name())
 
     def record_failure(
         self, scope: HostedTurnResources, error: BaseException, *, name: str
@@ -112,7 +134,7 @@ class HostedServiceResources:
 
     @property
     def joined(self) -> bool:
-        return self._joined or (not self._started and not self._turns)
+        return self._joined or (not self._started and not self._turns and not self._pending)
 
     async def _wait_until_deadline(
         self, deadline: float

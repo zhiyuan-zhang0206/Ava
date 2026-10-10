@@ -26,7 +26,11 @@ from dataclasses import dataclass
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy.chunks import CLAIM_LEASE_SECONDS, RETRY_SPACING_SECONDS
-from base.agents.history.hierarchy.group_consumer import _Models, run_group_checks
+from base.agents.history.hierarchy.group_consumer import (
+    GroupingModels,
+    UnderstandingReadInputs,
+    run_group_checks,
+)
 from base.db import Database
 from base.db.transaction import async_write_transaction
 
@@ -165,9 +169,10 @@ async def _lift_upper(pool: AsyncConnectionPool, agent_id: int) -> list[int]:
 async def run_rebuild(
     pool: AsyncConnectionPool,
     db: Database,
-    models: _Models,
+    models: GroupingModels,
     agent_id: int,
     *,
+    inputs: UnderstandingReadInputs,
     executor: Executor | None = None,
 ) -> int:
     """Rebuild the agent's upper levels from its level-1 nodes; the number of leaves replayed.
@@ -183,5 +188,7 @@ async def run_rebuild(
         waited += _IDLE_POLL_SECONDS
     leaf_ends = await _lift_upper(pool, agent_id)
     for end in leaf_ends:
-        await run_group_checks(pool, db, models, agent_id, executor=executor, upto=end)
+        await run_group_checks(
+            pool, db, models, agent_id, inputs=inputs, executor=executor, upto=end
+        )
     return len(leaf_ends)

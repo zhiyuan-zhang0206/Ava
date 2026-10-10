@@ -19,9 +19,16 @@ from base.agents.history.hierarchy.units import (
     read_times,
 )
 from base.agents.history.hierarchy.usage import MessageUsage
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from services.derived.insights.run_timeline import router
 from services.derived.insights.run_timeline.history import HistoryView
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -72,8 +79,8 @@ def history_messages() -> list[BaseMessage]:
 
 def view(messages: list[BaseMessage] | None = None) -> HistoryView:
     msgs = history_messages() if messages is None else messages
-    read = read_times(msgs)
-    units = display_blocks(divide_units(msgs), msgs, read)
+    read = read_times(msgs, timeline_inputs=_TIMELINE_INPUTS)
+    units = display_blocks(divide_units(msgs, timeline_inputs=_TIMELINE_INPUTS), msgs, read)
     return HistoryView.of(single_segment_history(msgs), units, MessageUsage(msgs), read)
 
 
@@ -282,14 +289,14 @@ def test_nodes_and_units_follow_the_read_order_when_the_stamps_do_not() -> None:
         ),
         AIMessage(content="second", additional_kwargs={"ava_created_at": at(8)}),
     ]
-    read = read_times(msgs)
+    read = read_times(msgs, timeline_inputs=_TIMELINE_INPUTS)
     assert read == [
         None,
         T0 + timedelta(minutes=5),
         T0 + timedelta(minutes=5),
         T0 + timedelta(minutes=8),
     ]
-    units = display_blocks(divide_units(msgs), msgs, read)
+    units = display_blocks(divide_units(msgs, timeline_inputs=_TIMELINE_INPUTS), msgs, read)
     spans = [(u.start, u.end) for u in units]
     assert all(a[1] <= b[0] for a, b in pairwise(spans))
     # The raw stamps stay what they were.
@@ -305,7 +312,7 @@ def test_the_read_time_is_the_stamp_itself_when_the_stamps_are_monotone() -> Non
         T0 + timedelta(minutes=2),
         T0 + timedelta(minutes=10),
     ]
-    assert read_times(msgs) == raw
+    assert read_times(msgs, timeline_inputs=_TIMELINE_INPUTS) == raw
 
 
 def test_a_recorded_pickup_time_is_the_read_time_and_older_messages_fall_back_to_arrival() -> None:
@@ -325,7 +332,7 @@ def test_a_recorded_pickup_time_is_the_read_time_and_older_messages_fall_back_to
             additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(4)},
         ),
     ]
-    assert read_times(msgs) == [
+    assert read_times(msgs, timeline_inputs=_TIMELINE_INPUTS) == [
         None,
         T0 + timedelta(minutes=5),
         T0 + timedelta(minutes=6),  # the recorded pickup, not the arrival
@@ -352,7 +359,7 @@ def test_a_view_behind_the_tree_is_rebuilt_but_not_more_than_every_two_seconds(
     # Even an unchanged checkpoint id does not keep a view the tree reaches past.
     monkeypatch.setattr(history_module, "latest_checkpoint_id", head)
     monkeypatch.setattr(history_module.time, "monotonic", lambda: clock["now"])
-    cache = history_module.HistoryViewCache()
+    cache = history_module.HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     db = cast(Database, object())
     cache.get(db, 1)
     cache.get(db, 1, needs=99)  # an orphan reaches past the history: too soon to rebuild

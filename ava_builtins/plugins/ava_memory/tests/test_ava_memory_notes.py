@@ -6,10 +6,11 @@ stores must not be told how to write to them, and `init_context` must lay down a
 window with no memory notes in it.
 """
 
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,10 +18,16 @@ from agent.graph.prompt.context_notes import FRAMEWORK_NOTES, context_notes
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+
+
+def _default_reader(domain: str, field: str) -> Any:
+    return getattr(getattr(settings, domain), field)
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +45,8 @@ def memory_plugin() -> Any:
 def _context(agent_id: int | None = 1) -> AvaContext:
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=_default_reader),
+        clock_factory=Clock.from_settings,
     )
 
 
@@ -123,7 +131,7 @@ def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> No
     """The type tags the linter enforces and the recall filter reads are the ones
     the agent is told to write — one list, stated here."""
     section = memory_plugin.memory_discipline_section(
-        AgentSlices.resolve(), catalog=build_model_catalog()
+        AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
     )
     for tag in (
         "type/user",
@@ -139,7 +147,7 @@ def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> No
 def test_discipline_carries_the_criteria_triggers_and_source_ranking(memory_plugin: Any) -> None:
     """The four parts that were missing or split across the index framings."""
     section = memory_plugin.memory_discipline_section(
-        AgentSlices.resolve(), catalog=build_model_catalog()
+        AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
     )
     assert "applicable, durable, legible" in section
     assert "answering is not saving" in section  # a correction is due that same turn
@@ -154,7 +162,7 @@ def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plug
     a stale or wrong note is corrected FIRST, before the agent continues the task
     it was on; "noticed but ignored" and waiting for consolidation are both wrong."""
     section = memory_plugin.memory_discipline_section(
-        AgentSlices.resolve(), catalog=build_model_catalog()
+        AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
     )
     assert "important standing duty" in section
     assert "update it first, before continuing" in section
@@ -174,7 +182,7 @@ def test_discipline_keeps_the_shared_pool_restrained_and_personal_verbose(
     allowed to be verbose — process details and half-formed understanding live
     there until they earn the pool."""
     section = memory_plugin.memory_discipline_section(
-        AgentSlices.resolve(), catalog=build_model_catalog()
+        AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
     )
     assert "Restrained by" in section
     assert "How to apply" in section
@@ -199,12 +207,12 @@ def test_discipline_empty_only_when_both_stores_are_off(
 ) -> None:
     """Either store is enough to warrant the discipline; with both off it would
     describe a capability the agent does not have."""
-    monkeypatch.setattr(memory_plugin.settings.agent, "memory_index_inject_enabled", index)
-    monkeypatch.setattr(memory_plugin.settings.agent, "memory_per_agent_inject_enabled", per_agent)
+    monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", index)
+    monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", per_agent)
     assert (
         bool(
             memory_plugin.memory_discipline_section(
-                AgentSlices.resolve(), catalog=build_model_catalog()
+                AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
             )
         )
         is expected
@@ -216,8 +224,8 @@ def test_context_notes_skips_the_stores_that_are_off(
 ) -> None:
     """A disabled store contributes nothing to the window — the note opts out by
     returning None, which the registry drops."""
-    monkeypatch.setattr(memory_plugin.settings.agent, "memory_index_inject_enabled", False)
-    monkeypatch.setattr(memory_plugin.settings.agent, "memory_per_agent_inject_enabled", False)
+    monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", False)
+    monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", False)
     sql = MagicMock()
     sql.cursor.return_value.__enter__.return_value.fetchone.return_value = None
     ctx = replace(_context(), clients=MagicMock(spec=ClientSet, sql=sql))
@@ -260,7 +268,7 @@ def test_per_agent_framing_makes_no_path_resolution_claim(memory_plugin: Any) ->
 
 
 def test_memory_index_injection_guard(
-    memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sdk_model_owner: None
 ) -> None:
     """Audit round-2 up-security-trust P0-2: a MEMORY.md carrying an injection
     imperative (any peer can push to the pool; the index lands in every
@@ -337,3 +345,36 @@ def test_personal_index_skips_unestablished_identity(
 
     assert notes.per_agent_memory_note(_context(None)) is None
     assert not list(tmp_path.iterdir())
+
+
+def test_memory_index_notes_keep_two_live_roots_separate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ava_builtins.plugins.ava_memory import notes
+    from base.config import ConfigBoot
+
+    with patch.dict(os.environ):
+        first, second = ConfigBoot(), ConfigBoot()
+        first.set_field("memory_index_inject_enabled", False)
+        second.set_field("memory_index_inject_enabled", True)
+        first_ctx = AvaContext(
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(first.view, domain), field)
+            ),
+            clock_factory=Clock.from_settings,
+        )
+        second_ctx = AvaContext(
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(second.view, domain), field)
+            ),
+            clock_factory=Clock.from_settings,
+        )
+        monkeypatch.setattr(notes, "memory_dir", lambda: tmp_path)
+        (tmp_path / "MEMORY.md").write_text("A shared index", encoding="utf-8")
+        assert notes.memory_index_note(first_ctx) is None
+        assert notes.memory_index_note(second_ctx) is not None
+        first.set_field("memory_index_inject_enabled", True)
+        second.set_field("memory_index_inject_enabled", False)
+        assert notes.memory_index_note(first_ctx) is not None
+        assert notes.memory_index_note(second_ctx) is None

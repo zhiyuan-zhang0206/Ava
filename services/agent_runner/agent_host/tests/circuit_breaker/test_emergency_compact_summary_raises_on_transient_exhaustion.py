@@ -29,6 +29,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.turn_identity import HostedTurnResources
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.test_circuit_breaker import (
     _ancestor_halt_notes,
     _overflow_state,
@@ -51,7 +52,10 @@ async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> Non
 
     with pytest.raises(CompactionFailedError, match="no usable summary"):
         await emergency_compact_summary(
-            msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+            msgs,
+            llm,
+            AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            catalog=build_model_catalog(),
         )
     assert llm.bind_tools.return_value.ainvoke.await_count == COMPACT_MAX_ATTEMPTS
 
@@ -215,10 +219,11 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
+            clock_factory=configured_policy().clock_factory,
         ),
         child_id,
         "done",

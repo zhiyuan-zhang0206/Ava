@@ -156,20 +156,40 @@ class FullBundle:
     exports: dict[str, Any]
 
 
-def build(*, env_boot: EnvBootResult) -> FullBundle:
+def build(
+    *,
+    env_boot: EnvBootResult,
+    environment: dict[str, str] | None = None,
+    profile: ProcessProfile | None = None,
+) -> FullBundle:
     """Construct the eager chain from the prepared environment.
 
     The environment work — the `.env` load, the config-source decision, the
     cluster clock — already ran in `_lite.prepare()`, in the same order the
     eager boot used; construction is the only step left here."""
-    return FullBundle(settings=Settings(env_boot=env_boot), exports=_facade_exports())
+    if environment is None:
+        settings = Settings(env_boot=env_boot)
+    else:
+        from base.config.service_read import domain_model_classes
+
+        domains = {
+            name: model.from_environment(environment)
+            for name, model in domain_model_classes().items()
+        }
+        settings = Settings(profile=profile, env_boot=env_boot, **domains)
+    return FullBundle(settings=settings, exports=_facade_exports())
 
 
 def _facade_exports() -> dict[str, Any]:
     """The names `base.config` gains when a lite process upgrades."""
-    from base.config import agent_pins as _agent_pins
-    from base.config import service_read as _service_read
-    from base.config.admin import metadata as _metadata
+    from base.config.admin.metadata import (
+        CONFIG_UNCHANGED_SENTINEL,
+        ConfigFieldMeta,
+        env_override_values,
+        get_config_metadata,
+    )
+    from base.config.agent_pins import resolve_agent_config_pins
+    from base.config.service_read import bootstrap_config_values, current_field_values
 
     fields = _config_registry.fields()
     return {
@@ -178,17 +198,16 @@ def _facade_exports() -> dict[str, Any]:
         "FIELD_INFOS": {name: ref.info for name, ref in fields.items()},
         "BOOTSTRAP_FIELDS": _bootstrap_fields(),
         "flat_dump": flat_dump,
-        "refresh_data_plane_settings": refresh_data_plane_settings,
-        "get_config_metadata": _metadata.get_config_metadata,
-        "env_override_values": _metadata.env_override_values,
-        "ConfigFieldMeta": _metadata.ConfigFieldMeta,
-        "CONFIG_UNCHANGED_SENTINEL": _metadata.CONFIG_UNCHANGED_SENTINEL,
-        "current_field_values": _service_read.current_field_values,
-        "bootstrap_config_values": _service_read.bootstrap_config_values,
+        "get_config_metadata": get_config_metadata,
+        "env_override_values": env_override_values,
+        "ConfigFieldMeta": ConfigFieldMeta,
+        "CONFIG_UNCHANGED_SENTINEL": CONFIG_UNCHANGED_SENTINEL,
+        "current_field_values": current_field_values,
+        "bootstrap_config_values": bootstrap_config_values,
         "field_lifecycle": _config_registry.field_lifecycle,
         "frozen_field_names": _config_registry.frozen_field_names,
         "live_field_names": _config_registry.live_field_names,
-        "resolve_agent_config_pins": _agent_pins.resolve_agent_config_pins,
+        "resolve_agent_config_pins": resolve_agent_config_pins,
         # The sub-model classes the facade used to import (tests and the
         # config-service read paths reach them through base.config).
         "AgentSettings": AgentSettings,
@@ -226,7 +245,7 @@ def flat_dump(authority: Any, mode: str = "python") -> dict[str, Any]:
     return authority.flat_dump(mode=mode)
 
 
-def refresh_data_plane_settings() -> None:
+def refresh_data_plane_settings(settings: Any) -> None:
     """Re-read the unit's `.env` and rebuild `settings.data_plane` in place.
 
     A long-lived process (the rollout orchestrator) builds its Settings
@@ -246,7 +265,6 @@ def refresh_data_plane_settings() -> None:
     Other domains are left untouched: the rotation is a data-plane fact, and a
     full singleton swap would surprise subsystems that cache a sub-model.
     """
-    from base.config import settings
     from base.host.env.dotenv_boot import load_ava_env
 
     result = load_ava_env()

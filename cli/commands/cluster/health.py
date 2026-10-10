@@ -20,6 +20,7 @@ from __future__ import annotations
 import shutil
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -28,6 +29,7 @@ import psycopg
 import redis.exceptions
 
 from base import telemetry
+from base.config import ConfigBoot
 from cli.commands.cluster._provider_guard import run_provider_guard
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
@@ -367,11 +369,11 @@ def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str 
     return f"data volume {fraction:.1%} used (watermark {watermark:.0%})"
 
 
-def _walg_archive_failure() -> str | None:
+def _walg_archive_failure(*, path_reader: Callable[[], Path | None]) -> str | None:
     """The first broken WAL-archiving condition, or None (also None while WAL-G is off)."""
     from services.backup.walg import probe
 
-    return probe.failure()
+    return probe.failure(path_reader=path_reader)
 
 
 def _editable_install_failure() -> str | None:
@@ -558,12 +560,19 @@ def _check_alert_only_health() -> int:
     # 6b. WAL archiving — alert-only, same class as checks 5 and 6: a stuck or
     # misconfigured archiver is fixed by repairing the archive path, not by rolling
     # code back. Silent unless AVA_WALG_CONFIG_FILE switches WAL-G on.
-    archive_failure = _walg_archive_failure()
+    config = ConfigBoot()
+
+    def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
+        return config.view.walg.walg_config_file
+
+    archive_failure = _walg_archive_failure(path_reader=path_reader)
     if archive_failure is not None:
         return _alert_only_failure("walg_archive", f"FAIL: {archive_failure}")
     from services.backup.walg.config import enabled as walg_enabled
 
-    if walg_enabled():
+    if walg_enabled(path_reader=path_reader):
         print("  ✓ WAL archiving")
 
     # 7. Editable-install records — alert-only, same class as checks 5 and 6:

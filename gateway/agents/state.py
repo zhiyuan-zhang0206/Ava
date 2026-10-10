@@ -12,7 +12,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, BaseMessage
@@ -114,7 +114,12 @@ def _prepare_message_content(
     blocks = content
     if any(isinstance(b, ImageUrlContentBlock) for b in blocks):
         model = resolve_agent_model(
-            request.app.state.db_pool, agent_id, catalog=request.app.state.catalog
+            request.app.state.db_pool,
+            agent_id,
+            catalog=request.app.state.catalog,
+            default_model_reader=lambda: cast(
+                str, request.app.state.config_authority.service_field_value("llm_model")
+            ),
         )
         if not model_supports_vision(model, catalog=request.app.state.catalog):
             raise HTTPException(
@@ -701,4 +706,7 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         agent_id,
         latest_request_breakdown(messages),
         catalog=request.app.state.catalog,
+        default_model_reader=lambda: cast(
+            str, request.app.state.config_authority.service_field_value("llm_model")
+        ),
     )

@@ -44,8 +44,22 @@ when no external attachment exists. The attachment temporarily overrides an
 external caller profile so peer operations carry `agent:N`, then restores the
 ordinary profile when closed.
 
-Plugins load through the existing extension loader before the attachment binds
-its borrowed context, so that context receives the Installation's model catalog.
+The attachment resolves its lease with an explicit database before binding the
+borrowed context. With no prior context it owns one fresh database gate and lazy
+client set; the first pooled borrow checks the minimum immediately, and later
+handles from that attachment share its thirty-second admission interval.
+Independent attachments do not retain each other's check timestamp. An existing
+context lends its original factory and gate; detach never closes those clients.
+An independent attachment captures the process's existing configuration delivery.
+Its lite reads, eager model and complete SDK read model use those same inputs;
+overlays remain local to that owner. It never reloads or projects `.env` into
+`os.environ`, fetches bootstrap into the environment, or changes process `TZ`.
+Process startup owns that delivery, including provider keys and launcher credentials.
+The existing SDK startup/import contract supplies those inputs without an extra
+caller bootstrap. Fresh config-service reads still use the authority's fixed file.
+Plugins load through the existing extension loader after the identity is bound
+and before reading native state. The installed model catalog then binds to that
+context.
 Framework and plugin config
 views bind the agent's stored configuration, while `ava.external.state.load_snapshot`
 reads its checkpoint without writing it. Pending journal entries are replayed
@@ -75,3 +89,8 @@ Peer messages carry the same borrowed identity: `ava impersonate send
 
 The usage procedure and CLI commands live in
 [External agent impersonation](../../../docs/conventions/agents/agent-impersonation.md).
+
+Event-source close reads its wait bound from that attachment's live configuration
+owner, or the existing installation authority for a borrowed context. It reads
+only when a participant actually closes; quiet attachment close performs no
+policy read or worker construction.

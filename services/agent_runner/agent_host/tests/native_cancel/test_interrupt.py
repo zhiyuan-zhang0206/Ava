@@ -30,6 +30,7 @@ from services.agent_runner.agent_host.invocation.native_work import settle_nativ
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from tests.fixtures.pin_agent import exec_context
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
@@ -123,7 +124,7 @@ async def test_real_model_watcher_discards_partial_then_claim_attributes_origina
         catalog=model_catalog,
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=database,
         bus=EventBus.from_settings(),
     )

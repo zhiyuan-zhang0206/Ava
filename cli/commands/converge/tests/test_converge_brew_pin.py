@@ -9,6 +9,7 @@ import pytest
 
 import cli.commands.converge._brew_pin as cbp
 import cli.commands.converge.host as cv
+from base.config import ConfigBoot
 from base.host import brew_pin
 
 EXPECTED_PINNED_FORMULAE = frozenset(
@@ -30,7 +31,9 @@ EXPECTED_PINNED_FORMULAE = frozenset(
 
 
 def _ctx(tmp_path: Path) -> cv.ConvergeCtx:
-    return cv.ConvergeCtx(repo=Path("/repo"), ava_home=tmp_path, roles=cv.ALL_ROLES)
+    return cv.ConvergeCtx(
+        repo=Path("/repo"), ava_home=tmp_path, roles=cv.ALL_ROLES, config=ConfigBoot()
+    )
 
 
 def _brew_output(

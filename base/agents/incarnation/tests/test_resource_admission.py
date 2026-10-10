@@ -1,6 +1,9 @@
 """The resource-admission protocol: an unknown or unresolved set cannot be reset, terminal consumption is exact, a malformed record never downgrades to legacy, and an owner receipt recovers only the exact persisted allocation."""
 
+import os
+from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
@@ -17,6 +20,13 @@ from base.agents.incarnation.resources import (
 from base.agents.incarnation.tests.test_resources import _admitted, _entry, _force, _process
 from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+
+
+@pytest.fixture(autouse=True)
+def restore_process_delivery() -> Iterator[None]:
+    """Own cold process-client configuration delivery for this consumer scope."""
+    with patch.dict(os.environ):
+        yield
 
 
 def test_successor_cannot_reset_unknown_or_unresolved_set(db_conn: psycopg.Connection) -> None:

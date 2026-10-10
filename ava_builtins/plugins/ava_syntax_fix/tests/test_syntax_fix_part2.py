@@ -20,6 +20,7 @@ from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     syntax_fix_before_exec,
 )
 from base.agents.context import AvaContext
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -101,7 +102,9 @@ class TestSyntaxFixEvents:
         ctx = AvaContext(
             ops_pool=AsyncMock(),
             llm=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
         )

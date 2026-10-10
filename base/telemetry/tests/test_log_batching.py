@@ -98,8 +98,8 @@ class _Recorder:
 
 def _make_sink(
     writer: Callable[[list[Any]], None], *, batch: int, interval: float, maxsize: int
-) -> telemetry._EventPipeline:
-    return telemetry._EventPipeline(
+) -> telemetry.EventPipeline:
+    return telemetry.EventPipeline(
         writer=writer,
         batch_size=batch,
         flush_interval_s=interval,
@@ -333,7 +333,7 @@ def test_shed_records_report_one_event_log_drop() -> None:
     import queue
     import threading
 
-    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+    pipe = telemetry.EventPipeline.__new__(telemetry.EventPipeline)
     pipe._queue = queue.Queue(maxsize=1)
     pipe._admission_lock = threading.Lock()
     pipe._stop_requested = threading.Event()

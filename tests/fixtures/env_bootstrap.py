@@ -442,9 +442,10 @@ _assert_env_precedes_project_imports()
 
 # ava / base.config read AVA_DB_URL + AVA_HOME at import — must come after the
 # env block above, which is what the assertion just enforced.
-from base.config import set_field, settings
+from base.config import ConfigBoot, set_field, settings
 from base.daemon.health import _HEALTH_PORT_OVERRIDES
 from base.host.env.port_table import FIXED_PORTS
+from tests.fixtures.configuration import snapshot_process_config
 
 # The host-scope isolation pins (env block above) must have taken effect before
 # Settings construction: the native LGTM render reads the Tempo URLs at use
@@ -494,6 +495,8 @@ os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 # `pin_agent(spawn_agent())` (`tests/fixtures/identity_restore.py`); the
 # `identity_restore` plugin puts it back after the test. Do not rely on "the first spawn is 1" —
 # capture the returned id.
+from ava.sdk_surface.process_context import process_clients
+from base.clock import Clock, clock_config_from_boot
 from tests.fixtures.pin_agent import pin_agent
 
 pin_agent(1)
@@ -597,7 +600,8 @@ _pin_setting("browser_cdp_port", next(_ports))
 _pin_setting("grafana_port", next(_ports))
 _pin_setting("memory_search_port", next(_ports))
 _pin_setting("memory_search_uri", f"http://127.0.0.1:{settings.services.memory_search_port}")
-set_field("permissions_helper_port", next(_ports))
+_permissions_helper_port = next(_ports)
+set_field("permissions_helper_port", _permissions_helper_port)
 
 # The ports every test home born in this session records (`guards.py`): one
 # kernel-assigned port per slot of the fixed table.
@@ -660,3 +664,23 @@ def session_ports() -> dict[str, int]:
     own channel instead of a module path that depends on how the plugin loads.
     """
     return dict(_SESSION_PORTS)
+
+
+_PROCESS_CONFIG_KEY = pytest.StashKey[ConfigBoot]()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Prepare the session SDK owner before collection and bare function homes."""
+    owner = snapshot_process_config()
+    config.stash[_PROCESS_CONFIG_KEY] = owner
+    pin_agent(
+        1,
+        clients=process_clients(config=owner),
+        clock_factory=lambda: Clock(clock_config_from_boot(owner)),
+    )
+
+
+@pytest.fixture(scope="session")
+def process_config(pytestconfig: pytest.Config) -> ConfigBoot:
+    """The prepared process configuration that native provisioning owns."""
+    return pytestconfig.stash[_PROCESS_CONFIG_KEY]

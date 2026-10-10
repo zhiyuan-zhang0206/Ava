@@ -26,7 +26,6 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
@@ -36,6 +35,7 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 _CHILD = """
 import asyncio, json, os, sys
@@ -235,60 +235,66 @@ async def _assert_successor_turns(
     expected_first: list[str],
     model_catalog: ModelCatalog,
 ) -> None:
-    receipt = db_conn.execute(
-        "SELECT checkpoint_id,recovery_checkpoint_id FROM native_cancel_commands WHERE work_id=%s",
-        (target.work_id,),
-    ).fetchone()
-    assert receipt is not None and receipt[0] is None and receipt[1] is not None
-    snapshot = await graph.aget_state(config)
-    assert snapshot.values["native_cancel"] is None
-    assert snapshot.values["halted"] is True
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=saver,
-        graph=graph,
-        machine="claim-test",
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(),
-        catalog=model_catalog,
-    )
-    ctx = AvaContext(
-        ops_pool=aops_pool,
-        event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
-        db=Database.from_settings(),
-        bus=EventBus.from_settings(),
-        catalog=model_catalog,
-    )
-    outcome = await host._invoke_until_done(
-        target.agent_id,
-        replace(ctx, original_incarnation=successor, hosted_resources=HostedTurnResources()),
-    )
-    assert not outcome.native_held and not outcome.crashed
-    assert replies == expected_first
-    new_work = db_conn.execute(
-        "SELECT native_work_id FROM agents_meta WHERE id=%s", (target.agent_id,)
-    ).fetchone()
-    assert new_work is not None and new_work[0] != target.work_id
-    _insert(db_conn, target.agent_id)
-    outcome = await host._invoke_until_done(
-        target.agent_id,
-        replace(ctx, original_incarnation=successor, hosted_resources=HostedTurnResources()),
-    )
-    assert not outcome.native_held and not outcome.crashed
-    assert replies == [*expected_first, "continued"]
-    # Terminal replay does not project the old work over a newer checkpoint.
-    latest = await graph.aget_state(config)
-    assert await recover_native_cancel(aops_pool, saver, graph, successor, resources=None)
-    assert (await graph.aget_state(config)).config == latest.config
-    assert (
-        db_conn.execute(
+    async with hosted_scope() as resources:
+        receipt = db_conn.execute(
             "SELECT checkpoint_id,recovery_checkpoint_id FROM native_cancel_commands WHERE work_id=%s",
             (target.work_id,),
         ).fetchone()
-        == receipt
-    )
+        assert receipt is not None and receipt[0] is None and receipt[1] is not None
+        snapshot = await graph.aget_state(config)
+        assert snapshot.values["native_cancel"] is None
+        assert snapshot.values["halted"] is True
+        host = AgentHost(
+            policy=configured_policy(),
+            pool=aops_pool,
+            checkpointer=saver,
+            graph=graph,
+            machine="claim-test",
+            bus=EventBus.from_settings(),
+            db=Database.from_settings(),
+            catalog=model_catalog,
+        )
+        ctx = AvaContext(
+            ops_pool=aops_pool,
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
+            catalog=model_catalog,
+            clock_factory=configured_policy().clock_factory,
+        )
+        outcome = await host._invoke_until_done(
+            target.agent_id,
+            replace(ctx, original_incarnation=successor, hosted_resources=resources),
+        )
+        assert not outcome.native_held and not outcome.crashed
+        assert replies == expected_first
+        new_work = db_conn.execute(
+            "SELECT native_work_id FROM agents_meta WHERE id=%s", (target.agent_id,)
+        ).fetchone()
+        assert new_work is not None and new_work[0] != target.work_id
+        _insert(db_conn, target.agent_id)
+        outcome = await host._invoke_until_done(
+            target.agent_id,
+            replace(
+                ctx,
+                original_incarnation=successor,
+                hosted_resources=await resources.require_service().turn(),
+            ),
+        )
+        assert not outcome.native_held and not outcome.crashed
+        assert replies == [*expected_first, "continued"]
+        # Terminal replay does not project the old work over a newer checkpoint.
+        latest = await graph.aget_state(config)
+        assert await recover_native_cancel(aops_pool, saver, graph, successor, resources=None)
+        assert (await graph.aget_state(config)).config == latest.config
+        assert (
+            db_conn.execute(
+                "SELECT checkpoint_id,recovery_checkpoint_id FROM native_cancel_commands WHERE work_id=%s",
+                (target.work_id,),
+            ).fetchone()
+            == receipt
+        )
 
 
 async def _force_successor(

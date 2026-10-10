@@ -19,6 +19,7 @@ Split into its own module to keep `host.py` inside the file-size ceiling.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
@@ -27,6 +28,7 @@ from agent.ownership.corpse_reap import reap_recrashed_corpse
 from agent.ownership.hosted import TurnSettlement, settle_and_stamp_turn
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
+from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -58,6 +60,9 @@ async def close_hosted_turn(
     outcome: TurnOutcome,
     *,
     resources: HostedTurnResources | None,
+    wake_enabled: Callable[[], bool],
+    prompt_reap_enabled: Callable[[], bool],
+    reconcile_inputs: ReconcileReadInputs,
 ) -> None:
     """Settle the finished turn, dispose its claimed rows (the abort pass, or
     a finished turn's own pass), then prompt-reap a corpse that re-crashed
@@ -75,14 +80,26 @@ async def close_hosted_turn(
         resources=resources,
     )
     if outcome.aborted:
-        await reconcile_inbounds_after_abort(pool, checkpointer, incarnation, resources=resources)
+        await reconcile_inbounds_after_abort(
+            pool, checkpointer, incarnation, resources=resources, inputs=reconcile_inputs
+        )
     elif not outcome.crashed and not outcome.truncated and not outcome.native_held:
         # A truncated turn (an applied force terminate of its incarnation)
         # skips the pass too: the successor boundary that observes the force
         # owns its claimed rows.
-        await reconcile_inbounds_after_turn(pool, checkpointer, incarnation, resources=resources)
+        await reconcile_inbounds_after_turn(
+            pool, checkpointer, incarnation, resources=resources, inputs=reconcile_inputs
+        )
     if outcome.crashed:
-        await prompt_reap_after_recrash(control_pool, db, bus, incarnation, settlement)
+        await prompt_reap_after_recrash(
+            control_pool,
+            db,
+            bus,
+            incarnation,
+            settlement,
+            wake_enabled=wake_enabled,
+            enabled=prompt_reap_enabled,
+        )
 
 
 async def prompt_reap_after_recrash(
@@ -91,6 +108,9 @@ async def prompt_reap_after_recrash(
     bus: EventBus,
     incarnation: RuntimeIncarnation,
     settlement: TurnSettlement,
+    *,
+    wake_enabled: Callable[[], bool],
+    enabled: Callable[[], bool],
 ) -> None:
     """Terminate a corpse whose second crash settled right now (task #3616).
 
@@ -114,7 +134,7 @@ async def prompt_reap_after_recrash(
     if stamp is None or not stamp.recrash:
         return
     agent_id = incarnation.agent_id
-    if not settings.daemon.hosted_recrash_prompt_reap_enabled:
+    if not enabled():
         logger.info(
             "recrash prompt reap disabled — the corpse keeps its remaining grace",
             event="host_recrash_reap_skipped",
@@ -131,7 +151,7 @@ async def prompt_reap_after_recrash(
             reason="settle_incomplete",
         )
         return
-    reaped = await reap_recrashed_corpse(pool, incarnation, bus=bus)
+    reaped = await reap_recrashed_corpse(pool, incarnation, bus=bus, wake_enabled=wake_enabled)
     if not reaped:
         logger.info(
             "recrash prompt reap skipped: the row moved on since the crash",
@@ -149,6 +169,7 @@ async def reconcile_inbounds_after_abort(
     incarnation: RuntimeIncarnation,
     *,
     resources: HostedTurnResources | None,
+    inputs: ReconcileReadInputs,
 ) -> None:
     """Dispose the aborted turn's claimed inbounds at its settlement point.
 
@@ -191,7 +212,7 @@ async def reconcile_inbounds_after_abort(
     try:
         async with database_phase():
             await reconcile_claimed_inbounds_at_startup(
-                pool, checkpointer, agent_id, incarnation=incarnation
+                pool, checkpointer, agent_id, incarnation=incarnation, inputs=inputs
             )
     except RuntimeOwnershipLostError:
         logger.warning(
@@ -215,6 +236,7 @@ async def reconcile_inbounds_after_turn(
     incarnation: RuntimeIncarnation,
     *,
     resources: HostedTurnResources | None,
+    inputs: ReconcileReadInputs,
 ) -> None:
     """Dispose the finished turn's claimed inbounds at its settlement point.
 
@@ -262,7 +284,7 @@ async def reconcile_inbounds_after_turn(
     try:
         async with database_phase():
             await reconcile_claimed_inbounds_at_startup(
-                pool, checkpointer, agent_id, incarnation=incarnation
+                pool, checkpointer, agent_id, incarnation=incarnation, inputs=inputs
             )
     except RuntimeOwnershipLostError:
         # Expected fail-closed path (the event declares tier="noise"): the

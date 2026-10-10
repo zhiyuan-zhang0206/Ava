@@ -33,7 +33,7 @@ pytestmark = [
     # module-wide here since every watcher session test needs the fake-id +
     # pty cleanup isolation. `pty_service` first — the isolation fixture's
     # own kill_all/list calls hit the daemon.
-    pytest.mark.usefixtures("pty_service", "_isolated_agent"),
+    pytest.mark.usefixtures("sdk_model_owner", "pty_service", "_isolated_agent"),
 ]
 
 

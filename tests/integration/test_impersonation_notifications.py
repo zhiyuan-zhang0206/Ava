@@ -24,7 +24,9 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.messages.caller_identity import CallerIdentity
+from base.clock import Clock
 from base.cluster.machine import machine_name
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, pool
 from base.events.live.bus import EventBus
@@ -260,11 +262,14 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         context=AvaContext(
             ops_pool=aops_pool,
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             identity=AgentIdentity(agent_id=owner.agent_id, owns_loop=True),
             original_incarnation=owner,
+            clock_factory=Clock.from_settings,
         )
     )
     await _terminate_native(db_conn, aops_pool, owner, session, runtime, mode)

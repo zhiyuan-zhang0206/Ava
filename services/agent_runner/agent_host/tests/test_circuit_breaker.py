@@ -49,6 +49,7 @@ from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.units import spawn_agent
 
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
@@ -100,10 +101,11 @@ def _breaker_ctx() -> AvaContext:
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=configured_policy().clock_factory,
     )
 
 
@@ -162,10 +164,11 @@ async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=cast(AgentEventPublisher, publisher),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=configured_policy().clock_factory,
     )
     exc = FatalProviderError(
         "provider permanently rejected (HTTP 400): Content Exists Risk",
@@ -242,10 +245,11 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
+            clock_factory=configured_policy().clock_factory,
         ),
         agent_id=child_id,
         occurred_at=occurred_at,
@@ -306,10 +310,11 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
+            clock_factory=configured_policy().clock_factory,
         ),
         agent_id=child_id,
     )
@@ -615,7 +620,10 @@ async def test_emergency_compact_summary_uses_real_summary() -> None:
     only fires when the request cannot go out)."""
     msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
     summary = await emergency_compact_summary(
-        msgs, _fake_llm(_LONG_SUMMARY), AgentSlices.resolve(), catalog=build_model_catalog()
+        msgs,
+        _fake_llm(_LONG_SUMMARY),
+        AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        catalog=build_model_catalog(),
     )
     assert summary == _LONG_SUMMARY
 
@@ -634,7 +642,10 @@ async def test_emergency_compact_summary_falls_back_on_permanent_rejection() -> 
     )
 
     summary = await emergency_compact_summary(
-        msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+        msgs,
+        llm,
+        AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        catalog=build_model_catalog(),
     )
     assert _EMERGENCY_COMPACT_MARKER in summary
     assert llm.bind_tools.return_value.ainvoke.await_count == 1, (
@@ -658,7 +669,10 @@ async def test_emergency_compact_summary_preserves_last_prior_summary() -> None:
     llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=_FakeProviderStatusError(400))
 
     summary = await emergency_compact_summary(
-        msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+        msgs,
+        llm,
+        AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        catalog=build_model_catalog(),
     )
     assert prior in summary
     assert _EMERGENCY_COMPACT_MARKER in summary
@@ -694,10 +708,11 @@ async def _reject_turn(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=cast(AgentEventPublisher, publisher),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
+            clock_factory=configured_policy().clock_factory,
         ),
         agent_id=agent_id,
         occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),

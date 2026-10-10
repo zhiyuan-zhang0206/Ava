@@ -21,6 +21,7 @@ from ava.sdk_surface import metering
 from base import telemetry
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation import history as history
 from base.agents.impersonation import manifest as capture
@@ -168,11 +169,10 @@ def test_central_events_belong_to_the_asserted_actor_not_the_recipient(
 def test_a_label_the_agent_sets_while_borrowed_lands_in_its_lease_log(
     db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
 ) -> None:
-    from fastapi.testclient import TestClient
-
     from gateway.app import app
+    from tests.fixtures.gateway_config import gateway_test_client
 
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         by_agent = client.patch(
             f"/api/agents/{owner.agent_id}", json={"label": "borrowed", "source": "self"}
         )
@@ -668,6 +668,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     from base.agents.context.identity import ExternalLease
 
@@ -687,10 +688,12 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         validate=lambda: owner.agent_id,
         config=lambda: None,
     )
+    clients = ClientSet(database=lambda: database)
     ava.bind_context(
         AvaContext(
             identity=AgentIdentity(None, True, lease=borrowed),
             sdk_capture=_CaptureOwner(gate),
+            clients=clients,
         )
     )
     try:
@@ -710,6 +713,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         seal_local_participant(gate)
         assert _state(db_conn, participant) == ("sealed",)
     finally:
+        clients.close()
         if prior is None:
             ava.unbind_context()
         else:

@@ -22,6 +22,7 @@ import argparse
 import builtins
 import sys
 
+from base.config import ConfigBoot
 from base.db import Database
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.docs.notes import walk_notes
@@ -110,7 +111,19 @@ def main() -> int:
         return 1
     print(f"{len(queries)} sample queries, k={args.k}")
 
-    provider = get_provider(catalog=build_model_catalog())
+    boot = ConfigBoot()
+    boot.boot()
+
+    def api_key() -> str | None:
+        value = boot.view.lm.gemini_api_key
+        return None if value is None else value.get_secret_value()
+
+    provider = get_provider(
+        boot.view.services.embedding_backend,
+        catalog=build_model_catalog(),
+        timeout_reader=lambda: boot.view.services.memory_embed_timeout_seconds,
+        api_key_reader=api_key,
+    )
     database = Database.from_settings()
     backend_a = get_backend_named(
         args.a,
@@ -118,6 +131,7 @@ def main() -> int:
         dim=provider.dim,
         fingerprint=provider.fingerprint,
         readonly=readonly,
+        uri_reader=lambda: boot.view.services.memory_search_uri,
     )
     backend_b = get_backend_named(
         args.b,
@@ -125,6 +139,7 @@ def main() -> int:
         dim=provider.dim,
         fingerprint=provider.fingerprint,
         readonly=readonly,
+        uri_reader=lambda: boot.view.services.memory_search_uri,
     )
     if not _connect_backends(backend_a, backend_b, readonly=readonly):
         return 1

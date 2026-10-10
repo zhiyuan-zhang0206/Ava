@@ -7,14 +7,26 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
+from base.agents.impersonation.notes import HandoffNotes
+from base.clock import Clock
 from base.cluster.machine import machine_name
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
+
+
+def _handoff_notes() -> HandoffNotes:
+    return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
 
 
 @pytest.fixture
@@ -77,7 +89,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     from gateway.agents.history.timeline import _window_before
 
     lease = start(owner, config_authority=config_authority)
-    marker = start_marker(lease)
+    marker = start_marker(lease, notes=_handoff_notes())
     for number in range(15):
         history.say(
             database,
@@ -87,7 +99,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
             f"Message {number}",
             message_key=str(number),
         )
-    items, count = build_timeline_items([marker], [])
+    items, count = build_timeline_items([marker], [], inputs=_TIMELINE_INPUTS)
     page = hydrate(database, items, owner.agent_id, limit=5)
     assert count == 1
     assert len(page) == 7  # marker + limit+1 lookahead
@@ -99,6 +111,8 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     assert more
     assert page[-1].impersonation is not None
     assert page[-1].impersonation.executor_name == "Codex: thoughtful squirrel"
-    archived, _ = build_timeline_items([marker], [], segment_prefix="s2.checkpoint")
+    archived, _ = build_timeline_items(
+        [marker], [], segment_prefix="s2.checkpoint", inputs=_TIMELINE_INPUTS
+    )
     archive_page = hydrate(database, archived, owner.agent_id, limit=5)
     assert archive_page[-1].item_id.startswith("s2.checkpoint.0.")

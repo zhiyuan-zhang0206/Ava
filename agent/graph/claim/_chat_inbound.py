@@ -8,6 +8,7 @@ image upload as a native base64 block the model decodes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
 
 from langchain_core.messages import HumanMessage
@@ -16,12 +17,17 @@ from agent.db import ClaimedInbound
 from agent.messages import inbound_message
 from ava.security import SecurityFindingEntry, scan_inbound_content
 from ava.skills.composer_commands import expand_command
-from base.agents.messages.envelope import inbound_head
+from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
 from base.agents.upload_delivery.paths import fetch_upload_b64, parse_upload_url
 from base.log import logger
 
 
-def build_chat_inbound(item: ClaimedInbound) -> tuple[HumanMessage, SecurityFindingEntry | None]:
+def build_chat_inbound(
+    item: ClaimedInbound,
+    *,
+    read_security_enabled: Callable[[], bool],
+    envelope_inputs: EnvelopeReadInputs,
+) -> tuple[HumanMessage, SecurityFindingEntry | None]:
     """Build the HumanMessage for a kind='chat' inbound row, plus its scan finding.
 
     The second element is the injection-scan finding for the row's text, or None
@@ -51,8 +57,8 @@ def build_chat_inbound(item: ClaimedInbound) -> tuple[HumanMessage, SecurityFind
     raw_blocks = item.payload.get("content_blocks") if item.payload else None
     if not isinstance(raw_blocks, list):
         raw = expand_command(item.content)
-        finding = scan_inbound_content(raw, source=scan_src)
-        head = inbound_head(item.source, created_at=item.created_at)
+        finding = scan_inbound_content(raw, source=scan_src, enabled=read_security_enabled())
+        head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
         message = inbound_message(
             content=head + raw,
             source=item.source,
@@ -65,8 +71,8 @@ def build_chat_inbound(item: ClaimedInbound) -> tuple[HumanMessage, SecurityFind
 
     text = "\n".join(b["text"] for b in blocks if b.get("type") == "text")
     raw_text = expand_command(text)
-    finding = scan_inbound_content(raw_text, source=scan_src)
-    head = inbound_head(item.source, created_at=item.created_at)
+    finding = scan_inbound_content(raw_text, source=scan_src, enabled=read_security_enabled())
+    head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
     content: list[dict[str, Any]] = [{"type": "text", "text": head + raw_text}]
     image_urls: list[str] = []
     for b in blocks:

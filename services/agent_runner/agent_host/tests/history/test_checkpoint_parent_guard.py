@@ -147,7 +147,10 @@ async def test_production_nstep_reparents_skipped_checkpoint_and_flush(
     aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.agent, "checkpoint_interval", 4)
-    saver = await _build_checkpointer(aops_pool)
+    saver = await _build_checkpointer(
+        aops_pool,
+        read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
+    )
     first = await saver.aput(
         _config(), _checkpoint(), {"source": "input", "step": -1}, {"value": "1"}
     )
@@ -175,7 +178,10 @@ async def test_actual_delta_graph_with_production_nstep_replays_committed_messag
     aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.agent, "checkpoint_interval", 4)
-    saver = await _build_checkpointer(aops_pool)
+    saver = await _build_checkpointer(
+        aops_pool,
+        read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
+    )
     builder = cast(Any, StateGraph(_DeltaState))  # Pinned graph overloads contain Unknown types.
     builder.add_node("append", _delta_append)
     builder.add_edge(START, "append")

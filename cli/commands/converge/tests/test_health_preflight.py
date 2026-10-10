@@ -11,6 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from base.cluster.machine import MachineRoles
+from base.config import ConfigBoot
 from cli.commands.converge import health_preflight as _hp
 from cli.commands.converge.spec import ConvergeCtx
 
@@ -24,8 +26,12 @@ class _FakeSettings:
     data_plane = _FakeDataPlane()
 
 
-def _preflight_ctx(tmp_path: Path, roles: frozenset | None = frozenset({"gateway"})) -> ConvergeCtx:
-    return ConvergeCtx(repo=tmp_path / "repo", ava_home=tmp_path / "home", roles=roles)  # pyright: ignore[reportUnknownArgumentType]
+def _preflight_ctx(
+    tmp_path: Path, roles: MachineRoles | None = frozenset({"gateway"})
+) -> ConvergeCtx:
+    return ConvergeCtx(
+        repo=tmp_path / "repo", ava_home=tmp_path / "home", roles=roles, config=ConfigBoot()
+    )
 
 
 def _install_fake_settings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,7 +256,9 @@ def _git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Converge
 
     first = _commit("one")
     head = _commit("two")
-    ctx = ConvergeCtx(repo=repo, ava_home=tmp_path / "home", roles=frozenset({"gateway"}))
+    ctx = ConvergeCtx(
+        repo=repo, ava_home=tmp_path / "home", roles=frozenset({"gateway"}), config=ConfigBoot()
+    )
     return ctx, head, first
 
 
@@ -276,7 +284,9 @@ def test_checkout_worktree_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     """A dev worktree path → checkout state is skipped entirely (dev context)."""
     wt = tmp_path / ".claude" / "worktrees" / "some-task"
     wt.mkdir(parents=True)
-    ctx = ConvergeCtx(repo=wt, ava_home=tmp_path / "home", roles=frozenset({"gateway"}))
+    ctx = ConvergeCtx(
+        repo=wt, ava_home=tmp_path / "home", roles=frozenset({"gateway"}), config=ConfigBoot()
+    )
     (wt / "stray.txt").write_text("dirty\n")
 
     assert _hp._checkout_warnings(ctx) == []

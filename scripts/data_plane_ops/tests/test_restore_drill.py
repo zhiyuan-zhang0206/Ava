@@ -6,6 +6,7 @@ import importlib.util
 import subprocess
 import sys
 import types
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -131,14 +132,28 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
 
     monkeypatch.setattr(restore_drill.backup, "backup_dir", lambda: tmp_path)
 
-    def _no_publish(_artifact: object) -> None:
+    def _no_publish(
+        _artifact: object,
+        *,
+        endpoint_reader: Callable[[], str],
+        bucket_reader: Callable[[], str],
+        credentials_file_reader: Callable[[], str],
+    ) -> None:
         return None
 
     monkeypatch.setattr(offsite, "publish", _no_publish)
     # The session database is not a born home: dump it through an explicit dial,
     # under the passphrase a gateway birth pins.
     passphrase.ensure_minted(ava_home())
-    artifact = restore_drill.backup.run_backup(db_url=settings.data_plane.db_url, db=database)
+    artifact = restore_drill.backup.run_backup(
+        db_url=settings.data_plane.db_url,
+        db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
     report, elapsed = restore_drill.run_drill(artifact)
 
     assert report.agents == 1

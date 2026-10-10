@@ -24,6 +24,7 @@ from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery imp
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import (
     isolate as isolate,
 )
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 @pytest.fixture
@@ -86,6 +87,7 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
             database_waits=waits,
             peek_lock=asyncio.Lock(),
             work=None,
+            reconcile_inputs=configured_policy().reconcile_inputs,
         )
     assert attempts == backoff.await_count == 2
     assert waits.snapshot(incarnation.agent_id) is None
@@ -152,6 +154,7 @@ async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
         database_waits=DatabaseWaits(),
         peek_lock=asyncio.Lock(),
         work=None,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
     warnings = [
         c for c in log.warning.call_args_list if c.args[0] == "host checkpoint recovery prolonged"
@@ -206,6 +209,7 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
         database_waits=waits,
         peek_lock=asyncio.Lock(),
         work=None,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
     assert backoff.await_count == failures
     assert waits.snapshot(incarnation.agent_id) is not None

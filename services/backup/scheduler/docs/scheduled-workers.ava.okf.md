@@ -13,6 +13,12 @@ Secrets travel on stdin, never retained request files. Each run has a unique
 0700 `.operation-*` directory, private request/result files and file-backed
 stdout/stderr. Progress and large artifact commits stay off the event loop.
 
+Each scheduler process owns one lazy `ConfigBoot` and forwards its live readers
+to due checks, weekly drill scheduling and retention. Each operation worker
+owns its own boot at process entry and forwards remote-plane, retention and
+off-site readers to the dump API. Clock factories read that same boot at the
+original timezone decision, without caching a configuration snapshot.
+
 The kind's concurrency lock prevents overlapping controller commits. A busy
 lock defers the scheduler. A zero worker exit and object result precede
 `CompletedOperation.commit`: dump publication validates the name and digest,

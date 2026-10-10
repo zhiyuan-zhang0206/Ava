@@ -36,8 +36,6 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import AvaContext
-from base.clock import Clock
-from base.config import settings
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.paths import workspace_dir
@@ -142,7 +140,7 @@ def exec_timeout_note(ctx: AvaContext) -> HumanMessage | None:
     Returns ``None`` when this invocation has no established agent identity."""
     if _established_agent_id(ctx, "exec-timeout") is None:
         return None
-    timeout_s = settings.sandbox.exec_timeout_seconds
+    timeout_s = ctx.require_agent().read("sandbox", "exec_timeout_seconds")
     return system_note_message(
         content=_EXEC_TIMEOUT_FRAMING.format(
             timeout_s=timeout_s,
@@ -190,7 +188,7 @@ def timezone_note(ctx: AvaContext) -> HumanMessage | None:
     Returns ``None`` when this invocation has no established agent identity."""
     if _established_agent_id(ctx, "timezone") is None:
         return None
-    clock = Clock.from_settings()
+    clock = ctx.require_clock()
     now = datetime.now(clock.explicit_zone())
     return system_note_message(
         content=_TIMEZONE_FRAMING.format(name=clock.timezone, offset=_utc_offset(now)),
@@ -228,7 +226,7 @@ def _machine_clause() -> str | None:
     return " ".join(name.split()) or None
 
 
-def _workspace_path(agent_id: int) -> str | None:
+def _workspace_path(agent_id: int, *, enabled: bool) -> str | None:
     """The agent's concrete workspace path, or None when the section is off.
 
     This is where the concrete path lives: the `# Workspace` prompt section is
@@ -237,7 +235,7 @@ def _workspace_path(agent_id: int) -> str | None:
     rides this note instead — regrafted by a fork. Same on/off gate as the
     section: bench runners that turn the section off keep their prompts free of
     workspace chatter."""
-    if not settings.agent.workspace_in_system_prompt:
+    if not enabled:
         return None
     ws = workspace_dir(agent_id)
     try:
@@ -270,7 +268,9 @@ def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
     if machine:
         clauses.append(f"machine: {machine}")
     detail = f" ({', '.join(clauses)})" if clauses else ""
-    workspace = _workspace_path(aid)
+    workspace = _workspace_path(
+        aid, enabled=ctx.require_agent().read("agent", "workspace_in_system_prompt")
+    )
     tail = f" Your workspace is {workspace}." if workspace else ""
     return system_note_message(
         content=f"Your Agent ID is {aid}{detail}.{tail}",

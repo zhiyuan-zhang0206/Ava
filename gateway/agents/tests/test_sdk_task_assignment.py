@@ -19,6 +19,7 @@ from gateway.agents.tests.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.agents.tests.test_task_assignments import body as body
 from gateway.agents.tests.test_task_assignments import client as client
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -80,7 +81,9 @@ def test_unavailable_atomic_route_refuses_without_separate_spawn(body: dict[str,
     unavailable.exception_handlers = app.exception_handlers.copy()
     unavailable.include_router(agent_router.router)
     http = MagicMock()
-    with TestClient(unavailable, headers={"Authorization": f"Bearer {SECRET}"}) as endpoint:
+    with gateway_test_client(
+        unavailable, headers={"Authorization": f"Bearer {SECRET}"}
+    ) as endpoint:
 
         def submit(path: str, **kwargs: Any) -> httpx.Response:
             return _response(endpoint.post(path, json=kwargs["json"], headers=kwargs["headers"]))

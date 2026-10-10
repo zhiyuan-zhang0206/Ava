@@ -17,6 +17,7 @@ from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.extensions.test_mcp_endpoint import _tool_call, _tool_result
 from ops.agents.creation_identity import creation_request_hash
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 PATH = "/api/keyed/v1/agents"
@@ -34,7 +35,7 @@ def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterat
         return SpawnedAgent(id=body.agent_id)
 
     monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
-    with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
+    with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
         yield value
 
 
@@ -158,7 +159,7 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
 ) -> None:
     monkeypatch.setattr(settings.gateway, "mcp_endpoint_enabled", True)
     # The MCP manager is built by lifespan, so re-enter with the flag enabled.
-    with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as mcp:
+    with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as mcp:
         credentials = mcp.post("/api/mcp/clients", json={"name": "prior", "scope": "write"}).json()
         token = credentials["token"]
         original = _tool_result(

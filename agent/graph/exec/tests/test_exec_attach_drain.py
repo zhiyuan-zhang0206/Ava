@@ -23,6 +23,8 @@ from agent.state import AgentState, AttachState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -67,10 +69,13 @@ def _make_runtime(
         ops_pool=make_fake_ops_pool(),
         llm=llm,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
 

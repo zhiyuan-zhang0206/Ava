@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from base.agents.history.timeline import (
-    _ai_message_items,
-    build_timeline_items,
-)
+from base.agents.history.timeline import _ai_message_items, build_timeline_items
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import ExecStatus
+from base.clock import Clock
+from base.config import settings
 from gateway.agents.history.tests.test_timeline import (
     test_client as test_client,
+)
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
 )
 
 
@@ -198,7 +202,7 @@ class TestAiMessageItems:
             status=ExecStatus.COMPLETED,
             body_start=0,
         )
-        items, _ = build_timeline_items([msg], [])
+        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         assert items[0].kind == "code_output"
         assert items[0].exec_ms == 1300
@@ -213,7 +217,7 @@ class TestAiMessageItems:
             tool_call_id="t1",
             additional_kwargs={"ava_msg_type": "exec_output"},
         )
-        items, _ = build_timeline_items([msg], [])
+        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
         assert items[0].kind == "code_output"
         assert items[0].exec_ms is None
 
@@ -227,7 +231,7 @@ class TestAiMessageItems:
         from agent.messages import NoteTag, system_note_message
 
         msg = system_note_message(content="use ava.agents.send_message", tag=NoteTag.AGENT_REPLY)
-        items, _ = build_timeline_items([msg], [])
+        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         assert items[0].kind == "system_marker"
         assert items[0].source == "agent_reply"
@@ -285,10 +289,14 @@ class TestAiMessageItems:
         assert shown | hidden == set(NoteTag)
 
         for tag in shown:
-            items, _ = build_timeline_items([system_note_message(content="x", tag=tag)], [])
+            items, _ = build_timeline_items(
+                [system_note_message(content="x", tag=tag)], [], inputs=_TIMELINE_INPUTS
+            )
             assert items[0].show_timestamp is True, tag
         for tag in hidden:
-            items, _ = build_timeline_items([system_note_message(content="x", tag=tag)], [])
+            items, _ = build_timeline_items(
+                [system_note_message(content="x", tag=tag)], [], inputs=_TIMELINE_INPUTS
+            )
             assert items[0].show_timestamp is False, tag
 
     def test_system_message_renders_as_system_prompt(self):
@@ -298,7 +306,7 @@ class TestAiMessageItems:
         from langchain_core.messages import SystemMessage
 
         msg = SystemMessage(content="You are Ava.\nAct via execute_code.")
-        items, msg_count = build_timeline_items([msg], [])
+        items, msg_count = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
         assert msg_count == 1
         assert len(items) == 1
         assert items[0].kind == "system_prompt"

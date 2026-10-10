@@ -18,6 +18,7 @@ import pytest
 from agent.graph.exec.output import format_elapsed, wrap_code_output
 from agent.graph.exec.tests.output_inputs import CropConfig
 from base.clock import Clock
+from base.config import settings
 from tests.fixtures.pin_agent import pin_agent
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
@@ -428,6 +429,8 @@ def _dispatch(result: object, monkeypatch: pytest.MonkeyPatch) -> tuple[bool, st
         7,
         referenced_messages=(),
         elapsed_seconds=1.0,
+        read_sandbox=lambda field: getattr(settings.sandbox, field),
+        clock=Clock.from_settings(),
     )
     return halted, envelope.text
 
@@ -503,6 +506,8 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
         42,
         referenced_messages=(),
         elapsed_seconds=1.0,
+        read_sandbox=lambda field: getattr(settings.sandbox, field),
+        clock=Clock.from_settings(),
     )
     boot = [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
     assert len(boot) == 1
@@ -519,6 +524,8 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
         42,
         referenced_messages=(),
         elapsed_seconds=1.0,
+        read_sandbox=lambda field: getattr(settings.sandbox, field),
+        clock=Clock.from_settings(),
     )
     assert not [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
 
@@ -667,6 +674,8 @@ def test_dispatch_reports_status_and_body_start(kind: str, status: str, halted: 
         _Ctx(),  # type: ignore[arg-type]
         7,
         elapsed_seconds=113.0,
+        read_sandbox=lambda field: getattr(settings.sandbox, field),
+        clock=Clock.from_settings(),
     )
     assert (got_halted, got_status.value) == (halted, status)
     assert envelope.text[envelope.body_start :].startswith("o\n")

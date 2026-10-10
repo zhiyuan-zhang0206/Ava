@@ -16,6 +16,7 @@ Design:
 from __future__ import annotations
 
 import abc
+from collections.abc import Callable
 from pathlib import Path
 
 from base.native_process.os_platform import is_linux, is_macos
@@ -118,7 +119,7 @@ class PlatformBackend(abc.ABC):
     # -- packages refresh ----------------------------------------------------
 
     @abc.abstractmethod
-    def register_packages_job(self) -> None:
+    def register_packages_job(self, *, tick_reader: Callable[[], int]) -> None:
         """Register the recurring content-refresh pass (skills fast lane)."""
         ...
 
@@ -130,7 +131,7 @@ class PlatformBackend(abc.ABC):
     # -- WAL-G physical backup ----------------------------------------------
 
     @abc.abstractmethod
-    def register_walg_job(self) -> None:
+    def register_walg_job(self, *, backup_hour_reader: Callable[[], int]) -> None:
         """Register the daily WAL-G tick (`ava backup walg run`).
 
         Reached only through ``base.host.system.walg_job.register_walg_job``, which
@@ -277,10 +278,10 @@ class MacPlatformBackend(PlatformBackend):
 
     # -- packages refresh --
 
-    def register_packages_job(self) -> None:
+    def register_packages_job(self, *, tick_reader: Callable[[], int]) -> None:
         from base.host.system.packages_job import _register_macos
 
-        if _register_macos() != 0:
+        if _register_macos(tick_reader=tick_reader) != 0:
             raise RuntimeError("packages-refresh registration failed on macOS")
 
     def unregister_packages_job(self) -> None:
@@ -303,10 +304,10 @@ class MacPlatformBackend(PlatformBackend):
 
     # -- WAL-G physical backup --
 
-    def register_walg_job(self) -> None:
+    def register_walg_job(self, *, backup_hour_reader: Callable[[], int]) -> None:
         from base.host.system.walg_job import _register_macos
 
-        if _register_macos() != 0:
+        if _register_macos(backup_hour_reader=backup_hour_reader) != 0:
             raise RuntimeError("WAL-G tick registration failed on macOS")
 
     def unregister_walg_job(self) -> None:
@@ -399,10 +400,10 @@ class LinuxPlatformBackend(PlatformBackend):
 
     # -- packages refresh --
 
-    def register_packages_job(self) -> None:
+    def register_packages_job(self, *, tick_reader: Callable[[], int]) -> None:
         from base.host.system.packages_job import _register_linux
 
-        if _register_linux() != 0:
+        if _register_linux(tick_reader=tick_reader) != 0:
             raise RuntimeError("packages-refresh registration failed on Linux")
 
     def unregister_packages_job(self) -> None:
@@ -425,10 +426,10 @@ class LinuxPlatformBackend(PlatformBackend):
 
     # -- WAL-G physical backup --
 
-    def register_walg_job(self) -> None:
+    def register_walg_job(self, *, backup_hour_reader: Callable[[], int]) -> None:
         from base.host.system.walg_job import _register_linux
 
-        if _register_linux() != 0:
+        if _register_linux(backup_hour_reader=backup_hour_reader) != 0:
             raise RuntimeError("WAL-G tick registration failed on Linux")
 
     def unregister_walg_job(self) -> None:

@@ -1,7 +1,7 @@
 """The embedding provider contract.
 
 One protocol (`EmbeddingProvider`), N implementations (Gemini today), one
-switch (`embeddings.factory.get_provider()` reading
+switch (`embeddings.factory.get_provider()` receiving
 `AVA_EMBEDDING_BACKEND`). The indexer daemon (document batch path) and the
 gateway search endpoint (async query path) both take their provider from
 the factory; neither imports a concrete provider directly.

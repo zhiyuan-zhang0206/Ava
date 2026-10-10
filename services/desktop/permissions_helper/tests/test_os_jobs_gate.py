@@ -10,6 +10,7 @@ it — so no stale job can resolve onto the prod install.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -30,13 +31,13 @@ class _ExplodingBackend:
     def register_logs_job(self) -> None:
         raise AssertionError("register_logs_job reached the OS with the gate off")
 
-    def register_packages_job(self) -> None:
+    def register_packages_job(self, *, tick_reader: Callable[[], int]) -> None:
         raise AssertionError("register_packages_job reached the OS with the gate off")
 
     def register_pr_flow_job(self) -> None:
         raise AssertionError("register_pr_flow_job reached the OS with the gate off")
 
-    def register_walg_job(self) -> None:
+    def register_walg_job(self, *, backup_hour_reader: Callable[[], int]) -> None:
         raise AssertionError("register_walg_job reached the OS with the gate off")
 
     def unregister_cron(self) -> None:
@@ -71,13 +72,13 @@ class _RecordingBackend:
     def register_logs_job(self) -> None:
         self.calls.append("logs-maintenance")
 
-    def register_packages_job(self) -> None:
+    def register_packages_job(self, *, tick_reader: Callable[[], int]) -> None:
         self.calls.append("packages-refresh")
 
     def register_pr_flow_job(self) -> None:
         self.calls.append("pr-flow")
 
-    def register_walg_job(self) -> None:
+    def register_walg_job(self, *, backup_hour_reader: Callable[[], int]) -> None:
         self.calls.append("walg")
 
     def unregister_cron(self) -> None:
@@ -122,16 +123,50 @@ def test_suite_default_is_off() -> None:
     """The whole suite runs with registration disabled — this is the invariant the
     e2e leak violated (nine launchd health probes on a dev box), so assert it
     directly rather than trusting the conftest comment."""
-    assert cron.os_jobs_enabled() is False
+    assert cron.os_jobs_enabled(enabled_reader=lambda: settings.general.os_jobs_enabled) is False
 
 
 _REGISTERS = [
-    pytest.param(cron.register_os_cron, id="health-probe"),
-    pytest.param(autostart.register_autostart, id="autostart"),
-    pytest.param(logs_job.register_logs_job, id="logs-maintenance"),
-    pytest.param(packages_job.register_packages_job, id="packages-refresh"),
-    pytest.param(pr_flow_job.register_pr_flow_job, id="pr-flow"),
-    pytest.param(walg_job.register_walg_job, id="walg"),
+    pytest.param(
+        partial(cron.register_os_cron, enabled_reader=lambda: settings.general.os_jobs_enabled),
+        id="health-probe",
+    ),
+    pytest.param(
+        partial(
+            autostart.register_autostart, enabled_reader=lambda: settings.general.os_jobs_enabled
+        ),
+        id="autostart",
+    ),
+    pytest.param(
+        partial(
+            logs_job.register_logs_job, enabled_reader=lambda: settings.general.os_jobs_enabled
+        ),
+        id="logs-maintenance",
+    ),
+    pytest.param(
+        partial(
+            packages_job.register_packages_job,
+            enabled_reader=lambda: settings.general.os_jobs_enabled,
+            refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
+            tick_reader=lambda: settings.packages.refresh_tick_seconds,
+        ),
+        id="packages-refresh",
+    ),
+    pytest.param(
+        partial(
+            pr_flow_job.register_pr_flow_job,
+            enabled_reader=lambda: settings.general.os_jobs_enabled,
+        ),
+        id="pr-flow",
+    ),
+    pytest.param(
+        partial(
+            walg_job.register_walg_job,
+            enabled_reader=lambda: settings.general.os_jobs_enabled,
+            backup_hour_reader=lambda: settings.services.backup_hour,
+        ),
+        id="walg",
+    ),
 ]
 _UNREGISTER_CALLS: dict[str, Callable[[], None]] = {
     "health-probe": cron.unregister_os_cron,
@@ -157,12 +192,19 @@ def test_registration_dispatches_when_enabled(
     gate_on: None, default_home: Path, backend: _RecordingBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(pr_flow_job, "credential_blocker", lambda: None)
-    cron.register_os_cron()
-    autostart.register_autostart()
-    logs_job.register_logs_job()
-    packages_job.register_packages_job()
-    pr_flow_job.register_pr_flow_job()
-    walg_job.register_walg_job()
+    cron.register_os_cron(enabled_reader=lambda: settings.general.os_jobs_enabled)
+    autostart.register_autostart(enabled_reader=lambda: settings.general.os_jobs_enabled)
+    logs_job.register_logs_job(enabled_reader=lambda: settings.general.os_jobs_enabled)
+    packages_job.register_packages_job(
+        enabled_reader=lambda: settings.general.os_jobs_enabled,
+        refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
+        tick_reader=lambda: settings.packages.refresh_tick_seconds,
+    )
+    pr_flow_job.register_pr_flow_job(enabled_reader=lambda: settings.general.os_jobs_enabled)
+    walg_job.register_walg_job(
+        enabled_reader=lambda: settings.general.os_jobs_enabled,
+        backup_hour_reader=lambda: settings.services.backup_hour,
+    )
     assert backend.calls == [
         "cron",
         "autostart",

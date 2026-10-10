@@ -22,7 +22,13 @@ from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm_errors import LlmLedger
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
+from base.clock import Clock
 from base.cluster.machine import machine_name
+
+# The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
+# windows vs flake; the poll-interval tests are serial (flaky-marked) because
+# they depend on real DB IO timing.
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
@@ -34,9 +40,6 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
-# The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
-# windows vs flake; the poll-interval tests are serial (flaky-marked) because
-# they depend on real DB IO timing.
 _TIMEOUT_S = 5.0
 
 # The payload a maintenance drain stamps on its restart command.
@@ -508,10 +511,13 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             ops_pool=aops_pool,
             llm=model,
             event_publisher=publisher,
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
         )
     )
     invocation = asyncio.create_task(
@@ -639,10 +645,13 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
             ops_pool=aops_pool,
             llm=model,
             event_publisher=publisher,
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
         )
     )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)

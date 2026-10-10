@@ -11,6 +11,8 @@ not swallowed by `except Exception`; the difference is what kind is written to t
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import psycopg
 import pytest
 
@@ -307,6 +309,21 @@ class TestRestart:
 
 
 class TestPauseHeartbeat:
+    @pytest.fixture(autouse=True)
+    def policy_installation(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        model_installation: Installation,
+        config_authority: ConfigAuthority,
+    ) -> None:
+        """The actual SDK caller uses this test root's supplied live configuration."""
+        monkeypatch.setattr(
+            ava,
+            "__plugin_installation__",
+            replace(model_installation, authority=config_authority),
+            raising=False,
+        )
+
     def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
         self,
         db_conn: psycopg.Connection,
@@ -447,7 +464,7 @@ class TestRestartCompletedMarker:
     def test_marker_no_payload(self) -> None:
         from agent.graph.claim.node import _render_restart_completed_marker
 
-        msg = _render_restart_completed_marker("self", None)
+        msg = _render_restart_completed_marker("self", None, timestamp_prefix=lambda: "")
         assert "restarted by yourself" in msg
         assert "with config" not in msg
 
@@ -455,7 +472,7 @@ class TestRestartCompletedMarker:
         from agent.graph.claim.node import _render_restart_completed_marker
 
         msg = _render_restart_completed_marker(
-            "self", {"config_overlay": {"auto_compact_fraction": 0.7}}
+            "self", {"config_overlay": {"auto_compact_fraction": 0.7}}, timestamp_prefix=lambda: ""
         )
         assert "restarted by yourself" in msg
         assert "with config {auto_compact_fraction=0.7}" in msg
@@ -467,6 +484,7 @@ class TestRestartCompletedMarker:
         msg = _render_restart_completed_marker(
             "system:update",
             {"config_overlay": {"auto_compact_fraction": 0.5}},
+            timestamp_prefix=lambda: "",
         )
         assert "updated and restarted" in msg
         assert "with config {auto_compact_fraction=0.5}" in msg
@@ -486,6 +504,7 @@ class TestRestartCompletedMarker:
                     "cluster_secret": "hunter2",
                 }
             },
+            timestamp_prefix=lambda: "",
         )
         assert "deepseek_api_key=<redacted>" in msg
         assert "cluster_secret=<redacted>" in msg

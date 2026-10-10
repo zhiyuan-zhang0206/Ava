@@ -28,6 +28,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
@@ -402,7 +403,10 @@ async def _run_with_fakes(
 
     stack = TrackedStack()
 
-    async def fake_create_upstream(_url: str, _stop: asyncio.Event) -> tuple[Any, Any]:
+    async def fake_create_upstream(
+        _url: str, _stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
+    ) -> tuple[Any, Any]:
+        assert connect_timeout_reader() == 60.0
         return FakeSession(), stack  # type: ignore[return-value]
 
     monkeypatch.setattr(daemon_mod, "_create_upstream", fake_create_upstream)
@@ -417,7 +421,7 @@ async def _run_with_fakes(
     monkeypatch.setattr(daemon_mod.GatewaySession, "refresh_loop", never)
     monkeypatch.setattr(daemon_mod.GatewaySession, "spawn_inject", no_inject)
 
-    task = asyncio.create_task(run())
+    task = asyncio.create_task(run(browser_cdp_port=9222, connect_timeout_reader=lambda: 60.0))
     await asyncio.sleep(0.3)  # let run() connect and start the watchdog/reaper
     return task, stack
 

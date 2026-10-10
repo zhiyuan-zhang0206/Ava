@@ -22,11 +22,17 @@ from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import build_agent_state
 from ava import gateway_client
 from base.agents.context import AvaContext
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
+
+
+def _default_reader(domain: str, field: str) -> Any:
+    return getattr(getattr(settings, domain), field)
 
 
 def _compact_disabled(_state: Any, _agent: AgentSlices, *, catalog: ModelCatalog) -> bool:
@@ -69,10 +75,11 @@ def _runtime(catalog: ModelCatalog) -> Runtime[AvaContext]:
         ops_pool=MagicMock(),
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=_default_reader),
         catalog=catalog,
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
 

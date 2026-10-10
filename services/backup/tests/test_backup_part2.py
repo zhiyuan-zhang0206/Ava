@@ -30,6 +30,8 @@ _REPO = Path(__file__).resolve().parents[3]
 
 @pytest.fixture
 def bdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    pg_binaries = {name: backup.pg_tool(name) for name in ("pg_dump", "pg_restore")}
+    monkeypatch.setattr(backup, "pg_tool", pg_binaries.__getitem__)
     monkeypatch.setattr(backup, "backup_dir", lambda: tmp_path)
     monkeypatch.setattr(settings.general, "timezone", _CLUSTER_TZ)
     return tmp_path
@@ -115,7 +117,16 @@ def test_run_backup_avoids_overwriting_a_same_second_dump(
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
 
-    created = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", db=database)
+    created = backup.run_backup(
+        _dt(2026, 8, 8, 3, 0),
+        db_url="dbname=whatever",
+        db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     assert created.name == "whatever-20260808T100001Z.dump.enc"
     assert existing.read_bytes() == b"x"

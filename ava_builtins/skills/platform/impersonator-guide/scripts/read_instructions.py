@@ -7,6 +7,7 @@ from langchain_core.messages import BaseMessage, SystemMessage
 
 from ava import external
 from ava.external import state as snapshots
+from ava.sdk_surface.settings import database
 from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 
 
@@ -35,7 +36,7 @@ def read_instructions(session_id: int, agent_id: int) -> str:
         # snapshot separately so a controller's staged messages cannot replace
         # the inherited instructions. Attachment close revalidates the lease
         # before this function returns any text to the executor.
-        snapshot, _, _ = snapshots.load_snapshot(agent_id)
+        snapshot, _, _ = snapshots.load_snapshot(agent_id, database=database())
         return instruction_text(snapshot.messages)
 
 

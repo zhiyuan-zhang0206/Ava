@@ -34,6 +34,8 @@ from agent.graph.prompt._base_prompt import _capture_ava_overview, _get_ava_over
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
@@ -172,10 +174,13 @@ def _make_runtime(
         ops_pool=make_fake_ops_pool(),
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx, execution_info=execution_info)
 
@@ -511,12 +516,16 @@ def test_record_consecutive_error_tracks_and_clears(ledger: LlmLedger) -> None:
     tid = "test-thread-1"
 
     exc = LLMStreamStallTimeoutError("test")
-    ledger.record_consecutive_error(tid, exc)
+    ledger.record_consecutive_error(
+        tid, exc, max_cap=settings.lm.llm_retry_max_consecutive_same_error
+    )
     assert ledger.consecutive_error(tid) == ("LLMStreamStallTimeoutError", 1), (
         "first record should be count=1"
     )
 
-    ledger.record_consecutive_error(tid, exc)
+    ledger.record_consecutive_error(
+        tid, exc, max_cap=settings.lm.llm_retry_max_consecutive_same_error
+    )
     assert ledger.consecutive_error(tid) == ("LLMStreamStallTimeoutError", 2), (
         "same type recorded again should be count=2"
     )
@@ -535,10 +544,16 @@ def test_check_consecutive_error_cap_raises_fatal_on_exhaustion(ledger: LlmLedge
 
     tid = "test-thread-2"
     for _ in range(3):
-        ledger.record_consecutive_error(tid, LLMStreamStallTimeoutError("test"))
+        ledger.record_consecutive_error(
+            tid,
+            LLMStreamStallTimeoutError("test"),
+            max_cap=settings.lm.llm_retry_max_consecutive_same_error,
+        )
 
     with pytest.raises(FatalLLMStreamError, match="retry cap"):
-        ledger.check_consecutive_error_cap(tid)
+        ledger.check_consecutive_error_cap(
+            tid, max_cap=settings.lm.llm_retry_max_consecutive_same_error
+        )
 
     # After cap exhaustion the entry is popped, next turn restarts counting
     assert ledger.consecutive_error(tid) is None, (
@@ -552,10 +567,16 @@ def test_check_consecutive_error_cap_below_threshold_passes(ledger: LlmLedger) -
 
     tid = "test-thread-3"
     for _ in range(2):  # < cap(3)
-        ledger.record_consecutive_error(tid, LLMStreamStallTimeoutError("test"))
+        ledger.record_consecutive_error(
+            tid,
+            LLMStreamStallTimeoutError("test"),
+            max_cap=settings.lm.llm_retry_max_consecutive_same_error,
+        )
 
     # should not raise
-    ledger.check_consecutive_error_cap(tid)
+    ledger.check_consecutive_error_cap(
+        tid, max_cap=settings.lm.llm_retry_max_consecutive_same_error
+    )
 
     assert ledger.consecutive_error(tid) == ("LLMStreamStallTimeoutError", 2), (
         "below cap must not alter entry"

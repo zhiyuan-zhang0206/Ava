@@ -9,10 +9,13 @@ would trigger the compensating `ava start`).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
+from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import patch
 
 import psutil
 import psycopg
@@ -27,7 +30,14 @@ from cli.commands.data_plane import maintenance_stop as plane
 HUNG_SECONDS = "3617"  # a marker only this test's archive command carries
 
 
-def _hung_archive_args() -> list[str]:
+@pytest.fixture(autouse=True)
+def config_boot_environment() -> Generator[None]:
+    """Restore process delivery from the maintenance operation's boot."""
+    with patch.dict(os.environ):
+        yield
+
+
+def _hung_archive_args(**_inputs: object) -> list[str]:
     return [
         "-c",
         "archive_mode=on",

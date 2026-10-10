@@ -4,10 +4,10 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.db import create_agent
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.parametrize(
@@ -21,7 +21,7 @@ def test_retired_route_has_no_effect(db_conn: psycopg.Connection, route: str) ->
         (agent, attempt),
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         response = client.post(
             route.format(agent=agent),
             json={"agent_id": agent},

@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,7 @@ def test_child_installs_signal_handlers_before_reading_request(
         _overlay: dict[str, object] | None,
         *,
         scope: str,
+        set_framework_field: object = None,
     ) -> bool:
         return False
 
@@ -99,9 +101,16 @@ def test_child_installs_signal_handlers_before_reading_request(
     def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
         return None
 
-    def fake_ensure_plugins_loaded(*, surface: bool = True) -> None:
+    def fake_ensure_plugins_loaded(
+        *,
+        surface: bool = True,
+        config: object,
+        clock_factory: object,
+        producer: Callable[[], object],
+    ) -> None:
         # Stateless request (fake_read_request: state=None) -> the surface load.
         assert surface is True
+        assert callable(producer)
 
     monkeypatch.setattr(exec_child, "_line_buffered_output", lambda: None)
     monkeypatch.setattr(protocol, "read_request", fake_read_request)
@@ -114,7 +123,15 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     try:
-        exec_child._run("request.json", "result.json", 0.0)
+        from ava.sdk_surface.process_context import process_clients
+        from tests.fixtures.configuration import snapshot_process_config
+
+        config = snapshot_process_config()
+        clients = process_clients(config=config)
+        try:
+            exec_child._run("request.json", "result.json", 0.0, config=config, clients=clients)
+        finally:
+            clients.close()
     finally:
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)

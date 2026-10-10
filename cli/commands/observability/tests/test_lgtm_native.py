@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 import yaml
 
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from cli.commands.observability import lgtm_native
@@ -473,6 +473,7 @@ def test_native_step_does_not_touch_an_unmarked_home(
         ava_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         services=frozenset(lgtm_native.BACKENDS),
+        config=ConfigBoot(),
     )
 
     def fail_ensure(_repo_path: Path, _home: Path) -> None:

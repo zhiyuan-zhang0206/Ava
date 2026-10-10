@@ -9,10 +9,12 @@ import pytest
 
 from ava.tests.understand.provider_support import ProviderCapture
 from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
+from ava.tests.understand.provider_support import understand_clock as understand_clock
 from ava.understand import understand
+from base.clock import Clock
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
-pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+pytestmark = pytest.mark.usefixtures("sdk_model_owner", "understand_clock")
 
 # ── auto-save output ────────────────────────────────────────────────────────
 
@@ -28,7 +30,7 @@ def test_single_result_saved_to_exec_output(
     ws.mkdir(parents=True)
 
     # Monkeypatch workspace_dir and agent_id
-    pin_agent(agent_id)
+    pin_agent(agent_id, clock_factory=Clock.from_settings)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -55,7 +57,7 @@ def test_batch_results_saved_to_exec_output(
     agent_id = 2139
     ws = tmp_path / "batch_ws"
     ws.mkdir(parents=True)
-    pin_agent(agent_id)
+    pin_agent(agent_id, clock_factory=Clock.from_settings)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -83,7 +85,7 @@ def test_auto_save_prunes_old_files(
     agent_id = 2139
     ws = tmp_path / "prune_ws"
     ws.mkdir(parents=True)
-    pin_agent(agent_id)
+    pin_agent(agent_id, clock_factory=Clock.from_settings)
 
     def _fake_workspace(aid: int) -> Path:
         return ws

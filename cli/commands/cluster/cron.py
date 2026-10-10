@@ -12,6 +12,7 @@ is always present when the cluster is running.
 
 from __future__ import annotations
 
+from base.config import ConfigBoot
 from base.host.system.cron import (
     DEFAULT_INTERVAL_SECONDS,
     register_os_cron,
@@ -27,8 +28,15 @@ def cmd_cron_register(
 
     CLI entry — delegates to `base.host.system.cron.register_os_cron`. Idempotent —
     re-running updates the interval and reloads the job."""
+    config = ConfigBoot()
+
+    def enabled_reader() -> bool:
+        if not config.prepared:
+            config.read_process_environment()
+        return config.view.general.os_jobs_enabled
+
     try:
-        register_os_cron(interval_s=interval_s)
+        register_os_cron(interval_s=interval_s, enabled_reader=enabled_reader)
     except RuntimeError as e:
         print(f"  * {e}")
         return 1

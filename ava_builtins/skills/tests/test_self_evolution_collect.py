@@ -19,6 +19,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from base.config import settings
+from base.db import Database
 from tests.skills import load_skill_script
 
 
@@ -72,11 +73,14 @@ def test_old_history_collapses_to_task_prompt(
 
 
 def test_quiet_resident_does_not_reuse_ancient_spawner_prompt(
-    collect_mod: Any, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    collect_mod: Any,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """A historical spawn brief is not the prompt for a quiet collection window."""
 
-    def _empty_transcript(_agent_id: int) -> list[dict[str, str]]:
+    def _empty_transcript(_agent_id: int, *, database: Database) -> list[dict[str, str]]:
         return []
 
     monkeypatch.setattr(collect_mod, "_transcript", _empty_transcript)
@@ -89,6 +93,7 @@ def test_quiet_resident_does_not_reuse_ancient_spawner_prompt(
         inbounds = _fetch(collect_mod, cur, [8])
 
     rec = collect_mod.build_record(
+        database=database,
         agent_id=8,
         week="2026-08-30",
         events=[],
@@ -101,11 +106,14 @@ def test_quiet_resident_does_not_reuse_ancient_spawner_prompt(
 
 
 def test_fresh_worker_uses_in_window_spawner_prompt(
-    collect_mod: Any, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    collect_mod: Any,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """A worker's recent spawn brief is its only task prompt."""
 
-    def _empty_transcript(_agent_id: int) -> list[dict[str, str]]:
+    def _empty_transcript(_agent_id: int, *, database: Database) -> list[dict[str, str]]:
         return []
 
     monkeypatch.setattr(collect_mod, "_transcript", _empty_transcript)
@@ -118,6 +126,7 @@ def test_fresh_worker_uses_in_window_spawner_prompt(
         inbounds = _fetch(collect_mod, cur, [9])
 
     rec = collect_mod.build_record(
+        database=database,
         agent_id=9,
         week="2026-08-30",
         events=[],
@@ -183,19 +192,22 @@ def test_agent_without_inbounds_absent(collect_mod: Any, db_conn: psycopg.Connec
 
 
 def test_transcript_uses_full_checkpoint_loader(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     called: dict[str, object] = {}
 
     def _load(_db: object, agent_id: int) -> list[HumanMessage]:
         called["agent_id"] = agent_id
+        called["database"] = _db
         return [HumanMessage(content="complete history")]
 
     record_mod = sys.modules[collect_mod._transcript.__module__]
     monkeypatch.setattr(record_mod, "load_checkpoint_messages_full", _load)
 
-    assert collect_mod._transcript(42) == [{"type": "human", "content": "complete history"}]
-    assert called == {"agent_id": 42}
+    assert collect_mod._transcript(42, database=database) == [
+        {"type": "human", "content": "complete history"}
+    ]
+    assert called == {"agent_id": 42, "database": database}
 
 
 def test_subprocess_call_count_counts_raw_calls_and_textual_mentions(collect_mod: Any) -> None:
@@ -667,17 +679,18 @@ def test_plugins_activated_counts_and_reports_malformed_rows(collect_mod: Any) -
     assert skipped == 3
 
 
-def _fake_transcript(_agent_id: int) -> list[dict[str, str]]:
+def _fake_transcript(_agent_id: int, *, database: Database) -> list[dict[str, str]]:
     return []
 
 
 def _build_minimal_record(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, events: list[tuple]
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, events: list[tuple], *, database: Database
 ) -> dict[str, Any]:
     """build_record with every other input reduced to its empty case, so the
     test isolates the plugins_activated_skipped wiring."""
     monkeypatch.setattr(collect_mod, "_transcript", _fake_transcript)
     return collect_mod.build_record(
+        database=database,
         agent_id=1,
         week="2026-W99",
         events=events,
@@ -688,7 +701,10 @@ def _build_minimal_record(
 
 
 def test_build_record_surfaces_plugins_activated_skipped(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    collect_mod: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    database: Database,
 ) -> None:
     """Issue #92: the skip count must land on the run record (not just the
     private counter), and a nonzero count must print a visible warning."""
@@ -700,7 +716,7 @@ def test_build_record_surfaces_plugins_activated_skipped(
         ),
     ]
 
-    rec = _build_minimal_record(collect_mod, monkeypatch, events)
+    rec = _build_minimal_record(collect_mod, monkeypatch, events, database=database)
 
     assert rec["plugins_activated_skipped"] == 1
     assert rec["plugins_activated"] == {"ava_code/hooks/before_exec": 1}
@@ -708,7 +724,10 @@ def test_build_record_surfaces_plugins_activated_skipped(
 
 
 def test_build_record_well_formed_rows_report_zero_skipped(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    collect_mod: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    database: Database,
 ) -> None:
     """Well-formed rows must not be affected by the loud-skip change: zero
     skipped, no warning printed."""
@@ -719,7 +738,7 @@ def test_build_record_well_formed_rows_report_zero_skipped(
         ),
     ]
 
-    rec = _build_minimal_record(collect_mod, monkeypatch, events)
+    rec = _build_minimal_record(collect_mod, monkeypatch, events, database=database)
 
     assert rec["plugins_activated_skipped"] == 0
     assert rec["plugins_activated"] == {"ava_code/hooks/before_exec": 1}

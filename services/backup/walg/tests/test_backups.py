@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import settings
 from services.backup.walg import backups
 from services.backup.walg.backups import Backup, BackupChainError, chain_of, parse_backups
 from services.backup.walg.tests.support import Sandbox, fixture_text, make_sandbox
@@ -94,7 +95,7 @@ def test_listing_asks_wal_g_for_the_detailed_json(
     sandbox: Sandbox = make_sandbox(tmp_path, monkeypatch)
     sandbox.put("backups.json", fixture_text("backup-list.json"))
 
-    listed = backups.list_backups()
+    listed = backups.list_backups(path_reader=lambda: settings.walg.walg_config_file)
 
     assert sandbox.calls() == ["backup-list --detail --json"]
     assert len(listed) == 4

@@ -24,6 +24,7 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from concurrent.futures import Executor
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from psycopg_pool import AsyncConnectionPool
@@ -47,11 +48,18 @@ from base.agents.history.hierarchy.group_store import (
 )
 from base.agents.observation.snapshot import agent_model_target
 from base.clock import Clock
-from base.config import settings
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.log import logger
+
+__all__ = [
+    "GroupingModels",
+    "UnderstandingReadInputs",
+    "check_threshold",
+    "run_blocking",
+    "run_group_checks",
+]
 
 # A safety bound on the climb; a tree this tall is far past what history produces.
 MAX_LEVEL = 12
@@ -69,57 +77,87 @@ async def run_blocking[**P, T](
     return await asyncio.get_running_loop().run_in_executor(executor, lambda: fn(*args, **kwargs))
 
 
-class _Models(Protocol):
+@dataclass(frozen=True)
+class UnderstandingReadInputs:
+    """One consumer's operation-time configuration and clock readers.
+
+    Construction performs no reads. Grouping and chunk operations call these
+    inputs at their original decision and generation points.
+    """
+
+    enabled: Callable[[], bool]
+    default_model: Callable[[], str]
+    hierarchy_model: Callable[[], str]
+    group_model: Callable[[], str]
+    check_open: Callable[[], int]
+    check_decay: Callable[[], int]
+    reasoning: Callable[[], str]
+    corrections: Callable[[], int]
+    clock_factory: Callable[[], Clock]
+    timestamps_enabled: Callable[[], bool]
+
+
+class GroupingModels(Protocol):
+    """The consumer-owned model cache used by grouping and rebuild operations."""
+
     catalog: ModelCatalog
 
     def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> Any: ...
 
 
 def _group_model(
-    db: Database, agent_id: int, *, catalog: ModelCatalog
+    db: Database, agent_id: int, *, catalog: ModelCatalog, inputs: UnderstandingReadInputs
 ) -> tuple[str, ModelOverrides]:
     """The configured grouping model, else the agent's own with its overrides."""
-    configured = settings.agent.understanding_group_model
+    configured = inputs.group_model()
     if configured:
         return configured, ModelOverrides.from_pins(None)
-    return agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model, catalog=catalog)
+    return agent_model_target(
+        db,
+        agent_id,
+        fallback=inputs.hierarchy_model(),
+        catalog=catalog,
+        default_model_reader=inputs.default_model,
+    )
 
 
 MIN_CHECK_OPEN = 6
 
 
-def check_threshold(level: int) -> int:
+def check_threshold(level: int, *, inputs: UnderstandingReadInputs) -> int:
     """New open nodes that make `level` due: the base cadence divided by the decay once per level
     above the first (rounded), never below `MIN_CHECK_OPEN` (60, 20, 7, 6, ... by default).
 
     A higher level collects far fewer nodes in the same time, so with one threshold for every level
     the top would trail the history by days.
     """
-    base = settings.agent.understanding_group_check_open
-    decay = settings.agent.understanding_group_check_decay
+    base = inputs.check_open()
+    decay = inputs.check_decay()
     return max(MIN_CHECK_OPEN, round(base / decay ** (level - 1)))
 
 
 def _generate(
-    models: _Models,
+    models: GroupingModels,
     model: str,
     overrides: ModelOverrides,
     level: int,
     nodes: list[OpenNode],
     calls: list[GroupCall],
     agent_id: int,
+    *,
+    inputs: UnderstandingReadInputs,
 ) -> list[Group]:
     """Blocking: one grouping conversation; every provider call is appended to `calls`."""
     return generate_groups(
-        models.get(model, overrides, settings.agent.understanding_group_reasoning),
+        models.get(model, overrides, inputs.reasoning()),
         nodes,
         model=model,
         catalog=models.catalog,
         agent_id=agent_id,
-        corrections=settings.agent.understanding_group_corrections,
-        clock=Clock.from_settings(),
+        corrections=inputs.corrections(),
+        clock=inputs.clock_factory(),
         # The brake on an open set that keeps growing: past three checks' worth of this level, close one.
-        must_close=len(nodes) >= 3 * check_threshold(level),
+        must_close=len(nodes) >= 3 * check_threshold(level, inputs=inputs),
         on_call=calls.append,
     )
 
@@ -127,16 +165,18 @@ def _generate(
 async def _check_level(
     pool: AsyncConnectionPool,
     db: Database,
-    models: _Models,
+    models: GroupingModels,
     agent_id: int,
     level: int,
     executor: Executor | None,
     upto: int | None = None,
+    *,
+    inputs: UnderstandingReadInputs,
 ) -> bool:
     """Check one level if it is due; whether it closed at least one group."""
     nodes = await load_open_nodes(pool, agent_id, level, upto=upto)
     last = min(await load_last_checked(pool, agent_id, level), len(nodes))
-    if len(nodes) < last + check_threshold(level):
+    if len(nodes) < last + check_threshold(level, inputs=inputs):
         return False
     if not await claim_check(pool, agent_id, level):
         return False
@@ -148,14 +188,23 @@ async def _check_level(
         nodes = await load_open_nodes(pool, agent_id, level, upto=upto)
         if len(nodes) < min(
             await load_last_checked(pool, agent_id, level), len(nodes)
-        ) + check_threshold(level):
+        ) + check_threshold(level, inputs=inputs):
             return False
         model, overrides = await asyncio.to_thread(
-            _group_model, db, agent_id, catalog=models.catalog
+            _group_model, db, agent_id, catalog=models.catalog, inputs=inputs
         )
         try:
             groups = await run_blocking(
-                executor, _generate, models, model, overrides, level, nodes, calls, agent_id
+                executor,
+                _generate,
+                models,
+                model,
+                overrides,
+                level,
+                nodes,
+                calls,
+                agent_id,
+                inputs=inputs,
             )
         except GenerateError as exc:
             telemetry.emit(
@@ -188,9 +237,10 @@ async def _check_level(
 async def run_group_checks(
     pool: AsyncConnectionPool,
     db: Database,
-    models: _Models,
+    models: GroupingModels,
     agent_id: int,
     *,
+    inputs: UnderstandingReadInputs,
     executor: Executor | None = None,
     upto: int | None = None,
 ) -> None:
@@ -204,7 +254,7 @@ async def run_group_checks(
     try:
         level = 1
         while level <= MAX_LEVEL and await _check_level(
-            pool, db, models, agent_id, level, executor, upto
+            pool, db, models, agent_id, level, executor, upto, inputs=inputs
         ):
             level += 1
     except Exception:

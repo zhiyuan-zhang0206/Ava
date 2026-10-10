@@ -7,9 +7,8 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import system_note_message
 from base.agents.impersonation.history import export_handoff, metadata
+from base.agents.impersonation.notes import HandoffNotes
 from base.agents.messages.kwargs import NoteTag
-from base.clock import Clock
-from base.config import settings
 from base.db import Database, publish_inbound_wake
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -25,10 +24,10 @@ _IMPERSONATION_EXPLANATION = (
 )
 
 
-def _impersonation_note(content: str) -> HumanMessage:
-    clock = Clock.from_settings()
+def _make_note(content: str, *, notes: HandoffNotes) -> HumanMessage:
+    clock = notes.clock_factory()
     created_at = clock.now()
-    stamp = f"{clock.format_timestamp(created_at)} " if settings.general.message_timestamps else ""
+    stamp = f"{clock.format_timestamp(created_at)} " if notes.timestamps_enabled() else ""
     return system_note_message(
         content=stamp + content,
         tag=NoteTag.IMPERSONATION,
@@ -36,39 +35,45 @@ def _impersonation_note(content: str) -> HumanMessage:
     )
 
 
-def introduction_note() -> HumanMessage:
+def introduction_note(*, notes: HandoffNotes) -> HumanMessage:
     """Standing native context, introduced only once a takeover is encountered."""
-    note = _impersonation_note(_IMPERSONATION_EXPLANATION)
+    note = _make_note(_IMPERSONATION_EXPLANATION, notes=notes)
     note.id = "impersonation-introduction"
     return note
 
 
-def start_update(session: dict[str, Any], *, introduced: bool) -> dict[str, Any]:
+def start_update(
+    session: dict[str, Any], *, introduced: bool, notes: HandoffNotes
+) -> dict[str, Any]:
     """Commit the introduction receipt and the takeover anchor together."""
-    notes = [] if introduced else [introduction_note()]
-    return {"messages": [*notes, start_marker(session)], "impersonation_introduced": True}
+    introduction = [] if introduced else [introduction_note(notes=notes)]
+    return {
+        "messages": [*introduction, start_marker(session, notes=notes)],
+        "impersonation_introduced": True,
+    }
 
 
-def start_marker(session: dict[str, Any]) -> HumanMessage:
+def start_marker(session: dict[str, Any], *, notes: HandoffNotes) -> HumanMessage:
     """Anchor the session's separately retained messages in checkpoint order."""
-    note = _impersonation_note(
+    note = _make_note(
         f"Impersonation session {session['session_id']} has started. "
         f'An external executor named "{session["name"]}" is taking over your work. '
         "You are paused until it returns control.",
+        notes=notes,
     )
     note.id = f"impersonation-start:{session['agent_id']}:{session['session_id']}"
     note.additional_kwargs["ava_impersonation"] = metadata(session).model_dump()
     return note
 
 
-async def ensure_start_marker(graph: Any, session: dict[str, Any]) -> None:
+async def ensure_start_marker(graph: Any, session: dict[str, Any], *, notes: HandoffNotes) -> None:
     """Repair a crash between accepting the request and saving its timeline anchor."""
     from agent.impersonation import flush_checkpoint
 
     config = {"configurable": {"thread_id": str(session["agent_id"])}}
     snapshot = await graph.aget_state(config)
     update = start_update(
-        session, introduced=snapshot.values.get("impersonation_introduced", False)
+        session, introduced=snapshot.values.get("impersonation_introduced", False), notes=notes
     )
     existing = {message.id for message in snapshot.values.get("messages", [])}
     update["messages"] = [note for note in update["messages"] if note.id not in existing]
@@ -148,6 +153,7 @@ async def deliver_handoff(
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     *,
+    notes: HandoffNotes,
     reason: str | None = None,
 ) -> None:
     """Save file, append the first resumed input, flush checkpoint, then receipt.
@@ -175,7 +181,7 @@ async def deliver_handoff(
     receipt = f"{session['agent_id']}:{session['session_id']}"
     if snapshot.values.get("impersonation_handoff_id") != receipt:
         stopped = f" This session was stopped early: {reason}." if reason else ""
-        note = _impersonation_note(
+        note = _make_note(
             f"Impersonation session {session['session_id']} has ended.{stopped} "
             f'You have resumed execution after the takeover by external executor "{session["name"]}".\n\n'
             f"External summary:\n{summary}\n\n"
@@ -185,6 +191,7 @@ async def deliver_handoff(
             "requests whose completion is not established by the summary or record. "
             "The activity log may be incomplete; missing entries do not establish "
             "that an action never happened.",
+            notes=notes,
         )
         note.id = f"impersonation-handoff:{receipt}"
         await graph.aupdate_state(

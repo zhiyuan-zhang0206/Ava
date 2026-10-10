@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from base.cluster.dataplane import walg_binary
+from base.config import ConfigBoot
 from base.db import Database
 from services.backup.walg import check, probe, state, tick
 from services.backup.walg import config as walg_config
@@ -16,7 +18,14 @@ from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_
 
 def cmd_walg_check() -> int:
     """Run the pre-flight steps; the exit code is non-zero when any step failed."""
-    steps = check.run_check()
+    config = ConfigBoot()
+
+    def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
+        return config.view.walg.walg_config_file
+
+    steps = check.run_check(path_reader=path_reader)
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1
@@ -33,7 +42,14 @@ def cmd_walg_run() -> int:
     The OS job runs exactly this, and so can an operator: concurrent runs stand down
     and a skipped or repeated run is harmless.
     """
-    return tick.run_tick(Database.from_settings(), _stamped)
+    config = ConfigBoot()
+
+    def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
+        return config.view.walg.walg_config_file
+
+    return tick.run_tick(Database.from_settings(), _stamped, path_reader=path_reader)
 
 
 def cmd_walg_drill() -> int:
@@ -42,7 +58,14 @@ def cmd_walg_drill() -> int:
     The tick runs the same drill once a week before its backup; a success here counts
     as that week's drill.
     """
-    return tick.run_drill_now(_stamped)
+    config = ConfigBoot()
+
+    def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
+        return config.view.walg.walg_config_file
+
+    return tick.run_drill_now(_stamped, path_reader=path_reader)
 
 
 def cmd_walg_restore(
@@ -54,7 +77,14 @@ def cmd_walg_restore(
     not started, and it is never this home's live data directory. `user` is the restored
     cluster's superuser (the OS user that ran initdb on the source; default: this OS user).
     """
-    if not walg_config.enabled():
+    config = ConfigBoot()
+
+    def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
+        return config.view.walg.walg_config_file
+
+    if not walg_config.enabled(path_reader=path_reader):
         print("WAL-G is off (AVA_WALG_CONFIG_FILE is not set); nothing to restore from")
         return 1
     binary_problem = walg_binary.installed_problem()
@@ -62,7 +92,7 @@ def cmd_walg_restore(
         print(f"restore failed: {binary_problem} (ava converge installs it)", file=sys.stderr)
         return 1
     try:
-        walg_config.load_walg_config()
+        walg_config.load_walg_config(path_reader=path_reader)
         target = RecoveryTarget(time=time, lsn=lsn)
     except (walg_config.WalgConfigError, ValueError) as exc:
         print(f"restore failed: {exc}", file=sys.stderr)
@@ -75,6 +105,7 @@ def cmd_walg_restore(
             report=_stamped,
             user=user,
             keep_data=True,
+            path_reader=path_reader,
         ):
             pass
     except RestoreError as exc:
@@ -102,8 +133,8 @@ def _config_lines(path: Path) -> list[str]:
     return lines
 
 
-def _postgres_lines() -> list[str]:
-    expected = expected_archive()
+def _postgres_lines(*, path_reader: Callable[[], Path | None]) -> list[str]:
+    expected = expected_archive(path_reader=path_reader)
     try:
         with probe.admin_connection() as conn:
             state = probe.read_archiver_state(conn)
@@ -168,27 +199,34 @@ def _tick_lines() -> list[str]:
 
 def cmd_walg_status() -> int:
     """Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0."""
-    path = walg_config.configured_path()
+    config = ConfigBoot()
+
+    def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
+        return config.view.walg.walg_config_file
+
+    path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
         print("WAL-G archiving is off (AVA_WALG_CONFIG_FILE is not set)")
         return 0
     binary_problem = walg_binary.installed_problem()
     print(f"binary: {binary_problem or f'pinned wal-g {walg_binary.WALG_VERSION}'}")
-    for line in (*_config_lines(path), *_postgres_lines(), *_tick_lines()):
+    for line in (*_config_lines(path), *_postgres_lines(path_reader=path_reader), *_tick_lines()):
         print(line)
-    failure = probe.failure()
+    failure = probe.failure(path_reader=path_reader)
     print(f"health: {failure or 'ok'}")
     return 0
 
 
-def warn_archive_inactive() -> None:
+def warn_archive_inactive(*, path_reader: Callable[[], Path | None]) -> None:
     """Say so when WAL archiving is configured but this Postgres is not carrying it.
 
     A retained postmaster is only reloaded, so it keeps the launch arguments of its
     previous start: `archive_mode` and the archive command take effect at the next
     new launch. A warning, not a failure: the health probe is the alert.
     """
-    expected = expected_archive()
+    expected = expected_archive(path_reader=path_reader)
     if expected is None:
         return
     try:

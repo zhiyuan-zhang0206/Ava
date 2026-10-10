@@ -13,6 +13,8 @@ import ava
 import ava.agents as agents_mod
 import ava.sdk_surface.agent_identity
 
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+
 
 def test_get_last_message_scans_peer_output(monkeypatch: pytest.MonkeyPatch) -> None:
     from ava import security

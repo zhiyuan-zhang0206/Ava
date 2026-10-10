@@ -15,6 +15,7 @@ from agent.graph.prompt.context_notes import exec_timeout_note
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
+from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -31,8 +32,11 @@ def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 def _context(agent_id: int | None = 7) -> AvaContext:
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
 
 

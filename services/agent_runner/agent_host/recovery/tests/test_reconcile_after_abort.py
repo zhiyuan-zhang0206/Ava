@@ -1,18 +1,10 @@
-"""The inbound reconcile against real rows: abort settlement and the claim-window side-load.
+"""Real-row abort settlement and claim-window side-load contracts.
 
-Task #3615: the same reconcile the startup path runs must also dispose the rows
-an aborted hosted turn left `claimed` — at the turn's settlement, so they do not
-wait for a boot that may never come. These lock the row-visible contract: the
-three-way split, the runtime-ownership fence (a replaced incarnation is a
-no-op), idempotent re-runs (the later boot reconcile changes nothing), and that
-a committed row is not re-delivered by the next claim.
-
-Task #4788: the committed-id source is the claim window's `messages` write rows
-(side-loaded from `base/agents/history/inbound_sideload.py`), so the common
-paths never read the settled checkpoint at all. These lock that source
-strategy: the no-read guard, the window resolution, the committed-then-removed
-proof, and both fallbacks (unresolved window, thread without messages write
-rows).
+The same startup reconcile disposes rows left claimed after a hosted abort.
+Coverage includes ownership fences, idempotency and committed-row suppression.
+Committed IDs come from claim-window message writes; normal paths do not read
+settled checkpoints. Unresolved windows and threads without writes retain their
+explicit fallback behavior.
 """
 
 from __future__ import annotations
@@ -42,10 +34,12 @@ from base.agents.history.inbound_sideload import (
     committed_ids_for_reconcile,
     sideload_committed_ids,
 )
+from base.agents.history.tests.test_inbound_sideload_failures import _read_inputs
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement as settlement_mod
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 def _insert_claimed(
@@ -138,7 +132,7 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
     saver = await _seed_checkpoint(aops_pool, agent, committed)
 
     await settlement_mod.reconcile_inbounds_after_abort(
-        aops_pool, saver, incarnation, resources=None
+        aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
     )
 
     assert _statuses(db_conn, [committed, orphan, stale]) == {
@@ -170,12 +164,18 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
     saver = await _seed_checkpoint(aops_pool, agent, committed)
 
     await settlement_mod.reconcile_inbounds_after_abort(
-        aops_pool, saver, incarnation, resources=None
+        aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
     )
     settled = {committed: "done", orphan: "pending"}
     assert _statuses(db_conn, [committed, orphan]) == settled
     logged = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert _statuses(db_conn, [committed, orphan]) == settled
     assert [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"] == logged
@@ -204,7 +204,11 @@ async def test_replaced_incarnation_writes_nothing(
 
     with pytest.raises(RuntimeOwnershipLostError):
         await reconcile_claimed_inbounds_at_startup(
-            aops_pool, saver, agent, incarnation=incarnation
+            aops_pool,
+            saver,
+            agent,
+            incarnation=incarnation,
+            inputs=configured_policy().reconcile_inputs,
         )
 
     assert _statuses(db_conn, [committed, orphan]) == {
@@ -236,7 +240,7 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
 
     # must not raise: the settlement is not failed by a fenced-out reconcile
     await settlement_mod.reconcile_inbounds_after_abort(
-        aops_pool, saver, incarnation, resources=None
+        aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
     )
 
     assert _statuses(db_conn, [committed]) == {committed: "claimed"}
@@ -262,7 +266,7 @@ async def test_next_claim_does_not_re_deliver_the_committed_row(
     saver = await _seed_checkpoint(aops_pool, agent, committed)
 
     await settlement_mod.reconcile_inbounds_after_abort(
-        aops_pool, saver, incarnation, resources=None
+        aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
     )
     claimed = await claim_inbound_batch(aops_pool, agent, incarnation=incarnation, work=None)
 
@@ -377,7 +381,13 @@ async def test_no_claimed_rows_never_reads_the_checkpoint(
     )
     agent = incarnation.agent_id
     saver = _CountingSaver(aops_pool)
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 0
     assert not [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
@@ -396,7 +406,13 @@ async def test_only_stale_claims_skip_the_read_and_dead_letter(
     agent = incarnation.agent_id
     stale = _insert_claimed(db_conn, agent, "stale", age=timedelta(days=2))
     saver = _CountingSaver(aops_pool)
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [stale]) == {stale: "done"}
@@ -419,7 +435,13 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
     saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed)
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 1
     assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
@@ -441,7 +463,13 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed, remove_after=True)
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -475,7 +503,13 @@ async def test_pending_write_without_successor_is_reset(
         ],
         str(uuid4()),
     )
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert _statuses(db_conn, [claimed]) == {claimed: "pending"}
 
@@ -508,7 +542,13 @@ async def test_pending_write_with_unrelated_successor_is_reset(
         str(uuid4()),
     )
     await graph.aupdate_state(config, {"halted": True}, as_node="work")
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert _statuses(db_conn, [claimed]) == {claimed: "pending"}
 
@@ -534,7 +574,13 @@ async def test_unresolved_window_falls_back_to_the_full_read(
         return None
 
     monkeypatch.setattr(sideload_mod, "sideload_committed_ids", _unresolved)
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 1
     assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
@@ -554,7 +600,13 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
     saver = await _seed_counting_checkpoint(aops_pool, agent, committed)
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 1
     assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
@@ -580,7 +632,13 @@ async def test_materialized_thread_with_only_pending_write_falls_back(
         [("messages", [HumanMessage(content="pending")])],
         str(uuid4()),
     )
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 1
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -689,7 +747,9 @@ async def test_sideload_decodes_inbound_ids_from_write_rows(
         blob=bytes(blob),
     )
 
-    ids = await sideload_committed_ids(aops_pool, saver, agent, since=datetime.now(UTC))
+    ids = await sideload_committed_ids(
+        aops_pool, saver, agent, since=datetime.now(UTC), inputs=_read_inputs()
+    )
     assert ids == {7}
 
 
@@ -732,4 +792,6 @@ async def test_reclaimed_row_keeps_its_first_claim_window(
     )
     _insert_write(db_conn, agent, parent_id, idx=0, type_tag=str(type_tag), blob=bytes(blob))
 
-    assert await committed_ids_for_reconcile(aops_pool, saver, agent) == {claimed}
+    assert await committed_ids_for_reconcile(aops_pool, saver, agent, inputs=_read_inputs()) == {
+        claimed
+    }

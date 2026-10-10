@@ -23,7 +23,7 @@ from __future__ import annotations
 from cli.commands.converge.spec import ConvergeCtx
 
 
-def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
+def ensure_health_probe_cron(ctx: ConvergeCtx) -> None:
     """Register the OS cron job for the cluster health probe.
 
     Only runs on gateway hosts (roles gated). Delegates to `base.host.system.cron`.
@@ -32,18 +32,18 @@ def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
     that runs before the gateway process starts. Idempotent."""
     from base.host.system.cron import register_os_cron
 
-    register_os_cron()
+    register_os_cron(enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled)
     # On failure the exception propagates so converge fails fast.
 
 
-def ensure_logs_maintenance(_ctx: ConvergeCtx) -> None:
+def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
     """Register daily rotation followed by retention."""
     from base.host.system.logs_job import register_logs_job
 
-    register_logs_job()
+    register_logs_job(enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled)
 
 
-def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:
+def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
     """Register the recurring content-refresh pass (design §5.6; task #3267).
 
     Every serving unit runs it: skills are per-machine state, so each home owns
@@ -53,11 +53,15 @@ def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:
     re-checks both at run time. Idempotent."""
     from base.host.system.packages_job import register_packages_job
 
-    register_packages_job()
+    register_packages_job(
+        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
+        refresh_enabled_reader=lambda: ctx.read_config().view.packages.refresh_enabled,
+        tick_reader=lambda: ctx.read_config().view.packages.refresh_tick_seconds,
+    )
     # A registration failure propagates so converge fails fast.
 
 
-def ensure_pr_flow_job(_ctx: ConvergeCtx) -> None:
+def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
     """Register the daily PR-flow sampler job (task #2139).
 
     The gate lives in `base.host.system.pr_flow_job.register_pr_flow_job`: the job is
@@ -67,10 +71,10 @@ def ensure_pr_flow_job(_ctx: ConvergeCtx) -> None:
     the absence. Idempotent."""
     from base.host.system.pr_flow_job import register_pr_flow_job
 
-    register_pr_flow_job()
+    register_pr_flow_job(enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled)
 
 
-def ensure_walg_job(_ctx: ConvergeCtx) -> None:
+def ensure_walg_job(ctx: ConvergeCtx) -> None:
     """Keep the daily WAL-G tick registered exactly while WAL-G is switched on.
 
     Key set: register (idempotent). Key unset: remove a job a previous
@@ -81,13 +85,16 @@ def ensure_walg_job(_ctx: ConvergeCtx) -> None:
     from base.host.system.walg_job import register_walg_job, unregister_walg_job
     from services.backup.walg.config import enabled
 
-    if enabled():
-        register_walg_job()
+    if enabled(path_reader=lambda: ctx.read_config().view.walg.walg_config_file):
+        register_walg_job(
+            enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
+            backup_hour_reader=lambda: ctx.read_config().view.services.backup_hour,
+        )
     else:
         unregister_walg_job()
 
 
-def ensure_cluster_autostart(_ctx: ConvergeCtx) -> None:
+def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
     """Register the boot-time autostart job so a machine reboot brings this
     cluster's gateway / agents / daemons back up without a manual `ava start`
     (macOS launchd RunAtLoad / Linux systemd).
@@ -97,5 +104,5 @@ def ensure_cluster_autostart(_ctx: ConvergeCtx) -> None:
     Delegates to `base.host.system.autostart`. Idempotent."""
     from base.host.system.autostart import register_autostart
 
-    register_autostart()
+    register_autostart(enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled)
     # On failure the exception propagates so converge fails fast.

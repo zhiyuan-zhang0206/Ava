@@ -15,6 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.graph.recall._memory_filter import Candidate, filter_candidates
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 
@@ -62,11 +63,15 @@ async def test_retries_when_reply_unparseable_then_succeeds(
     picked = await filter_candidates(
         "q",
         _candidates("a.md", "b.md", "c.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     )
 
     assert picked == ["b.md"]
@@ -87,11 +92,15 @@ async def test_warns_only_when_all_retries_fail(monkeypatch: pytest.MonkeyPatch)
     picked = await filter_candidates(
         "q",
         _candidates("a.md", "b.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     )
 
     assert picked == []
@@ -105,11 +114,15 @@ async def test_keeps_only_what_the_model_picked(monkeypatch: pytest.MonkeyPatch)
     picked = await filter_candidates(
         "q",
         _candidates("a.md", "b.md", "c.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     )
 
     assert picked == ["b.md"]
@@ -127,11 +140,15 @@ async def test_records_hmac_query_and_basename_path_sample(
     assert await filter_candidates(
         query,
         _candidates("a.md", full_path),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=hmac_key,
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     ) == [full_path]
 
     verdict = next(
@@ -170,11 +187,15 @@ async def test_does_not_log_an_unrecognised_model_path(
         await filter_candidates(
             query,
             _candidates("a.md"),
-            AgentSlices.resolve().memory,
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).memory,
             log_key=b"test-key",
             catalog=build_model_catalog(),
             llm_override="",
-            overrides=AgentSlices.resolve().overrides,
+            overrides=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).overrides,
         )
         == []
     )
@@ -204,11 +225,15 @@ async def test_does_not_log_an_unparseable_model_echo(
         await filter_candidates(
             query,
             _candidates("a.md"),
-            AgentSlices.resolve().memory,
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).memory,
             log_key=b"test-key",
             catalog=build_model_catalog(),
             llm_override="",
-            overrides=AgentSlices.resolve().overrides,
+            overrides=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).overrides,
         )
         == []
     )
@@ -238,11 +263,15 @@ async def test_does_not_log_a_filter_exception_echo(
         await filter_candidates(
             query,
             _candidates("a.md"),
-            AgentSlices.resolve().memory,
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).memory,
             log_key=b"test-key",
             catalog=build_model_catalog(),
             llm_override="",
-            overrides=AgentSlices.resolve().overrides,
+            overrides=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).overrides,
         )
         == []
     )
@@ -272,11 +301,15 @@ async def test_successful_filter_call_emits_chat_billing(
     assert await filter_candidates(
         "q",
         _candidates("a.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     ) == ["a.md"]
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
     assert record["extra"]["model"] == settings.agent.memory_recall_filter_model
@@ -307,11 +340,15 @@ async def test_filter_model_is_built_with_reasoning_pinned_off(
         await filter_candidates(
             "q",
             _candidates("a.md", "b.md"),
-            AgentSlices.resolve().memory,
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).memory,
             log_key=b"test-key",
             catalog=build_model_catalog(),
             llm_override="",
-            overrides=AgentSlices.resolve().overrides,
+            overrides=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).overrides,
         )
         == []
     )
@@ -329,11 +366,15 @@ async def test_injects_nothing_when_the_model_rejects_everything(
         await filter_candidates(
             "q",
             _candidates("a.md", "b.md"),
-            AgentSlices.resolve().memory,
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).memory,
             log_key=b"test-key",
             catalog=build_model_catalog(),
             llm_override="",
-            overrides=AgentSlices.resolve().overrides,
+            overrides=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).overrides,
         )
         == []
     )
@@ -350,11 +391,15 @@ async def test_model_order_is_kept_and_capped_at_inject_k(
     assert await filter_candidates(
         "q",
         _candidates("a.md", "b.md", "c.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     ) == ["c.md", "a.md"]
 
 
@@ -377,11 +422,15 @@ async def test_the_wrappers_small_models_add_are_seen_through(
     assert await filter_candidates(
         "q",
         _candidates("a.md", "b.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     ) == ["a.md"]
 
 
@@ -394,11 +443,15 @@ async def test_invented_path_is_dropped_not_injected(monkeypatch: pytest.MonkeyP
     assert await filter_candidates(
         "q",
         _candidates("a.md", "b.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     ) == ["a.md"]
 
 
@@ -408,11 +461,15 @@ async def test_duplicate_picks_collapse(monkeypatch: pytest.MonkeyPatch) -> None
     assert await filter_candidates(
         "q",
         _candidates("a.md", "b.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     ) == ["a.md"]
 
 
@@ -433,11 +490,15 @@ async def test_unreadable_reply_injects_nothing(
         await filter_candidates(
             "q",
             _candidates("a.md", "b.md"),
-            AgentSlices.resolve().memory,
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).memory,
             log_key=b"test-key",
             catalog=build_model_catalog(),
             llm_override="",
-            overrides=AgentSlices.resolve().overrides,
+            overrides=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).overrides,
         )
         == []
     )
@@ -467,11 +528,15 @@ async def test_timeout_bound_comes_from_settings(
     picked = await filter_candidates(
         "q",
         _candidates("a.md", "b.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     )
 
     assert picked == ["a.md"]
@@ -492,11 +557,15 @@ async def test_model_failure_injects_nothing(
         await filter_candidates(
             "q",
             _candidates("a.md", "b.md"),
-            AgentSlices.resolve().memory,
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).memory,
             log_key=b"test-key",
             catalog=build_model_catalog(),
             llm_override="",
-            overrides=AgentSlices.resolve().overrides,
+            overrides=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).overrides,
         )
         == []
     )
@@ -517,11 +586,15 @@ async def test_disabled_filter_passes_the_top_through_untouched(
     assert await filter_candidates(
         "q",
         _candidates("a.md", "b.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     ) == ["a.md", "b.md"]
     assert not [
         record for record in loguru_records if record["extra"].get("event") == "recall_filter"
@@ -538,11 +611,15 @@ async def test_no_candidates_needs_no_model(monkeypatch: pytest.MonkeyPatch) -> 
         await filter_candidates(
             "q",
             [],
-            AgentSlices.resolve().memory,
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).memory,
             log_key=b"test-key",
             catalog=build_model_catalog(),
             llm_override="",
-            overrides=AgentSlices.resolve().overrides,
+            overrides=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).overrides,
         )
         == []
     )
@@ -573,11 +650,15 @@ async def test_prompt_lists_when_unsure_instead_of_staying_strict(
     await filter_candidates(
         "q",
         _candidates("a.md", "b.md"),
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     )
 
     assert "err on the side of including" in seen["prompt"]
@@ -608,11 +689,15 @@ async def test_prompt_shows_the_type_tag(monkeypatch: pytest.MonkeyPatch) -> Non
     await filter_candidates(
         "q",
         [Candidate(path="p.md", description="a profile", tags=["type/user", "tech-ops"])],
-        AgentSlices.resolve().memory,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).memory,
         log_key=b"test-key",
         catalog=build_model_catalog(),
         llm_override="",
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).overrides,
     )
 
     assert "type/user" in seen["prompt"]

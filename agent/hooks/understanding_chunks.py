@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -42,7 +43,6 @@ from base.agents.history.hierarchy.chunks import (
     sendable_len,
 )
 from base.agents.messages.kwargs import message_read_time
-from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.log import logger
@@ -58,13 +58,14 @@ async def due_chunk_update(
     model: str,
     overrides: ModelOverrides,
     catalog: ModelCatalog,
+    read_agent: Callable[[str], Any],
 ) -> dict[str, Any]:
     """The state update after one llm turn: `{}`, or the moved cut once a chunk is enqueued.
 
     `request` is the message list the turn sent (head included); `final_msg`
     carries the provider's usage for it.
     """
-    if pool is None or not settings.agent.understanding_enabled:
+    if pool is None or not read_agent("understanding_enabled"):
         return {}
     usage = final_msg.usage_metadata
     input_tokens = int(usage["input_tokens"]) if usage else 0
@@ -87,7 +88,7 @@ async def due_chunk_update(
         input_tokens=input_tokens,
         request_len=len(request),
         threshold=chunk_threshold(
-            model, overrides, settings.agent.understanding_chunk_ratio, catalog=catalog
+            model, overrides, read_agent("understanding_chunk_ratio"), catalog=catalog
         ),
     )
     if chunk is None:
@@ -118,6 +119,7 @@ async def enqueue_closing_chunk(
     pool: AsyncConnectionPool | None,
     agent_id: int,
     boundary: str | None,
+    read_agent: Callable[[str], Any],
 ) -> None:
     """Enqueue the closing segment's remainder at compaction (best-effort).
 
@@ -125,7 +127,7 @@ async def enqueue_closing_chunk(
     is the checkpoint stamped for it (None = the stamp failed, nothing to anchor
     the read on, so nothing is enqueued).
     """
-    if pool is None or boundary is None or not settings.agent.understanding_enabled:
+    if pool is None or boundary is None or not read_agent("understanding_enabled"):
         return
     chunk = plan_closing_chunk(
         cut_index=max(compact.understanding_cut_index, segment_head_len(messages)),
@@ -175,7 +177,9 @@ async def _newest_checkpoint_ts(pool: AsyncConnectionPool, agent_id: int) -> dat
     return None if row is None or not row[0] else datetime.fromisoformat(str(row[0]))
 
 
-async def await_snapshot(pool: AsyncConnectionPool | None, state: Any, agent_id: int) -> None:
+async def await_snapshot(
+    pool: AsyncConnectionPool | None, state: Any, agent_id: int, *, read_agent: Callable[[str], Any]
+) -> None:
     """Wait (bounded) until the newest checkpoint of the agent is at least as new as the `state`'s
     last message.
 
@@ -191,7 +195,7 @@ async def await_snapshot(pool: AsyncConnectionPool | None, state: Any, agent_id:
     understanding is off or there is no state.
     """
     messages: list[AnyMessage] = [] if state is None else list(state.messages)
-    if pool is None or not messages or not settings.agent.understanding_enabled:
+    if pool is None or not messages or not read_agent("understanding_enabled"):
         return
     last = _read_time(messages[-1])
     started = time.monotonic()

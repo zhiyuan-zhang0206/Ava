@@ -228,9 +228,24 @@ class TestSpawnAgent:
             model_catalog=model_catalog,
         )
 
-        default_snapshot = select_one(db_conn, default_model_agent, catalog=model_catalog)
-        text_only_snapshot = select_one(db_conn, text_only_agent, catalog=model_catalog)
-        withdrawn_snapshot = select_one(db_conn, withdrawn_vision_agent, catalog=model_catalog)
+        default_snapshot = select_one(
+            db_conn,
+            default_model_agent,
+            catalog=model_catalog,
+            default_model_reader=lambda: settings.lm.llm_model,
+        )
+        text_only_snapshot = select_one(
+            db_conn,
+            text_only_agent,
+            catalog=model_catalog,
+            default_model_reader=lambda: settings.lm.llm_model,
+        )
+        withdrawn_snapshot = select_one(
+            db_conn,
+            withdrawn_vision_agent,
+            catalog=model_catalog,
+            default_model_reader=lambda: settings.lm.llm_model,
+        )
 
         assert default_snapshot is not None
         assert default_snapshot.supports_vision is True
@@ -262,8 +277,18 @@ class TestSpawnAgent:
             settings.lm, "llm_model", "deepseek-flash"
         )  # the default has since flipped
 
-        vision = select_one(db_conn, born_vision, catalog=model_catalog)
-        text = select_one(db_conn, born_text, catalog=model_catalog)
+        vision = select_one(
+            db_conn,
+            born_vision,
+            catalog=model_catalog,
+            default_model_reader=lambda: settings.lm.llm_model,
+        )
+        text = select_one(
+            db_conn,
+            born_text,
+            catalog=model_catalog,
+            default_model_reader=lambda: settings.lm.llm_model,
+        )
 
         assert vision is not None and vision.supports_vision is True
         assert text is not None and text.supports_vision is False

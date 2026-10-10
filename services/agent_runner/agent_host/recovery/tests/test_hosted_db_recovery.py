@@ -24,6 +24,7 @@ from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.observation.db_wait import DatabaseWaits
@@ -41,6 +42,7 @@ from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +100,18 @@ async def _graph(
     return graph, saver
 
 
+async def _probe_control_connection(
+    control: AsyncConnectionPool, failures: list[PoolTimeout]
+) -> None:
+    """Retain the actual exhausted-pool error while preserving its original propagation."""
+    try:
+        async with control.connection(timeout=0.03) as conn:
+            await conn.execute("SELECT 1")
+    except PoolTimeout as error:
+        failures.append(error)
+        raise
+
+
 async def test_original_host_task_resumes_autonomous_work_without_pending_inbound(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -119,10 +133,14 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
     monkeypatch.setattr(db_recovery, "_refresh_owner", observe)
     # Exhaust a real PostgreSQL pool: both the interrupted graph and recovery
     # get real PoolTimeout until the held connection is returned.
-    async with AsyncConnectionPool[psycopg.AsyncConnection](
-        settings.data_plane.db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
-    ) as control:
+    async with (
+        AsyncConnectionPool[psycopg.AsyncConnection](
+            settings.data_plane.db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
+        ) as control,
+        hosted_scope(expected_error=PoolTimeout) as resources,
+    ):
         invocations: list[int] = []
+        failures: list[PoolTimeout] = []
         work_entered, exhaust_control = asyncio.Event(), asyncio.Event()
 
         async def work(_state: states.AgentState) -> dict[str, Any]:
@@ -130,9 +148,12 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
             if len(invocations) == 1:
                 work_entered.set()
                 await exhaust_control.wait()
-            async with control.connection(timeout=0.03) as conn:
-                await conn.execute("SELECT 1")
-            return {"halted": True, "turn_idle": True, "messages": [AIMessage(content="Resumed")]}
+            await _probe_control_connection(control, failures)
+            return {
+                "halted": True,
+                "turn_idle": True,
+                "messages": [AIMessage(content="Resumed")],
+            }
 
         graph, saver = await _graph(aops_pool, agent, work)
         host = AgentHost(
@@ -151,10 +172,13 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
                 replace(
                     AvaContext(
                         catalog=model_catalog,
-                        agent=AgentSlices.resolve(),
+                        agent=AgentSlices.resolve(
+                            default_reader=configured_policy().default_reader
+                        ),
+                        clock_factory=configured_policy().clock_factory,
                     ),
                     original_incarnation=incarnation,
-                    hosted_resources=None,
+                    hosted_resources=resources,
                     native_work=None,
                 ),
             )
@@ -184,6 +208,8 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
                 raise
         assert not (await asyncio.wait_for(original, 5)).exited
         assert len(invocations) == 2
+        (failure,) = failures
+        assert resources.require_service().failures == [(resources, failure)]
         cold = await saver.aget({"configurable": {"thread_id": str(agent)}})
         assert cold is not None
         assert cold["channel_values"]["halted"] is True
@@ -236,6 +262,7 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
             database_waits=DatabaseWaits(),
             peek_lock=asyncio.Lock(),
             work=None,
+            reconcile_inputs=configured_policy().reconcile_inputs,
         )
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
     assert await saver.aget_tuple(config) == checkpoint
@@ -280,6 +307,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
                 database_waits=DatabaseWaits(),
                 peek_lock=asyncio.Lock(),
                 work=None,
+                reconcile_inputs=configured_policy().reconcile_inputs,
             )
         )
         await asyncio.sleep(0.06)
@@ -302,6 +330,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
         database_waits=DatabaseWaits(),
         peek_lock=asyncio.Lock(),
         work=None,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
     resumed = admission.require_operation("outage", acquired)
     assert resumed.maintenance is not None and not resumed.maintenance.drained
@@ -344,6 +373,7 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
                     database_waits=DatabaseWaits(),
                     peek_lock=asyncio.Lock(),
                     work=None,
+                    reconcile_inputs=configured_policy().reconcile_inputs,
                 )
             )
             try:
@@ -416,6 +446,7 @@ async def test_repair_timeout_retries_and_remains_cancellable(
             database_waits=DatabaseWaits(),
             peek_lock=asyncio.Lock(),
             work=None,
+            reconcile_inputs=configured_policy().reconcile_inputs,
         )
     )
     try:
@@ -580,9 +611,10 @@ async def test_healthy_stages_each_get_their_own_deadline(
         agent: int,
         *,
         incarnation: RuntimeIncarnation | None,
+        inputs: ReconcileReadInputs,
     ) -> None:
         await delay("reconcile")
-        await reconcile(pool, checkpointer, agent, incarnation=incarnation)
+        await reconcile(pool, checkpointer, agent, incarnation=incarnation, inputs=inputs)
         events.append(("reconcile", "done", 0))
 
     async def slow_repair(compiled: Any, agent: int) -> None:
@@ -602,6 +634,7 @@ async def test_healthy_stages_each_get_their_own_deadline(
                 database_waits=DatabaseWaits(),
                 peek_lock=asyncio.Lock(),
                 work=None,
+                reconcile_inputs=configured_policy().reconcile_inputs,
             ),
             15,
         )

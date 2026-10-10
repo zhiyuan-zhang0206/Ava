@@ -28,6 +28,7 @@ from langgraph.runtime import Runtime
 from agent.messages import NoteTag
 from agent.state import build_agent_state
 from base.agents.context import AvaContext
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
@@ -60,7 +61,9 @@ def _runtime(catalog: ModelCatalog) -> Runtime[AvaContext]:
         ops_pool=MagicMock(),
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ),
         catalog=catalog,
         db=Database.from_settings(),
         bus=EventBus.from_settings(),

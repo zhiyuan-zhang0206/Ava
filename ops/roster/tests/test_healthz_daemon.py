@@ -11,6 +11,7 @@ these names the entry that does not.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import math
 from functools import partial
 from pathlib import Path
@@ -283,7 +284,7 @@ def _literal(node: ast.expr, constants: dict[str, str]) -> str | None:
     return None
 
 
-def _daemon_literals(source: str) -> dict[str, list[str | None]]:
+def _daemon_literals(source: str, *, module: str | None = None) -> dict[str, list[str | None]]:
     tree = ast.parse(source)
     constants = _module_constants(tree)
     found: dict[str, list[str | None]] = {}
@@ -297,6 +298,50 @@ def _daemon_literals(source: str) -> dict[str, list[str | None]]:
             found.setdefault(callee, []).append(_literal(argument, constants) if argument else None)
         elif callee in _MODULE_CALLS and len(node.args) >= 2:
             found.setdefault(callee, []).append(_literal(node.args[1], constants))
+    # A composition entry may delegate logging to an imported public function.
+    missing = set(_HEALTH_NAME_CALLS) - found.keys()
+    if module is not None:
+        for delegated in _called_function_sources(tree, module):
+            for callee, values in _daemon_literals(delegated).items():
+                if callee in missing:
+                    found.setdefault(callee, []).extend(values)
+    return found
+
+
+def _called_imports(tree: ast.Module, module: str) -> list[tuple[str, str]]:
+    calls = {_call_name(node) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+    found: list[tuple[str, str]] = []
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        target = (
+            importlib.util.resolve_name("." * node.level + node.module, module.rpartition(".")[0])
+            if node.level
+            else node.module
+        )
+        found.extend(
+            (target, alias.name) for alias in node.names if (alias.asname or alias.name) in calls
+        )
+    return found
+
+
+def _called_function_sources(tree: ast.Module, module: str) -> list[str]:
+    found: list[str] = []
+    for target, name in _called_imports(tree, module):
+        path = _REPO / (target.replace(".", "/") + ".py")
+        if not path.exists():
+            path = _REPO / target.replace(".", "/") / "__init__.py"
+        if not path.exists():
+            continue
+        delegated = ast.parse(path.read_text(encoding="utf-8"))
+        constants = _module_constants(delegated)
+        prefix = "\n".join(f"{key} = {value!r}" for key, value in constants.items())
+        for function in delegated.body:
+            if (
+                isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and function.name == name
+            ):
+                found.append(prefix + "\n" + ast.unparse(function))
     return found
 
 
@@ -307,7 +352,7 @@ def test_every_standard_daemon_names_itself_as_the_roster_does() -> None:
     for spec in _healthz_specs().values():
         module = _module(spec)
         source = (_REPO / (module.replace(".", "/") + ".py")).read_text(encoding="utf-8")
-        found = _daemon_literals(source)
+        found = _daemon_literals(source, module=module)
         for callee in _HEALTH_NAME_CALLS:
             assert found.get(callee), f"{module}: no {callee}(...) with a literal name"
             assert set(found[callee]) == {spec.health_name}, (module, callee, found[callee])

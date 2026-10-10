@@ -34,7 +34,12 @@ def _coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
     from agent.graph.prompt.system_prompt import effective_sdk_expand
 
-    expanded = set(effective_sdk_expand(slices.prompt.sdk_disable))
+    expanded = set(
+        effective_sdk_expand(
+            slices.prompt.sdk_disable,
+            configured_expansions=slices.read("agent", "sdk_expand_in_system_prompt"),
+        )
+    )
     pieces: list[str] = []
     for name in _PROMOTED_MODULES:
         if name in expanded:

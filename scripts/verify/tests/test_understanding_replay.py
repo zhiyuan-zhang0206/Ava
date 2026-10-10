@@ -21,6 +21,10 @@ from base.lm.catalog import ModelCatalog
 _THRESHOLD = 1000
 
 
+def _read_agent(field: str):
+    return getattr(settings.agent, field)
+
+
 def _segment() -> list[AnyMessage]:
     """Head, one framework note, then 40 turns (human, ai) whose input tokens grow by 130."""
     msgs: list[AnyMessage] = [
@@ -77,6 +81,7 @@ async def test_live_chunks_match_the_hook_turn_by_turn(
                 model="m",
                 overrides=ModelOverrides.from_pins({}),
                 catalog=model_catalog,
+                read_agent=_read_agent,
             )
             compact = update.get("compact", compact)
 

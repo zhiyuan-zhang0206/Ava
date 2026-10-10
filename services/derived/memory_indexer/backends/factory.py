@@ -2,7 +2,7 @@
 
 `get_backend()` is the single entry point: the indexer daemon (write
 path) and the gateway search endpoint (read path) both take their backend
-from here, keyed by `settings.services.memory_search_backend`
+from here, keyed by the name supplied by the composition root
 (`AVA_MEMORY_SEARCH_BACKEND`, default `numpy`). Switching storage is one
 env var + a restart; the cold-start reconcile rebuilds the index on the
 new backend.
@@ -25,13 +25,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from base.config import settings
 from base.db import Database
 from services.derived.memory_indexer.backends.base import MemorySearchBackend
 
 
 def _numpy_backend(
-    database: Database, dim: int, fingerprint: str, *, readonly: bool = False
+    database: Database,
+    dim: int,
+    fingerprint: str,
+    *,
+    uri_reader: Callable[[], str],
+    readonly: bool = False,
 ) -> MemorySearchBackend:
     """NumPyBackend is a thin HTTP client — the vector space lives in the
     memory_search service process, so database/dim/fingerprint are accepted for the
@@ -39,30 +43,44 @@ def _numpy_backend(
     from services.derived.memory_indexer.backends.numpy import NumPyBackend
 
     del database, dim, fingerprint
-    return NumPyBackend(readonly=readonly)
+    return NumPyBackend(uri_reader=uri_reader, readonly=readonly)
 
 
 def _pgvector_backend(
-    database: Database, dim: int, fingerprint: str, *, readonly: bool = False
+    database: Database,
+    dim: int,
+    fingerprint: str,
+    *,
+    uri_reader: Callable[[], str],
+    readonly: bool = False,
 ) -> MemorySearchBackend:
+    del uri_reader  # This backend has no HTTP endpoint.
     from services.derived.memory_indexer.backends.pgvector import PGVectorBackend
 
     return PGVectorBackend(database, dim=dim, fingerprint=fingerprint, readonly=readonly)
 
 
-# Uniform constructor shape `(database, dim, fingerprint, readonly)`.
-_BACKENDS: dict[str, Callable[[Database, int, str, bool], MemorySearchBackend]] = {
-    "numpy": lambda database, dim, fingerprint, readonly: _numpy_backend(
-        database, dim, fingerprint, readonly=readonly
+# Uniform constructor shape `(database, dim, fingerprint, readonly, uri_reader)`.
+_BACKENDS: dict[
+    str, Callable[[Database, int, str, bool, Callable[[], str]], MemorySearchBackend]
+] = {
+    "numpy": lambda database, dim, fingerprint, readonly, uri_reader: _numpy_backend(
+        database, dim, fingerprint, readonly=readonly, uri_reader=uri_reader
     ),
-    "pgvector": lambda database, dim, fingerprint, readonly: _pgvector_backend(
-        database, dim, fingerprint, readonly=readonly
+    "pgvector": lambda database, dim, fingerprint, readonly, uri_reader: _pgvector_backend(
+        database, dim, fingerprint, readonly=readonly, uri_reader=uri_reader
     ),
 }
 
 
 def get_backend_named(
-    name: str, *, database: Database, dim: int, fingerprint: str, readonly: bool = False
+    name: str,
+    *,
+    database: Database,
+    dim: int,
+    fingerprint: str,
+    uri_reader: Callable[[], str],
+    readonly: bool = False,
 ) -> MemorySearchBackend:
     """Construct a backend by name — the one dispatch path; unknown names
     fail fast (an unrecognized value must not silently fall back to numpy:
@@ -73,16 +91,19 @@ def get_backend_named(
     except KeyError:
         known = ", ".join(sorted(_BACKENDS))
         raise ValueError(f"unknown memory search backend {name!r} (known: {known})") from None
-    return ctor(database, dim, fingerprint, readonly)
+    return ctor(database, dim, fingerprint, readonly, uri_reader)
 
 
-def get_backend(database: Database, dim: int, fingerprint: str) -> MemorySearchBackend:
+def get_backend(
+    database: Database, dim: int, fingerprint: str, *, name: str, uri_reader: Callable[[], str]
+) -> MemorySearchBackend:
     """Construct the configured backend
     (`settings.services.memory_search_backend`, env
     `AVA_MEMORY_SEARCH_BACKEND`) for the given embedding vector space."""
     return get_backend_named(
-        settings.services.memory_search_backend,
+        name,
         database=database,
         dim=dim,
         fingerprint=fingerprint,
+        uri_reader=uri_reader,
     )

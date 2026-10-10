@@ -158,7 +158,10 @@ def test_sdk_attachment_can_pause_heartbeat(
     pin_agent(None)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
 
-    def snapshot(_agent_id: int) -> tuple[BaseAgentState, dict[str, Any], None]:
+    def snapshot(
+        _agent_id: int, *, database: Database
+    ) -> tuple[BaseAgentState, dict[str, Any], None]:
+        assert isinstance(database, Database)
         return BaseAgentState(), {}, None
 
     monkeypatch.setattr(external, "load_snapshot", snapshot)

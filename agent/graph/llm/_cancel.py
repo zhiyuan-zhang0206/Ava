@@ -97,7 +97,11 @@ async def _race_stream_vs_cancel(
             return Command[LlmGoto](update={"halted": True}, goto=AFTER_EXEC)
 
         except LLMStreamError as e:
-            ledger.record_consecutive_error(str(agent_id), e)
+            ledger.record_consecutive_error(
+                str(agent_id),
+                e,
+                max_cap=ctx.require_agent().read("lm", "llm_retry_max_consecutive_same_error"),
+            )
             raise
         except Exception as e:
             # Classify the provider exception (base.lm.errors.classify_error) and

@@ -49,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import collect
 
+from base.db import Database
 from base.paths import ava_home
 
 ORCHESTRATION_SKILLS = ("ava-workflow", "ava-dynamic-workflow", "ava-goal")
@@ -127,7 +128,9 @@ class ScanResult(NamedTuple):
     counts: dict[str, int]
 
 
-def scan(days: int, week: str | None = None, *, include_test: bool = False) -> ScanResult:
+def scan(
+    days: int, week: str | None = None, *, database: Database, include_test: bool = False
+) -> ScanResult:
     """Collect the window's runs and write them under
     `$AVA_HOME/self_evolution/daily/<date>.jsonl`. The weekly `dataset/`
     files are never touched, so a daily run can never clobber a weekly
@@ -140,7 +143,9 @@ def scan(days: int, week: str | None = None, *, include_test: bool = False) -> S
 
     Source: the gateway's /api/events; a failed read fails the scan."""
     week = week or datetime.now(UTC).date().isoformat()
-    records, counts = collect.collect_with_counts(days, week, include_test=include_test)
+    records, counts = collect.collect_with_counts(
+        days, week, database=database, include_test=include_test
+    )
     out_dir = ava_home() / "self_evolution" / "daily"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{week}.jsonl"
@@ -313,6 +318,12 @@ def render(
 
 
 def main() -> None:
+    from base.db.code_version_gate import ProcessDbGate
+    from base.native_process.code_version import CodeVersion
+    from base.native_process.loaded_commit import LoadedCommit
+
+    version = CodeVersion(LoadedCommit.capture())
+    gate = ProcessDbGate(version=version.get, process="unknown")
     p = argparse.ArgumentParser(
         description="Daily incremental self-evolution scan — collect the past day's runs, "
         "report, alert (exit 2) on bad runs.",
@@ -328,7 +339,8 @@ def main() -> None:
     if args.days < 1:
         print("error: --days must be >= 1", file=sys.stderr)
         raise SystemExit(1)
-    result = scan(args.days, include_test=args.include_test)
+    database = Database.from_settings(gate=gate)
+    result = scan(args.days, database=database, include_test=args.include_test)
     full = render(result.records, result.path, args.days, result.counts)
     report_path = result.path.with_suffix(".report.txt")
     try:

@@ -15,6 +15,7 @@ from base import cluster, config
 from base import db as db_module
 from base.cluster import ClusterPorts, ClusterRecord
 from base.config.domains.storage.data_plane import DataPlaneSettings
+from base.db import Database, DbConfig
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 _POOLED = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"
@@ -54,6 +55,38 @@ def _set(monkeypatch: pytest.MonkeyPatch, *, db_url: str, rec: ClusterRecord | N
 _HOME = "/x/.ava-t"
 # A record carrying the fixed table's data-plane ports.
 _PG_REC = _rec(_HOME, {"gateway": 8000, "postgres": 5433, "redis": 6380, "pgbouncer": 6433})
+
+
+def test_direct_handle_uses_owned_lazy_host_and_preserves_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set(monkeypatch, db_url=_POOLED, rec=_PG_REC)
+    reads: list[str] = []
+
+    def local_host() -> str:
+        reads.append("host")
+        return "owned-host"
+
+    def handle(url: str) -> Database:
+        return Database(
+            DbConfig(
+                db_url=url,
+                db_sslmode="",
+                db_pool_min_size=1,
+                db_pool_max_size=2,
+                pgbouncer_enabled=True,
+            ),
+            local_host=local_host,
+        )
+
+    assert handle(PLACEHOLDER_DB_URL).direct_url() == PLACEHOLDER_DB_URL
+    assert handle("not-a-port").direct_url() == "not-a-port"
+    assert handle(_POOLED).direct_url() == _DIRECT
+    assert reads == []
+    assert handle(_POOLED.replace("127.0.0.1", "owned-host")).direct_url() == _DIRECT.replace(
+        "127.0.0.1", "owned-host"
+    )
+    assert reads == ["host"]
 
 
 def test_direct_db_url_swaps_pooler_port_to_direct_pg(monkeypatch: pytest.MonkeyPatch) -> None:

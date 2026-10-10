@@ -575,7 +575,28 @@ class TestRetryBackoffJitter:
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
         pin_no_identity()
-        assert [gc._retry_delay_seconds(i) for i in range(6)] == [1.0, 2.0, 4.0, 8.0, 8.0, 8.0]
+        from base.agents.context import AvaContext
+        from base.agents.context.clients import ClientSet
+
+        context = AvaContext(
+            clients=ClientSet(
+                factories={
+                    gc.GatewayTransportInputs: lambda: gc.GatewayTransportInputs(
+                        max_retries_reader=lambda: 3,
+                        retry_delay_reader=lambda: 1.0,
+                        memory_deadline_reader=lambda: 15.0,
+                    )
+                }
+            )
+        )
+        assert [gc._retry_delay_seconds(i, context) for i in range(6)] == [
+            1.0,
+            2.0,
+            4.0,
+            8.0,
+            8.0,
+            8.0,
+        ]
 
     def test_sleeps_follow_backoff_schedule(
         self, mock_client: MagicMock, retry_waits: list[float], monkeypatch: pytest.MonkeyPatch
@@ -674,10 +695,22 @@ def test_retry_settings_are_read_when_a_request_retries(monkeypatch: pytest.Monk
     """The attempt count and base delay come from the settings at use, not from values
     captured when the module imported."""
     from ava.gateway_client import transport
-    from base.config import settings
+    from base.agents.context import AvaContext
+    from base.agents.context.clients import ClientSet
 
-    monkeypatch.setattr(settings.gateway, "gateway_client_max_retries", 7)
-    monkeypatch.setattr(settings.gateway, "gateway_client_retry_delay_seconds", 0.5)
-    assert transport._max_retries() == 7
-    assert transport._base_retry_delay_s() == 0.5
-    assert transport._retry_delay_seconds(0) >= 0.5
+    values = {"attempts": 3.0, "delay": 1.0}
+    context = AvaContext(
+        clients=ClientSet(
+            factories={
+                transport.GatewayTransportInputs: lambda: transport.GatewayTransportInputs(
+                    max_retries_reader=lambda: int(values["attempts"]),
+                    retry_delay_reader=lambda: values["delay"],
+                    memory_deadline_reader=lambda: 15.0,
+                )
+            }
+        )
+    )
+    values.update(attempts=7, delay=0.5)
+    assert transport._max_retries(context) == 7
+    assert transport._base_retry_delay_s(context) == 0.5
+    assert transport._retry_delay_seconds(0, context) >= 0.5

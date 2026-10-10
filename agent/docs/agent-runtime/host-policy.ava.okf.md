@@ -26,6 +26,19 @@ constraints.
 The daemon supplies `HostPolicy` (`agent_host/runtime.py`) explicitly: admission
 capacity is read at construction, cache limits at each eviction, and the model
 and override readers at the existing admission, slice and runtime-build boundaries.
+The same process `ConfigBoot` supplies the live default reader, operation-time
+clock factory, handoff note inputs, and corpse recovery policy. Cold build,
+database recovery and final reconciliation retain the same `ReconcileReadInputs`;
+they do not create another configuration owner or reset their read ordering.
+The process entry owns one captured code image and one `ProcessDbGate` for its
+database factory, workload pool and control pool. Host logging and the plugin
+installation capture that same ClientSet producer; the heartbeat alert and
+checkpoint interval retain live readers from this configuration owner.
+`agent_host/lifecycle/configuration.py` owns these startup inputs, while the
+daemon owns their handoff and bounded shutdown. Each work and settlement Task
+is retained by the same hosted turn scope. Outer cancellation preserves their
+shielded completion; cleanup failures attach to the original business error,
+and the service retains completed failures for its own shutdown receipt.
 Agent pins retain precedence. Policy inputs are per host; a live default update
 still follows the existing runtime-cache invalidation rules.
 

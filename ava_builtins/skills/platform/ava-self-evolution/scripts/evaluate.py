@@ -155,19 +155,20 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
     return state
 
 
-def _status_of(agent_ids: list[int]) -> dict[int, str]:
+def _status_of(agent_ids: list[int], *, database: Database) -> dict[int, str]:
     if not agent_ids:
         return {}
-    with Database.from_settings().connect() as conn, conn.cursor() as cur:
+    with database.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT id, status FROM agents_meta WHERE id = ANY(%s)", [agent_ids])
         return {r[0]: r[1] for r in cur.fetchall()}
 
 
-def poll(state: dict[str, Any]) -> dict[str, list[int]]:
+def poll(state: dict[str, Any], *, database: Database) -> dict[str, list[int]]:
     """Split the eval agents into done vs still-pending by their current status.
-    Call each turn until `pending` is empty, then `gather`."""
+    Call each turn until `pending` is empty, then `gather`, using the same
+    caller-supplied Database."""
     ids = [r["eval_agent_id"] for r in state["runs"]]
-    status = _status_of(ids)
+    status = _status_of(ids, database=database)
     done = [i for i in ids if status.get(i) in DONE_STATUSES]
     pending = [i for i in ids if i not in done]
     return {"done": done, "pending": pending}
@@ -191,7 +192,7 @@ def _leak_paths(agent_id: int) -> LeakPaths:
     )
 
 
-def gather(state: dict[str, Any]) -> dict[str, Any]:
+def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
     """Collect + score every finished eval agent.
 
     Agents still running are listed under `pending`. Finished replays that do
@@ -199,13 +200,13 @@ def gather(state: dict[str, Any]) -> dict[str, Any]:
     profile, or touch a leak surface remain in `per_task` and `invalid`, but
     are excluded from the mean and `n`.
     """
-    progress = poll(state)
+    progress = poll(state, database=database)
     per_task = []
     for run in state["runs"]:
         if run["eval_agent_id"] not in progress["done"]:
             continue
         eval_agent_id = run["eval_agent_id"]
-        rec = collect_one(eval_agent_id, leak_paths=_leak_paths(eval_agent_id))
+        rec = collect_one(eval_agent_id, database=database, leak_paths=_leak_paths(eval_agent_id))
         replay_ok, replay_reason = verify_replay(
             {"tools_called": run.get("original_tools_called", {})}, rec
         )
@@ -252,7 +253,7 @@ def latest_state(skill: str) -> dict[str, Any]:
 # ─────────────── debrief (the backward pass) ───────────────
 
 
-def debrief(state: dict, skill_name: str) -> list[dict]:
+def debrief(state: dict, skill_name: str, *, database: Database) -> list[dict]:
     """Ask each eval agent that just ran a task: "what would you change?"
 
     This is the backward pass of the evaluation loop — the agent that actually
@@ -263,7 +264,7 @@ def debrief(state: dict, skill_name: str) -> list[dict]:
     Returns one record per debriefed agent: {eval_agent_id, prompt, debrief_sent}.
     """
     results: list[dict] = []
-    status = _status_of([entry["eval_agent_id"] for entry in state["runs"]])
+    status = _status_of([entry["eval_agent_id"] for entry in state["runs"]], database=database)
     for entry in state["runs"]:
         eval_agent_id = entry["eval_agent_id"]
         if status.get(eval_agent_id) not in DONE_STATUSES:

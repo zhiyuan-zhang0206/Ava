@@ -15,6 +15,27 @@ is retried on the next discovery instead of being retained as an empty result.
 
 ## Module Index
 
+SDK operations read configuration from the `ConfigAuthority` retained by their
+existing plugin installation. Web requests, understanding calls, neighbor
+defaults and shell capture defaults retain their operation-time reads; changing
+that installation's configuration affects subsequent reads. Explicit arguments
+still take precedence over defaults. A claim-side security scan receives its
+policy from the agent's own slices, while SDK scans use the installed agent
+configuration. Missing required installation inputs fail at their first use.
+Default SDK clients capture startup's delivered environment at their first
+configuration read. Bare plugin installation uses the same read-only capture;
+neither operation repeats dotenv delivery or changes the process environment.
+Explicit process roots retain their supplied configuration owner and overlays.
+Timestamped SDK operations obtain a fresh clock from their bound context, or
+from the installed process factory when no context is bound. Neither binding
+evaluates the factory; a partial owner without one refuses a clock operation.
+
+Gateway retry counts, each retry delay, and the default memory-search deadline
+come from live readers configured on that context's existing client owner.
+An explicit host context uses its own inputs without requiring an SDK
+installation. The transport input object performs no reads at construction
+and owns no second HTTP connection.
+
 ### Files & Shell
 - [[files.ava.okf.md]] — File read/write: read / write / edit / delete / glob / append
 - [[shell.ava.okf.md]] — Shell commands: run() / run_background() (auto-report on completion) + sessions (new / send / capture / kill)
@@ -39,3 +60,17 @@ is retried on the next discovery instead of being retained as an empty result.
 - [[ui.ava.okf.md]] — User interface: serve / notify / show / close
 - [[ava_builtins/plugins/ava_memory/docs/memory-api.ava.okf.md]] — Long-term memory pool: semantic search
 - [[ava/skills/docs/skills.ava.okf.md]] — Skill registry: ava.help(ava.skills.<name>)
+
+An SDK installation retains its root-supplied Clock factory without reading it
+at installation. A bound context owns Clock operations; a partial context
+missing that capability fails explicitly rather than borrowing the installation.
+An unbound installed SDK uses its retained factory. `ava.loaded_code_image()`
+returns the immutable first-load code fact and does not reread a moved checkout
+on reload or late attachment.
+
+SDK recorders capture the installation's lazy event producer, or the admitted
+caller's ClientSet producer together with identity, tally and durable capture.
+Changing context inside a call cannot redirect that event. Sampling happens
+before producer construction; durable capture precedes enqueue. An unbound
+Python caller remains a system caller and uses the installation's retained
+producer, without creating an AvaContext. Reload preserves that producer.

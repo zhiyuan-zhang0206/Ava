@@ -52,6 +52,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Callable
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
@@ -61,7 +62,7 @@ from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
-from base.config import settings
+from base.config import ConfigBoot
 from base.log import logger
 from base.paths import chrome_mcp_socket
 from services.desktop.browser import page_lifecycle
@@ -546,7 +547,9 @@ async def _socket_in_use(path: Path) -> bool:
     return True
 
 
-async def run() -> None:  # noqa: PLR0915 — the single-instance guard and the reconnect loop keep run at 55 statements
+async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect loop keep run at 55 statements
+    *, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]
+) -> None:
     """Start the browser-mcp daemon.
 
     Listens on the shared Unix socket and auto-reconnects the upstream
@@ -554,7 +557,7 @@ async def run() -> None:  # noqa: PLR0915 — the single-instance guard and the 
     common case (npx crash / Chrome restart / OOM). Only SIGTERM/SIGINT or
     a fatal daemon-process error stops the loop.
     """
-    browser_url = f"http://127.0.0.1:{settings.services.browser_cdp_port}"
+    browser_url = f"http://127.0.0.1:{browser_cdp_port}"
     sock = chrome_mcp_socket()
     # Single-instance guard: the old code unlinked the socket unconditionally,
     # so a second daemon (watchdog misjudged the first dead and respawned)
@@ -598,7 +601,9 @@ async def run() -> None:  # noqa: PLR0915 — the single-instance guard and the 
         try:
             while not stop.is_set():
                 try:
-                    session, stack = await _create_upstream(browser_url, stop)
+                    session, stack = await _create_upstream(
+                        browser_url, stop, connect_timeout_reader=connect_timeout_reader
+                    )
                 except _StoppingError:
                     break
                 except Exception as e:
@@ -683,8 +688,15 @@ def main() -> None:
     # traceback is postmortem-able. Idempotent.
     from base.log import init_gateway_process
 
+    config = ConfigBoot()
+    config.boot()
     init_gateway_process(name="browser-mcp")
-    asyncio.run(run())
+    asyncio.run(
+        run(
+            browser_cdp_port=config.view.services.browser_cdp_port,
+            connect_timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
+        )
+    )
 
 
 if __name__ == "__main__":

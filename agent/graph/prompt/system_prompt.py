@@ -15,7 +15,6 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
-from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import activation
@@ -88,7 +87,9 @@ def _discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
     return sorted(discovered)
 
 
-def effective_sdk_expand(sdk_disable: Sequence[str]) -> list[str]:
+def effective_sdk_expand(
+    sdk_disable: Sequence[str], *, configured_expansions: Sequence[str]
+) -> list[str]:
     """The merged expand list: plugin-declared paths (`sdk_namespaces(expand=True)` / `sdk_expansions`)
     first, then the configured framework list, deduped keep-first. Plugins lead
     because a plugin promotes its own highest-frequency surface (ava_code's cwd
@@ -112,7 +113,7 @@ def effective_sdk_expand(sdk_disable: Sequence[str]) -> list[str]:
     from ava.sdk_surface import install
 
     configured: list[str] = []
-    for entry in settings.agent.sdk_expand_in_system_prompt:
+    for entry in configured_expansions:
         if entry == "*":
             configured.extend(_discover_all_namespaces(sdk_disable))
         else:
@@ -158,7 +159,10 @@ def _sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     or a polluted expand list) is an anomaly — render it once (a repeated
     contract is pure prompt bloat) but WARN, so the upstream cause stays visible
     instead of being silently absorbed."""
-    wanted = effective_sdk_expand(slices.prompt.sdk_disable)
+    wanted = effective_sdk_expand(
+        slices.prompt.sdk_disable,
+        configured_expansions=slices.read("agent", "sdk_expand_in_system_prompt"),
+    )
     if not wanted:
         return ""
     import ava
@@ -578,7 +582,7 @@ def _workspace_section(slices: AgentSlices, *, agent_id: int | None) -> str:
     the ``agent_id_note`` context note instead — injected after each compact
     and at cold start, and regrafted by a fork, so it is always the reader's
     own path."""
-    if agent_id is None or not settings.agent.workspace_in_system_prompt:
+    if agent_id is None or not slices.read("agent", "workspace_in_system_prompt"):
         return ""
     # Ensure the workspace directory exists (mkdir side effect).
     workspace_dir(agent_id)
@@ -672,7 +676,6 @@ def build_system_prompt(
     flow order), so plugin namespaces (`ava.cwd` etc.) make it into the
     `help(ava)` output.
     """
-    from base.config import settings
 
     from ._base_prompt import (
         _BASE_SYSTEM_PROMPT,
@@ -684,7 +687,7 @@ def build_system_prompt(
     sequential = (
         _SEQUENTIAL_TOOL_CALLS_NOTE if slices.prompt.prompt_sequential_tool_calls_enabled else ""
     )
-    if settings.agent.prompt_sdk_overview_enabled:
+    if slices.read("agent", "prompt_sdk_overview_enabled"):
         parts = [
             _BASE_SYSTEM_PROMPT.format(
                 _SEQUENTIAL_TOOL_CALLS=sequential, _AVA_OVERVIEW=_get_ava_overview()
@@ -754,7 +757,7 @@ def build_system_prompt(
     # table produces no line (future models drop in by adding one entry).
     # Suppressible because temporal metadata is noise in a benchmark run, where
     # the task is dated by its repo state rather than by wall-clock time.
-    if settings.agent.prompt_knowledge_cutoff_enabled:
+    if slices.read("agent", "prompt_knowledge_cutoff_enabled"):
         cutoff = catalog.knowledge_cutoffs.get(slices.brain.llm_model)
         if cutoff:
             parts.append(f"Knowledge cutoff: {cutoff}")

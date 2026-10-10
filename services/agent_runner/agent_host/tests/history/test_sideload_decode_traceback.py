@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 
 import base.agents.history.inbound_sideload as sideload_mod
 from base.agents.history.inbound_sideload import sideload_committed_ids
+from base.agents.history.tests.test_inbound_sideload_failures import _read_inputs
 from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort import (
     _insert_checkpoint,
     _insert_write,
@@ -56,7 +57,12 @@ async def test_sideload_decode_failure_keeps_its_traceback(
 
     monkeypatch.setattr(sideload_mod, "_collect_inbound_ids", _boom)
 
-    assert await sideload_committed_ids(aops_pool, saver, agent, since=datetime.now(UTC)) is None
+    assert (
+        await sideload_committed_ids(
+            aops_pool, saver, agent, since=datetime.now(UTC), inputs=_read_inputs()
+        )
+        is None
+    )
     record = next(
         r
         for r in loguru_records

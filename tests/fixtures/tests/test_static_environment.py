@@ -20,7 +20,7 @@ def test_process_environment_keeps_its_home_and_data_plane_boundary(
     pytestconfig: pytest.Config,
 ) -> None:
     assert Path(os.environ["AVA_HOME"]) != Path.home() / ".ava"
-    assert not os_jobs_enabled()
+    assert not os_jobs_enabled(enabled_reader=lambda: settings.general.os_jobs_enabled)
     db = conninfo_to_dict(settings.data_plane.db_url)
     if static_mode(pytestconfig):
         expected = conninfo_to_dict(UNPROVISIONED_DB_URL)

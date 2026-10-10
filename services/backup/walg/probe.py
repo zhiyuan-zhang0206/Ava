@@ -33,10 +33,11 @@ The probe never raises: anything it cannot read is its own fixed failure.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -157,9 +158,9 @@ def judge(state: ArchiverState, expected: ExpectedArchive) -> str | None:
     return None
 
 
-def configuration_failure() -> str | None:
+def configuration_failure(*, path_reader: Callable[[], Path | None]) -> str | None:
     """A broken configuration or a swapped key, from the files alone."""
-    path = walg_config.configured_path()
+    path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
         return None
     try:
@@ -228,12 +229,12 @@ def tick_failure(now: datetime | None = None) -> str | None:
         return TICK_STATE_UNREADABLE
 
 
-def failure() -> str | None:
+def failure(*, path_reader: Callable[[], Path | None]) -> str | None:
     """The first thing wrong with WAL archiving, or None (also None while it is off)."""
-    expected = expected_archive()
+    expected = expected_archive(path_reader=path_reader)
     if expected is None:
         return None
-    configuration = configuration_failure()
+    configuration = configuration_failure(path_reader=path_reader)
     if configuration is not None:
         return configuration
     try:

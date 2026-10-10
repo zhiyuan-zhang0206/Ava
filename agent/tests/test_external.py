@@ -22,6 +22,7 @@ from ava.sdk_surface import agent_identity
 from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.settings import agent_setting
 from base import telemetry
+from base.config import settings
 from base.db import Database
 from base.lm.plugin_providers import build_model_catalog
 from base.telemetry.otlp.tests.external_flush import paused_otlp_record as paused_otlp_record
@@ -111,7 +112,11 @@ def test_attach_requests_native_plugin_load(
     monkeypatch.setattr(ava, "ensure_plugins_loaded", spy_loader)
     with external.attach("lease"):
         pass
-    assert calls == [{"surface": False}]
+    assert len(calls) == 1
+    assert calls[0]["surface"] is False
+    assert calls[0]["config"] is None
+    assert set(calls[0]) == {"surface", "config", "clock_factory"}
+    assert callable(calls[0]["clock_factory"])
 
 
 def test_plugin_updates_journal_once_and_next_attachment_sees_them(
@@ -252,7 +257,7 @@ def test_constructor_failure_detaches_and_allows_next_attachment(
 ) -> None:
     _, _, staged = attached_runtime
 
-    def fail(_db: object, *_args: Any) -> Any:
+    def fail(_db: object, *_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("constructor interrupted")
 
     with monkeypatch.context() as failure_patch:
@@ -537,7 +542,12 @@ def test_external_controls_stay_out_of_native_prompt(
     from base.packages.plugins.extensions import ExtensionRegistry
 
     prompt = build_system_prompt(
-        ExtensionRegistry(()), AgentSlices.resolve(), agent_id=None, catalog=build_model_catalog()
+        ExtensionRegistry(()),
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
+        agent_id=None,
+        catalog=build_model_catalog(),
     )
     assert "external" not in ava.__all_for_ava__
     assert "ava.external.attach" not in prompt

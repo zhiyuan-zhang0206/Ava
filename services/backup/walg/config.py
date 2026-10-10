@@ -19,12 +19,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from base.config import settings
 from base.deploy.release.verified_file import RegularFileReadError, regular_bytes
 from base.host.private_storage import create_private_bytes, private_file_problem
 from base.paths import ava_home
@@ -66,13 +66,13 @@ class WalgConfig:
     key_fingerprint: str
 
 
-def configured_path() -> Path | None:
+def configured_path(*, path_reader: Callable[[], Path | None]) -> Path | None:
     """The configured file, or None when WAL-G is off (the default)."""
-    return settings.walg.walg_config_file
+    return path_reader()
 
 
-def enabled() -> bool:
-    return configured_path() is not None
+def enabled(*, path_reader: Callable[[], Path | None]) -> bool:
+    return configured_path(path_reader=path_reader) is not None
 
 
 def key_id_path() -> Path:
@@ -193,7 +193,7 @@ def pin_problem(config: WalgConfig) -> str | None:
     )
 
 
-def load_walg_config() -> WalgConfig:
+def load_walg_config(*, path_reader: Callable[[], Path | None]) -> WalgConfig:
     """The validated configuration, pinning the key's fingerprint on first use.
 
     Called by converge, before Postgres starts: a bad configuration fails
@@ -204,7 +204,7 @@ def load_walg_config() -> WalgConfig:
         WalgConfigError: WAL-G is not configured, the configuration is unusable,
             or its key differs from the pinned one.
     """
-    path = configured_path()
+    path = configured_path(path_reader=path_reader)
     if path is None:
         raise WalgConfigError("AVA_WALG_CONFIG_FILE is not set")
     config = read_config(path)

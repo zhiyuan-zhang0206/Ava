@@ -3,9 +3,11 @@
 import asyncio
 import contextlib
 import json
+import os
 import threading
+from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import psycopg
 import pytest
@@ -15,6 +17,13 @@ from base.agents.incarnation.resources import IncarnationResources, decode_resou
 from base.agents.incarnation.tests.test_resources import _admitted
 from base.db import Database
 from tests.fixtures.pin_agent import exec_context
+
+
+@pytest.fixture(autouse=True)
+def restore_process_delivery() -> Iterator[None]:
+    """Own cold process-client configuration delivery for this consumer scope."""
+    with patch.dict(os.environ):
+        yield
 
 
 async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(

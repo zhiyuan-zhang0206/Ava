@@ -4,7 +4,6 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.mcp_server import endpoint
@@ -15,6 +14,7 @@ from gateway.tests.extensions.test_mcp_endpoint import (
 from gateway.tests.extensions.test_mcp_endpoint import (
     _enable_endpoint as _enable_endpoint,
 )
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_older_server_rejects_guarded_tool_before_creating_anything(
@@ -33,7 +33,7 @@ def test_older_server_rejects_guarded_tool_before_creating_anything(
         return server.session_manager
 
     monkeypatch.setattr(endpoint, "build_manager", older_manager)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         token = _create_token(client)
         response = _tool_call(
             client,

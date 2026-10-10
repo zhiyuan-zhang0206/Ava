@@ -23,6 +23,7 @@ from base.config import settings
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import settlement as settlement_mod
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 class _ReconcileSpy:
@@ -40,6 +41,7 @@ class _ReconcileSpy:
         agent_id: int,
         *,
         incarnation: RuntimeIncarnation | None,
+        inputs: object,
     ) -> None:
         self.calls.append((pool, checkpointer, agent_id))
         self.bound.append(incarnation)
@@ -67,6 +69,7 @@ async def _run_pass(
         cast(AsyncPostgresSaver, object()),
         incarnation,
         resources=resources,
+        inputs=configured_policy().reconcile_inputs,
     )
 
 

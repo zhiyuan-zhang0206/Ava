@@ -55,7 +55,7 @@ import contextlib
 import faulthandler
 import sys
 import time
-from collections.abc import AsyncGenerator, Generator, Sequence
+from collections.abc import AsyncGenerator, Callable, Generator, Sequence
 from typing import Any, TextIO
 
 from langchain_core.messages import BaseMessage
@@ -68,8 +68,8 @@ from base.agents.history.timeline import (
     tail_window,
     timeline_default_limit,
 )
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.observation.turn_progress import TurnProgress
-from base.config import settings
 from base.events.live.projection import TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.log import logger
@@ -145,7 +145,9 @@ def _real_stderr() -> TextIO | None:
 
 
 @contextlib.contextmanager
-def _stall_dump_guard(node_name: str) -> Generator[None]:
+def _stall_dump_guard(
+    node_name: str, *, read_stall_seconds: Callable[[], float]
+) -> Generator[None]:
     """Arm a one-shot stack dump if the body outlasts
     `settings.agent.node_stall_dump_seconds`: faulthandler dumps every thread's frames AND
     a loop timer dumps every asyncio task's coroutine frames (the thread dump
@@ -156,7 +158,7 @@ def _stall_dump_guard(node_name: str) -> Generator[None]:
     no real-fd stderr skips the dump rather than crash. Nodes run one at a time,
     so the single global faulthandler timer never collides.
     """
-    threshold = settings.agent.node_stall_dump_seconds
+    threshold = read_stall_seconds()
     if threshold <= 0 or node_name in _STALL_GUARD_EXEMPT:
         yield
         return
@@ -237,6 +239,9 @@ async def node_lifecycle(
     event_publisher: AgentEventPublisher,
     agent_id: int,
     turn_progress: TurnProgress,
+    read_stall_seconds: Callable[[], float],
+    timeline_inputs: TimelineReadInputs,
+    limit_reader: Callable[[], int],
     full_window: bool = False,
 ) -> AsyncGenerator[None]:
     """Wrap node body with enter/exit events + publish a TimelineSnapshot on enter.
@@ -265,7 +270,7 @@ async def node_lifecycle(
     turn_progress.mark(agent_id)
     # The guard spans the pre-enter ops_pool query AND the node body (the
     # `yield`), so a hang in either lands a stack dump naming the blocked frame.
-    with _stall_dump_guard(node_name):
+    with _stall_dump_guard(node_name, read_stall_seconds=read_stall_seconds):
         # Incremental snapshot protocol: on enter, publish only what was newly
         # committed since the last published snapshot. The full-window path
         # (first enter after process start, compaction shrink, or the claim
@@ -287,13 +292,13 @@ async def node_lifecycle(
                 if ops_pool is not None and needs_chat_anchors(messages)
                 else []
             )
-            items, msg_count = build_timeline_items(messages, anchors)
+            items, msg_count = build_timeline_items(messages, anchors, inputs=timeline_inputs)
             # Publish only the newest window — a streaming turn always lands in
             # the tail, and the frontend keeps older windows it scroll-loaded
             # (its merge preserves items below the snapshot's msg_idx floor).
             # msg_count stays the full state.messages length so the
             # future-partial boundary is unaffected.
-            window, _ = tail_window(items, timeline_default_limit())
+            window, _ = tail_window(items, timeline_default_limit(limit_reader=limit_reader))
         else:
             # Incremental: only the messages past the cursor. msg_count stays
             # the FULL len(messages) — the frontend's future-partial boundary
@@ -303,7 +308,9 @@ async def node_lifecycle(
             # NOTE: pass the FULL messages list — build_timeline_items computes
             # msg_count = len(messages) from its first argument, and that must
             # stay the full history length (hard invariant).
-            inc_items, msg_count = build_timeline_items(messages, [], start=cursor)
+            inc_items, msg_count = build_timeline_items(
+                messages, [], start=cursor, inputs=timeline_inputs
+            )
             window = inc_items
         # An empty window carries no items and no signal — skip the emit on
         # BOTH paths. The incremental case (no new commits since the last

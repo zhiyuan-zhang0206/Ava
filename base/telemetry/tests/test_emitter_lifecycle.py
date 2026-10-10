@@ -34,6 +34,56 @@ def event(i: int) -> telemetry.Event:
     )
 
 
+def test_process_binding_uses_owned_writer_without_ambient_factory() -> None:
+    code = """
+import threading
+from base import telemetry
+written = []
+prior = set(threading.enumerate())
+pipeline = telemetry.EventPipeline(writer=written.extend)
+try:
+    telemetry.init_telemetry(
+        process="owned-process", pipeline=pipeline, machine_reader=lambda: "owned-machine"
+    )
+    assert len(set(threading.enumerate()) - prior) == 1
+    telemetry.emit("log", "log", attributes={"owned": True})
+    assert pipeline.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
+    assert len(written) == 1
+    assert written[0].machine == "owned-machine"
+    assert written[0].process == "owned-process"
+finally:
+    pipeline.stop(timeout=1)
+"""
+    child = proc.run_bounded(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=10
+    )
+    assert child.returncode == 0, child.stderr
+
+
+def test_process_binding_rejects_replacing_a_live_owner() -> None:
+    code = """
+from base import telemetry
+first = telemetry.EventPipeline(writer=lambda batch: None)
+second = telemetry.EventPipeline(writer=lambda batch: None)
+try:
+    telemetry.init_telemetry(process="original-owner", pipeline=first)
+    try:
+        telemetry.init_telemetry(process="replacement", pipeline=second)
+    except RuntimeError as exc:
+        assert "another event pipeline" in str(exc)
+    else:
+        raise AssertionError("a live process writer was replaced")
+    assert telemetry.process_name() == "original-owner"
+finally:
+    first.stop(timeout=1)
+    second.stop(timeout=1)
+"""
+    child = proc.run_bounded(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=10
+    )
+    assert child.returncode == 0, child.stderr
+
+
 def test_full_queue_stop_is_finite_and_closes_admission() -> None:
     entered, release = threading.Event(), threading.Event()
     written: list[telemetry.Event] = []
@@ -43,7 +93,7 @@ def test_full_queue_stop_is_finite_and_closes_admission() -> None:
         assert release.wait(3)
         written.extend(batch)
 
-    pipe = telemetry._EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
     try:
         pipe.enqueue(event(1))
         assert entered.wait(1)
@@ -70,7 +120,7 @@ def test_sync_deadline_covers_marker_admission_and_write(monkeypatch: pytest.Mon
         entered.set()
         assert release.wait(3)
 
-    pipe = telemetry._EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
     try:
         pipe.enqueue(event(1))
         assert entered.wait(1)
@@ -105,7 +155,7 @@ def test_concurrent_sync_receipts_wait_for_their_own_fifo_batch() -> None:
             entered.set()
             assert release.wait(3)
 
-    pipe = telemetry._EventPipeline(writer=writer, batch_size=100, flush_interval_s=60)
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=100, flush_interval_s=60)
     try:
         pipe.enqueue(event(1))
         with ThreadPoolExecutor(max_workers=2) as callers:
@@ -141,7 +191,7 @@ def test_worker_failure_reports_immediately_and_never_acknowledges(
         raise failure
 
     monkeypatch.setattr(emitter, "report_no_pipeline", report)
-    pipe = telemetry._EventPipeline(writer=writer, batch_size=100, flush_interval_s=60)
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=100, flush_interval_s=60)
     pipe.enqueue(event(1))
     with pytest.raises(type(failure)) as observed:
         pipe.sync(timeout=1)
@@ -171,7 +221,7 @@ def test_explicit_sink_isolation_preserves_successful_barrier(
         with emitter.failure_isolated("documented exporter"):
             raise RuntimeError("optional sink failure")
 
-    pipe = telemetry._EventPipeline(writer=writer, flush_interval_s=60)
+    pipe = telemetry.EventPipeline(writer=writer, flush_interval_s=60)
     try:
         pipe.enqueue(event(1))
         assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
@@ -183,7 +233,7 @@ def test_explicit_sink_isolation_preserves_successful_barrier(
 def test_unreleasable_writer_cannot_make_stop_unbounded() -> None:
     code = """
 import threading, time
-from base.telemetry import _EventPipeline, Event
+from base.telemetry import EventPipeline, Event
 from base import telemetry
 from base.log import logger
 import sys
@@ -193,7 +243,7 @@ entered = threading.Event()
 def blocked(batch):
     entered.set()
     threading.Event().wait()
-p = _EventPipeline(writer=blocked, batch_size=1, queue_maxsize=1)
+p = EventPipeline(writer=blocked, batch_size=1, queue_maxsize=1)
 e = Event(datetime.now(UTC), None, None, None, "test", "test", "test", "log", "log", "info", "test", None)
 p.enqueue(e)
 assert entered.wait(1)
@@ -223,7 +273,7 @@ def test_one_deadline_spans_queue_admission_and_blocked_writer() -> None:
         else:
             assert second_release.wait(3)
 
-    pipe = telemetry._EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
     timer = threading.Timer(0.15, first_release.set)
     try:
         pipe.enqueue(event(1))
@@ -244,7 +294,7 @@ def test_one_deadline_spans_queue_admission_and_blocked_writer() -> None:
 
 @pytest.mark.parametrize("timeout", [-1.0, float("inf"), float("nan")])
 def test_invalid_timeout_cannot_create_an_unbounded_close(timeout: float) -> None:
-    pipe = telemetry._EventPipeline(writer=lambda _batch: None)
+    pipe = telemetry.EventPipeline(writer=lambda _batch: None)
     try:
         with pytest.raises(ValueError, match="finite and non-negative"):
             pipe.sync(timeout=timeout)
@@ -256,14 +306,14 @@ def test_invalid_timeout_cannot_create_an_unbounded_close(timeout: float) -> Non
 
 def test_unknown_worker_failure_is_visible_without_a_logging_sink() -> None:
     code = """
-from base.telemetry import _EventPipeline, Event
+from base.telemetry import EventPipeline, Event
 from base import telemetry
 from base.log import logger
 from datetime import datetime, UTC
 logger.remove()
 def broken(batch):
     raise RuntimeError("zero-sink worker defect")
-p = _EventPipeline(writer=broken, batch_size=1)
+p = EventPipeline(writer=broken, batch_size=1)
 e = Event(datetime.now(UTC), None, None, None, "test", "test", "test", "log", "log", "info", "test", None)
 p.enqueue(e)
 assert p._finished.wait(1)

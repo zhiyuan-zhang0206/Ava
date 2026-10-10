@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +13,27 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
+from gateway.routers.memory import MemorySearchInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+
+
+def _memory_inputs() -> MemorySearchInputs:
+    def api_key() -> str | None:
+        value = settings.lm.gemini_api_key
+        return None if value is None else value.get_secret_value()
+
+    return MemorySearchInputs(
+        embedding_backend=lambda: settings.services.embedding_backend,
+        backend=lambda: settings.services.memory_search_backend,
+        uri=lambda: settings.services.memory_search_uri,
+        embedding_timeout=lambda: settings.services.memory_embed_timeout_seconds,
+        api_key=api_key,
+        acquire_timeout=lambda: settings.services.memory_search_acquire_timeout_seconds,
+        deadline=lambda: settings.services.memory_search_deadline_seconds,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -22,11 +41,18 @@ def _app_db(monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog) -> Non
     # Only the app lifespan sets app.state.db; ASGITransport tests never run it.
     monkeypatch.setattr(app.state, "db", object(), raising=False)
     monkeypatch.setattr(app.state, "catalog", model_catalog, raising=False)
+    monkeypatch.setattr(app.state, "memory_search_inputs", _memory_inputs(), raising=False)
 
 
 def _patch_provider(monkeypatch: pytest.MonkeyPatch, provider: object) -> None:
-    def construct(*, catalog: ModelCatalog) -> object:
-        del catalog
+    def construct(
+        name: str,
+        *,
+        catalog: ModelCatalog,
+        timeout_reader: Callable[[], float],
+        api_key_reader: Callable[[], str | None],
+    ) -> object:
+        del name, catalog, timeout_reader, api_key_reader
         return provider
 
     monkeypatch.setattr(
@@ -372,7 +398,7 @@ async def test_query_usage_failure_propagates_without_network_replay(
 
     fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     monkeypatch.setattr(httpx, "AsyncClient", fake)
-    monkeypatch.setattr(memory.settings.lm, "gemini_api_key", SecretStr("test-key"))
+    monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("test-key"))
     failure = error_type("accounting invariant failed")
     seen: list[object] = []
 
@@ -381,7 +407,11 @@ async def test_query_usage_failure_propagates_without_network_replay(
         raise failure
 
     monkeypatch.setattr("base.lm.usage.log_usage_fields", fail_usage)
-    state = SimpleNamespace(catalog=model_catalog, memory_search_gate=asyncio.Semaphore(1))
+    state = SimpleNamespace(
+        catalog=model_catalog,
+        memory_search_gate=asyncio.Semaphore(1),
+        memory_search_inputs=_memory_inputs(),
+    )
     request = Request({"type": "http", "app": SimpleNamespace(state=state)})
     with pytest.raises(error_type) as caught:
         await memory.post_memory_search(request, MemorySearchRequest(query="hello", k=1))

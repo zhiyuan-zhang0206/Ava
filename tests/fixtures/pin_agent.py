@@ -7,16 +7,19 @@ imported before pytest registers it cannot be assertion-rewritten.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 import pytest
 
 import ava
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
+from base.clock import Clock, clock_config_from_boot
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
+from tests.fixtures.configuration import snapshot_process_config
 
 
 @pytest.fixture
@@ -36,6 +39,8 @@ def pin_agent(
     actor: str | None = None,
     lease: ExternalLease | None = None,
     incarnation: RuntimeIncarnation | None = None,
+    clock_factory: Callable[[], Clock] | None = None,
+    clients: ClientSet | None = None,
 ) -> None:
     """Bind a context acting as `agent_id` for the rest of this test; the autouse fixture below
     puts the previous one back."""
@@ -45,7 +50,12 @@ def pin_agent(
         original_incarnation=incarnation,
         # The identity changes, the connections stay: a test's `use_client` or fake SQL slot
         # entered before it pins an agent keeps applying.
-        clients=bound.clients if bound else process_clients(),
+        clients=clients if clients is not None else (bound.clients if bound else process_clients()),
+        clock_factory=(
+            clock_factory
+            if clock_factory is not None
+            else (None if bound is None else bound.clock_factory)
+        ),
     )
 
 
@@ -62,9 +72,11 @@ def exec_context(
     resources: HostedTurnResources | None = None,
 ) -> AvaContext:
     """The host-side context of a turn that runs as `agent_id`: what an exec request carries."""
+    config = snapshot_process_config()
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True, actor=actor),
         original_incarnation=incarnation,
         hosted_resources=resources,
-        clients=process_clients(),
+        clients=process_clients(config=config),
+        clock_factory=lambda: Clock(clock_config_from_boot(config)),
     )

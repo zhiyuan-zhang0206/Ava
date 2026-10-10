@@ -11,7 +11,6 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
 import gateway.cluster.status as status_mod
@@ -23,6 +22,7 @@ from gateway.cluster import snapshots
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.snapshots import Snapshot
 from ops.cluster import rpc as cluster_rpc
+from tests.fixtures.gateway_config import gateway_test_client
 
 _ROW = tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
@@ -260,7 +260,7 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
         return _status(target_machine, running_sha="from-a-dial")
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         default = client.get("/api/cluster/roster").json()
         assert dialed == []
         fresh = client.get("/api/cluster/roster?fresh=true").json()
@@ -285,7 +285,7 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
         return _status(target_machine)
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         assert client.get("/api/cluster/machines").json()[0]["live"] is True
         assert dialed == []
         assert client.get("/api/cluster/machines?fresh=true").json()[0]["live"] is True

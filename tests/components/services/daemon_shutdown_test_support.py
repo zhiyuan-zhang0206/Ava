@@ -90,7 +90,7 @@ def run_child() -> None:
     # production code.
     base.deploy.schema.migrations.assert_schema_current = _noop_schema_gate
 
-    async def wedge_run() -> None:
+    async def wedge_run(**_process_inputs: object) -> None:
         try:
             # The shape under test: a default-executor job that never finishes
             # (any in-flight threadpool work at stop), so closing the loop can

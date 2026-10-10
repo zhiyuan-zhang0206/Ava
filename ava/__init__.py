@@ -1,7 +1,29 @@
 import sys as _sys
+from collections.abc import Callable
+from pathlib import Path as _Path
 from types import ModuleType as _ModuleType
 from types import SimpleNamespace
 from typing import Any, cast
+
+from base.native_process.loaded_commit import LoadedCommit as _LoadedCommit
+from base.native_process.loaded_commit import capture_commit as _capture_commit
+
+# This immutable value belongs to the SDK module's first code load, before any
+# database or plugin use. Reloading a surface must not relabel already-loaded
+# Python code with a checkout that moved later. It owns no clients or gate.
+if "_LOADED_IMAGE" not in globals():
+    _source_root = _Path(__file__).resolve().parents[1]
+    _LOADED_IMAGE = _LoadedCommit(source_root=_source_root, sha=_capture_commit(_source_root))
+
+
+def loaded_code_image() -> _LoadedCommit:
+    """Return the immutable image captured at this SDK module's first load.
+
+    Process composition roots consume this fact without rereading Git or
+    relabeling already-loaded Python after a checkout move or surface reload.
+    """
+    return _LOADED_IMAGE
+
 
 # Runtime connections — `ava.DB`, `ava.REDIS` — are the bound context's clients
 # (`ava.context.sql` / `.redis`), served by the module class below. The agent's own identity
@@ -14,6 +36,8 @@ from typing import Any, cast
 # external API while removing the "must mutate settings before import"
 # invariant.
 from base.agents.context import AvaContext
+from base.clock import Clock, clock_config_from_boot
+from base.config import ConfigBoot
 
 from .sdk_surface import process_context
 
@@ -264,7 +288,13 @@ def unbind_exec_turn() -> None:
 _init_complete = False
 
 
-def ensure_plugins_loaded(*, surface: bool = True) -> None:
+def ensure_plugins_loaded(
+    *,
+    surface: bool = True,
+    config: ConfigBoot | None = None,
+    clock_factory: Callable[[], Clock] | None = None,
+    producer: Callable[[], Any] | None = None,
+) -> None:
     """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
 
     The entry point for a process an agent launched: a watcher / schedule
@@ -318,22 +348,31 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
             _sdk_install.mark_faces_loaded()
         else:
             from base import paths
-            from base.config import settings
             from base.config.service_read import ConfigAuthority
             from base.lm.plugin_providers import build_model_catalog
 
-            def complete_read_model() -> Any:
-                from base.config import Settings
+            if config is None:
+                config = ConfigBoot()
+                config.read_process_environment()
+            import atexit
 
-                return Settings(profile=None)
-
+            # The installation outlives attachments. Bound calls capture their
+            # own context's producer; bare calls keep this distinct cold owner.
+            if producer is None:
+                clients = process_context.process_clients(config=config)
+                atexit.register(clients.close)
+                producer = clients.event_pipeline
             authority = ConfigAuthority.deferred(
-                runtime=settings,
-                build_all_domains=complete_read_model,
+                runtime=config.view,
+                build_all_domains=config.complete_read_model,
                 env_path=paths.ava_home() / ".env",
             )
             loader.load_extensions(
-                surface=surface, catalog=build_model_catalog(), authority=authority
+                surface=surface,
+                catalog=build_model_catalog(),
+                authority=authority,
+                producer=producer,
+                clock_factory=clock_factory or (lambda: Clock(clock_config_from_boot(config))),
             )
             if not surface:
                 _sdk_install.mark_faces_loaded()
@@ -504,5 +543,12 @@ _init_complete = True
 # SDK surface (`ava.sdk_surface.install.install`), not here.
 from .sdk_surface import agent_identity
 
-if agent_identity.is_launched_child():
+# The formal execution entry validates its request and supplies its own boot
+# owner before loading the surface. An arbitrary request env string in a bare
+# launched script cannot select this posture; the interpreter entry owns it.
+if (
+    getattr(getattr(_sys.modules.get("__main__"), "__spec__", None), "name", None)
+    != "agent.execution.child"
+    and agent_identity.is_launched_child()
+):
     ensure_plugins_loaded()

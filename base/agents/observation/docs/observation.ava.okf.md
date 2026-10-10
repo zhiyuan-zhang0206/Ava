@@ -53,3 +53,10 @@ successes.
 Selected-agent detail exposes optional `last_launch_attempt_id` from metadata,
 so guarded retry callers can submit the exact observed UUID. It is an attempt
 identity, not admission or execution evidence; older details may omit it.
+
+Model projections take an explicit `default_model_reader` from their caller.
+Snapshot model lookup preserves birth pins followed by overlay pins; roster
+cards retain their existing overlay-only lookup. A pinned model never reads
+the default. Each unpinned row reads the caller's current default independently,
+then resolves any model withdrawal through the supplied catalog. Database read
+failure in `agent_model_target` still returns the caller's explicit fallback.

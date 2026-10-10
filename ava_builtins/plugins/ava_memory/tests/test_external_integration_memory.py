@@ -1,5 +1,7 @@
 """An external attachment's memory writes use the borrowed identity and recheck the lease before any filesystem effect."""
 
+from collections.abc import Iterator
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
@@ -17,15 +19,19 @@ from agent import state as state_module
 from agent.extensions import registry as registry_module
 from ava import external
 from ava.sdk_surface.install import Installation
+from ava.sdk_surface.process_context import process_clients
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
+from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 
@@ -44,7 +50,7 @@ def native_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
     model_installation: Installation,
-) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
+) -> Iterator[tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]]:
     pin_no_identity()
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)
@@ -87,7 +93,15 @@ def native_checkpoint(
             {"source": "input", "step": 1, "parents": {}},
             versions,
         )
-    return owner, handle
+    config = snapshot_process_config()
+    with closing(process_clients(config=config)) as clients:
+        pin_agent(
+            None,
+            owns_loop=False,
+            clients=clients,
+            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        )
+        yield owner, handle
 
 
 @pytest.mark.parametrize("store", ["personal", "shared"])
@@ -191,7 +205,15 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
             if operation == "write":
                 sdk.write("expired-note", "Must not be written.")
             else:
-                notes.per_agent_memory_note(ava.context)
+                context = replace(
+                    ava.context,
+                    agent=AgentSlices.resolve(
+                        default_reader=lambda _domain, field: config_authority.service_field_value(
+                            field
+                        )
+                    ),
+                )
+                notes.per_agent_memory_note(context)
         assert not list(tmp_path.iterdir())
     finally:
         with pytest.raises(leases.ImpersonationError, match="expired"):

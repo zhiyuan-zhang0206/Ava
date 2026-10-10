@@ -16,6 +16,7 @@ import faulthandler
 import io
 import json
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,8 +24,14 @@ from langchain_core.messages import SystemMessage
 
 from agent.graph import node_log
 from agent.graph.node_log import node_lifecycle
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.observation.turn_progress import TurnProgress
-from base.config import settings
+from base.clock import Clock
+from base.config import ConfigBoot, settings
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 
 def _enter_records(records):
@@ -46,6 +53,9 @@ def _wrap(node: str, msg_count: int, pub=None):
         event_publisher=pub if pub is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     )
 
 
@@ -326,6 +336,9 @@ async def test_node_lifecycle_first_snapshot_carries_system_prompt_then_drops_it
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     # third enter with a new committed message — incremental path, must NOT
@@ -338,6 +351,9 @@ async def test_node_lifecycle_first_snapshot_carries_system_prompt_then_drops_it
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     payloads = [json.loads(c.args[0]) for c in pub.emit.call_args_list]
@@ -372,6 +388,9 @@ async def test_node_lifecycle_incremental_second_enter_emits_only_new_messages()
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     # second enter: same state + one more committed message
@@ -386,6 +405,9 @@ async def test_node_lifecycle_incremental_second_enter_emits_only_new_messages()
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -428,6 +450,9 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     # compact: history wiped to zero — the next enter is the full-window path
@@ -439,6 +464,9 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -456,6 +484,9 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -470,6 +501,9 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -516,6 +550,9 @@ async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_message
         event_publisher=pub,
         agent_id=7,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     assert queried == [], f"anchors queried for an all-modern history: {queried}"
@@ -536,6 +573,9 @@ async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_message
         event_publisher=pub2,
         agent_id=8,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     assert queried == [8]
@@ -555,6 +595,9 @@ async def test_node_lifecycle_cursor_reset_after_shrink_forces_full_window() -> 
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     # compact: history shrinks to 3
@@ -566,6 +609,9 @@ async def test_node_lifecycle_cursor_reset_after_shrink_forces_full_window() -> 
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -590,6 +636,9 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     # same state, but forced full window (claim entering idle)
@@ -601,6 +650,9 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
         agent_id=1,
         full_window=True,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -615,6 +667,9 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     assert len(_snapshots_from(pub)) == 2  # pyright: ignore[reportUnknownArgumentType]
@@ -647,6 +702,9 @@ async def test_node_lifecycle_render_failure_does_not_advance_cursor(
             event_publisher=pub,
             agent_id=1,
             turn_progress=TurnProgress(),
+            read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+            timeline_inputs=_TIMELINE_INPUTS,
+            limit_reader=lambda: settings.display.timeline_default_limit,
         ):
             pass
     # cursor must be untouched (still 0) → the next enter goes full-window again
@@ -658,9 +716,45 @@ async def test_node_lifecycle_render_failure_does_not_advance_cursor(
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
+        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
+        timeline_inputs=_TIMELINE_INPUTS,
+        limit_reader=lambda: settings.display.timeline_default_limit,
     ):
         pass
     snaps = _snapshots_from(pub)
     assert len(snaps) == 1  # pyright: ignore[reportUnknownArgumentType]
     # first publish of the process → carries 0.0 (see #615)
     assert [it["item_id"] for it in snaps[0]["items"]] == ["0.0", "1.0", "2.0"]
+
+
+async def test_stall_guards_keep_two_roots_and_live_reads_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("node_stall_dump_seconds", 0)
+    second.set_field("node_stall_dump_seconds", 3)
+    armed: list[float] = []
+
+    def arm(seconds: float, **_kwargs: Any) -> None:
+        armed.append(seconds)
+
+    monkeypatch.setattr(faulthandler, "dump_traceback_later", arm)
+    monkeypatch.setattr(faulthandler, "cancel_dump_traceback_later", lambda: None)
+
+    def read_first() -> float:
+        return first.view.agent.node_stall_dump_seconds
+
+    def read_second() -> float:
+        return second.view.agent.node_stall_dump_seconds
+
+    with node_log._stall_dump_guard("llm", read_stall_seconds=read_first):
+        pass
+    with node_log._stall_dump_guard("llm", read_stall_seconds=read_second):
+        pass
+    first.set_field("node_stall_dump_seconds", 7)
+    second.set_field("node_stall_dump_seconds", 0)
+    with node_log._stall_dump_guard("llm", read_stall_seconds=read_first):
+        pass
+    with node_log._stall_dump_guard("llm", read_stall_seconds=read_second):
+        pass
+    assert armed == [5, 9]

@@ -9,7 +9,7 @@ status: current
 
 Preparation captures the cohort under row locks: every non-terminated agent of
 the machine, each as a restart command or parked. The host
-(`services/agent_runner/agent_host/maintenance.py`) then records no failure or undelivered
+(`services/agent_runner/agent_host/lifecycle/maintenance.py`) then records no failure or undelivered
 receipt for a failed wake in two cases, only logging it at debug and setting
 no fence:
 

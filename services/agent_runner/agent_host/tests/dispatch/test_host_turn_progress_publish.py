@@ -159,6 +159,7 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
                 cast(host_daemon.TurnScheduler, FakeScheduler()),
                 "runner-a",
                 EventBus.from_settings(),
+                read_alert_seconds=lambda: 30.0,
             )
         )
         try:
@@ -224,6 +225,7 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             EventBus.from_settings(),
+            read_alert_seconds=lambda: 30.0,
         )
     )
     try:
@@ -393,6 +395,7 @@ async def test_ownership_renewal_timeout_logs_warning_without_traceback(
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             EventBus.from_settings(),
+            read_alert_seconds=lambda: 30.0,
         )
 
     [record] = [
@@ -444,6 +447,7 @@ async def test_agent_host_beats_liveness_before_renewing_ownership(
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             EventBus.from_settings(),
+            read_alert_seconds=lambda: 30.0,
         )
 
     assert calls == [
@@ -497,6 +501,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_hangs(
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             EventBus.from_settings(),
+            read_alert_seconds=lambda: 30.0,
         )
     )
     second_renewal = asyncio.create_task(second_renewal_started.wait())
@@ -555,6 +560,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             EventBus.from_settings(),
+            read_alert_seconds=lambda: 30.0,
         )
     )
     next_beat = asyncio.create_task(second_beat.wait())
@@ -598,6 +604,7 @@ async def test_unknown_renewal_error_is_retained_until_owner_join(
         cast(host_daemon.TurnScheduler, object()),
         "runner-a",
         EventBus.from_settings(),
+        read_alert_seconds=lambda: 30.0,
     )
     try:
         await asyncio.wait_for(entered.wait(), timeout=1.0)

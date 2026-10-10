@@ -23,11 +23,12 @@ from ava.tests.understand.provider_support import fake_pdf as fake_pdf
 from ava.tests.understand.provider_support import fake_video as fake_video
 from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
 from ava.tests.understand.provider_support import mock_gemini as mock_gemini
+from ava.tests.understand.provider_support import understand_clock as understand_clock
 from ava.understand import UnderstandError, understand
 from base.config import settings
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
-pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+pytestmark = pytest.mark.usefixtures("sdk_model_owner", "understand_clock")
 
 # ── mode validation (paths= / text= mutually exclusive) ─────────────────────
 
@@ -484,7 +485,9 @@ def test_paths_auto_save_source_labels_list(
 
     ws = tmp_path / "paths_ws"
     ws.mkdir(parents=True)
-    pin_agent(2139)
+    from base.clock import Clock
+
+    pin_agent(2139, clock_factory=Clock.from_settings)
 
     def _fake_workspace(aid: int) -> Path:
         return ws

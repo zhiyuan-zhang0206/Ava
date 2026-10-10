@@ -256,3 +256,32 @@ def test_the_database_gate_applies_until_a_process_exempts_itself() -> None:
     assert code_version.db_gate_applies() is True
     code_version.exempt_from_db_gate()
     assert code_version.db_gate_applies() is False
+
+
+def test_explicit_loaded_image_survives_checkout_move_before_lazy_version(
+    tmp_path: Path,
+) -> None:
+    repo = _repo_with_commits(tmp_path / "explicit-image", 2)
+    loaded = loaded_commit.LoadedCommit.capture(repo)
+    sha = loaded.sha
+    version = code_version.CodeVersion(loaded)
+    _git(repo, "commit", "--allow-empty", "-m", "replacement image")
+    assert _git(repo, "rev-parse", "HEAD") != sha
+    assert loaded.sha == sha
+    assert version.get() == 2
+    _git(repo, "commit", "--allow-empty", "-m", "another replacement")
+    assert version.get() == 2
+
+
+def test_unknown_loaded_image_cannot_be_replaced_by_a_later_git_checkout(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "initially-unknown"
+    source.mkdir()
+    loaded = loaded_commit.LoadedCommit.capture(source)
+    assert loaded.sha is None
+    _git(source, "init", "--initial-branch=main")
+    _git(source, "commit", "--allow-empty", "-m", "late checkout")
+    with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
+        code_version.CodeVersion(loaded).get()
+    assert loaded.sha is None

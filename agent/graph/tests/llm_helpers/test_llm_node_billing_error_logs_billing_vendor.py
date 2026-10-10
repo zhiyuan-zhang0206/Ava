@@ -28,6 +28,7 @@ from agent.graph.tests.test_llm_helpers import (
     ledger as ledger,
 )
 from agent.state import AgentState
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
@@ -106,7 +107,10 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
             agent_id=7,
             ledger=ledger,
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).read("lm", "llm_retry_max_attempts"),
+            read_lm=lambda field: getattr(settings.lm, field),
         )
         is not None
     )
@@ -388,7 +392,12 @@ def test_is_fatal_provider_error_type_no_body() -> None:
     from agent.graph.llm_errors import _is_fatal_provider_error_type
 
     assert (
-        _is_fatal_provider_error_type(ConnectionError("net"), AgentSlices.resolve().llm_policy)
+        _is_fatal_provider_error_type(
+            ConnectionError("net"),
+            AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).llm_policy,
+        )
         is False
     )
 

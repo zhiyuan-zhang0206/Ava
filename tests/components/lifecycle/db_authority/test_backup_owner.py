@@ -15,10 +15,11 @@ import getpass
 import os
 import shutil
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -28,7 +29,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster import authority
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.host.net.url_secret import url_with_port
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
@@ -41,6 +42,13 @@ pytestmark = pytest.mark.skipif(
     not (Path(pooler.pgbouncer_bin()).exists() or shutil.which(pooler.pgbouncer_bin())),
     reason="pgbouncer not installed (brew/apt)",
 )
+
+
+@pytest.fixture(autouse=True)
+def config_boot_environment() -> Generator[None]:
+    """Restore process delivery from the maintenance operation's boot."""
+    with patch.dict(os.environ):
+        yield
 
 
 def _no_publish(*_args: object, **_kwargs: object) -> None:
@@ -113,9 +121,14 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     work = tmp_path / "work"
     work.mkdir(mode=0o700)
     # The scheduled worker's own operation, then the controller's publication.
-    result = worker._execute({"kind": "dump", "now": datetime.now(UTC).isoformat()}, work)
+    config = ConfigBoot()
+    result = worker._execute(
+        {"kind": "dump", "now": datetime.now(UTC).isoformat()}, work, config=config
+    )
     artifact = worker.commit_scheduled_backup(
-        work / "artifact" / str(result["artifact"]), str(result["sha256"])
+        work / "artifact" / str(result["artifact"]),
+        str(result["sha256"]),
+        keep_reader=lambda: config.view.services.backup_keep,
     )
 
     assert artifact.parent == maintenance.home / "backups" / "db"

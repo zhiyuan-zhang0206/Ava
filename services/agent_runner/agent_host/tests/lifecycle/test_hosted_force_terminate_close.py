@@ -38,6 +38,7 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 from tests.fixtures.pin_agent import exec_context as ctx_of
 
 _FORCE_ERROR = "Native runtime no longer owns this agent"
@@ -98,68 +99,75 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
 ) -> None:
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
-    publisher = Mock()
-    commands: list[int] = []
+    async with hosted_scope(expected_error=ImpersonationError) as resources:
+        agent_id = _agent(db_conn)
+        incarnation = await _admit(
+            aops_pool,
+            agent_id,
+        )
+        publisher = Mock()
+        commands: list[int] = []
+        failure = ImpersonationError(_FORCE_ERROR)
 
-    async def graph_return(*args: object, **kwargs: object) -> dict[str, object]:
-        # The force lands while the invocation runs, exactly as observed on
-        # company-air 6240 (2026-09-20 07:33:21Z -> 07:33:49Z): the guard read
-        # then refuses.
-        commands.append(_apply_force(db_conn, agent_id))
-        raise ImpersonationError(_FORCE_ERROR)
+        async def graph_return(*args: object, **kwargs: object) -> dict[str, object]:
+            # The force lands while the invocation runs, exactly as observed on
+            # company-air 6240 (2026-09-20 07:33:21Z -> 07:33:49Z): the guard read
+            # then refuses.
+            commands.append(_apply_force(db_conn, agent_id))
+            raise failure
 
-    graph = Mock()
-    graph.ainvoke = AsyncMock(side_effect=graph_return)
-    host = _host(graph, aops_pool, model_catalog=model_catalog)
-    host._runtimes[agent_id] = Mock()
-    outcome = await host._invoke_until_done(
-        agent_id,
-        replace(
-            AvaContext(
-                ops_pool=aops_pool,
-                event_publisher=publisher,
-                agent=AgentSlices.resolve(),
-                db=Database.from_settings(),
-                bus=EventBus.from_settings(),
-                catalog=model_catalog,
+        graph = Mock()
+        graph.ainvoke = AsyncMock(side_effect=graph_return)
+        host = _host(graph, aops_pool, model_catalog=model_catalog)
+        host._runtimes[agent_id] = Mock()
+        outcome = await host._invoke_until_done(
+            agent_id,
+            replace(
+                AvaContext(
+                    ops_pool=aops_pool,
+                    event_publisher=publisher,
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                    catalog=model_catalog,
+                    clock_factory=configured_policy().clock_factory,
+                ),
+                original_incarnation=incarnation,
+                hosted_resources=resources,
+                native_work=None,
             ),
-            original_incarnation=incarnation,
-            hosted_resources=None,
-            native_work=None,
-        ),
-    )
+        )
 
-    assert outcome.truncated and not outcome.crashed and not outcome.exited
-    assert graph.ainvoke.await_count == 1  # the force landed mid-invocation
-    publisher.emit.assert_not_called()  # no error event on the quiet close
-    assert agent_id not in host._runtimes  # dropped for the successor
+        assert outcome.truncated and not outcome.crashed and not outcome.exited
+        assert graph.ainvoke.await_count == 1  # the force landed mid-invocation
+        assert resources.require_service().failures == [(resources, failure)]
+        publisher.emit.assert_not_called()  # no error event on the quiet close
+        assert agent_id not in host._runtimes  # dropped for the successor
 
-    # The classify does NOT consume the command: the pump's own boundary
-    # observes it, and the settle boundary leaves the row as the force left it.
-    await close_hosted_turn(
-        aops_pool,
-        aops_pool,
-        Database.from_settings(),
-        event_bus,
-        Mock(),
-        incarnation,
-        outcome,
-        resources=None,
-    )
-    assert db_conn.execute(
-        "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == ("terminated", None)
-    assert db_conn.execute(
-        "SELECT status, observed_at FROM inbound_messages WHERE agent_id=%s", (agent_id,)
-    ).fetchone() == ("claimed", None)
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (commands[0],)
+        # The classify does NOT consume the command: the pump's own boundary
+        # observes it, and the settle boundary leaves the row as the force left it.
+        await close_hosted_turn(
+            aops_pool,
+            aops_pool,
+            Database.from_settings(),
+            event_bus,
+            Mock(),
+            incarnation,
+            outcome,
+            resources=None,
+            wake_enabled=configured_policy().recovery_wake_enabled,
+            prompt_reap_enabled=configured_policy().recrash_reap_enabled,
+            reconcile_inputs=configured_policy().reconcile_inputs,
+        )
+        assert db_conn.execute(
+            "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone() == ("terminated", None)
+        assert db_conn.execute(
+            "SELECT status, observed_at FROM inbound_messages WHERE agent_id=%s", (agent_id,)
+        ).fetchone() == ("claimed", None)
+        assert db_conn.execute(
+            "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone() == (commands[0],)
 
 
 async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
@@ -184,10 +192,11 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
         replace(
             AvaContext(
                 ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
+                clock_factory=configured_policy().clock_factory,
             ),
             original_incarnation=incarnation,
             hosted_resources=None,
@@ -214,10 +223,11 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
         replace(
             AvaContext(
                 ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
+                clock_factory=configured_policy().clock_factory,
             ),
             original_incarnation=incarnation,
             hosted_resources=None,
@@ -244,10 +254,11 @@ async def test_a_cli_style_user_force_closes_quietly_too(
         replace(
             AvaContext(
                 ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
+                clock_factory=configured_policy().clock_factory,
             ),
             original_incarnation=incarnation,
             hosted_resources=None,
@@ -301,9 +312,10 @@ async def test_an_observed_force_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -331,9 +343,10 @@ async def test_a_foreign_incarnation_force_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -362,9 +375,10 @@ async def test_a_detached_pointer_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -396,9 +410,10 @@ async def test_a_non_impersonation_exception_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -441,9 +456,10 @@ async def test_a_superseded_older_force_cannot_classify(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -474,9 +490,10 @@ async def test_a_lapsed_lease_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,

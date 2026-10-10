@@ -12,14 +12,15 @@ from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.config import settings
 from base.lm.catalog import ModelCatalog
-from base.native_process.turn_identity import HostedTurnResources
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.settlement import close_hosted_turn
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
     _blocked_host,
 )
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
 def _headers(patch: pytest.MonkeyPatch) -> dict[str, str]:
@@ -150,27 +151,33 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
     incarnation, initial = await managed_work(db_conn, aops_pool)
     _insert(db_conn, initial.agent_id)
 
+    original_error = RuntimeError("isolated unexpected graph failure")
+
     async def unexpected(_state: object) -> None:
-        raise RuntimeError("isolated unexpected graph failure")
+        raise original_error
 
     _graph, saver, host, context = await _blocked_host(
         aops_pool, unexpected, model_catalog=model_catalog
     )
-    context = replace(
-        context, original_incarnation=incarnation, hosted_resources=HostedTurnResources()
-    )
-    with pytest.raises(RuntimeError, match="isolated unexpected graph failure"):
-        await host._invoke_until_done(initial.agent_id, context)
-    await close_hosted_turn(
-        aops_pool,
-        aops_pool,
-        host._db,
-        host._bus,
-        saver,
-        incarnation,
-        TurnOutcome(exited=False, crashed=True),
-        resources=context.hosted_resources,
-    )
+    async with hosted_scope(expected_error=RuntimeError) as resources:
+        context = replace(context, original_incarnation=incarnation, hosted_resources=resources)
+        with pytest.raises(RuntimeError, match="isolated unexpected graph failure") as raised:
+            await host._invoke_until_done(initial.agent_id, context)
+        assert raised.value is original_error
+        await close_hosted_turn(
+            aops_pool,
+            aops_pool,
+            host._db,
+            host._bus,
+            saver,
+            incarnation,
+            TurnOutcome(exited=False, crashed=True),
+            resources=resources,
+            wake_enabled=configured_policy().recovery_wake_enabled,
+            prompt_reap_enabled=configured_policy().recrash_reap_enabled,
+            reconcile_inputs=configured_policy().reconcile_inputs,
+        )
+        assert resources.require_service().failures == [(resources, original_error)]
     row = db_conn.execute(
         "SELECT m.status,w.phase,w.id FROM agents_meta m "
         "JOIN native_graph_work w ON w.id=m.native_work_id WHERE m.id=%s",

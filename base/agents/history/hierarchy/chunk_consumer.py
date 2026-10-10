@@ -74,7 +74,11 @@ from base.agents.history.hierarchy.chunks import (
     write_group_nodes,
 )
 from base.agents.history.hierarchy.generate import GenerateError, GenParams, build_generation_llm
-from base.agents.history.hierarchy.group_consumer import run_blocking, run_group_checks
+from base.agents.history.hierarchy.group_consumer import (
+    UnderstandingReadInputs,
+    run_blocking,
+    run_group_checks,
+)
 from base.agents.history.hierarchy.rebuild import (
     MAX_REBUILD_ATTEMPTS,
     RebuildJob,
@@ -85,8 +89,8 @@ from base.agents.history.hierarchy.rebuild import (
     run_rebuild,
 )
 from base.agents.history.hierarchy.units import divide_units
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.observation.snapshot import agent_model_target
-from base.config import settings
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.host.env.agent_slices import ModelOverrides
@@ -167,6 +171,8 @@ def _describe(
     tools: Sequence[Any],
     calls: list[ChunkCall],
     agent_id: int,
+    *,
+    inputs: UnderstandingReadInputs,
 ) -> ChunkResult:
     """Blocking: the agent's own model's groups and summaries of a located chunk.
 
@@ -180,8 +186,9 @@ def _describe(
         catalog=models.catalog,
         agent_id=agent_id,
         tools=tools,
-        corrections=settings.agent.understanding_group_corrections,
+        corrections=inputs.corrections(),
         on_call=calls.append,
+        timeline_inputs=TimelineReadInputs(inputs.clock_factory, inputs.timestamps_enabled),
     )
 
 
@@ -253,6 +260,8 @@ async def _run_job(
     tools: Sequence[Any],
     models: ModelCache,
     executor: ThreadPoolExecutor | None = None,
+    *,
+    inputs: UnderstandingReadInputs,
 ) -> Outcome:
     """Describe one claimed chunk and store its nodes; the outcome says how it ended."""
     if (gave_up := _gave_up(job)) is not None:
@@ -261,8 +270,9 @@ async def _run_job(
         agent_model_target,
         db,
         job.agent_id,
-        fallback=settings.lm.hierarchy_model,
+        fallback=inputs.hierarchy_model(),
         catalog=models.catalog,
+        default_model_reader=inputs.default_model,
     )
     try:
         history, closing_segment = await asyncio.to_thread(
@@ -290,7 +300,13 @@ async def _run_job(
     located, left_over = await _undescribed_part(pool, job, located)
     if located is None:
         return Outcome("skipped", "the chunk is already described")
-    if all(unit.kind == "note" for unit in divide_units(list(located.messages))):
+    if all(
+        unit.kind == "note"
+        for unit in divide_units(
+            list(located.messages),
+            timeline_inputs=TimelineReadInputs(inputs.clock_factory, inputs.timestamps_enabled),
+        )
+    ):
         # Nothing but framework-injected notes: there is no matter to describe.
         return Outcome("skipped", "the chunk holds only framework notes")
     calls: list[ChunkCall] = []
@@ -305,6 +321,7 @@ async def _run_job(
             tools,
             calls,
             job.agent_id,
+            inputs=inputs,
         )
     except GenerateError as exc:
         if job.attempts >= GENERATION_MAX_ATTEMPTS:
@@ -383,9 +400,11 @@ class _Consumer:
         *,
         catalog: ModelCatalog,
         llm_override: str,
+        inputs: UnderstandingReadInputs,
     ) -> None:
         self.pool, self.db, self.tools, self.replay = pool, db, tools, replay
         self.models = ModelCache(catalog, llm_override)
+        self.inputs = inputs
         self.in_flight = 0
         self.finished = asyncio.Event()  # set whenever a job ends
 
@@ -445,7 +464,9 @@ class _Consumer:
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="understanding")
         try:
             try:
-                outcome = await _run_job(self.pool, self.db, job, self.tools, self.models, executor)
+                outcome = await _run_job(
+                    self.pool, self.db, job, self.tools, self.models, executor, inputs=self.inputs
+                )
             except asyncio.CancelledError:
                 # The host is stopping (a rollout): hand the job back at once instead of making
                 # the next host wait out the lease. A crash still relies on the lease.
@@ -476,7 +497,12 @@ class _Consumer:
                 # The nodes just written may make a level due for grouping (group_consumer.py);
                 # a pending rebuild groups every leaf itself, so checks now would be redone.
                 await run_group_checks(
-                    self.pool, self.db, self.models, job.agent_id, executor=executor
+                    self.pool,
+                    self.db,
+                    self.models,
+                    job.agent_id,
+                    executor=executor,
+                    inputs=self.inputs,
                 )
         except Exception:
             # A settle that failed leaves the row `running`; its lease lapses and it is retaken.
@@ -496,7 +522,12 @@ class _Consumer:
         try:
             try:
                 leaves = await run_rebuild(
-                    self.pool, self.db, self.models, rebuild.agent_id, executor=executor
+                    self.pool,
+                    self.db,
+                    self.models,
+                    rebuild.agent_id,
+                    executor=executor,
+                    inputs=self.inputs,
                 )
             except asyncio.CancelledError:
                 try:
@@ -606,10 +637,11 @@ async def replay_jobs(
     *,
     catalog: ModelCatalog,
     llm_override: str,
+    inputs: UnderstandingReadInputs,
 ) -> None:
     """Describe every enqueued job of one agent, its segments in parallel (the replay tool)."""
     await _Consumer(
-        pool, db, tools, Replay(agent_id), catalog=catalog, llm_override=llm_override
+        pool, db, tools, Replay(agent_id), catalog=catalog, llm_override=llm_override, inputs=inputs
     ).run_until_idle()
 
 
@@ -620,6 +652,7 @@ async def understanding_loop_forever(
     *,
     catalog: ModelCatalog,
     llm_override: str,
+    inputs: UnderstandingReadInputs,
 ) -> None:
     """Consume the chunk queue for the host's whole life; returns at once when the feature is off.
 
@@ -627,7 +660,9 @@ async def understanding_loop_forever(
     the host hands it in because the kernel's schema lives above this package.
     Every due job runs at once, one agent's never together.
     """
-    if not settings.agent.understanding_enabled:
+    if not inputs.enabled():
         logger.info("[agent-host] understanding consumer idle — AVA_UNDERSTANDING_ENABLED is off")
         return
-    await _Consumer(pool, db, tools, catalog=catalog, llm_override=llm_override).run_forever()
+    await _Consumer(
+        pool, db, tools, catalog=catalog, llm_override=llm_override, inputs=inputs
+    ).run_forever()

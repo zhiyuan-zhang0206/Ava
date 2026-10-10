@@ -11,7 +11,7 @@ from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
+from base.native_process.turn_identity import HostedServiceResources
 from services.agent_runner.agent_host import dispatcher, settlement
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
@@ -284,10 +284,13 @@ class TestBounds:
 
         # Exercise admission directly so a pre-fix Semaphore(0) can be
         # cancelled during cleanup without bypassing run_turn's resource shield.
-        tasks = [
-            asyncio.create_task(host._run_turn(agent_id, resources=HostedTurnResources()))
-            for agent_id in agents
-        ]
+        service = HostedServiceResources()
+        scopes = {agent_id: await service.turn() for agent_id in agents}
+        tasks: list[asyncio.Task[None]] = []
+        for agent_id in agents:
+            task = asyncio.create_task(host._run_turn(agent_id, resources=scopes[agent_id]))
+            service.retain_task(scopes[agent_id], task)
+            tasks.append(task)
         try:
             await asyncio.wait_for(
                 asyncio.gather(*(graph.arrival(agent_id).wait() for agent_id in agents)), 2
@@ -299,6 +302,8 @@ class TestBounds:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            await service.aclose()
+            assert service.joined
 
     async def test_completed_burst_restores_the_warm_cache_bound(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch

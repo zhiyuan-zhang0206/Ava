@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, NoReturn, cast
 
@@ -69,8 +70,8 @@ from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import read_ava_kwargs
-from base.config import settings
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
@@ -103,11 +104,11 @@ def _log_llm_retry_duration(
     )
 
 
-def _raise_retry_budget_exhausted(attempt: int) -> NoReturn:
+def _raise_retry_budget_exhausted(attempt: int, *, read_lm: Callable[[str], Any]) -> NoReturn:
     """End an LLM node before its expired retry budget permits another call."""
     raise LLMRetryBudgetExceededError(
         "LLM retry wall-clock budget "
-        f"({settings.lm.llm_retry_max_total_seconds:.0f}s) exhausted before attempt {attempt}"
+        f"({read_lm('llm_retry_max_total_seconds'):.0f}s) exhausted before attempt {attempt}"
     )
 
 
@@ -212,6 +213,7 @@ async def llm_node(
                 agent_id=agent_id,
                 ledger=ledger,
                 catalog=runtime.context.require_catalog(),
+                read_lm=lambda field: runtime.context.require_agent().read("lm", field),
                 max_attempts_pin=runtime.context.require_agent().read(
                     "lm", "llm_retry_max_attempts"
                 ),
@@ -227,16 +229,18 @@ async def llm_node(
             )
 
 
-def _enforce_retry_budget(attempt: Attempt, agent_id: int, ledger: LlmLedger) -> None:
+def _enforce_retry_budget(
+    attempt: Attempt, agent_id: int, ledger: LlmLedger, *, read_lm: Callable[[str], Any]
+) -> None:
     if (
-        attempt.elapsed_seconds() >= settings.lm.llm_retry_max_total_seconds
+        attempt.elapsed_seconds() >= read_lm("llm_retry_max_total_seconds")
         # The transient-retry budget is sized for seconds-scale
         # backoffs; while a delayed stall sequence is active its own
         # schedule (streak cap) owns the bound — see _retry.
         and not ledger.stall_pair_streak_active(str(agent_id))
     ):
         _log_llm_retry_duration(attempt, outcome="budget_exhausted")
-        _raise_retry_budget_exhausted(attempt.number)
+        _raise_retry_budget_exhausted(attempt.number, read_lm=read_lm)
 
 
 def _note_failed_attempt(
@@ -245,7 +249,10 @@ def _note_failed_attempt(
     """Mark the settled attempt as progress and record the retry budget left on `exc`."""
     runtime.context.turn_progress.mark(agent_id)
     if isinstance(exc, Exception) and not isinstance(exc, LLMStreamStallPairError):
-        remaining_seconds = settings.lm.llm_retry_max_total_seconds - attempt.elapsed_seconds()
+        remaining_seconds = (
+            runtime.context.require_agent().read("lm", "llm_retry_max_total_seconds")
+            - attempt.elapsed_seconds()
+        )
         if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
             _log_llm_retry_duration(attempt, outcome="budget_exhausted")
         elif not isinstance(exc, (FatalLLMStreamError, FatalProviderError)):
@@ -291,9 +298,24 @@ async def llm_attempt(
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=runtime.context.turn_progress,
+        read_stall_seconds=lambda: runtime.context.require_agent().read(
+            "agent", "node_stall_dump_seconds"
+        ),
+        timeline_inputs=TimelineReadInputs(
+            runtime.context.require_clock,
+            lambda: runtime.context.require_agent().read("general", "message_timestamps"),
+        ),
+        limit_reader=lambda: runtime.context.require_agent().read(
+            "display", "timeline_default_limit"
+        ),
     ):
         try:
-            _enforce_retry_budget(attempt, agent_id, ledger)
+            _enforce_retry_budget(
+                attempt,
+                agent_id,
+                ledger,
+                read_lm=lambda field: runtime.context.require_agent().read("lm", field),
+            )
             result = await _llm_node_impl(state, runtime, config, ledger)
         except BaseException as exc:
             # A settled (failed) attempt is real activity: mark the turn clock
@@ -368,7 +390,13 @@ def _is_silent_idle(final_msg: AIMessage) -> bool:
 
 
 def _silent_idle_command(
-    final_msg: AIMessage, agent_id: int, model: str, ledger: LlmLedger, *, catalog: ModelCatalog
+    final_msg: AIMessage,
+    agent_id: int,
+    model: str,
+    ledger: LlmLedger,
+    *,
+    catalog: ModelCatalog,
+    read_lm: Callable[[str], Any],
 ) -> Command[LlmGoto] | None:
     """Continue-loop vs guard-halt decision for a silent-idle turn.
 
@@ -388,7 +416,7 @@ def _silent_idle_command(
     output_tokens = int(usage.get("output_tokens", 0) or 0)
     budget_tokens = max(output_tokens, 1)
     cumulative_output_tokens = ledger.silent_idle_output_tokens(tid) + budget_tokens
-    cap = settings.lm.llm_silent_idle_max_output_tokens
+    cap = read_lm("llm_silent_idle_max_output_tokens")
     from base.lm.pricing import quote
 
     priced = quote(model, 0, output_tokens, 0, prices=catalog.prices)
@@ -509,11 +537,16 @@ async def _llm_node_impl(
     # Consecutive same-error retry cap: if the same LLMStreamError has occurred
     # N times across retries, fail fast with FatalLLMStreamError instead of
     # wasting another 30-480s retry cycle on a deterministic error.
-    ledger.check_consecutive_error_cap(str(agent_id))
+    ledger.check_consecutive_error_cap(
+        str(agent_id),
+        max_cap=ctx.require_agent().read("lm", "llm_retry_max_consecutive_same_error"),
+    )
     # Stall-pair cap: a spent delayed stall-retry streak (default 4 pairs) ends
     # the turn here as a fatal abort — the next attempt would only burn another
     # stalled pair while the provider is still degraded.
-    ledger.check_stall_pair_cap(str(agent_id))
+    ledger.check_stall_pair_cap(
+        str(agent_id), max_pairs=ctx.require_agent().read("lm", "llm_stall_retry_max_consecutive")
+    )
 
     # Streaming forwarding (chat / reasoning / code) is isolated in
     # RedisStreamHandler — process_chunk is called in the chunk loop; after
@@ -596,6 +629,7 @@ async def _llm_node_impl(
         state.compact,
         list(state.messages),
         final_msg,
+        read_agent=lambda field: ctx.require_agent().read("agent", field),
         pool=ctx.ops_pool,
         agent_id=agent_id,
         model=ctx.require_agent().brain.llm_model,
@@ -609,6 +643,7 @@ async def _llm_node_impl(
         ctx.require_agent().brain.llm_model,
         ledger,
         catalog=ctx.require_catalog(),
+        read_lm=lambda field: ctx.require_agent().read("lm", field),
     )
     if silent_idle_cmd is not None:
         return Command[LlmGoto](

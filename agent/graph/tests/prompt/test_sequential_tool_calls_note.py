@@ -18,7 +18,12 @@ _SENTENCE = "Several tool calls in one response run one at a time, in the order 
 
 def _prompt() -> str:
     return build_system_prompt(
-        EMPTY, AgentSlices.resolve(), agent_id=1, catalog=build_model_catalog()
+        EMPTY,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
+        agent_id=1,
+        catalog=build_model_catalog(),
     )
 
 

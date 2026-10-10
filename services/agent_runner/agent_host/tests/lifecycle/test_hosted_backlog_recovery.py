@@ -72,15 +72,13 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         catalog=model_catalog,
     )
 
-    assert [(wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(60)] == [
-        (agent, True)
-    ]
+    wakes = await host.pending_inbound_wakes(60)
+    assert [(wake.agent_id, wake.recovery) for wake in wakes] == [(agent, True)]
 
     ordinary = insert_inbound(db_conn, agent, "Need a reply", "user")
     db_conn.commit()
-    assert [(wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(60)] == [
-        (agent, False)
-    ]
+    wakes = await host.pending_inbound_wakes(60)
+    assert [(wake.agent_id, wake.recovery) for wake in wakes] == [(agent, False)]
 
     db_conn.execute(
         "UPDATE inbound_messages SET status='done' WHERE id IN (%s,%s)", (lifecycle, ordinary)
@@ -92,9 +90,8 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         (uuid4(), agent, machine_name()),
     )
     db_conn.commit()
-    assert [(wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(60)] == [
-        (agent, False)
-    ]
+    wakes = await host.pending_inbound_wakes(60)
+    assert [(wake.agent_id, wake.recovery) for wake in wakes] == [(agent, False)]
 
 
 @pytest.mark.parametrize("known_progress", [True, False])
@@ -671,10 +668,13 @@ class TestHostedWakePacing:
 
     async def test_failed_recovery_turn_releases_slot_on_next_scan(self) -> None:
         attempted: list[int] = []
+        failures: list[RuntimeError] = []
 
         async def run_turn(agent_id: int) -> None:
             attempted.append(agent_id)
-            raise RuntimeError("failed before admission")
+            failure = RuntimeError("failed before admission")
+            failures.append(failure)
+            raise failure
 
         scheduler = TurnScheduler(run_turn)
         pending = [dispatcher.PendingInboundWake(agent_id=1, stale=False, recovery=True)]
@@ -699,7 +699,9 @@ class TestHostedWakePacing:
             await disp.scan_once()
             await poll_until_async(lambda: attempted == [1, 2], timeout=3)
         finally:
-            await scheduler.aclose()
+            with pytest.raises(ExceptionGroup) as joined:
+                await scheduler.aclose()
+            assert joined.value.exceptions == tuple(failures)
 
     async def test_recovery_cap_drains_across_scans_without_delaying_work(self) -> None:
         scheduler = _ScanScheduler()

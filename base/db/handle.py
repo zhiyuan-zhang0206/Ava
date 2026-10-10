@@ -13,7 +13,7 @@ class only binds one `DbConfig` to them.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -21,26 +21,45 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.db import connections
+from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_settings
 
 
 class Database:
     """One cluster Postgres, dialed with one `DbConfig`."""
 
-    def __init__(self, config: DbConfig) -> None:
+    def __init__(
+        self,
+        config: DbConfig,
+        *,
+        gate: ProcessDbGate | None = None,
+        local_host: Callable[[], str] | None = None,
+    ) -> None:
         self._config = config
+        self._gate = gate
+        self._local_host = local_host
 
     @classmethod
-    def from_settings(cls) -> Database:
+    def from_settings(
+        cls,
+        *,
+        gate: ProcessDbGate | None = None,
+        local_host: Callable[[], str] | None = None,
+    ) -> Database:
         """The composition-root constructor: the config as the live settings hold it now."""
-        return cls(db_config_from_settings())
+        return cls(db_config_from_settings(), gate=gate, local_host=local_host)
 
     def connect(
         self, *, autocommit: bool = False, direct: bool = False, unbounded: bool = False
     ) -> psycopg.Connection:
         """`base.db.connect()` on this handle's config."""
         return connections.connect(
-            autocommit=autocommit, direct=direct, unbounded=unbounded, config=self._config
+            autocommit=autocommit,
+            direct=direct,
+            unbounded=unbounded,
+            config=self._config,
+            gate=self._gate,
+            local_host=self._local_host,
         )
 
     def pool(
@@ -64,6 +83,8 @@ class Database:
             autocommit=autocommit,
             row_factory=row_factory,
             config=self._config,
+            gate=self._gate,
+            local_host=self._local_host,
         )
 
     def async_pool(
@@ -82,12 +103,13 @@ class Database:
             max_size=max_size,
             timeout=timeout,
             config=self._config,
+            gate=self._gate,
             **pool_kwargs,
         )
 
     def direct_url(self) -> str:
         """The admin-plane URL of this handle's cluster (never through the pooler)."""
-        return connections.direct_db_url(self._config)
+        return connections.direct_db_url(self._config, local_host=self._local_host)
 
     @contextmanager
     def write_transaction(self) -> Generator[psycopg.Connection, None, None]:

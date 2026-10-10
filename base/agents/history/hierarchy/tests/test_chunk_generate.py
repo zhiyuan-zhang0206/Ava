@@ -21,8 +21,14 @@ from base.agents.history.hierarchy.chunks import ChunkCall
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.history.hierarchy.units import divide_units
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
 from base.config import settings
 from base.lm.catalog import ModelCatalog
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +69,9 @@ def _chunk() -> list[BaseMessage]:
 
 def _instruction(chunk: list[BaseMessage] | None = None, **kw: bool) -> str:
     chunk = chunk or _chunk()
-    return build_chunk_instruction(chunk, divide_units(chunk), **kw)
+    return build_chunk_instruction(
+        chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS), **kw
+    )
 
 
 def _think_turn(think: str, code: str, n: int, result: str = "ok", **kw: Any) -> list[BaseMessage]:
@@ -88,7 +96,7 @@ def test_catalog_lines_are_type_content_and_a_work_line_has_its_three_parts() ->
         _inbound(f"fix the flaky test {long}"),
         *_think_turn("plan " + "p" * 100, "ls  -la\n  -h", 1, "total 4\n  drwx" + "d" * 100),
     ]
-    lines = build_catalog(chunk, divide_units(chunk)).splitlines()
+    lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
     assert len(lines) == 2
     assert lines[0].startswith("[1] human message: fix the flaky test xxx")
     assert len(lines[0]) == len("[1] human message: ") + 100  # content is cut at 100 characters
@@ -108,7 +116,7 @@ def test_a_work_line_leaves_out_the_parts_the_unit_does_not_have() -> None:
     only_thinking = [AIMessage(content=[{"type": "thinking", "thinking": "just thinking"}])]
     empty = _turn("d", 4, "")  # an empty output is left out
     chunk: list[BaseMessage] = [*no_think, *no_output, *only_thinking, *empty]
-    lines = build_catalog(chunk, divide_units(chunk)).splitlines()
+    lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
     assert lines == [
         "[1] work: call\u300cpytest\u300d | output\u300cpassed\u300d",
         "[2] work: call\u300csleep\u300d",
@@ -123,7 +131,7 @@ def test_a_work_lines_output_part_is_the_start_of_the_output_whatever_its_status
         *_turn("b", 2, "x", ava_timed_out=True),
         *_turn("e", 5, "Traceback (most recent call last):\n  File x", ava_exit_code=1),
     ]
-    lines = build_catalog(chunk, divide_units(chunk)).splitlines()
+    lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
     assert lines == [
         "[1] work: call\u300ca\u300d | output\u300cboom\u300d",
         "[2] work: call\u300cb\u300d | output\u300cx\u300d",
@@ -134,7 +142,7 @@ def test_a_work_lines_output_part_is_the_start_of_the_output_whatever_its_status
 def test_a_work_lines_call_part_skips_import_lines_and_keeps_all_import_code_whole() -> None:
     code = "import ava, os\nfrom pathlib import Path\n\n# check the queue\nprint(ava.shell.run('gh pr list'))"
     chunk = [_inbound("go"), *_turn(code, 1), *_turn("import os\nimport sys", 2)]
-    lines = build_catalog(chunk, divide_units(chunk)).splitlines()
+    lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
     assert (
         lines[1]
         == "[2] work: call\u300c# check the queue print(ava.shell.run('gh pr list'))\u300d | output\u300cok\u300d"
@@ -154,7 +162,9 @@ def test_the_turns_text_is_its_own_line_before_its_work_line() -> None:
         additional_kwargs={"ava_msg_type": "exec_output", "ava_exec_body_start": len(_HEADER)},
     )
     chunk: list[BaseMessage] = [turn, result]
-    assert build_catalog(chunk, divide_units(chunk)).splitlines() == [
+    assert build_catalog(
+        chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)
+    ).splitlines() == [
         "[1] agent text: looking",
         "[2] work: reasoning\u300cplan it\u300d | call\u300cls\u300d | output\u300cfiles\u300d",
     ]
@@ -183,7 +193,7 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
         inbound(None, "no source"),
         inbound("user", "[2026-10-05 Mon 11:04:09]\n\nold", legacy=True),
     ]
-    lines = build_catalog(chunk, divide_units(chunk)).splitlines()
+    lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
     assert lines == [
         "[1] agent 3230 message: hello there",
         "[2] human message: fix it now",
@@ -213,7 +223,7 @@ def test_framework_notes_show_a_short_label_by_type_not_their_text() -> None:
         _note(None),
         _inbound("real message"),
     ]
-    lines = build_catalog(chunk, divide_units(chunk)).splitlines()
+    lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
     assert lines == [
         "[1] (memory)",
         "[2] (sdk hint)",
@@ -297,7 +307,15 @@ _TWO = '<group first="1" last="2">look</group><group first="3" last="3">run</gro
 
 def _gen(llm: Any, *, model_catalog: ModelCatalog, **kw: Any) -> Any:
     return generate_chunk(
-        llm, _PREFIX, 1, model="m", agent_id=7, tools=["T"], **kw, catalog=model_catalog
+        llm,
+        _PREFIX,
+        1,
+        model="m",
+        agent_id=7,
+        tools=["T"],
+        **kw,
+        catalog=model_catalog,
+        timeline_inputs=_TIMELINE_INPUTS,
     )
 
 
@@ -308,7 +326,14 @@ def test_request_is_prefix_plus_one_instruction_with_tools_bound(
 ) -> None:
     llm = _Recorder([AIMessage(content=_TWO)])
     out = generate_chunk(
-        llm, _PREFIX, 1, model=model, agent_id=7, tools=["T"], catalog=model_catalog
+        llm,
+        _PREFIX,
+        1,
+        model=model,
+        agent_id=7,
+        tools=["T"],
+        catalog=model_catalog,
+        timeline_inputs=_TIMELINE_INPUTS,
     )
     assert out.groups == [UnitGroup(0, 1, "look"), UnitGroup(2, 2, "run")]
     assert [u.kind for u in out.units] == ["inbound", "work", "work"]
@@ -459,7 +484,16 @@ def test_unknown_chunk_invocation_error_is_recorded_once_and_preserved(
 def test_a_chunk_is_numbered_from_its_own_first_unit(model_catalog: ModelCatalog) -> None:
     # A chunk that starts at the second work turn: its catalog numbers from 1 there.
     llm = _Recorder([AIMessage(content='<group first="1" last="1">a</group>')])
-    out = generate_chunk(llm, _PREFIX, 4, model="m", agent_id=7, tools=["T"], catalog=model_catalog)
+    out = generate_chunk(
+        llm,
+        _PREFIX,
+        4,
+        model="m",
+        agent_id=7,
+        tools=["T"],
+        catalog=model_catalog,
+        timeline_inputs=_TIMELINE_INPUTS,
+    )
     catalog = llm.requests[0][-1].content.split("whole units):\n")[1]
     assert catalog.startswith("[1] ") and "pytest -x" in catalog and "[2]" not in catalog
     assert [u.i0 for u in out.units] == [0]
@@ -471,7 +505,16 @@ def test_a_chunk_is_numbered_from_its_own_first_unit(model_catalog: ModelCatalog
         ]
     )
     with pytest.raises(GenerateError, match=r"first 2 is not in the catalog \(units 1 to 1\)"):
-        generate_chunk(llm, _PREFIX, 4, model="m", agent_id=7, tools=["T"], catalog=model_catalog)
+        generate_chunk(
+            llm,
+            _PREFIX,
+            4,
+            model="m",
+            agent_id=7,
+            tools=["T"],
+            catalog=model_catalog,
+            timeline_inputs=_TIMELINE_INPUTS,
+        )
 
 
 def test_chunk_calls_log_their_usage_under_the_job_agent(

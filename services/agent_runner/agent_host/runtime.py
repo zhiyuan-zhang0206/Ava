@@ -17,6 +17,9 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
+from base.agents.history.inbound_sideload import ReconcileReadInputs
+from base.agents.impersonation.notes import HandoffNotes
+from base.clock import Clock
 from base.host.env.agent_slices import AgentBrain, AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
@@ -50,6 +53,12 @@ class HostPolicy:
     cache: Callable[[], HostCachePolicy]
     default_model: Callable[[], str]
     llm_override: Callable[[], str]
+    default_reader: Callable[[str, str], Any]
+    clock_factory: Callable[[], Clock]
+    handoff_notes: HandoffNotes
+    recovery_wake_enabled: Callable[[], bool]
+    recrash_reap_enabled: Callable[[], bool]
+    reconcile_inputs: ReconcileReadInputs
 
     def resolve_slices(
         self,
@@ -59,7 +68,13 @@ class HostPolicy:
     ) -> AgentSlices:
         """Resolve the model at the existing slice boundary, with pins taking precedence."""
         brain = AgentBrain(pins["llm_model"] if "llm_model" in pins else self.default_model())
-        return AgentSlices.resolve(pins, plugin_pins, plugin_configs=plugin_configs, brain=brain)
+        return AgentSlices.resolve(
+            pins,
+            plugin_pins,
+            plugin_configs=plugin_configs,
+            brain=brain,
+            default_reader=self.default_reader,
+        )
 
 
 def _config_fingerprint(

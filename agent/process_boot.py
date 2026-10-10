@@ -11,6 +11,7 @@ task #3585).
 """
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from base.log import logger
 from base.paths import workspace_dir
 
 
-def _apply_per_agent_sdk_disable() -> None:
+def _apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], Any]) -> None:
     """Apply the per-agent sdk_disable list additively on the installed SDK surface.
 
     The env baseline ``AVA_SDK_DISABLE`` is applied by the SDK install while it
@@ -32,23 +33,23 @@ def _apply_per_agent_sdk_disable() -> None:
     installation records its own disable set), so re-listing the env baseline is a
     no-op.
     """
-    configured = agent_setting("sdk_disable")
+    configured = agent_setting("sdk_disable", default_reader=default_reader)
     if not configured:
         return
     sdk_disable.apply_sdk_disable(list(configured))
 
 
-def _apply_per_agent_eval_isolation() -> None:
+def _apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any]) -> None:
     """Apply the SDK and memory-pool boundaries for an isolated eval agent.
 
     This runs after plugins have registered their namespaces: the eval boundary
     must rebind the live `ava.memory` surface rather than affect the plugin's
     import-time default path.
     """
-    if not agent_setting("eval_isolation"):
+    if not agent_setting("eval_isolation", default_reader=default_reader):
         return
 
-    allowed_network = set(agent_setting("eval_network_allowlist"))
+    allowed_network = set(agent_setting("eval_network_allowlist", default_reader=default_reader))
     disabled = ["agents.get_last_message", "tasks", "mcps", "ui"]
     if "web" not in allowed_network:
         disabled.append("web")
