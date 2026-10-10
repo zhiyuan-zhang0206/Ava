@@ -32,7 +32,10 @@ def _load_ava_code_plugin(
     test and uninstall it after. Use a valid local sampling policy for SDK calls."""
     from base.agents.sdk import call_policy
 
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     install.install(code_registry(), catalog=model_catalog, authority=config_authority)
 
     yield

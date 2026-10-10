@@ -288,7 +288,10 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
     from ava_builtins.plugins.ava_fleet import plugin as fleet
     from base.agents.sdk import call_policy
 
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", factory())
