@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import time
 from collections import OrderedDict
 from collections.abc import Mapping
 from datetime import datetime
@@ -61,7 +62,6 @@ from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import machine_name
-from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.deploy.maintenance import admission
@@ -100,6 +100,7 @@ from services.agent_runner.agent_host.invocation.native_work import (
 )
 from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 from services.agent_runner.agent_host.runtime import (
+    HostPolicy,
     HostStats,
     TurnOutcome,
     _AgentRuntime,
@@ -146,6 +147,7 @@ class AgentHost:
         bus: EventBus,
         db: Database,
         catalog: ModelCatalog,
+        policy: HostPolicy,
         clients: ClientSet | None = None,
         extensions: ExtensionRegistry = EMPTY,
         plugin_configs: Mapping[str, BaseModel] | None = None,
@@ -153,6 +155,7 @@ class AgentHost:
         self._bus = bus
         self._db = db
         self._catalog = catalog
+        self._policy = policy
         # Shared clients are passed through each turn's explicit `AvaContext`.
         self._clients = clients if clients is not None else ClientSet(database=lambda: db)
         self._extensions = extensions
@@ -178,7 +181,7 @@ class AgentHost:
         self.turn_progress = TurnProgress()
         self.relays = RelaySupervision()
         self._recall_log_key = secrets.token_bytes(32)
-        self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
+        self.admission = TurnAdmission(policy.max_concurrent_turns)
         self.database_waits = DatabaseWaits()
         self.stats = HostStats()
         self._resource_service = HostedServiceResources()
@@ -250,7 +253,7 @@ class AgentHost:
                         self._peek_lock,
                         work=None,
                         catalog=self._catalog,
-                        llm_override=settings.lm.llm_override,
+                        llm_override=self._policy.llm_override(),
                     )
                 )
                 cancelled = await wait_shielded_task(settlement) or cancelled
@@ -324,7 +327,8 @@ class AgentHost:
                 rejected=self._rejected_configs,
                 normalized=self._normalized_configs,
                 catalog=self._catalog,
-                llm_override=settings.lm.llm_override,
+                llm_override=self._policy.llm_override(),
+                default_model=self._policy.default_model,
             ):
                 return
             self.stats.turns_started += 1
@@ -368,9 +372,7 @@ class AgentHost:
                         reconstruction
                     )
                     await publish_agent_updated(self._bus, agent_id)
-                    slices = AgentSlices.resolve(
-                        pins, plugin_pins, plugin_configs=self._plugin_configs
-                    )
+                    slices = self._policy.resolve_slices(pins, plugin_pins, self._plugin_configs)
                     from base.agents.compaction.startup import resumable_compact
 
                     compact_continuation = await resumable_compact(self._control_pool, incarnation)
@@ -533,12 +535,14 @@ class AgentHost:
             fingerprint,
             slices,
             catalog=self._catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override=self._policy.llm_override(),
         )
 
     def _evict(self) -> None:
         """Evict settled runtimes by idle age and least-recent use."""
-        evict_runtimes(self._runtimes, self._in_flight)
+        evict_runtimes(
+            self._runtimes, self._in_flight, policy=self._policy.cache(), now=time.monotonic()
+        )
 
     async def last_active_at(self, agent_id: int) -> datetime | None:
         """Read the scheduler's actual LLM activity clock."""

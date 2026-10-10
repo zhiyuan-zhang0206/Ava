@@ -11,6 +11,7 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.test_hosted_backlog_recovery import (
     isolated_clocks as isolated_clocks,
 )
@@ -24,6 +25,7 @@ class TestHostedHostWakePacing:
     ) -> None:
         pool = _PendingScanPool([(17, False, False)])
         host = AgentHost(
+            policy=configured_policy(),
             pool=cast(AsyncConnectionPool[Any], pool),
             checkpointer=object(),  # pyright: ignore[reportArgumentType]
             graph=object(),  # pyright: ignore[reportArgumentType]

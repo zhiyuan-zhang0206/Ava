@@ -100,14 +100,17 @@ def _no_reap_stale_daemons(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def daemon_wide() -> daemon_mod._DaemonWide:
     """The daemon-wide state of one fresh daemon (what `run_daemon` builds once)."""
-    return daemon_mod._DaemonWide()
+    return daemon_mod._DaemonWide(timeout_seconds=lambda: 15.0)
 
 
 @pytest.fixture
 def scope(daemon_wide: daemon_mod._DaemonWide) -> daemon_mod._Scope:
     """One client connection's scope: its own empty buckets over the daemon-wide state."""
     return daemon_mod._Scope(
-        local=daemon_mod._Buckets(), shared=daemon_wide.shared, oauth_locks=daemon_wide.oauth_locks
+        local=daemon_mod._Buckets(),
+        shared=daemon_wide.shared,
+        oauth_locks=daemon_wide.oauth_locks,
+        timeout_seconds=lambda: 15.0,
     )
 
 
@@ -206,7 +209,7 @@ async def test_get_session_lazy_inits_and_caches(
     s1 = await daemon_mod._get_session("fs", scope)
     s2 = await daemon_mod._get_session("fs", scope)
     assert s1 is session and s2 is session
-    connect.assert_awaited_once_with("fs", scope.oauth_locks)
+    connect.assert_awaited_once_with("fs", scope.oauth_locks, timeout_seconds=scope.timeout_seconds)
     assert scope.local.sessions["fs"] is session
     assert scope.local.stacks["fs"] is stack
 
@@ -234,7 +237,9 @@ async def test_get_session_concurrent_calls_share_one_connect(
     call_count = 0
     started = asyncio.Event()
 
-    async def slow_connect(_server: str, _oauth_locks: dict[str, Any]) -> tuple[Any, Any]:
+    async def slow_connect(
+        _server: str, _oauth_locks: dict[str, Any], **_kwargs: Any
+    ) -> tuple[Any, Any]:
         nonlocal call_count
         call_count += 1
         started.set()
@@ -643,7 +648,9 @@ async def test_run_daemon_full_lifecycle_via_unix_socket(
     # pre-write a stale file to verify run_daemon startup cleans it
     Path(short_socket_path).write_text("stale")
 
-    daemon_task = asyncio.create_task(daemon_mod.run_daemon(short_socket_path))
+    daemon_task = asyncio.create_task(
+        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0)
+    )
     reader, writer = await _wait_for_daemon_socket(daemon_task, short_socket_path, timeout=1.5)
 
     try:
@@ -682,7 +689,9 @@ async def test_run_daemon_graceful_shutdown_closes_server_and_cleans_socket(
 
     monkeypatch.setattr(daemon_mod.asyncio, "Event", _SpyEvent)
 
-    daemon_task = asyncio.create_task(daemon_mod.run_daemon(short_socket_path))
+    daemon_task = asyncio.create_task(
+        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0)
+    )
 
     # wait for daemon to listen + get the stop_event instance
     for _ in range(75):

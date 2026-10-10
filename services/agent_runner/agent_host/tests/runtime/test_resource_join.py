@@ -14,6 +14,7 @@ import pytest
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 from ... import daemon
 from ...host import AgentHost
@@ -23,6 +24,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     host = AgentHost(
+        policy=configured_policy(),
         pool=cast(Any, MagicMock()),
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),
@@ -61,6 +63,7 @@ def _exercise_unfinished_main() -> None:
 
     async def run() -> None:
         host = AgentHost(
+            policy=configured_policy(),
             pool=cast(Any, MagicMock()),
             checkpointer=cast(Any, object()),
             graph=cast(Any, object()),

@@ -9,6 +9,7 @@ current context, thread patch or live clients.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
@@ -70,17 +71,35 @@ def _gateway(url: str) -> Any:
     )
 
 
+def _mcp_timeout_seconds() -> float:
+    from base.config import settings
+
+    return settings.sandbox.mcp_connect_timeout_seconds
+
+
 def process_clients(
-    *, gateway_url: str | None = None, database: DatabaseFactory | None = None
+    *,
+    gateway_url: str | None = None,
+    database: DatabaseFactory | None = None,
+    mcp_timeout_seconds: Callable[[], float] | None = None,
 ) -> ClientSet:
-    """Build lazy process clients; resolve configuration and credentials only at first use."""
+    """Build lazy process clients without reading their configuration or credentials.
+
+    The MCP timeout reader is passed to each freshly built MCP client, which reads it
+    at its operation and session boundaries. Omission uses this process's settings.
+    """
+    from ava.mcps import McpClients
     from ava.sdk_surface import settings
 
+    timeout_reader = (
+        mcp_timeout_seconds if mcp_timeout_seconds is not None else _mcp_timeout_seconds
+    )
     return ClientSet(
         gateway_url=gateway_url if gateway_url is not None else _gateway_url,
         database=database if database is not None else settings.database,
         redis=_redis,
         gateway=_gateway,
+        factories={McpClients: lambda: McpClients(timeout_reader)},
     )
 
 

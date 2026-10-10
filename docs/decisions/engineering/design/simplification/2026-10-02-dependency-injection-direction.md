@@ -31,7 +31,7 @@ the place where the hidden dependencies have to be made visible by hand.
 scope. That held when each agent ran in its own process: one agent's identity,
 config, buffers and counters were the process's. The agent host replaced that
 model. One host process serves many agents' turns as concurrent asyncio tasks
-([agent runtime](../../../../../agent/docs/agent-runtime.ava.okf.md)), so every global that
+([agent runtime](../../../../../agent/docs/agent-runtime/agent-runtime.ava.okf.md)), so every global that
 is agent-level in meaning and process-level in storage is a possible cross-agent
 leak. The repository has patched this one global at a time: the per-turn config
 view and the plugin-config view bind overlays in ContextVars around each turn

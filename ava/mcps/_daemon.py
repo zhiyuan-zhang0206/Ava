@@ -31,6 +31,7 @@ import json
 import os
 import signal
 import sys
+from collections.abc import Callable
 from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -128,6 +129,7 @@ class _Scope:
     local: _Buckets
     shared: _Buckets
     oauth_locks: dict[str, asyncio.Lock]
+    timeout_seconds: Callable[[], float]
 
     def buckets_for(self, shared: Any) -> _Buckets:
         """Which buckets a server's sessions live in, from its `shared` declaration."""
@@ -138,6 +140,7 @@ class _Scope:
 class _DaemonWide:
     """The state every connection of one daemon shares; `run_daemon` builds it once."""
 
+    timeout_seconds: Callable[[], float]
     shared: _Buckets = field(default_factory=_Buckets)
     oauth_locks: dict[str, asyncio.Lock] = field(default_factory=dict[str, asyncio.Lock])
 
@@ -202,7 +205,12 @@ async def _invalidate_session(
                 )
 
 
-async def _connect_server(server: str, oauth_locks: dict[str, asyncio.Lock]) -> Any:
+async def _connect_server(
+    server: str,
+    oauth_locks: dict[str, asyncio.Lock],
+    *,
+    timeout_seconds: Callable[[], float],
+) -> Any:
     """Start MCP server and return (session, AsyncExitStack).
 
     A `"shared": "browser"` server needs no child process: the daemon dials
@@ -228,6 +236,7 @@ async def _connect_server(server: str, oauth_locks: dict[str, asyncio.Lock]) -> 
             oauth=bool(spec.get("oauth")),
             server=server,
             oauth_locks=oauth_locks,
+            timeout_seconds=timeout_seconds,
         )
     shared = spec.get("shared")
     if shared == "browser":
@@ -256,16 +265,14 @@ async def _connect_server(server: str, oauth_locks: dict[str, asyncio.Lock]) -> 
         try:
             read, write = await asyncio.wait_for(
                 local_stack.enter_async_context(stdio_client(params, errlog=devnull)),
-                timeout=settings.sandbox.mcp_connect_timeout_seconds,
+                timeout=timeout_seconds(),
             )
         except BaseException:
             devnull.close()
             raise
         devnull.close()
         session = await local_stack.enter_async_context(ClientSession(read, write))
-        await asyncio.wait_for(
-            session.initialize(), timeout=settings.sandbox.mcp_connect_timeout_seconds
-        )
+        await asyncio.wait_for(session.initialize(), timeout=timeout_seconds())
     except BaseException:
         await local_stack.aclose()
         raise
@@ -279,6 +286,7 @@ async def _connect_http(
     oauth: bool = False,
     server: str = "",
     oauth_locks: dict[str, asyncio.Lock],
+    timeout_seconds: Callable[[], float],
 ) -> tuple[Any, AsyncExitStack]:
     """Connect to a remote Streamable HTTP MCP server — no child process.
 
@@ -299,7 +307,7 @@ async def _connect_http(
     local_stack = AsyncExitStack()
     # An OAuth authorization flow involves the user clicking through a browser,
     # so the connect envelope is far more generous there than for stdio/static-auth.
-    timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else settings.sandbox.mcp_connect_timeout_seconds
+    timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else timeout_seconds()
     try:
         if oauth:
             from ._oauth import oauth_http_client
@@ -503,7 +511,9 @@ async def _get_session(
         if server in buckets.sessions:
             return buckets.sessions[server]
 
-        session, stack = await _connect_server(server, scope.oauth_locks)
+        session, stack = await _connect_server(
+            server, scope.oauth_locks, timeout_seconds=scope.timeout_seconds
+        )
         if shared is True:
             session = _SerialSession(session, lock)
         buckets.sessions[server] = session
@@ -524,7 +534,12 @@ async def _handle_connection(
     `"shared"` servers live in the daemon-wide buckets instead: they outlive
     the connection by design and are released at daemon shutdown.
     """
-    scope = _Scope(local=_Buckets(), shared=daemon.shared, oauth_locks=daemon.oauth_locks)
+    scope = _Scope(
+        local=_Buckets(),
+        shared=daemon.shared,
+        oauth_locks=daemon.oauth_locks,
+        timeout_seconds=daemon.timeout_seconds,
+    )
     try:
         await _handle_client(reader, writer, scope)
     finally:
@@ -663,7 +678,7 @@ def _unlink_own_socket(socket_path: str, self_ino: int) -> None:
             Path(socket_path).unlink()
 
 
-async def run_daemon(socket_path: str) -> None:
+async def run_daemon(socket_path: str, *, timeout_seconds: Callable[[], float]) -> None:
     """Start the shared MCP daemon, listening on one Unix socket.
 
     A single per-machine process (ops roster session "mcp-daemon") replaces
@@ -676,7 +691,7 @@ async def run_daemon(socket_path: str) -> None:
     # `socket_path` here is a dead file, safe to clear.
     _prepare_socket(socket_path)
 
-    daemon = _DaemonWide()
+    daemon = _DaemonWide(timeout_seconds=timeout_seconds)
 
     async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await _handle_connection(reader, writer, daemon)
@@ -743,7 +758,11 @@ def main() -> None:
             socket_path,
         )
         sys.exit(1)
-    asyncio.run(run_daemon(socket_path))
+    asyncio.run(
+        run_daemon(
+            socket_path, timeout_seconds=lambda: settings.sandbox.mcp_connect_timeout_seconds
+        )
+    )
 
 
 if __name__ == "__main__":

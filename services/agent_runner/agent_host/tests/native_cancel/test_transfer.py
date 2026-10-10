@@ -34,6 +34,7 @@ from services.agent_runner.agent_host.invocation.native_work import recover_nati
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
 _CHILD = """
@@ -243,6 +244,7 @@ async def _assert_successor_turns(
     assert snapshot.values["native_cancel"] is None
     assert snapshot.values["halted"] is True
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,

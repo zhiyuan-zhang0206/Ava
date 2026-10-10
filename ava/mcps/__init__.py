@@ -24,6 +24,7 @@ import keyword
 import subprocess
 import time
 import types
+from collections.abc import Callable
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,6 @@ from ava.mcp_config import (
 )
 from ava.sdk_surface.validation import coerce_str
 from ava.security import scan_content
-from base.config import settings
 from base.log import logger
 
 from ._clients import McpClients
@@ -214,7 +214,9 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
         assert_requirements(spec)
         url = server_url(spec)
         if url is not None:
-            session, stack = await _connect_http(url, spec.get("headers"), server=server)
+            session, stack = await _connect_http(
+                url, spec.get("headers"), timeout_seconds=mcp.timeout_seconds, server=server
+            )
             mcp.session_stacks[server] = stack
             mcp.sessions[server] = session
             return session
@@ -245,7 +247,7 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
         try:
             read, write = await asyncio.wait_for(
                 local_stack.enter_async_context(stdio_client(params, **stdio_kwargs)),
-                timeout=settings.sandbox.mcp_connect_timeout_seconds,
+                timeout=mcp.timeout_seconds(),
             )
             session: Any = await local_stack.enter_async_context(
                 ClientSession(
@@ -255,16 +257,14 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
                     # default is no timeout, and a hung server would block the
                     # calling agent forever. Same knob the connect phase uses
                     # and the daemon request deadline applies.
-                    read_timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds,
+                    read_timeout_seconds=mcp.timeout_seconds(),
                 )
             )
-            await asyncio.wait_for(
-                session.initialize(), timeout=settings.sandbox.mcp_connect_timeout_seconds
-            )
+            await asyncio.wait_for(session.initialize(), timeout=mcp.timeout_seconds())
         except TimeoutError as e:
             await local_stack.aclose()
             raise MCPConnectError(
-                f"connecting to server {server!r} timed out (>{settings.sandbox.mcp_connect_timeout_seconds}s)"
+                f"connecting to server {server!r} timed out (>{mcp.timeout_seconds()}s)"
             ) from e
         except Exception as e:
             await local_stack.aclose()
@@ -280,7 +280,12 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
 
 
 async def _connect_http(
-    url: str, headers: dict[str, str] | None, *, oauth: bool = False, server: str = ""
+    url: str,
+    headers: dict[str, str] | None,
+    *,
+    timeout_seconds: Callable[[], float],
+    oauth: bool = False,
+    server: str = "",
 ) -> tuple[Any, AsyncExitStack]:
     """Connect to a remote Streamable HTTP server in the background loop.
 
@@ -295,7 +300,7 @@ async def _connect_http(
     )
 
     local_stack = AsyncExitStack()
-    timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else settings.sandbox.mcp_connect_timeout_seconds
+    timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else timeout_seconds()
     try:
         if oauth:
             from ._oauth import oauth_http_client
@@ -312,7 +317,7 @@ async def _connect_http(
             ClientSession(
                 read,
                 write,
-                read_timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds,
+                read_timeout_seconds=timeout_seconds(),
             )
         )
         await asyncio.wait_for(session.initialize(), timeout=timeout)
@@ -398,9 +403,7 @@ def _list_tools(server: str) -> list[ToolInfo]:
         # must propagate, not be silently retried on a freshly-spawned local
         # session, which would mask the error and double-run side effects.
         with suppress(MCPConnectError, OSError):
-            return remote.list_tools(
-                server, timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds
-            )
+            return remote.list_tools(server, timeout_seconds=_clients().timeout_seconds())
 
     cached = _read_cache(server)
     if cached is not None:
@@ -438,7 +441,7 @@ def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
         # retried locally (which would double-run a side-effectful tool).
         with suppress(MCPConnectError, OSError):
             return remote.call_tool(
-                server, tool, args, timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds
+                server, tool, args, timeout_seconds=_clients().timeout_seconds()
             )
         # The daemon attempt may have outlived the borrowed lease.
         agent_identity.validate_external_identity()

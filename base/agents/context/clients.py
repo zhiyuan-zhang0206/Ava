@@ -11,7 +11,8 @@ owner of those objects:
   description a host sends (`AvaContext.describe`) carries endpoints, never a secret;
   its composition root supplies lazy builders and the endpoint resolver;
 - `close()` releases everything the set built. A client a test or an embedder supplied with
-  `using_gateway` is not the set's to close.
+  `using_gateway` is not the set's to close. Constructor-specific factory builders
+  remain configured after close, so subsequent use can build fresh clients.
 
 A failure to build a client raises at the call that needed it; nothing here swallows one.
 """
@@ -19,7 +20,7 @@ A failure to build a client raises at the call that needed it; nothing here swal
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -101,11 +102,14 @@ class ClientSet:
         database: DatabaseFactory | None = None,
         redis: Callable[[], object] | None = None,
         gateway: Callable[[str], httpx.Client] | None = None,
+        factories: Mapping[Callable[..., object], Callable[[], object]] | None = None,
     ) -> None:
         """`database` hands over the cluster database handle, which is the composition root's to
         name (the exec child's is built from its settings, the host passes the one it holds); a set
         without one has no SQL connection to offer. The other builders and endpoint resolver are
-        also supplied explicitly; this owner never discovers process configuration."""
+        also supplied explicitly; this owner never discovers process configuration.
+        `factories` maps an SDK factory key to its configured zero-argument builder,
+        preserving `get(factory)` identity and the existing close/rebuild lifecycle."""
         self._gateway_url = gateway_url
         self._database = database
         self._redis_factory = redis
@@ -115,7 +119,8 @@ class ClientSet:
         self._redis: LazyConnection | None = None
         self._gateway: httpx.Client | None = None
         self._gateway_provided = False
-        self._made: dict[Callable[[], object], object] = {}
+        self._factories = dict(factories) if factories is not None else {}
+        self._made: dict[Callable[..., object], object] = {}
 
     # ── the three base clients ───────────────────────────────────────────
 
@@ -174,12 +179,13 @@ class ClientSet:
 
     # ── the SDK layer's own clients ──────────────────────────────────────
 
-    def get[T](self, factory: Callable[[], T]) -> T:
+    def get[T](self, factory: Callable[..., T]) -> T:
         """The client `factory` builds for this set, built on first use and closed with the set
-        (its `close()`, when it has one). The factory itself is the key."""
+        (its `close()`, when it has one). The factory itself is the key; an explicitly
+        configured builder may supply its constructor inputs without changing that key."""
         with self._lock:
             if factory not in self._made:
-                self._made[factory] = factory()
+                self._made[factory] = self._factories.get(factory, factory)()
             return self._made[factory]  # type: ignore[return-value]
 
     # ── release ──────────────────────────────────────────────────────────
