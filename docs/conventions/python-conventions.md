@@ -160,11 +160,14 @@ are not.
 
 Thread ownership detection is conservative and structural, with no file list or
 inline owner marker. The scanner recognizes an instance-held Thread whose target
-is a visible method, actual start, a real Event created by that owner and read
+is a visible method, a unique constructor/start in the initializer, a real Event created by that owner and read
 or passed to the worker, and a teardown call graph that sets that same signal,
 joins that same handle with an explicit non-None timeout, checks its liveness,
 and raises the original error retained by the worker. The worker entry captures
 BaseException into an owner field and immediately passes it to an error observer.
+Its else block contains no unprotected work, and any finally block only sets
+owner-created completion Events. Repeatable start methods remain findings;
+a stop-only fence does not prevent overwriting an active thread's handle.
 Void completion is observed through join and liveness; value-producing work also
 needs its actual result receipt. Method and field names carry no exemption.
 Other ownership shapes remain findings until their structural evidence is
