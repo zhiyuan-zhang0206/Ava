@@ -32,6 +32,7 @@ from services.agent_runner.agent_host.dispatcher import (
 )
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.wake.delivery_watchdog import turn_liveness
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
 
@@ -179,6 +180,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
 
     graph, saver = await _graph(aops_pool, agent, never)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,

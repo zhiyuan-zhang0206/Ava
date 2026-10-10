@@ -23,6 +23,7 @@ from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 @pytest.mark.parametrize(
@@ -48,6 +49,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
         None if failure_site in ("flush", "after_flush") else _command(db_conn, agent, command_kind)
     )
     host = host_module.AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,

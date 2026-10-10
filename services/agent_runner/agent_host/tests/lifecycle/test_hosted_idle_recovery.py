@@ -38,6 +38,7 @@ from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.base.poll_until import poll_until_async
 
 
@@ -171,6 +172,7 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
     messages = [HumanMessage(content="Existing question"), AIMessage(content="Already answered")]
     await graph.aupdate_state(config, {"messages": messages, "halted": True})
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         graph=graph,
         checkpointer=saver,
@@ -212,6 +214,7 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     )
     db_conn.commit()
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         graph=AsyncMock(),
         checkpointer=AsyncMock(),

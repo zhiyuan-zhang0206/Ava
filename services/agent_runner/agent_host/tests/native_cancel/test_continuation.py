@@ -29,6 +29,7 @@ from services.agent_runner.agent_host import host as host_owner
 from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.invocation import native_work as work_owner
 from services.agent_runner.agent_host.settlement import close_hosted_turn
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
 
@@ -121,6 +122,7 @@ async def test_original_invocation_settles_once_after_database_fault(
     builder.add_edge(START, "claim")
     graph = builder.compile(checkpointer=saver)
     host = host_owner.AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,

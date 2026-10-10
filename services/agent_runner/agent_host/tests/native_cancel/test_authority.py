@@ -26,6 +26,7 @@ from services.agent_runner.agent_host.invocation.native_work import (
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
 
@@ -51,6 +52,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         return await actual_update(*args, **kwargs)
 
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,

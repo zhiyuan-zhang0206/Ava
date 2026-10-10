@@ -29,6 +29,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
 
@@ -128,6 +129,7 @@ async def _blocked_host(
     builder.add_edge(START, "claim")
     graph = builder.compile(checkpointer=saver)
     host = AgentHost(
+        policy=configured_policy(),
         pool=pool,
         checkpointer=saver,
         graph=graph,

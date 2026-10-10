@@ -40,6 +40,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +136,7 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
 
         graph, saver = await _graph(aops_pool, agent, work)
         host = AgentHost(
+            policy=configured_policy(),
             pool=aops_pool,
             control_pool=control,
             checkpointer=saver,
