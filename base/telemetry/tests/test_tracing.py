@@ -55,6 +55,7 @@ def _drain_background_trace_threads() -> None:
     a hung arm is caught by the next test's _assert_no_background_trace_threads
     with a loud failure instead of a silent cross-test contamination.
     """
+    tracing_mod.shutdown(timeout=_THREAD_DRAIN_TIMEOUT_S)
     retry_thread = tracing_mod._state["retry_thread"]
     if isinstance(retry_thread, threading.Thread):
         retry_thread.join(timeout=_THREAD_DRAIN_TIMEOUT_S)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from base.telemetry.observability import cluster_label
@@ -162,7 +162,13 @@ def _metrics_resource() -> Any:
     )
 
 
-def _build_providers(endpoint: str) -> tuple[Any, Any]:
+def _build_providers(
+    endpoint: str,
+    *,
+    keep_logs: Callable[[Any], None] | None = None,
+    keep_reader: Callable[[Any], None] | None = None,
+    keep_metrics: Callable[[Any], None] | None = None,
+) -> tuple[Any, Any]:
     """Build the production (LoggerProvider, MeterProvider) pair exporting
     OTLP/HTTP to ``endpoint`` (signal paths /v1/logs, /v1/metrics are appended
     by the exporters). Imports the OTel SDK lazily — the no-tracing path and
@@ -187,22 +193,27 @@ def _build_providers(endpoint: str) -> tuple[Any, Any]:
     # `_drain_on_exit` is the single ordered exit seam: it flushes the emitter
     # and this queue, then force-flushes these still-live providers.
     logs = LoggerProvider(shutdown_on_exit=False)
+    if keep_logs is not None:
+        keep_logs(logs)
     log_exporter: Any = _EventDimensionResourceExporter(
         OTLPLogExporter(endpoint=f"{endpoint}/v1/logs", timeout=_OTLP_HTTP_TIMEOUT_S)
     )
     logs.add_log_record_processor(
         BatchLogRecordProcessor(log_exporter, export_timeout_millis=_OTLP_HTTP_TIMEOUT_S * 1000)
     )
+    reader = PeriodicExportingMetricReader(
+        OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics", timeout=_OTLP_HTTP_TIMEOUT_S),
+        export_interval_millis=_METRICS_INTERVAL_S * 1000,
+        export_timeout_millis=_OTLP_HTTP_TIMEOUT_S * 1000,
+    )
+    if keep_reader is not None:
+        keep_reader(reader)
     metrics = MeterProvider(
         shutdown_on_exit=False,
-        metric_readers=[
-            PeriodicExportingMetricReader(
-                OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics", timeout=_OTLP_HTTP_TIMEOUT_S),
-                export_interval_millis=_METRICS_INTERVAL_S * 1000,
-                export_timeout_millis=_OTLP_HTTP_TIMEOUT_S * 1000,
-            )
-        ],
+        metric_readers=[reader],
         resource=_metrics_resource(),
         views=_metric_views(),
     )
+    if keep_metrics is not None:
+        keep_metrics(metrics)
     return logs, metrics
