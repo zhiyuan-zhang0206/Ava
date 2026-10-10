@@ -3,3 +3,4 @@
 "tests.path_scoped.agent_tests" = [
     ".",
 ]
+"agent.graph.llm.tests.cancel_fixture" = ["test_multiple_tool_calls_ava_syntax_fix.py"]
