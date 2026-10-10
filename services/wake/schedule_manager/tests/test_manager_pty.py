@@ -1,7 +1,7 @@
 """ScheduleManager x real pty-sessions service integration.
 
 A real pty-sessions service + real DB + real backend + the real
-`gateway.schedules.runner` entrypoint: `_launch` creates a session in the service,
+`services.wake.schedule_manager.runner` entrypoint: `_launch` creates a session in the service,
 `_live_ids` / `capture_blocking` see it, `_reap` tears it down, reconcile rebuilds
 after a crash, and the breaker trips after repeated crashes.
 
@@ -142,7 +142,7 @@ def _wait_session_gone(name: str, timeout_s: float = 20.0) -> None:
 
 def test_launch_cwd_is_the_checkout_root() -> None:
     """Schedule sessions start in the checkout root, where `python -m
-    gateway.schedules.runner` and the relative `.venv/bin/python` resolve."""
+    services.wake.schedule_manager.runner` and the relative `.venv/bin/python` resolve."""
     assert sm.REPO_ROOT == REPO
 
 
@@ -160,7 +160,8 @@ def test_pty_launch_live_capture(
     sid = _insert_schedule(
         db_conn,
         "pty-live",
-        "import time; print('RUNNER_ALIVE'); time.sleep(30)",
+        "import time; from ava.sdk_surface.agent_identity import require_actor; "
+        "print('RUNNER_ALIVE', require_actor()); time.sleep(30)",
         "python schedule.py",
     )
     mgr = sm.ScheduleManager(pool)
@@ -186,10 +187,10 @@ def test_pty_launch_live_capture(
             raise AssertionError(
                 f"capture failed ({exc}); session logs:\n{_dump_logs(home)}"
             ) from exc
-        if captured and "RUNNER_ALIVE" in captured:
+        if captured and f"RUNNER_ALIVE schedule:{sid}" in captured:
             break
         time.sleep(0.5)
-    if not (captured and "RUNNER_ALIVE" in captured):
+    if not (captured and f"RUNNER_ALIVE schedule:{sid}" in captured):
         raise AssertionError("runner output never appeared; session logs:\n" + _dump_logs(home))
 
     assert mgr._reap(sid)

@@ -462,7 +462,7 @@ class ScheduleManager:
         # misread (the Task #1115 bug-B class).
         cmd = (
             f"cd {shlex.quote(str(REPO_ROOT))} && "
-            f".venv/bin/python -m gateway.schedules.runner {schedule_id} {wanted.revision}; exit $?"
+            f".venv/bin/python -m services.wake.schedule_manager.runner {schedule_id} {wanted.revision}; exit $?"
         )
         # No shell-TTL row is written here (deliberate exemption, task
         # #2614): agent_shell_ttls rows key on an agent id, and schedule
