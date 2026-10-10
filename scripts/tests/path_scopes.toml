@@ -3,3 +3,6 @@
 "tests.path_scoped.structure_tests" = [
     "test_patch_targets.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_worktree_guard.py"
+]

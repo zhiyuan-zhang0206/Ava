@@ -5,3 +5,6 @@ from tests.fixtures.unit.config_authority import config_authority as config_auth
 from tests.fixtures.unit.generation import seed_write_generation as seed_write_generation
 from tests.fixtures.unit.generation import served_gateway_home as served_gateway_home
 from tests.fixtures.unit.homes import unit_home as unit_home
+from tests.fixtures.unit.sdk import _sdk_environment as _sdk_environment
+from tests.fixtures.unit.sdk import sdk_identity as sdk_identity
+from tests.fixtures.unit.sdk import sdk_metering as sdk_metering

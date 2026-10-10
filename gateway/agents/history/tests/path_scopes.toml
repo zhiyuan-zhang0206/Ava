@@ -2,3 +2,15 @@
     "test_context_breakdown.py",
     "test_timeline.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_context_breakdown.py",
+    "test_history_gateway.py",
+    "test_timeline.py",
+    "timeline/test_ai_message_items.py",
+    "timeline/test_attach_items.py",
+    "timeline/test_retained_timeline.py",
+    "timeline/test_timeline_chat_anchor_reads.py",
+    "timeline/test_timeline_compact_history_boundaries.py",
+    "timeline/test_timeline_compact_history_head_notes.py",
+    "timeline/test_timeline_skips_inbound_without_langgraph_state.py"
+]

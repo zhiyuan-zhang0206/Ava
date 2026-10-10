@@ -3,3 +3,6 @@
 "tests.path_scoped.gateway_tests" = [
     "test_session_store.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_session_store.py"
+]

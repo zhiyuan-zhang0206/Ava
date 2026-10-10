@@ -41,3 +41,6 @@
 "tests.fixtures.log_capture" = [
     "test_circuit_breaker.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "."
+]

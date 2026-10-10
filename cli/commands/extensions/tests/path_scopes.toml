@@ -5,3 +5,16 @@
 ]
 "tests.fixtures.unit.homes" = ["."]
 "tests.fixtures.unit.identity" = ["."]
+"tests.fixtures.unit.sdk" = [
+    "test_external_skills.py",
+    "test_guide_package.py",
+    "test_manifest_gate.py",
+    "test_mcp.py",
+    "test_mcp_enable.py",
+    "test_mcp_install.py",
+    "test_plugins_enable_disable.py",
+    "test_plugins_inspect.py",
+    "test_plugins_install.py",
+    "test_plugins_verify.py",
+    "test_skills_sync.py"
+]

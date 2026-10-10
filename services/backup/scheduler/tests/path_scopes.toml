@@ -3,3 +3,10 @@
 "tests.path_scoped.services_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_backup_scheduler_daemon.py",
+    "test_daemon_import_boundary.py",
+    "test_operation_worker.py",
+    "test_scheduler_shutdown.py",
+    "test_worker_bootstrap.py"
+]

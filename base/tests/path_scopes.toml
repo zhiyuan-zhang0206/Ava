@@ -3,3 +3,9 @@
 "tests.path_scoped.db_authority_tests" = [
     "test_delivery.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "config/test_config_env_values.py",
+    "config/test_paths.py",
+    "events/live/test_announce.py",
+    "test_qwen_live_smoke.py"
+]

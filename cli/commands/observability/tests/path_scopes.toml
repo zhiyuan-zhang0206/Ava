@@ -9,3 +9,11 @@
     "test_otel_port_deviation.py",
     "test_trace_ship.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_atomic_writer_contracts.py",
+    "test_converge_lgtm.py",
+    "test_grafana_render_cmd.py",
+    "test_lgtm_native.py",
+    "test_lgtm_toggle.py",
+    "test_observatory_urls.py"
+]

@@ -14,3 +14,7 @@
 "tests.path_scoped.services_tests" = [
     "test_native_storage_diagnostics.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_maintenance_stop.py",
+    "test_walg_cmd.py"
+]

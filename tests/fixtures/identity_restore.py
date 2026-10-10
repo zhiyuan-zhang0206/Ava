@@ -18,22 +18,38 @@ attribute for good (PR #3791).
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any, Protocol
 
 import pytest
 
-import ava
+
+class SdkIdentitySlot(Protocol):
+    """The context slot restored by the guard, independent of its SDK implementation."""
+
+    context: Any
+
+
+@pytest.fixture
+def sdk_identity() -> SdkIdentitySlot | None:
+    """An unrelated test has no SDK context slot; consumers override this locally."""
+    return None
 
 
 @pytest.fixture(autouse=True)
-def _restore_agent_identity() -> Iterator[None]:
-    held = getattr(ava, "context", None)
+def _restore_agent_identity(sdk_identity: SdkIdentitySlot | None) -> Iterator[None]:
+    if sdk_identity is None:
+        yield
+        return
+    held = getattr(sdk_identity, "context", None)
     yield
     # Clients a test's own context built end with the test; the ones that were bound before it
     # (the session default's, which `pin_agent` carries over) keep living.
-    current = getattr(ava, "context", None)
-    if current is not None and (held is None or current.clients is not held.clients):
-        current.clients.close()
-    if held is None:
-        del ava.context
-    else:
-        ava.context = held
+    current = getattr(sdk_identity, "context", None)
+    try:
+        if current is not None and (held is None or current.clients is not held.clients):
+            current.clients.close()
+    finally:
+        if held is None:
+            delattr(sdk_identity, "context")
+        else:
+            sdk_identity.context = held

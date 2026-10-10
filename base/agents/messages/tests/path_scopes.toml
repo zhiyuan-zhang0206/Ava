@@ -4,3 +4,7 @@
     "test_caller_identity.py",
     "test_envelope.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_caller_identity.py",
+    "test_envelope.py"
+]

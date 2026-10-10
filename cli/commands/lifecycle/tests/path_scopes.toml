@@ -17,3 +17,23 @@
 "base.deploy.lifecycle.tests.serving_root" = [
     "test_commands_restart_stop.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "startup/test_commands_start.py",
+    "startup/test_extension_materialize_ordering.py",
+    "startup/test_start_health_port_gate.py",
+    "startup/test_start_partial_stop.py",
+    "startup/test_start_readiness_gate.py",
+    "startup/test_start_unready_signal.py",
+    "test_commands_cluster_status_lifecycle.py",
+    "test_commands_restart_stop.py",
+    "test_commands_status.py",
+    "test_hold_report.py",
+    "test_maintenance_stop_report.py",
+    "test_remote_data_plane.py",
+    "test_rollout_robustness.py",
+    "test_start_data_plane.py",
+    "test_stop.py",
+    "test_stop_close_notices.py",
+    "test_stop_escalation_report.py",
+    "test_stop_terminals.py"
+]
