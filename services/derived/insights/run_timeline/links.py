@@ -84,7 +84,7 @@ def _link(row: dict[str, object]) -> RunTimelineLink | None:
         ts=cast(datetime, row["ts"]),
         sender=sender,
         receiver=receiver,
-        inbound_id=_int(attrs.get("inbound_id")) if kind == "send_message" else None,
+        inbound_id=_message_inbound(row),
         fork_from=_int(row["target_agent_id"]) if kind == "fork" else None,
         preview=" ".join(content.split())[:_PREVIEW_CHARS] if isinstance(content, str) else None,
     )

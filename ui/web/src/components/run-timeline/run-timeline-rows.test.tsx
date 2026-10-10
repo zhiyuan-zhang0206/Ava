@@ -65,7 +65,7 @@ const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: numbe
 });
 
 const ENTRIES = (data: Partial<RunTimelineResponse>) => [
-  { id: 42, status: "loaded" as const, data: { nodes: [], units: [], events: [], ...data } as RunTimelineResponse },
+  { id: 42, status: "loaded" as const, data: { nodes: [], units: [], ...data } as RunTimelineResponse },
 ];
 
 function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null, heights: UnitHeights = "equal") {

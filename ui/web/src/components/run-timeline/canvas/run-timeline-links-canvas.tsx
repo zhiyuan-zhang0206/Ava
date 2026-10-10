@@ -10,7 +10,7 @@ import { useEffect, useRef, type RefObject } from "react";
 import { curveOf, endTangent, hitLink, LINK_COLORS, type Curve, type ResolvedLink } from "../model/timeline-links";
 import type { AxisMap, Viewport } from "../model/timeline-model";
 
-const ROW_TESTID = { units: "run-timeline-row-units", lifecycle: "run-timeline-row-lifecycle", other: "run-timeline-row-other" } as const;
+const ROW_TESTID = { units: "run-timeline-row-units", other: "run-timeline-row-other" } as const;
 const OTHER_GROUP = "agent-view-other-agents";
 const HEAD_PX = 5;
 /** How far from a curve a pointer still counts as on it. */

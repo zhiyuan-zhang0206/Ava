@@ -6,10 +6,6 @@ The response is a window over both: every level of the tree intersecting the
 window, and below them layer 0, the message units (`base.agents.history.hierarchy.units`).
 No window means the agent's whole lifetime — from the earliest message or node to
 the latest; drilling a node is asking for its span as the window.
-
-Audit events (spawn, fork, restart, terminate) are laid over the window as lifecycle
-markers. They are not a data source: the window never looks at them, and a
-failed read of them leaves the markers out.
 """
 
 from __future__ import annotations
@@ -25,14 +21,11 @@ from base.agents.history.hierarchy.store import load_generation_costs, load_node
 from base.agents.history.hierarchy.units import DisplayBlock
 from base.agents.messages.kwargs import message_addl_kwargs
 from base.db import Database
-from base.log import logger
-from services.derived.insights.run_timeline import _lifecycle
 from services.derived.insights.run_timeline.context import router as context_router
 from services.derived.insights.run_timeline.history import HistoryView, HistoryViewCache
 from services.derived.insights.run_timeline.links import router as links_router
 from services.derived.insights.run_timeline.messages import router as messages_router
 from services.derived.insights.run_timeline.schemas import (
-    RunTimelineEvent,
     RunTimelineGeneration,
     RunTimelineNode,
     RunTimelineResponse,
@@ -73,8 +66,8 @@ def _covering_leaf(leaves: list[ServedNode], firsts: list[int], index: int) -> s
 
 
 def _inbound_id(view: HistoryView, unit: DisplayBlock) -> int | None:
-    """The inbound row an inbound block was made from; the checkpoint stamps it on the message."""
-    if unit.kind != "inbound":
+    """The inbound row an inbound or note block was made from; the checkpoint stamps it on the message."""
+    if unit.kind not in ("inbound", "note"):
         return None
     stamped = message_addl_kwargs(view.history.messages[unit.i0]).get("ava_inbound_id")
     return stamped if isinstance(stamped, int) else None
@@ -151,14 +144,6 @@ def _window(
     return start, end
 
 
-def _events(db: Database, agent_id: int, start: datetime, end: datetime) -> list[RunTimelineEvent]:
-    try:
-        return _lifecycle.read(db, agent_id, start, end)
-    except Exception:
-        logger.exception("run-timeline lifecycle read failed for agent {}", agent_id)
-        return []
-
-
 @router.get("/api/agents/{agent_id}/run-timeline")
 def get_run_timeline(
     request: Request,
@@ -188,5 +173,4 @@ def get_run_timeline(
         ),
         nodes=[_node(view, node) for node in nodes],
         units=_units(view, served, start, end),
-        events=_events(db, agent_id, start, end),
     )

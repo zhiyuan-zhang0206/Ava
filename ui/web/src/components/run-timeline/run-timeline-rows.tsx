@@ -1,7 +1,7 @@
 "use client";
 
 // The agent view's rows: any number of agents on one shared axis (plain time). Each agent is a group
-// of rows: lifecycle markers on top, then one row per understanding-tree level (topmost first), then
+// of rows: one row per understanding-tree level (topmost first), then
 // layer 0 — the message units — and the context bars at the bottom. All rows of all agents share one
 // viewport on the loaded data: the wheel / pinch zooms around the cursor, a drag or a horizontal
 // scroll pans, and nothing refetches. A click selects a block; the arrow keys move the selection,
@@ -18,7 +18,6 @@ import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import {
   blockClass,
   hoverLit,
-  axisBox,
   timeAxis,
   inboundSources,
   levelsTopFirst,
@@ -139,8 +138,6 @@ export function RunTimelineRows({
     for (const l of links) counts.set(l.link.kind, (counts.get(l.link.kind) ?? 0) + 1);
     return counts;
   }, [links]);
-  // An agent an event happened to shows its Lifecycle row even when no marker is in its window.
-  const lifecycleAgents = useMemo(() => new Set(shownLinks.filter((l) => l.to.row === "lifecycle").map((l) => l.to.agent)), [shownLinks]);
   // The row the selection was made in: a block and its bar in the Context size row select the same thing.
   const [navRow, setNavRow] = useState<string | null>(null);
   const choose = (agent: number, row: string, target: AgentSelection["selection"]) => {
@@ -453,27 +450,6 @@ export function RunTimelineRows({
         className="space-y-1.5"
       >
         <AgentGroupHeader agentId={agent.id} onRemove={onRemove} />
-        {data.events.length > 0 || lifecycleAgents.has(agent.id) ? (
-          <RowShell label={t("lifecycleRow")} height="h-5" testId="run-timeline-row-lifecycle">
-            {data.events.map((event, index) => {
-              const box = axisBox(axis, event.ts, event.ts, viewU);
-              if (box === null) return null;
-              const when = formatShort(event.ts);
-              return (
-                <span
-                  key={`${event.kind}-${event.ts}-${event.source}-${index}`}
-                  role="img"
-                  aria-label={t("eventAria", { kind: event.kind, time: when })}
-                  title={`${event.kind} · ${when}${event.label ? ` · ${event.label}` : ""}`}
-                  data-testid="run-timeline-event"
-                  className="absolute top-1 h-3 w-1.5 rounded-sm bg-foreground/60"
-                  style={{ left: `${box.left}%` }}
-                />
-              );
-            })}
-          </RowShell>
-        ) : null}
-
         {levels.map((level) => (
           <RowShell
             key={level}

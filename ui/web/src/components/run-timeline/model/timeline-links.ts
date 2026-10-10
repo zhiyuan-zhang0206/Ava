@@ -19,9 +19,9 @@ export const LINK_COLORS: Record<LinkKind, string> = {
   resurrect: "#a855f7",
 };
 
-/** Where an end sits: a row of an agent in the view, or the Other agents row (`agent` is then the peer). */
+/** Where an end sits: the Messages row of an agent in the view, or the Other agents row (`agent` is then the peer). */
 export interface LinkEnd {
-  row: "units" | "lifecycle" | "other";
+  row: "units" | "other";
   agent: number;
   /** Epoch milliseconds: where on the shared axis. */
   ms: number;
@@ -35,18 +35,18 @@ export interface ResolvedLink {
   to: LinkEnd;
   /** The end that is not in the view, when one is. */
   external: number | null;
-  /** A message whose receiver is in view but whose inbound block was not found: it ends at the event's time, not on a block. */
+  /** The event names an inbound row of the receiver in view but no block carries it: the arrow ends at the event's time, not on a block. */
   unmatched: boolean;
 }
 
 const middle = (unit: Pick<RunTimelineUnit, "start" | "end">) => (Date.parse(unit.start) + Date.parse(unit.end)) / 2;
 
 /**
- * The ends of each link. The sender stands in its Messages row at the event's time (the block it was
- * working on is not guessed). The receiver is, for a message, the inbound block it became (matched by
- * `inbound_id`; the Messages row at the event's time when no block carries it), for any other event
- * its Lifecycle row. An end whose agent is not in the view lands on the Other agents row at the
- * event's time. A link whose in-view agent has not loaded yet is left out until it has.
+ * The ends of each link. Both ends of an in-view agent are in its Messages row. The sender stands at
+ * the event's time (the block it was working on is not guessed). The receiver is the block of the
+ * inbound row the event was delivered as (matched by `inbound_id`), else the event's time. An end
+ * whose agent is not in the view lands on the Other agents row at the event's time. A link whose
+ * in-view agent has not loaded yet is left out until it has.
  */
 export function resolveLinks(
   links: readonly RunTimelineLink[],
@@ -60,18 +60,14 @@ export function resolveLinks(
     const receiverIn = inView.has(link.receiver);
     if (!senderIn && !receiverIn) return;
     if ((senderIn && !loaded.has(link.sender)) || (receiverIn && !loaded.has(link.receiver))) return;
-    const from: LinkEnd = senderIn ? { row: "units", agent: link.sender, ms } : { row: "other", agent: link.sender, ms };
+    const from: LinkEnd = { row: senderIn ? "units" : "other", agent: link.sender, ms };
     let to: LinkEnd = { row: "other", agent: link.receiver, ms };
     let unmatched = false;
     if (receiverIn) {
-      if (link.kind === "send_message") {
-        const block =
-          link.inbound_id === null
-            ? undefined
-            : loaded.get(link.receiver)?.units.find((unit) => unit.kind === "inbound" && unit.inbound_id === link.inbound_id);
-        unmatched = block === undefined;
-        to = { row: "units", agent: link.receiver, ms: block === undefined ? ms : middle(block) };
-      } else to = { row: "lifecycle", agent: link.receiver, ms };
+      const block =
+        link.inbound_id === null ? undefined : loaded.get(link.receiver)?.units.find((unit) => unit.inbound_id === link.inbound_id);
+      unmatched = link.inbound_id !== null && block === undefined;
+      to = { row: "units", agent: link.receiver, ms: block === undefined ? ms : middle(block) };
     }
     out.push({
       key: `${link.kind}-${link.ts}-${link.sender}-${link.receiver}-${index}`,
@@ -121,23 +117,24 @@ export interface Curve {
 const BEND_MIN_PX = 28;
 const BEND_MAX_PX = 140;
 const BEND_PER_DY = 0.45;
+const STAGGER_STEPS = 5;
 
-/** A small stable offset per link (0..4), so near-simultaneous curves do not lie on one another. */
+/** A stable factor per link in 0.76..1.24, so near-simultaneous curves do not lie on one another. Always positive: it changes the size of the bend, never its side. */
 function stagger(key: string): number {
   let h = 0;
   for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  return h % 5;
+  return 0.76 + (h % STAGGER_STEPS) * 0.12;
 }
 
 /**
- * The curve of a link: like a flow-chart connector, leaving and arriving sideways in an S. The pull
- * grows with the vertical distance between the ends (bounded), so a straight-down link still bends
- * visibly; the stagger varies it by up to +-24% per link.
+ * The curve of a link: a C, bulging to the right (later in time) whatever the direction of the link,
+ * so every arrow leans the same way. Both control points sit level with their end, pushed right by a
+ * pull that grows with the vertical distance (bounded), so a straight-down link still bends visibly.
  */
 export function curveOf(key: string, x0: number, y0: number, x1: number, y1: number): Curve {
   const base = Math.min(Math.max(Math.abs(y1 - y0) * BEND_PER_DY, BEND_MIN_PX), BEND_MAX_PX);
-  const pull = base * (0.76 + stagger(key) * 0.12) * (x1 >= x0 ? 1 : -1);
-  return { key, x0, y0, c1x: x0 + pull, c1y: y0, c2x: x1 - pull, c2y: y1, x1, y1 };
+  const pull = base * stagger(key);
+  return { key, x0, y0, c1x: x0 + pull, c1y: y0, c2x: x1 + pull, c2y: y1, x1, y1 };
 }
 
 export function curvePoint(c: Curve, t: number): { x: number; y: number } {

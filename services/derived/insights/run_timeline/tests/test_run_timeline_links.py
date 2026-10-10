@@ -119,16 +119,23 @@ def test_every_kind_reads_the_sender_from_source(db_conn: psycopg.Connection) ->
     record(db_conn, "spawn", source="agent:405", agent=6657, target=405, hours_ago=6)
     # A fork is executed by `source`; target_agent_id is the agent it was copied from.
     record(db_conn, "fork", source="agent:405", agent=6658, target=9, hours_ago=5)
-    record(db_conn, "terminate", source="agent:405", agent=6657, hours_ago=4)
+    record(
+        db_conn,
+        "terminate",
+        source="agent:405",
+        agent=6657,
+        hours_ago=4,
+        attributes={"inbound_id": 55},
+    )
     record(db_conn, "restart", source="agent:6657", agent=6658, hours_ago=3)
     record(db_conn, "resurrect", source="agent:405", agent=6657, target=405, hours_ago=2)
-    seen = [(e.kind, e.sender, e.receiver, e.fork_from) for e in read(6657, 6658)]
+    seen = [(e.kind, e.sender, e.receiver, e.fork_from, e.inbound_id) for e in read(6657, 6658)]
     assert seen == [
-        ("spawn", 405, 6657, None),
-        ("fork", 405, 6658, 9),
-        ("terminate", 405, 6657, None),
-        ("restart", 6657, 6658, None),
-        ("resurrect", 405, 6657, None),
+        ("spawn", 405, 6657, None, None),
+        ("fork", 405, 6658, 9, None),
+        ("terminate", 405, 6657, None, 55),
+        ("restart", 6657, 6658, None, None),
+        ("resurrect", 405, 6657, None, None),
     ]
 
 

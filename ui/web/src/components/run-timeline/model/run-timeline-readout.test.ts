@@ -29,7 +29,7 @@ function readout(u: RunTimelineUnit): string | null {
   return readoutText(
     { kind: "unit", i0: u.i0, i1: u.i1, unitKind: u.kind } as never,
     {
-      data: { units: [u], nodes: [], events: [] } as unknown as RunTimelineResponse,
+      data: { units: [u], nodes: [] } as unknown as RunTimelineResponse,
       t,
       unitLabel: () => "Output",
       sourceLabel: (s) => s,
