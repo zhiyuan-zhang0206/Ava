@@ -15,10 +15,11 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Generator, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal, Protocol
 from unittest.mock import Mock
 
 import psutil
@@ -44,7 +45,48 @@ from tests.path_scoped.pty_service import PtyServiceProcess as PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import output_until
 
-Launcher = Callable[[str, str], subprocess.Popen[str]]
+
+class Launcher(Protocol):
+    def __call__(
+        self,
+        name: str,
+        *,
+        term: Literal["default", "exit", "ignore"] = "default",
+        ignore_hangup: bool = False,
+        child_armed: Path | None = None,
+    ) -> subprocess.Popen[str]: ...
+
+
+_PROCESS_SOURCE = r"""
+import signal
+import subprocess
+import sys
+import time
+
+term, hangup, armed = sys.argv[1:]
+if term == "ignore":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+elif term == "exit":
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+elif term != "default":
+    raise ValueError("invalid fixture SIGTERM behavior")
+if hangup == "ignore":
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+if armed:
+    child_source = '''
+import pathlib
+import signal
+import sys
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path(sys.argv[1]).touch()
+time.sleep(60)
+'''
+    subprocess.Popen([sys.executable, "-u", "-c", child_source, armed])
+print("ready", flush=True)
+time.sleep(60)
+"""
 
 
 @pytest.fixture
@@ -62,13 +104,30 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-@pytest.fixture
-def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
+@contextmanager
+def launched_processes(home: Path) -> Generator[Launcher, None, None]:
+    """Own fixed-source private sessions until their test and native cleanup finish."""
     processes: list[subprocess.Popen[str]] = []
 
-    def create(name: str, code: str) -> subprocess.Popen[str]:
+    def create(
+        name: str,
+        *,
+        term: Literal["default", "exit", "ignore"] = "default",
+        ignore_hangup: bool = False,
+        child_armed: Path | None = None,
+    ) -> subprocess.Popen[str]:
+        if term not in ("default", "exit", "ignore"):
+            raise ValueError("invalid fixture SIGTERM behavior")
         proc = subprocess.Popen(
-            [sys.executable, "-u", "-c", code],
+            [
+                sys.executable,
+                "-u",
+                "-c",
+                _PROCESS_SOURCE,
+                term,
+                "ignore" if ignore_hangup else "default",
+                str(child_armed) if child_armed is not None else "",
+            ],
             cwd=home,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -88,16 +147,24 @@ def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
         ).write(home / "run/sessions" / f"{name}.json")
         return proc
 
-    yield create
-    for proc in processes:
-        # Test fixture cleanup alone may kill the exact private process group it
-        # created, after the assertions prove strict stop left it alive.
-        kill_group_if_alive(proc)
-        proc.wait(timeout=5)
-        if proc.stdout:
-            proc.stdout.close()
-        if proc.stderr:
-            proc.stderr.close()
+    try:
+        yield create
+    finally:
+        for proc in processes:
+            # Test fixture cleanup alone may kill the exact private process group it
+            # created, after the assertions prove strict stop left it alive.
+            kill_group_if_alive(proc)
+            proc.wait(timeout=5)
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+
+
+@pytest.fixture
+def launch(home: Path) -> Iterator[Launcher]:
+    with launched_processes(home) as create:
+        yield create
 
 
 def drained() -> None:
