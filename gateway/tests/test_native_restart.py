@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.plugin_providers import build_model_catalog
 from gateway.tests.test_idempotency import client as client
 from gateway.tests.test_native_cancel import _headers
@@ -21,11 +22,13 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from gateway.agents import lifecycle
     from gateway.app import app
 
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     headers = _headers(monkeypatch)
     body = {
         "target": target.model_dump(mode="json"),
@@ -100,10 +103,12 @@ async def test_unknown_executor_wire_fails_closed_without_legacy_fallback(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     wire: dict[str, object],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from gateway.agents import lifecycle
 
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     calls: list[str] = []
 
     async def unsupported(_agent: int, path: str, _body: Any, **_kwargs: Any) -> Any:

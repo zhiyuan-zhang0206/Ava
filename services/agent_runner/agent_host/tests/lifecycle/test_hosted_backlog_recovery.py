@@ -25,7 +25,10 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import (
+    _graph,
+    admit_recovery,
+)
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.wake_recovery_setup import isolated_clocks
 from tests.components.base.poll_until import poll_until_async
@@ -40,7 +43,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -93,7 +96,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -169,7 +172,7 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -280,7 +283,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -329,7 +332,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,

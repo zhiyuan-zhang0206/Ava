@@ -32,7 +32,10 @@ from services.agent_runner.agent_host.dispatcher import (
     TurnScheduler,
 )
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import (
+    _graph,
+    admit_recovery,
+)
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.wake.delivery_watchdog import turn_liveness
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
@@ -173,7 +176,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -263,7 +266,7 @@ async def test_gateway_exemption_requires_current_db_identity_and_finite_fresh_p
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -323,7 +326,7 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -371,7 +374,7 @@ async def test_success_handoff_clears_on_actual_node_progress(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,

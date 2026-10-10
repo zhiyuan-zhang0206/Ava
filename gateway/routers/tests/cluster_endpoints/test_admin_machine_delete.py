@@ -11,6 +11,7 @@ from psycopg.rows import TupleRow
 
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
@@ -320,6 +321,7 @@ class TestMachinePauseResume:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:  # type: ignore[no-untyped-def]
         """The full pause contract: tasks of the machine's live agents are
         drained to #405 with a note, every agent is terminated (graceful via
@@ -331,10 +333,18 @@ class TestMachinePauseResume:
         _seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _seed_drain_owner(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         aid = _seed_agent_on_machine(
-            db_conn, "away", config_authority=config_authority, model_catalog=model_catalog
+            db_conn,
+            "away",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
         )  # pyright: ignore[reportUnknownArgumentType]
         _seed_agent_on_machine(
-            db_conn, "away", config_authority=config_authority, model_catalog=model_catalog
+            db_conn,
+            "away",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
         )  # pyright: ignore[reportUnknownArgumentType]
         _seed_in_progress_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -403,6 +413,7 @@ class TestMachinePauseResume:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:  # type: ignore[no-untyped-def]
         """A machine whose ops server cannot take the graceful terminate (already
         unreachable) gets its agent rows force-marked terminated in the shared
@@ -412,7 +423,11 @@ class TestMachinePauseResume:
         set_machine_identity(role="agent-runner", name="test-host")
         _seed_away_machine(db_conn)
         aid = _seed_agent_on_machine(
-            db_conn, "away", config_authority=config_authority, model_catalog=model_catalog
+            db_conn,
+            "away",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
         )
         from base.db import insert_inbound_message
 

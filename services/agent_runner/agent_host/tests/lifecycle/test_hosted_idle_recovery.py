@@ -38,7 +38,7 @@ from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
+from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import admit_recovery
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.base.poll_until import poll_until_async
 
@@ -139,7 +139,7 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -212,7 +212,7 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,

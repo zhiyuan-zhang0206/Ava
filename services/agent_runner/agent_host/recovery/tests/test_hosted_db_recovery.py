@@ -58,7 +58,7 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.daemon, "host_db_recovery_budget_seconds", 3600.0)
 
 
-async def _admit(
+async def admit_recovery(
     pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -131,7 +131,7 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -246,7 +246,7 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -296,7 +296,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -376,7 +376,7 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -446,7 +446,7 @@ async def test_repair_timeout_retries_and_remains_cancellable(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -618,7 +618,7 @@ async def test_healthy_stages_each_get_their_own_deadline(
     must still complete — the chain is bounded per stage, not per attempt."""
     import time
 
-    incarnation = await _admit(
+    incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
