@@ -1,4 +1,4 @@
-"""Contract: the compaction triggers point at the ava.self.compact contract in commands/compact.md."""
+"""Contract: the compaction triggers point at the ava.self.compact contract in ava_builtins/commands/compact.md."""
 
 import pytest
 
@@ -25,7 +25,9 @@ def test_compact_triggers_point_at_the_contract(_ava_compact_loaded):
     from agent.hooks import compact as _p
     from base.paths import repo_root
 
-    compact_md = (repo_root() / "commands" / "compact.md").read_text(encoding="utf-8")
+    compact_md = (repo_root() / "ava_builtins" / "commands" / "compact.md").read_text(
+        encoding="utf-8"
+    )
     assert "ava.self.compact" in COMPACTION_INSTRUCTION
     assert "ava.self.compact" in _p.COMPACT_REMINDER_NOTE
     assert "ava.self.compact" in compact_md
