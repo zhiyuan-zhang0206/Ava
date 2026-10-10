@@ -2,7 +2,7 @@
 
 import psycopg
 
-from gateway.schedules.runner import run
+from gateway.schedules.tests.runner_inputs import run_schedule as run
 
 
 def test_stale_runner_revision_cannot_execute_newer_script(db_conn: psycopg.Connection) -> None:

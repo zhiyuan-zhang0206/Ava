@@ -37,6 +37,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.settlement import close_hosted_turn
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.pin_agent import exec_context as ctx_of
 
 _FORCE_ERROR = "Native runtime no longer owns this agent"
@@ -44,6 +45,7 @@ _FORCE_ERROR = "Native runtime no longer owns this agent"
 
 def _host(graph: Mock, pool: AsyncConnectionPool, model_catalog: ModelCatalog) -> AgentHost:
     return AgentHost(
+        policy=configured_policy(),
         pool=pool,
         checkpointer=Mock(),
         graph=graph,

@@ -38,6 +38,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.factories.maintenance import WHEN, maintenance_agent, start_cluster_through_ready_gate
 from tests.factories.maintenance import isolate as isolate
 from tests.factories.maintenance import maintenance_agent as _agent
@@ -52,6 +53,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
 ) -> None:
     agent = _agent(db_conn)
     old = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
         graph=MagicMock(),
@@ -86,6 +88,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         == "restart"
     )
     successor = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
         graph=MagicMock(),
@@ -217,6 +220,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         config, {"messages": [HumanMessage(content="Already finished")], "halted": True}
     )
     original = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
@@ -246,6 +250,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         "idle", WHEN, current.maintenance, current.maintenance, resumed=True
     )
     successor = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=AsyncPostgresSaver(aops_pool),
         graph=builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
@@ -304,6 +309,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
 ) -> None:
     agent = _agent(db_conn)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
         graph=MagicMock(),
@@ -442,6 +448,7 @@ def _host_driving_invoke_until_done(
     model_catalog: ModelCatalog,
 ) -> AgentHost:
     host = AgentHost(
+        policy=configured_policy(),
         pool=pool,
         checkpointer=saver,
         graph=graph,

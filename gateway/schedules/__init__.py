@@ -8,6 +8,7 @@ Package door — no imports, no re-exports; callers use the modules below:
   - `session_control.py` — queued sync requests + log capture (the service itself
     is `services/wake/schedule_manager`)
 
-The in-session entrypoint stays `gateway/schedules/runner.py`
-(`python -m gateway.schedules.runner <id>`, a cross-version launch contract).
+`runner.py` owns script execution and the stall guard. The independent process
+entrypoint is `services.wake.schedule_manager.runner`, which supplies the SDK
+actor binding and plugin loading explicitly.
 """
