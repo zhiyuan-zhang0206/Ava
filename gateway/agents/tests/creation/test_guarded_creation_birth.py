@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from base.cluster import machines
 from gateway.agents import router as agent_router
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
 from gateway.agents.tests.creation.test_guarded_creation import client as client
@@ -52,7 +53,7 @@ def test_historical_birth_never_wakes_later_work(
     }
     db_conn.execute(sql.SQL(statements[mutation]), (agent_id,))
     db_conn.commit()
-    monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", _no_revalidation)
+    monkeypatch.setattr(machines, "lookup_role", _no_revalidation)
 
     async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise AssertionError("historical creation cannot wake later work")
@@ -89,7 +90,7 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
     )
     db_conn.commit()
     monkeypatch.setattr(agent_router, "machine_name", lambda: "new-default")
-    monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", _no_revalidation)
+    monkeypatch.setattr(machines, "lookup_role", _no_revalidation)
     calls: list[tuple[str, LaunchAgentRequest]] = []
 
     async def accept(_db: object, target: str, launch: LaunchAgentRequest) -> SpawnedAgent:
@@ -172,7 +173,7 @@ def test_prior_guarded_key_without_snapshot_fails_before_effects(
         "UPDATE agents_meta SET creation_key=%s WHERE id=%s", (prior_key, legacy.json()["id"])
     )
     db_conn.commit()
-    monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", _no_revalidation)
+    monkeypatch.setattr(machines, "lookup_role", _no_revalidation)
     response = client.post(PATH, json=BODY, headers=HEADERS)
     assert response.status_code == 409 and "snapshot is unavailable" in response.text
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)

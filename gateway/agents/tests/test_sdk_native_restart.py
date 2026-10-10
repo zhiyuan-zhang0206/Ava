@@ -7,13 +7,14 @@ import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from ava.agents import work
 from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.config import settings
+from base.db import Database
 from base.lm.plugin_providers import build_model_catalog
 from gateway.agents import lifecycle
 from gateway.app import app
@@ -35,8 +36,16 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
     calls: list[str] = []
 
     async def forward(
-        agent_id: int, path: str, packet: dict[str, object], *, idempotency_key: str
+        agent_id: int,
+        path: str,
+        packet: dict[str, object],
+        *,
+        db: Database,
+        pool: ConnectionPool,
+        idempotency_key: str,
     ) -> dict[str, object]:
+        assert db is app.state.db
+        assert pool is app.state.db_pool
         calls.append(path)
         assert path == f"/api/agents/{agent_id}/restart-work-v1"
         operation = NativeRestartOperation.model_validate(packet)

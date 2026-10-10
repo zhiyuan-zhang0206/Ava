@@ -67,14 +67,15 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
-    async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
-        raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
-
     def _write_outage(*_args: object) -> None:
         raise OSError("database unavailable")
 
+    async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
+        # Birth has committed; only the ensuing launch-state transaction fails.
+        monkeypatch.setattr(route, "write_transaction", _write_outage)
+        raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
+
     monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
-    monkeypatch.setattr(route, "_mark_launch_failure", _write_outage)
     with TestClient(app) as client:
         failed = client.post("/api/agents", json={"prompt": "Keep me", "prompt_source": "user"})
         assert failed.status_code == 502
