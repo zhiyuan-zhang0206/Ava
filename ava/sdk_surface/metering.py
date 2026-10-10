@@ -40,6 +40,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import ava
+from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 
@@ -48,16 +49,23 @@ from base.agents.sdk.tally import SdkCallTally
 # `ava.extend`'s wrap machinery, which copies a wrapped callable's __dict__: a plugin wrapper built
 # over a recorder inherits the marker, but it points at the inner recorder, not at the wrapper.
 _RECORDER_MARK = "__ava_recorder__"
+_SAMPLING_MARK = "__ava_sampling_owner__"
 
 
-def _recorder(fn: Callable[..., Any]) -> Callable[..., Any]:
+def _recorder(fn: Callable[..., Any], sampling: SamplingPolicyOwner) -> Callable[..., Any]:
     setattr(fn, _RECORDER_MARK, fn)
+    setattr(fn, _SAMPLING_MARK, sampling)
     return fn
 
 
 def is_recorder(fn: object) -> bool:
     """Whether `fn` is itself a metering recorder (not a wrapper that merely copied one's attributes)."""
-    return getattr(fn, _RECORDER_MARK, None) is fn
+    return fn is not None and getattr(fn, _RECORDER_MARK, None) is fn
+
+
+def _check_sampling(fn: object, sampling: SamplingPolicyOwner) -> None:
+    if is_recorder(fn) and getattr(fn, _SAMPLING_MARK) is not sampling:
+        raise ValueError("SDK recorders already belong to another sampling owner")
 
 
 def _caller() -> tuple[dict[str, Any], SdkCallTally | None, SdkCaptureOwner | None]:
@@ -82,7 +90,9 @@ def _caller() -> tuple[dict[str, Any], SdkCallTally | None, SdkCaptureOwner | No
     )
 
 
-def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
+def _make_recorder(
+    original: Callable[..., Any], fq: str, sampling: SamplingPolicyOwner
+) -> Callable[..., Any]:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the call /
     tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
 
@@ -92,7 +102,14 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
 
         identity, tally, capture_owner = _caller()
         return run_metered(
-            fq, original, args, kwargs, identity=identity, tally=tally, capture_owner=capture_owner
+            fq,
+            original,
+            args,
+            kwargs,
+            identity=identity,
+            tally=tally,
+            capture_owner=capture_owner,
+            sampling_owner=sampling,
         )
 
     if inspect.iscoroutinefunction(original):
@@ -110,11 +127,12 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
                 identity=identity,
                 tally=tally,
                 capture_owner=capture_owner,
+                sampling_owner=sampling,
             )
 
-        return _recorder(async_recorder)
+        return _recorder(async_recorder, sampling)
 
-    return _recorder(recorder)
+    return _recorder(recorder, sampling)
 
 
 # ava.mcps exposes tools dynamically (no list `__all_for_ava__`), so the namespace walk cannot
@@ -124,7 +142,9 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
 _MCP_CALL_FUNNEL = "_call_raw"
 
 
-def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
+def _make_mcp_recorder(
+    original: Callable[..., Any], sampling: SamplingPolicyOwner
+) -> Callable[..., Any]:
     """Recorder for the MCP call funnel — derives the fq from the runtime args."""
 
     @functools.wraps(original)
@@ -140,9 +160,10 @@ def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
             identity=identity,
             tally=tally,
             capture_owner=capture_owner,
+            sampling_owner=sampling,
         )
 
-    return _recorder(recorder)
+    return _recorder(recorder, sampling)
 
 
 def _instrument_targets() -> list[tuple[Any, str, str]]:
@@ -184,7 +205,7 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
     return targets
 
 
-def install() -> tuple[tuple[Any, str], ...]:
+def install(sampling: SamplingPolicyOwner) -> tuple[tuple[Any, str], ...]:
     """Wrap every public ``ava.*`` callable with the recording proxy. Idempotent.
 
     Called by ``ava.sdk_surface.install`` after plugins load, so plugin namespaces /
@@ -196,20 +217,23 @@ def install() -> tuple[tuple[Any, str], ...]:
     Returns the restore ledger: the ``(parent, attr)`` pairs this call actually wrapped,
     in wrap order. The installation carries it; ``uninstall(ledger)`` restores from it.
     """
+    targets = _instrument_targets()
+    mcps_mod = getattr(ava, "mcps", None)
+    funnel = None if mcps_mod is None else getattr(mcps_mod, _MCP_CALL_FUNNEL, None)
+    for parent, attr, _fq in targets:
+        _check_sampling(getattr(parent, attr, None), sampling)
+    _check_sampling(funnel, sampling)
     wrapped: list[tuple[Any, str]] = []
-    for parent, attr, fq in _instrument_targets():
+    for parent, attr, fq in targets:
         current = getattr(parent, attr, None)
         if current is None or is_recorder(current):
             continue
-        setattr(parent, attr, _make_recorder(current, fq))
+        setattr(parent, attr, _make_recorder(current, fq, sampling))
         wrapped.append((parent, attr))
 
-    mcps_mod = getattr(ava, "mcps", None)
-    if mcps_mod is not None:
-        funnel = getattr(mcps_mod, _MCP_CALL_FUNNEL, None)
-        if callable(funnel) and not is_recorder(funnel):
-            setattr(mcps_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel))
-            wrapped.append((mcps_mod, _MCP_CALL_FUNNEL))
+    if mcps_mod is not None and callable(funnel) and not is_recorder(funnel):
+        setattr(mcps_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel, sampling))
+        wrapped.append((mcps_mod, _MCP_CALL_FUNNEL))
     return tuple(wrapped)
 
 

@@ -1,6 +1,0 @@
-{
-  "ambient_state": {
-    "base/agents/sdk/call_policy.py::ambient-instance:_cache": 1,
-    "base/agents/sdk/call_policy.py::thread:_PolicyCache.read": 1
-  }
-}

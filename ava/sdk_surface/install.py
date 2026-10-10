@@ -9,8 +9,9 @@ attribute access on the singleton `ava` module, so the module itself is the one 
 passed around as a value — the write to it is concentrated here, once per process.
 
 `install` produces one **`Installation`**: the admitted registry, the expansions, the wrap layers, the
-skill providers, resolved plugin configs, the metering ledger, SDK-disable entries, the faces flag, and undos —
-frozen, so nothing outside it is written after plugin load. The holder is a single slot on the `ava`
+skill providers, resolved plugin configs, the metering ledger, sampling owner, SDK-disable entries,
+the faces flag, and undos. Metadata is frozen; runtime owners retain their own synchronization.
+The holder is a single slot on the `ava`
 module (`__plugin_installation__`); a change (an additive SDK-disable entry, a scoped skill root, the
 agent-runtime faces loading) builds a new value and swaps the holder. `uninstall` reverses the surface
 and empties the slot.
@@ -37,6 +38,7 @@ loads once per process and a changed plugin set takes effect on the next host st
 
 from __future__ import annotations
 
+import atexit
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -46,6 +48,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from base.agents.messages.delivery_outbox import DeliverySenderConfig
+from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import load_report
@@ -75,6 +78,7 @@ class Installation:
     disabled: frozenset[str]
     faces: bool
     undo: tuple[Callable[[], None], ...]
+    sampling: SamplingPolicyOwner = field(default_factory=SamplingPolicyOwner)
     configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
     catalog: ModelCatalog | None = None
     authority: ConfigAuthority | None = None
@@ -313,6 +317,7 @@ def install(
     catalog: ModelCatalog | None = None,
     authority: ConfigAuthority | None = None,
     delivery_sender: DeliverySenderConfig | None = None,
+    sampling: SamplingPolicyOwner | None = None,
 ) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `ava`; return the registry of the plugins admitted.
 
@@ -332,6 +337,7 @@ def install(
     from . import metering, sdk_disable
 
     prior = _slot()
+    sampling_owner = sampling if sampling is not None else SamplingPolicyOwner()
     setattr(ava_module(), _SLOT, _LOADING)
     build = _Build()
     admitted: list[tuple[str, PluginContributions]] = []
@@ -361,7 +367,7 @@ def install(
             build.namespaces = claimed
             build.expansions.extend(paths)
             admitted.append((plugin, contributions))
-        metered = metering.install()
+        metered = metering.install(sampling_owner)
     except BaseException as exc:
         _run(build.undo, exc)
         setattr(ava_module(), _SLOT, prior)
@@ -374,6 +380,7 @@ def install(
         ),
         skill_providers=tuple(build.providers),
         metered=metered,
+        sampling=sampling_owner,
         disabled=frozenset(disabled),
         faces=False,
         undo=tuple(build.undo),
@@ -384,6 +391,10 @@ def install(
         or (DeliverySenderConfig(authority) if authority is not None else None),
     )
     setattr(ava_module(), _SLOT, installation)
+    if sampling is None:
+        # Bare SDK processes have no service lifespan. This is finite cleanup,
+        # not a guarantee of a nonzero exit or delivery after a hard exit.
+        atexit.register(sampling_owner.close)
     return installation.registry
 
 
