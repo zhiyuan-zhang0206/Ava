@@ -1,8 +1,9 @@
 """The tests-location lint (`scripts/structure/tests_location.py`): a top-level test must be
-registered (nothing else is accepted), the registry cannot rot, and the checks stay path-only."""
+registered or prove a root subject LCA; incomplete evidence never certifies placement."""
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import subprocess
 import sys
@@ -121,9 +122,7 @@ def test_a_new_top_level_test_is_refused_with_the_fix(
     assert "scripts/structure/tests_location.py --suggest tests/components/base/test_new.py" in out
     assert "git mv" in err
     assert "path_scopes.toml" in err  # the autouse fixtures do not follow a move
-    assert "scripts/structure/tests_location_allowed.py" in err  # the way out
-    assert "`contract`" in err
-    assert "`integration`" in err
+    assert "Unknown inputs must be resolved" in err
 
 
 def test_the_same_test_inside_a_package_is_not_this_lints_business(
@@ -338,17 +337,16 @@ def test_the_verdicts_do_not_depend_on_where_the_checkout_sits(
 # ------------------------------------------------------------------ the checks never read the code
 
 
-def test_the_checks_do_not_load_the_placement_rule(repo: pathlib.Path) -> None:
+def test_registered_checks_do_not_load_the_placement_rule(repo: pathlib.Path) -> None:
     """A hook run is a path lookup: no module index, no import graph, no `place()`."""
-    _track(repo, "tests/components/base/test_new.py")
     code = textwrap.dedent(
         f"""
         import sys
         from pathlib import Path
         sys.path.insert(0, {str(_ROOT)!r})
         from scripts.structure import tests_location as tl
-        status = tl.main([], repo_root=Path({str(repo)!r}), allowed={{}})
-        assert status == 1
+        status = tl.main([], repo_root=Path({str(repo)!r}), allowed={_REGISTERED!r})
+        assert status == 0
         loaded = [m for m in sys.modules if m.startswith("scripts.structure.placement")]
         assert not loaded, loaded
         assert "scripts.structure.tests_location_suggest" not in sys.modules
@@ -391,8 +389,8 @@ def _suggest_repo(root: pathlib.Path, text: str) -> str:
 def test_suggest_names_the_lowest_package_that_may_hold_the_test(repo: pathlib.Path) -> None:
     text = "from agent.own import hosted\nfrom base.net import retry\n\ndef test_a():\n    hosted.admit()\n    retry.backoff()\n"
     message = _suggest_repo(repo, text)
-    assert "put it in agent/own/tests/test_probe.py" in message
-    assert "references agent.own.hosted (unit agent)" in message
+    assert "complete subject LCA is root" in message
+    assert "agent.own.hosted, base.net.retry" in message
 
 
 def test_suggest_says_why_no_package_can_hold_a_test_across_peer_units(
@@ -400,15 +398,14 @@ def test_suggest_says_why_no_package_can_hold_a_test_across_peer_units(
 ) -> None:
     text = "from agent.own import hosted\nfrom ops.wake import spawn\n\ndef test_a():\n    hosted.admit()\n    spawn.spawn()\n"
     message = _suggest_repo(repo, text)
-    assert "no package can hold this test" in message
-    assert "agent, ops" in message
-    assert "`integration`" in message
+    assert "complete subject LCA is root" in message
+    assert "agent.own.hosted, ops.wake.spawn" in message
 
 
 def test_suggest_a_test_with_no_first_party_reference(repo: pathlib.Path) -> None:
     message = _suggest_repo(repo, "def test_a():\n    assert True\n")
     assert "references no first-party package" in message
-    assert "`contract`" in message
+    assert "no subject proves placement" in message
 
 
 def test_suggest_a_by_design_test_is_told_it_stays(repo: pathlib.Path) -> None:
@@ -428,3 +425,62 @@ def test_no_frozen_section_exists_any_more() -> None:
     assert not hasattr(tl, "read_baseline")
     for shard in (_ROOT / "scripts/structure/baseline").glob("*.json"):
         assert "tests_location" not in shard.read_text(encoding="utf-8"), shard.name
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from agent.own import hosted\nfrom base.net import retry\nhosted.admit()\nretry.backoff()\n",
+        "import agent.own.hosted as subject\nimport base.net.retry as dependency\nsubject.admit()\ndependency.backoff()\n",
+    ],
+)
+def test_complete_cross_package_subjects_prove_root_without_registration(
+    repo: pathlib.Path, capsys: pytest.CaptureFixture[str], source: str
+) -> None:
+    _track(repo, "tests/components/agent/test_integration.py", source)
+    assert _run(repo, capsys) == (0, "", "")
+
+
+@pytest.mark.parametrize(
+    ("source", "detail"),
+    [
+        ("from base.net import retry\nretry.backoff()\n", "base/net"),
+        (
+            "from base.net import retry\nimport agent.own.hosted as mock_target\nfrom unittest.mock import patch\nretry.backoff()\nwith patch.object(mock_target, 'admit'): pass\n",
+            "base/net",
+        ),
+        (
+            "from unittest.mock import patch\nwith patch('agent.own.hosted.admit'), patch('base.net.retry.backoff'): pass\n",
+            "no subject",
+        ),
+        ("text = 'agent.own.hosted'\nother = 'base.net.retry'\n", "no subject"),
+        (
+            "from agent.own import hosted\nfrom base.net import retry\nimport importlib\nimportlib.import_module(unknown)\n",
+            "incomplete",
+        ),
+        (
+            "from agent.own import hosted\nfrom base.net import retry\nfrom pathlib import Path\nPath(unknown).read_text()\n",
+            "incomplete",
+        ),
+    ],
+)
+def test_root_proof_rejects_local_replacement_weak_and_unknown_evidence(
+    repo: pathlib.Path, capsys: pytest.CaptureFixture[str], source: str, detail: str
+) -> None:
+    _track(repo, "tests/components/agent/test_unproved.py", source)
+    status, out, _ = _run(repo, capsys)
+    assert status == 1
+    assert detail in out
+
+
+def test_subject_lca_uses_relative_aliases_and_excludes_test_support(repo: pathlib.Path) -> None:
+    from scripts.structure import placement_evidence
+
+    _write(repo, "agent/tests/helper.py", "")
+    source = "from .. import retry as subject\nfrom agent.tests import helper\nsubject.backoff()\n"
+    result = placement_evidence.subject_lca(
+        ast.parse(source), "base/net/tests/test_retry.py", placement.ModuleIndex(repo)
+    )
+    assert result.directory == "base/net"
+    assert result.modules == ("base.net.retry",)
+    assert result.unknown == ()
