@@ -257,7 +257,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
                 assert not errors, "\n".join(errors)
                 await asyncio.sleep(0.01)
         with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-            _, _, _, command = await asyncio.to_thread(
+            _, _, _, command, _cutoff = await asyncio.to_thread(
                 _force_terminate_transaction, agent_id, pool, source="user"
             )
         chat = _insert(db_conn, agent_id)
@@ -318,7 +318,7 @@ async def test_idle_force_only_original_live_host_can_observe(
         is not None
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     assert not await original_host_force(
@@ -359,7 +359,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
         is not None
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     monkeypatch.setattr(
@@ -474,7 +474,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
         is not None
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     request = _aged_envelope(tmp_path, agent_id, owner=None)
@@ -548,7 +548,7 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
         is not None
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     request = _aged_envelope(tmp_path, agent_id, owner=uuid4())
@@ -629,7 +629,7 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
         is not None
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     bound = exec_request_evidence._unreadable_expiry_age_s()
@@ -690,7 +690,7 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
         is not None
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     request = _unreadable_envelope(tmp_path, agent_id, age_s=0.0)
@@ -740,7 +740,7 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
         is not None
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     request = _aged_envelope(tmp_path, agent_id, owner=old_host._owner, age_s=0.0)

@@ -75,7 +75,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
     try:
         await asyncio.wait_for(entered.wait(), 5)
         with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-            *_prefix, force = await asyncio.to_thread(
+            _status, _pid, _pages, force, _shell_cutoff = await asyncio.to_thread(
                 _force_terminate_transaction, target.agent_id, pool, source="user"
             )
         running.cancel()

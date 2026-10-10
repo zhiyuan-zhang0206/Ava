@@ -224,7 +224,7 @@ async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
     with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
-        _, _, _, force = await asyncio.to_thread(
+        _, _, _, force, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):

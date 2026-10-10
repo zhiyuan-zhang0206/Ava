@@ -1,5 +1,9 @@
 # Terminate has no closed state; it can take the agent's shell sessions with it
 
+The cleanup timing and crash guarantee below were superseded by
+[commit termination before best-effort PTY cleanup](../../runtime/processes/2026-10-10-termination-pty-cleanup-after-commit.md).
+The original decision remains recorded here.
+
 ## Context
 
 Task #3911 (PR #2823) gave termination a second, stronger form: `terminate

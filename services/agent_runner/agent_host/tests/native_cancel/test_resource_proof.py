@@ -28,7 +28,7 @@ async def test_collector_never_certifies_mismatched_frozen_stop_evidence(
     pool: ConnectionPool
     original, target = await managed_work(db_conn, aops_pool)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-        *_prefix, force = await asyncio.to_thread(
+        _status, _pid, _pages, force, _shell_cutoff = await asyncio.to_thread(
             _force_terminate_transaction, target.agent_id, pool, source="user"
         )
     assert await original_host_force(

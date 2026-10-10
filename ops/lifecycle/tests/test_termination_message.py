@@ -97,7 +97,7 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
         return result
 
     monkeypatch.setattr(termination, "_insert_termination_pair", _fail_after_pair)
-    terminate_id = termination._enqueue_termination_inbounds(
+    terminate_id, _cutoff = termination._enqueue_termination_inbounds(
         database,
         event_bus,
         running_agent_id,
@@ -151,7 +151,7 @@ def test_termination_survives_failed_message_retry(
 
     monkeypatch.setattr(termination, "_insert_termination_pair", _fail_pair)
     monkeypatch.setattr(termination, "_insert_pending_termination_message", _fail_retry)
-    terminate_id = termination._enqueue_termination_inbounds(
+    terminate_id, _cutoff = termination._enqueue_termination_inbounds(
         database,
         event_bus,
         running_agent_id,
@@ -198,7 +198,7 @@ def test_force_termination_retries_command_before_message(
         return result
 
     monkeypatch.setattr(termination, "_insert_termination_pair", _fail_after_pair)
-    old_status, _, _, terminate_id = termination._force_terminate_transaction(
+    old_status, _, _, terminate_id, _cutoff = termination._force_terminate_transaction(
         running_agent_id,
         db_pool,
         source="user",
@@ -262,7 +262,7 @@ class TestKillAllShellSessions:
 
         calls: list[int] = []
 
-        def _kill(agent_id: int) -> list[int]:
+        def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
             calls.append(agent_id)
             return [0, 3]
 
@@ -530,7 +530,7 @@ class TestKillAllShellSessions:
         to the caller, whose repeat request retries the kill."""
         from ops import lifecycle
 
-        def _fail(_aid: int) -> list[int]:
+        def _fail(_aid: int, *, before_session_index: int) -> list[int]:
             raise RuntimeError("failed to kill shell session(s) [2]")
 
         async def _noop_cancel(_aid: int, _command_id: int) -> None:
@@ -599,10 +599,6 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    async def _noop_cancel(_aid: int, _command_id: int) -> None:
-        return None
-
-    monkeypatch.setattr(lifecycle, "_cancel_hosted_turn_best_effort", _noop_cancel)
     job = tmp_path / "notice_on_exit.py"
     job.write_text(_NOTICE_ON_EXIT_JOB, encoding="utf-8")
     marker = tmp_path / "notice.marker"
@@ -612,6 +608,20 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     page = page_session_name(running_agent_id, "dash_board", 2)
     foreign = session_name(f"agent-{other_agent_id}-shell-0")
     backend = PtySessionBackend()
+    replacement = session_name(f"agent-{running_agent_id}-shell-3-replacement")
+
+    async def _allocate_after_acceptance(_aid: int, _command_id: int) -> None:
+        row = db_conn.execute(
+            "UPDATE agents_meta SET session_index=session_index+1 WHERE id=%s "
+            "RETURNING session_index-1",
+            (running_agent_id,),
+        ).fetchone()
+        db_conn.commit()
+        assert row == (3,)
+        assert backend.new_session(replacement, "", tmp_path, env={"AVA_HOME": str(tmp_path)})
+        shells[replacement] = pty_reaper.track_session(replacement).pid
+
+    monkeypatch.setattr(lifecycle, "_cancel_hosted_turn_best_effort", _allocate_after_acceptance)
     watcher_cmd = shlex.join([sys.executable, "-u", str(job), str(marker)])
     shells: dict[str, int] = {}
     for name, cmd in ((shell, ""), (watcher, watcher_cmd), (page, "sleep 300"), (foreign, "")):
@@ -619,6 +629,9 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         shells[name] = pty_reaper.track_session(name).pid
     job_pid = _wait_child(shells[watcher])
     pty_reaper.track(psutil.Process(job_pid))
+    # These explicit service creations model allocated shell IDs 0, 1 and page 2.
+    db_conn.execute("UPDATE agents_meta SET session_index=3 WHERE id=%s", (running_agent_id,))
+    db_conn.commit()
 
     resp = await lifecycle.terminate_agent_op(
         database,
@@ -629,10 +642,11 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     )
 
     assert resp.shell_sessions == ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=[0, 1])
-    assert set(backend.list_sessions()) == {page, foreign}
+    assert set(backend.list_sessions()) == {page, foreign, replacement}
     assert not _pid_alive(shells[shell]) and not _pid_alive(shells[watcher])
     assert not _pid_alive(job_pid)
     assert _pid_alive(shells[page]) and _pid_alive(shells[foreign])
+    assert _pid_alive(shells[replacement])
     # An owner-level kill is silent: the killed job's exit path never ran.
     assert not marker.exists()
 
