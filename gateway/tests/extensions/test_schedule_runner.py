@@ -519,7 +519,7 @@ def _watch_stalls(
     try:
         yield fired
     finally:
-        stop.set()
+        stop.close()
         if patch_sleep:
             sr._restore_park_detection()
 
@@ -569,7 +569,7 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
         time.sleep(0.4)  # main thread parked in time.sleep the whole time
         assert fired == []
     finally:
-        stop.set()
+        stop.close()
         # The wrapper is process-wide (`time.sleep = sleep` in
         # schedule_runner._patch_park_detection) — restore it or every later
         # `assert time.sleep is _REAL_SLEEP` guard (test_start_readiness_gate)

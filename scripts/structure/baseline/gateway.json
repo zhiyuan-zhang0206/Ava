@@ -1,6 +1,0 @@
-{
-  "ambient_state": {
-    "gateway/schedules/runner.py::thread:_stall_action": 1,
-    "gateway/schedules/runner.py::thread:_start_stall_guard": 1
-  }
-}
