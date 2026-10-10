@@ -11,9 +11,17 @@ from pathlib import Path
 
 from scripts.structure import placement_evidence
 
-from . import ModuleSourceLookup, bindings, dependency_evidence, executed, mock_targets, normalize
+from . import (
+    ModuleSourceLookup,
+    bindings,
+    dependency_evidence,
+    executed,
+    file_loader,
+    mock_targets,
+    normalize,
+)
 
-__all__ = ["Evidence", "Fact", "FactKind", "Unknown", "collect"]
+__all__ = ["Evidence", "Fact", "FactKind", "FileExecution", "ResourceRead", "Unknown", "collect"]
 
 
 class FactKind(StrEnum):
@@ -43,9 +51,29 @@ class Unknown:
 
 
 @dataclass(frozen=True)
+class ResourceRead:
+    """A recognized read operation on a checkout path, without ownership policy."""
+
+    line: int
+    target: str
+    operation: str
+
+
+@dataclass(frozen=True)
+class FileExecution:
+    """A possible input to a proven exec call, with its runtime module identity."""
+
+    line: int
+    target: str
+    name: str
+
+
+@dataclass(frozen=True)
 class Evidence:
     records: tuple[Fact, ...]
     unknown: tuple[Unknown, ...]
+    resource_reads: tuple[ResourceRead, ...] = ()
+    file_executions: tuple[FileExecution, ...] = ()
 
 
 _DYNAMIC_CALLS = frozenset(
@@ -71,18 +99,28 @@ class _Collector(ast.NodeVisitor):
         tops: Sequence[str],
         *,
         embedded: bool = False,
+        loaded_name: str | None = None,
     ) -> None:
         self.path, self.index, self.tops = path, index, tops
         name = "__main__" if embedded else bindings.module_name(path)
+        if loaded_name is not None:
+            name = loaded_name
         self.context = bindings.module_context(tree, name)
         self.scope = self.context.scope(tree, path)
+        self.scope_trees = {self.scope: tree}
         self.depth = len(Path(path).parts) if path else 0
         self.embedded = embedded
+        self.loaded_name = loaded_name
         self.resource_seen: set[int] = set()
         self.has_launches = False
         self.visitors: dict[type[ast.AST], Callable[[ast.NodeVisitor, ast.AST], None]] = {}
         self.records: list[Fact] = []
         self.unknown: list[Unknown] = []
+        self.resource_reads: list[ResourceRead] = []
+        self.file_executions: list[FileExecution] = []
+        self.file_specs: dict[ast.Call, tuple[bindings.Scope, Unknown]] = {}
+        self.loaded_trees: dict[str, ast.Module] = {}
+        self.seen_calls: set[ast.Call] = set()
 
     def visit(self, node: ast.AST) -> None:
         """Resolve visitor dispatch once per node type in this source analysis."""
@@ -120,6 +158,9 @@ class _Collector(ast.NodeVisitor):
                 node, "Python -c source has no relative import package", FactKind.EMBEDDED_IMPORT
             )
             return
+        if self.loaded_name is not None and isinstance(node, ast.ImportFrom) and node.level:
+            self.gap(node, "File-loader relative import package is not proven", FactKind.IMPORT)
+            return
         clause = normalize(node, self.path)
         evidence = dependency_evidence(clause, self.index, self.tops)
         self.records.extend(
@@ -140,6 +181,7 @@ class _Collector(ast.NodeVisitor):
         for expression in outer:
             self.visit(expression)
         self.scope = self.context.scope(node, self.path, parent.nested_parent())
+        self.scope_trees[self.scope] = node
         for statement in inner:
             self.visit(statement)
         self.scope = parent
@@ -169,9 +211,16 @@ class _Collector(ast.NodeVisitor):
         self._nested(node)
 
     def visit_Call(self, node: ast.Call) -> None:
+        self.seen_calls.add(node)
         origin = self.scope.origin(node.func)
         if origin in _DYNAMIC_CALLS:
             self._dynamic(node, origin)
+        if origin == "importlib.util.spec_from_file_location":
+            self.gap(node, "File-loader spec has no proven execution chain")
+            self.file_specs[node] = (self.scope, self.unknown[-1])
+        if origin == "runpy.run_path":
+            self.gap(node, f"File-loader {origin} execution inputs are not supported")
+        self._file_execute(node)
         if origin in _PATCH_IMPORTS:
             self._patch_import(node, origin)
         if executed.is_launcher(origin):
@@ -192,6 +241,105 @@ class _Collector(ast.NodeVisitor):
         if not self.embedded:
             self._resource_read(node)
         self.generic_visit(node)
+
+    def _file_execute(self, node: ast.Call) -> None:
+        proof = file_loader.prove_execution(
+            node, self.scope, self.scope_trees[self.scope], self.seen_calls
+        )
+        if proof is None:
+            return
+        if proof.reason or proof.spec is None or proof.source is None:
+            self.gap(node, proof.reason or "File-loader execution has no proven source")
+            return
+        found = self.file_specs.get(proof.spec)
+        if (
+            self.embedded
+            or self.loaded_name is not None
+            or found is None
+            or found[0] is not self.scope
+        ):
+            self.gap(node, "File-loader execution is not a supported local source chain")
+            return
+        inputs = self._file_inputs(proof.spec, proof.source)
+        if not inputs:
+            self.gap(node, "File-loader name and path have no bounded unchanged checkout anchor")
+            return
+        for name, path in inputs:
+            self._file_source(node, name, path)
+        if found[1] in self.unknown:
+            self.unknown.remove(found[1])
+
+    def _file_inputs(self, spec: ast.Call, source: ast.expr) -> tuple[tuple[str, str], ...] | None:
+        inputs = file_loader.input_domain(spec, self.scope, self._file_path_text(source))
+        if not inputs or any(
+            not self._unmodified_path_operation(spec, path, "", function=False)
+            for _, path in inputs
+        ):
+            return None
+        return inputs
+
+    def _file_path_text(self, node: ast.expr) -> ast.expr | None:
+        value = node
+        path = self._resource_path(value)
+        if path is not None:
+            return ast.Constant(path)
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Div):
+            prefix = self._resource_path(value.left)
+            if prefix is not None:
+                return ast.JoinedStr(
+                    [
+                        ast.Constant(prefix + "/" if prefix else ""),
+                        ast.FormattedValue(value.right, -1),
+                    ]
+                )
+        return None
+
+    def _file_source(self, node: ast.Call, name: str, path: str) -> None:
+        source = self.index.repo_root / path
+        try:
+            physical = source.resolve()
+            if (
+                source.suffix != ".py"
+                or physical != source.absolute()
+                or not physical.is_relative_to(self.index.repo_root.resolve())
+            ):
+                self.gap(node, "File-loader source is not a checkout Python file")
+                return
+            if path not in self.loaded_trees:
+                self.loaded_trees[path] = ast.parse(
+                    source.read_text(encoding="utf-8"), filename=path
+                )
+        except (OSError, UnicodeError, SyntaxError, ValueError) as error:
+            self.gap(node, f"File-loader source {path} cannot be analyzed: {error}")
+            return
+        child = _Collector(self.loaded_trees[path], path, self.index, self.tops, loaded_name=name)
+        evidence = _analyze(self.loaded_trees[path], child)
+        self.records.append(Fact(node.lineno, FactKind.RESOURCE, path, via="file-loader"))
+        self.file_executions.append(FileExecution(node.lineno, path, name))
+        for fact in evidence.records:
+            for target in self._file_dependencies(fact):
+                self.records.append(Fact(node.lineno, FactKind.RESOURCE, target, via="file-loader"))
+        self.unknown.extend(
+            Unknown(
+                self.path,
+                node.lineno,
+                gap.expression,
+                f"File-loader {path}:{gap.line}: {gap.reason}",
+                gap.kind,
+            )
+            for gap in evidence.unknown
+        )
+
+    def _file_dependencies(self, fact: Fact) -> tuple[str, ...]:
+        if fact.kind is FactKind.RESOURCE:
+            return (fact.target,)
+        parts = fact.target.split(".")
+        files = tuple(
+            file
+            for end in range(1, len(parts) + 1)
+            if (file := self.index.file(".".join(parts[:end]))) is not None
+        )
+        return files or (fact.target.replace(".", "/"),)
 
     def _dynamic(self, node: ast.Call, origin: str) -> None:
         first = (
@@ -436,6 +584,7 @@ class _Collector(ast.NodeVisitor):
         path = self._resource_path(target)
         if path is not None:
             self.records.append(Fact(node.lineno, FactKind.RESOURCE, path or "."))
+            self._read_operation(node, path or ".")
             return
         values = self.scope.strings(target)
         if values and all(Path(value).is_absolute() for value in values):
@@ -444,6 +593,7 @@ class _Collector(ast.NodeVisitor):
                 if absolute.is_relative_to(self.index.repo_root):
                     relative = absolute.relative_to(self.index.repo_root).as_posix()
                     self.records.append(Fact(node.lineno, FactKind.RESOURCE, relative))
+                    self._read_operation(node, relative)
             return
         if self.scope.unmodified_origin(target) == "os.devnull":
             return
@@ -452,6 +602,49 @@ class _Collector(ast.NodeVisitor):
             "Resource read has no proven repository or external path anchor",
             FactKind.RESOURCE,
         )
+
+    def _read_operation(self, node: ast.Call, path: str) -> None:
+        if Path(path).is_absolute() or ".." in Path(path).parts:
+            return
+        function = self._open_function(node.func)
+        operation = "open" if function else getattr(node.func, "attr", "")
+        if operation not in {"open", "read_text", "read_bytes"}:
+            return  # Directory iterators require a separate consumption proof.
+        if operation == "open" and not self._readable_open(node):
+            return
+        if self._unmodified_path_operation(node, path, operation, function=function):
+            self.resource_reads.append(ResourceRead(node.lineno, path, operation))
+
+    def _readable_open(self, node: ast.Call) -> bool:
+        if any(isinstance(arg, ast.Starred) for arg in node.args) or any(
+            kw.arg is None for kw in node.keywords
+        ):
+            return False
+        mode = self._open_mode(node)
+        values = self.scope.strings(mode) if mode is not None else ("r",)
+        return bool(values) and all("r" in value or "+" in value for value in values or ())
+
+    def _unmodified_path_operation(
+        self, node: ast.Call, path: str, operation: str, *, function: bool
+    ) -> bool:
+        origin = self.scope.origin(node.func)
+        if function and origin:
+            return self.scope.unmodified_origin(node.func) == origin
+        scope: bindings.Scope | None = self.scope
+        while scope is not None:
+            for written in scope.attribute_writes:
+                origin = scope.origin(written)
+                if function:
+                    if origin == "builtins.open":
+                        return False
+                elif (
+                    origin == "pathlib.Path"
+                    or origin.startswith("pathlib.Path.")
+                    or (written.attr == operation and self._resource_path(written.value) == path)
+                ):
+                    return False
+            scope = scope.parent
+        return True
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
         self._resource(node)
@@ -468,6 +661,11 @@ def collect(
     arbitrary builders or assign business ownership to fixture execution edges.
     """
     collector = _Collector(tree, rel_path, index, tops)
+    return _analyze(tree, collector)
+
+
+def _analyze(tree: ast.AST, collector: _Collector) -> Evidence:
+    rel_path, index, tops = collector.path, collector.index, collector.tops
     collector.visit(tree)
     inputs = (
         executed.inputs(tree, rel_path, context=collector.context)
@@ -484,7 +682,10 @@ def collect(
         collector.records.extend(embedded.records)
         collector.unknown.extend(embedded.unknown)
     return Evidence(
-        tuple(dict.fromkeys(collector.records)), tuple(dict.fromkeys(collector.unknown))
+        tuple(dict.fromkeys(collector.records)),
+        tuple(dict.fromkeys(collector.unknown)),
+        tuple(dict.fromkeys(collector.resource_reads)),
+        tuple(dict.fromkeys(collector.file_executions)),
     )
 
 
