@@ -51,3 +51,13 @@ Guarded ACTIVE restart retains the exact original lifecycle command and its
 source-transaction completion facts. The completed-invocation selector runs
 after native cancellation settles and preserves later queued chat. See
 [[../../../base/agents/incarnation/docs/native-work-restart.ava.okf.md]].
+
+Requested PTY cleanup runs after lifecycle commit. Graceful apply and force
+acceptance capture the next monotonic shell ID under the agent row lock; the
+original host's validated quiescent force settlement captures one fresh cutoff.
+Each cleanup attempts only listed IDs below its cutoff, excluding page sessions,
+through the existing backend identity checks. It never holds the lifecycle lock
+across PTY calls or chases later allocations. Errors stay visible without rolling
+back termination; crash leftovers and late sessions require operator cleanup.
+Execution-child resource closure and admission fences remain separate. See
+[the cleanup decision](../../../docs/decisions/runtime/processes/2026-10-10-termination-pty-cleanup-after-commit.md).

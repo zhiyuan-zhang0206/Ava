@@ -72,6 +72,7 @@ async def test_hosted_status_changes_publish_agent_updated(
 ) -> None:
     publish = AsyncMock()
     monkeypatch.setattr("agent.ownership.hosted.publish_agent_updated", publish)
+    monkeypatch.setattr("agent.ownership.hosted_cleanup.publish_agent_updated", publish)
     agent_id, owner = _agent(db_conn), uuid4()
 
     incarnation = await admit_hosted_runtime(

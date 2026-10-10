@@ -13,6 +13,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted_claim import claim_admission_row
+from agent.ownership.hosted_cleanup import finish_termination
 from base import telemetry
 from base.agents.incarnation.host_process_evidence import local_host_evidence
 from base.agents.incarnation.lifecycle_acceptance import (
@@ -95,7 +96,7 @@ async def apply_hosted_lifecycle(
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
-    kill_shell_sessions: Callable[[int], None] | None = None,
+    kill_shell_sessions: Callable[[int, int], None] | None = None,
     expected_command_id: int | None = None,
     resources: HostedTurnResources | None,
 ) -> str | None:
@@ -109,20 +110,22 @@ async def apply_hosted_lifecycle(
     returned from the real continuation and dropped its non-authoritative cache.
 
     When a terminate asked to take the agent's shell sessions with it, the
-    host's `kill_shell_sessions(agent_id)` (must not raise) runs under the row
-    lock before the `terminated` write: the last step is over, and a crash
-    cannot commit the death without the kill — the retry kills again.
+    row lock captures the next shell ID. After committing the termination,
+    `kill_shell_sessions(agent_id, cutoff)` attempts only older sessions. The
+    host reports cleanup failures; they cannot roll back the durable death.
+    A crash or a session created after this cutoff can leave live sessions for operators.
     """
     from base.native_process.turn_identity import hosted_resources_settled
 
     if not hosted_resources_settled(resources):
         return None
+    shell_cutoff: int | None = None
     async with async_write_transaction(pool) as conn:
         from base.agents.incarnation.resource_admission import require_resources_closed_async
 
         await require_resources_closed_async(conn, incarnation.agent_id)
         cursor = await conn.execute(
-            "SELECT lifecycle_command_id,lease_expires_at FROM agents_meta WHERE id=%s "
+            "SELECT lifecycle_command_id,lease_expires_at,session_index FROM agents_meta WHERE id=%s "
             "AND runtime_generation=%s AND runtime_owner=%s AND runtime_kind='hosted' "
             "AND status IN ('running','idling') "
             "AND (%s::bigint IS NULL OR lifecycle_command_id=%s) FOR UPDATE",
@@ -164,7 +167,7 @@ async def apply_hosted_lifecycle(
             if await terminate_kills_shell_sessions(conn, incarnation.agent_id):
                 if kill_shell_sessions is None:
                     raise RuntimeError("shell-session kill requested but no killer is bound")
-                await asyncio.to_thread(kill_shell_sessions, incarnation.agent_id)
+                shell_cutoff = row[2]
             await conn.execute(
                 "UPDATE agents_meta SET status='terminated',termination_source='user',"
                 "lease_expires_at=NULL,runtime_protocol_version=0 WHERE id=%s",
@@ -185,7 +188,7 @@ async def apply_hosted_lifecycle(
                 (incarnation.agent_id, row[0]),
             )
     if lifecycle_kind == "terminate":
-        await publish_agent_updated(bus, incarnation.agent_id)
+        await finish_termination(bus, incarnation.agent_id, shell_cutoff, kill_shell_sessions)
     return lifecycle_kind
 
 
