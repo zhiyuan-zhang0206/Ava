@@ -76,7 +76,7 @@ _previous_gateway: subprocess.Popen[str] | None = None
 def pytest_collection_modifyitems(
     session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Skip the whole e2e package up front when its prerequisites are missing.
+    """Skip frontend/browser consumers up front when frontend prerequisites are missing.
 
     The skip is a collection-time MARKER, not a `pytest.skip()` thrown from a
     fixture: a fixture-stage skip still instantiates the session/package
@@ -95,7 +95,10 @@ def pytest_collection_modifyitems(
     if shutil.which("npm") and (_REPO_ROOT / "ui" / "web" / "node_modules" / "next").exists():
         return
     for item in items:
-        if item.nodeid.startswith("tests/e2e/"):
+        if isinstance(item, pytest.Function) and {
+            "frontend_proc",
+            "playwright_runtime",
+        }.intersection(item.fixturenames):
             item.add_marker(
                 pytest.mark.skip(reason="e2e prerequisites missing (npm or ui/web/node_modules)")
             )
@@ -163,7 +166,7 @@ def _apply_e2e_seq_offset() -> None:
         )
 
 
-@pytest.fixture(scope="package", autouse=True)
+@pytest.fixture(scope="package")
 def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
     """Layer e2e-specific process config on the suite's session Postgres +
     Redis (provisioned by the autouse fixtures in tests/fixtures/provisioning.py). The DB/Redis
@@ -474,7 +477,7 @@ def playwright_browser(playwright_runtime: Playwright) -> Iterator[Browser]:
 
 
 @pytest.fixture
-def scenario_env(request: pytest.FixtureRequest) -> Iterator[None]:
+def scenario_env(_e2e_process_env: None, request: pytest.FixtureRequest) -> Iterator[None]:
     """Read test's @pytest.mark.scenario('module:factory') to set AVA_LLM_OVERRIDE.
 
     Use bare os.environ not monkeypatch——the latter function teardown automatically unsets,
@@ -769,11 +772,6 @@ def e2e_env(
         page=playwright_page,
         agent_id=spawned_agent,
     )
-
-
-# socket / subprocess references to avoid ruff treating as unused imports erroneously removed (only type hints usage)
-_ = socket
-_ = subprocess
 
 
 # ── issue #213: dead-server evidence on failure ────────────────────────────

@@ -179,3 +179,11 @@ This validates runtime composition, not unprompted model compliance with skills.
 - Performance baseline
 - pytest-xdist parallelization
 ```
+
+Pure fake and direct unit tests use the repository's normal test isolation without
+starting the E2E process environment. Scenario and E2E database fixtures explicitly
+request that environment, whose package teardown restores every assigned key.
+Frontend prerequisites are checked against the collected fixture dependency closure:
+frontend or Playwright consumers skip before fixture setup when npm or Next is
+missing; tests without those dependencies still execute. Browser fixtures that
+select a frontend dynamically retain the Playwright prerequisite check.
