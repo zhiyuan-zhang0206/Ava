@@ -49,7 +49,7 @@ Overview of the Agent subsystem.
 
 ## Sub-concepts
 
-- [[agent/docs/agent-runtime.ava.okf.md|Agent Runtime]]
+- [[agent/docs/agent-runtime/agent-runtime.ava.okf.md|Agent Runtime]]
 - [[agent/docs/cross-cutting.ava.okf.md|Cross Cutting]]
 - [[agent/db/docs/db.ava.okf.md|Db]]
 - [[agent/docs/env-vars.ava.okf.md|Env Vars]]

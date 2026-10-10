@@ -29,6 +29,7 @@ from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.runtime import TurnOutcome
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.agent.test_maintenance import WHEN, _agent
 from tests.components.agent.test_maintenance import isolate as isolate
 
@@ -66,6 +67,7 @@ async def _failed_turn(
     )
     await flush_checkpoint(saver, agent)
     host = host_module.AgentHost(
+        policy=configured_policy(),
         pool=pool,
         checkpointer=saver,
         graph=graph,
