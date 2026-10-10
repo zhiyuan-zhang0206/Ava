@@ -29,6 +29,7 @@ import asyncio
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from psycopg_pool import ConnectionPool
 
 from base.api_contracts.config import (
     ConfigAuditView,
@@ -45,6 +46,7 @@ from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
 from base.config.admin.plugin_config import patch_owner, write_plugin_patch
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.host.env import runtime_config
 from base.host.env.audit import check_env_integrity
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
@@ -75,7 +77,7 @@ def _request_actor(request: Request) -> tuple[str | None, str | None]:
     return actor, trace_id if isinstance(trace_id, str) else None
 
 
-def _assert_machine_known(target: str) -> None:
+def _assert_machine_known(target: str, pool: ConnectionPool) -> None:
     """404 if `target` is not in the machines table — distinguishes a typo'd
     machine name from a registered-but-offline host (which 503s on timeout).
 
@@ -84,15 +86,14 @@ def _assert_machine_known(target: str) -> None:
     """
     if target == machine_name():
         return
-    from gateway.app import app
 
-    with app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM machines WHERE name = %s", (target,))
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"unknown machine: {target!r}")
 
 
-def _target_capabilities(target: str) -> list[MachineRole]:
+def _target_capabilities(target: str, db: Database) -> list[MachineRole]:
     """The target machine's capability set (`gateway` / `agent-runner` /
     `observability-station`) — what the panel uses to pick which capability
     sections a remote view renders.
@@ -108,17 +109,18 @@ def _target_capabilities(target: str) -> list[MachineRole]:
 
         return cast("list[MachineRole]", sorted(machine_role()))
     from base.cluster.machines import MachineNotRegistered, lookup_role
-    from gateway.app import app
 
     try:
         # machines.role is written from the capability tokens, so it is a
         # gateway/agent-runner list; the DB read is typed str.
-        return cast("list[MachineRole]", lookup_role(app.state.db, target))
+        return cast("list[MachineRole]", lookup_role(db, target))
     except MachineNotRegistered:
         return []
 
 
-async def _dispatch_config_read(target: str, *, authority: ConfigAuthority) -> ConfigReadResult:
+async def _dispatch_config_read(
+    target: str, *, db: Database, authority: ConfigAuthority
+) -> ConfigReadResult:
     """Run config_read on `target` via its ops server — one uniform path.
 
     Every machine with an agent-runner capability (the gateway's own box
@@ -130,16 +132,15 @@ async def _dispatch_config_read(target: str, *, authority: ConfigAuthority) -> C
     already verified the machine is known.
     """
     from base.cluster.machines import MachineNotRegistered, lookup_role
-    from gateway.app import app
 
     try:
-        role = await asyncio.to_thread(lookup_role, app.state.db, target)
+        role = await asyncio.to_thread(lookup_role, db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
             wire = await _cluster_rpc.dispatch_to_machine(
-                app.state.db,
+                db,
                 target_machine=target,
                 kind="config_read",
                 payload={},
@@ -170,7 +171,9 @@ async def _dispatch_config_read(target: str, *, authority: ConfigAuthority) -> C
     )
 
 
-async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditReadResult:
+async def _dispatch_config_audit_read(
+    target: str, last: int, *, db: Database
+) -> ConfigAuditReadResult:
     """Run config_audit_read on `target` via its ops server — one uniform path.
 
     Same structural shape as `_dispatch_config_read`: an agent-runner target is
@@ -180,16 +183,15 @@ async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditRead
     unreachable by construction. Caller has already verified the machine is known.
     """
     from base.cluster.machines import MachineNotRegistered, lookup_role
-    from gateway.app import app
 
     try:
-        role = await asyncio.to_thread(lookup_role, app.state.db, target)
+        role = await asyncio.to_thread(lookup_role, db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
             wire = await _cluster_rpc.dispatch_to_machine(
-                app.state.db,
+                db,
                 target_machine=target,
                 kind="config_audit_read",
                 payload={"last": last},
@@ -222,6 +224,7 @@ async def _dispatch_config_write(
     target: str,
     overrides: dict[str, Any],
     *,
+    db: Database,
     authority: ConfigAuthority,
     local: bool = False,
     actor: str | None = None,
@@ -240,16 +243,15 @@ async def _dispatch_config_write(
     remote_writable). Caller has already verified the machine is known.
     """
     from base.cluster.machines import MachineNotRegistered, lookup_role
-    from gateway.app import app
 
     try:
-        role = await asyncio.to_thread(lookup_role, app.state.db, target)
+        role = await asyncio.to_thread(lookup_role, db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
             wire = await _cluster_rpc.dispatch_to_machine(
-                app.state.db,
+                db,
                 target_machine=target,
                 kind="config_write",
                 payload={
@@ -324,8 +326,10 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
     """
     await asyncio.to_thread(check_env_integrity)
     target = machine or machine_name()
-    await asyncio.to_thread(_assert_machine_known, target)
-    read = await _dispatch_config_read(target, authority=request.app.state.config_authority)
+    await asyncio.to_thread(_assert_machine_known, target, request.app.state.db_pool)
+    read = await _dispatch_config_read(
+        target, db=request.app.state.db, authority=request.app.state.config_authority
+    )
     host_fields = read.host_fields
 
     fields: list[ConfigFieldView] = []
@@ -401,12 +405,13 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
     return ConfigView(
         fields=fields,
         raw_overrides=raw_overrides,
-        machine_capabilities=_target_capabilities(target),
+        machine_capabilities=_target_capabilities(target, request.app.state.db),
     )
 
 
 @router.get("/api/config/audit")
 async def get_config_audit(
+    request: Request,
     machine: str | None = None,
     # `last`'s range stays a protective constant (import-time Query bound;
     # task #3696 exception inventory); the default *count* is
@@ -428,19 +433,23 @@ async def get_config_audit(
     effective_last = last if last is not None else settings.display.config_audit_default_last
     if machine == "all":
         from base.cluster.machines import list_agent_runners
-        from gateway.app import app
 
-        runners = await asyncio.to_thread(list_agent_runners, app.state.db)
+        runners = await asyncio.to_thread(list_agent_runners, request.app.state.db)
         names = [name for name, _url in runners]
         if machine_name() not in names:
             names.append(machine_name())
         results = await asyncio.gather(
-            *(_dispatch_config_audit_read(name, effective_last) for name in names)
+            *(
+                _dispatch_config_audit_read(name, effective_last, db=request.app.state.db)
+                for name in names
+            )
         )
     else:
         target = machine or machine_name()
-        await asyncio.to_thread(_assert_machine_known, target)
-        results = [await _dispatch_config_audit_read(target, effective_last)]
+        await asyncio.to_thread(_assert_machine_known, target, request.app.state.db_pool)
+        results = [
+            await _dispatch_config_audit_read(target, effective_last, db=request.app.state.db)
+        ]
 
     records: list[dict[str, object]] = []
     for result in results:
@@ -556,6 +565,7 @@ async def _put_local(
     plan: ConfigPatchPlan,
     metas: dict[str, Any],
     *,
+    db: Database,
     authority: ConfigAuthority,
     has_cluster_patch: bool,
     actor: str | None,
@@ -567,7 +577,13 @@ async def _put_local(
     # No in-memory apply, no restart — the change is persisted and the named
     # process picks it up on its next restart (restart_required says which).
     host_result = await _dispatch_config_write(
-        target, plan.host_body, authority=authority, local=True, actor=actor, trace_id=trace_id
+        target,
+        plan.host_body,
+        db=db,
+        authority=authority,
+        local=True,
+        actor=actor,
+        trace_id=trace_id,
     )
     cluster_changed: set[str] = set()
     if host_result.applied and has_cluster_patch:
@@ -672,7 +688,7 @@ async def put_config(
     """
     target = machine or machine_name()
     actor, trace_id = _request_actor(request)
-    await asyncio.to_thread(_assert_machine_known, target)
+    await asyncio.to_thread(_assert_machine_known, target, request.app.state.db_pool)
 
     metas = {m.name: m for m in get_config_metadata(authority=request.app.state.config_authority)}
     plan = ConfigPatchPlan.parse(body, metas, is_remote=machine is not None)
@@ -692,6 +708,7 @@ async def put_config(
             target,
             plan,
             metas,
+            db=request.app.state.db,
             authority=request.app.state.config_authority,
             has_cluster_patch=has_cluster_patch,
             actor=actor,
@@ -707,6 +724,7 @@ async def put_config(
         host_result = await _dispatch_config_write(
             target,
             plan.host_body,
+            db=request.app.state.db,
             authority=request.app.state.config_authority,
             actor=actor,
             trace_id=trace_id,

@@ -7,11 +7,13 @@ every request; it now builds once per git revision of the gateway checkout.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from base.packages.docs.notes import Note
 from gateway.app import app
 
 
@@ -33,13 +35,15 @@ def _track_builds(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     import gateway.routers.memory as gw_memory
 
     calls: list[Path] = []
-    real = gw_memory._build_memory_graph
+    real = gw_memory.walk_notes
 
-    def counting(root: Path):
+    def counting(
+        root: Path, *, skip_names: frozenset[str], warnings: list[str]
+    ) -> Iterator[tuple[Path, Note]]:
         calls.append(root)
-        return real(root)
+        return real(root, skip_names=skip_names, warnings=warnings)
 
-    monkeypatch.setattr(gw_memory, "_build_memory_graph", counting)
+    monkeypatch.setattr(gw_memory, "walk_notes", counting)
     return calls
 
 
