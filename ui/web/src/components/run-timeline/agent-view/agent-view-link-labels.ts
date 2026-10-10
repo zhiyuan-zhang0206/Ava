@@ -8,6 +8,7 @@ export function useLinkKindLabels(): Record<LinkKind, string> {
   const t = useTranslations("runTimeline");
   return {
     send_message: t("linkSendMessage"),
+    user_message: t("linkUserMessage"),
     spawn: t("linkSpawn"),
     fork: t("linkFork"),
     terminate: t("linkTerminate"),

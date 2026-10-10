@@ -108,5 +108,12 @@
   "linkTitle": "标题",
   "userInteractionsLabel": "用户交互",
   "otherInteractionsLabel": "其他 agent 交互",
-  "closeGroup": "隐藏{title}（可在工具栏重新打开）"
+  "closeGroup": "隐藏{title}（可在工具栏重新打开）",
+  "readoutLinkGroup": "{kind} · {from} → {to} · 合并 {count} 条 · {start} – {end}",
+  "linkGroupTitle": "{count} 条{kind}",
+  "linkGroupHeading": "合并的箭头（选一条会放大到它）",
+  "linkUserMessage": "用户消息",
+  "maxArrowsLabel": "最多箭头数",
+  "maxArrowsTitle": "同时显示的最多箭头数；超过的按远近合并",
+  "maxArrowsInvalid": "请输入 1 到 {max} 的整数；仍使用上一次有效的值"
 }

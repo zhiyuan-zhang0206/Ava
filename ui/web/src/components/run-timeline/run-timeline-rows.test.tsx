@@ -91,8 +91,8 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
       onShowOther={vi.fn()}
       linkKinds={new Set(LINK_KINDS)}
       onToggleLinkKind={vi.fn()}
-      linkKey={null}
-      onSelectLink={vi.fn()}
+      linkKeys={[]}
+      onSelectLinks={vi.fn()}
     />,
   );
   return onSelect;

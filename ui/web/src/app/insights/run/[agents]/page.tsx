@@ -10,7 +10,8 @@ import { AgentPending } from "@/components/run-timeline/agent-view/agent-view-gr
 import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-view-nav";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { LinkDetail } from "@/components/run-timeline/run-timeline-link-detail";
-import { LINK_KINDS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
+import { LinkGroupDetail } from "@/components/run-timeline/run-timeline-link-group-detail";
+import { LINK_KINDS, MAX_ARROWS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
 import { RunTimelineRows, type AgentEntry } from "@/components/run-timeline/run-timeline-rows";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import { PageHeader } from "@/components/shell/page-header";
@@ -18,6 +19,7 @@ import {
   categoryClass,
   classCategory,
   clampViewport,
+  MIN_VIEW_MS,
   contextPoint,
   levelsTopFirst,
   nodeAncestors,
@@ -68,10 +70,13 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   // null = the whole loaded extent.
   const [viewport, setViewport] = useState<Viewport | null>(null);
   // The selected arrow between agents (a selected arrow and a selected block exclude each other) and the kinds drawn.
-  const [linkKey, setLinkKey] = useState<string | null>(null);
+  // The selected links: one for an arrow of one link, several for a merged arrow.
+  const [linkKeys, setLinkKeys] = useState<readonly string[]>([]);
+  const setLinkKey = (key: string | null) => setLinkKeys(key === null ? [] : [key]);
   const [linkKinds, setLinkKinds] = useState<ReadonlySet<LinkKind>>(() => new Set(LINK_KINDS));
   const [showUser, setShowUser] = useState(true);
   const [showOther, setShowOther] = useState(true);
+  const [maxArrows, setMaxArrows] = useState<number>(MAX_ARROWS);
   const [levels, setLevels] = useState<number | null>(null);
   // Off by default: the Context size row is one more row per agent.
   const [contextSize, setContextSize] = useState(false);
@@ -151,7 +156,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     () => resolveLinks(linksRead.data?.links ?? [], new Set(ids), new Map(loaded.map(({ id, data }) => [id, data]))),
     [linksRead.data, ids, loaded],
   );
-  const selectedLink = linkKey === null ? undefined : links.find((l) => l.key === linkKey);
+  const selectedLinks = links.filter((l) => linkKeys.includes(l.key));
 
   if (paramsResolved && agentIds === null) {
     return (
@@ -195,6 +200,18 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     },
   };
   const maxLevels = Math.max(0, ...loaded.map(({ data }) => levelsTopFirst(data.nodes).length));
+  // Selecting one link of a merged arrow zooms to it: a window 20 times the span the group covered, so
+  // the group falls apart, never wider than now.
+  const focusLink = (key: string) => {
+    const target = links.find((l) => l.key === key);
+    if (target === undefined || view === null) return;
+    const times = selectedLinks.map((l) => Date.parse(l.link.ts));
+    const width = Math.min(Math.max((Math.max(...times) - Math.min(...times)) * 20, MIN_VIEW_MS), view.to - view.from);
+    const at = Date.parse(target.link.ts);
+    if (base !== null) setViewport(clampViewport({ from: at - width / 2, to: at + width / 2 }, base));
+    setSelection(null);
+    setLinkKeys([key]);
+  };
   const select = (agent: number) => (id: string) => setSelection({ agent, selection: { kind: "node", id } });
 
   const main = (
@@ -219,6 +236,8 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
           setShowOther(on);
           if (!on) setLinkKey(null);
         }}
+        maxArrows={maxArrows}
+        onMaxArrows={setMaxArrows}
       />
       {base && view ? (
         <>
@@ -265,10 +284,11 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
                 return next;
               })
             }
-            linkKey={linkKey}
-            onSelectLink={(key) => {
+            linkKeys={linkKeys}
+            maxArrows={maxArrows}
+            onSelectLinks={(keys) => {
               setSelection(null);
-              setLinkKey(key);
+              setLinkKeys(keys);
             }}
           />
           {linksRead.isError ? (
@@ -297,8 +317,10 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     </>
   );
 
-  const side = selectedLink ? (
-    <LinkDetail key={selectedLink.key} resolved={selectedLink} onAddAgent={addAgent} />
+  const side = selectedLinks.length > 1 ? (
+    <LinkGroupDetail links={selectedLinks} onSelect={focusLink} />
+  ) : selectedLinks.length === 1 ? (
+    <LinkDetail key={selectedLinks[0].key} resolved={selectedLinks[0]} onAddAgent={addAgent} />
   ) : selectedNode ? (
     <NodeDetail
       key={`n${focus}-${selectedNode.id}`}
