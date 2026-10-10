@@ -99,7 +99,7 @@ class ServiceSpec:
         home_healthz: this service's readiness endpoint is an Ava ``/healthz``
             whose body names the unit's home, so ``ava start`` can recognise
             another unit's occupant on the port before it launches
-            (``cli.commands._probe._occupied_health_ports``). Always true of a
+            (``cli.commands.probe.occupied_health_ports``). Always true of a
             ``health_name`` daemon, which need not set it; declared here by the
             one other service that answers such a payload, the gate on its entry
             port. False = the endpoint carries no home identity, so an occupant

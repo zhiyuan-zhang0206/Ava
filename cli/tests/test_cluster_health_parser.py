@@ -28,10 +28,10 @@ from cli.commands.cluster.tests.test_cluster_health import (
     ],
 )
 def test_parser_rejects_removed_release_policy_flags(arguments: list[str]) -> None:
-    from cli.main import _build_parser
+    from cli.parsers import parse_args
 
     with pytest.raises(SystemExit) as refused:
-        _build_parser().parse_args(["cluster", *arguments])
+        parse_args(["cluster", *arguments])
     assert refused.value.code == 2
 
 
@@ -45,10 +45,10 @@ def test_parser_rejects_removed_release_policy_flags(arguments: list[str]) -> No
     ],
 )
 def test_parser_rejects_removed_health_probe_flags(arguments: list[str]) -> None:
-    from cli.main import _build_parser
+    from cli.parsers import parse_args
 
     with pytest.raises(SystemExit) as refused:
-        _build_parser().parse_args(["cluster", *arguments])
+        parse_args(["cluster", *arguments])
     assert refused.value.code == 2
 
 
@@ -56,7 +56,7 @@ def test_health_probe_dispatch_preserves_observation_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import cli.commands.cluster.health as _cluster_health_commands
-    from cli.main import _build_parser
+    from cli.parsers import parse_args
 
     received: list[dict[str, object]] = []
 
@@ -65,7 +65,7 @@ def test_health_probe_dispatch_preserves_observation_options(
         return 1
 
     monkeypatch.setattr(_cluster_health_commands, "cmd_health_probe", probe)
-    args = _build_parser().parse_args(["cluster", "health-probe", "--no-schema-check"])
+    args = parse_args(["cluster", "health-probe", "--no-schema-check"])
     assert args.func(args) == 1
     assert received == [
         {

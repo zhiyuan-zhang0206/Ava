@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 
-import cli.commands._probe as _probe_commands
+import cli.commands.probe as _probe_commands
 import ops.roster as _roster
 import ops.roster.service_spec as _service_spec
 from base.daemon.tests.fakes import pin_endpoints
@@ -32,33 +32,26 @@ def _spec_by_service(service: str) -> _service_spec.ServiceSpec:
 def test_gateway_spec_uses_http_probe_not_pidfile() -> None:
     """Gateway uvicorn(reload=True) makes pidfile-based liveness unreliable — must probe HTTP.
 
-    `_probe_service` prefers the identity probe, then curl_url, and only falls back
-    to the pidfile when neither is set. The gateway spec must set curl_url,
-    otherwise `ava status` / the watchdog healthcheck would probe the pidfile —
-    which the reload supervisor's fork makes wrong, reporting a healthy gateway dead.
+    The gateway carries an identity-bound HTTP probe. A bare responding port or
+    reload supervisor PID cannot certify that this unit owns the endpoint.
     """
     spec = _spec_by_service("gateway")
     assert spec.curl_url is not None, "gateway must use curl probe (uvicorn reload)"
     assert spec.curl_url.startswith("http://"), f"curl_url shape wrong: {spec.curl_url!r}"
 
 
-def test_probe_gateway_takes_the_identity_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_probe_service(gateway_spec)` asks the identity probe, not a bare curl.
+def test_probe_gateway_takes_the_identity_path() -> None:
+    """`probe_service(gateway_spec)` asks the identity probe, not a bare curl.
 
     The gateway declares one (`probe_home` — 2xx AND this unit's `$AVA_HOME`), so
     the operator surface and the watchdog ask the same question of the same port.
     A plain 2xx would still be satisfied by another cluster's gateway."""
 
     spec = _spec_by_service("gateway")
-    monkeypatch.setattr(
-        _probe_commands,
-        "_curl_ok",
-        lambda _u: pytest.fail("gateway must not fall back to a bare 2xx"),  # pyright: ignore[reportUnknownArgumentType]
-    )
     from base.daemon.health import DaemonProbe
 
     spec = replace(spec, identity_probe=lambda: DaemonProbe.up("root-owned gateway"))
-    probe = _probe_commands._probe_service(spec)
+    probe = _probe_commands.probe_service(spec)
     assert probe.alive is True
     assert probe.label == "identity"
 
@@ -75,7 +68,7 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
         spec,
         identity_probe=lambda: DaemonProbe.port_taken("identity mismatch: home='/home/ava/.ava'"),
     )
-    probe = _probe_commands._probe_service(spec)
+    probe = _probe_commands.probe_service(spec)
     assert probe.alive is False
     assert "/home/ava/.ava" in probe.detail
 
@@ -94,7 +87,7 @@ def test_probe_survives_an_identity_probe_that_raises() -> None:
         raise RuntimeError("no socket for you")
 
     spec = dataclasses.replace(_spec_by_service("gateway"), identity_probe=_boom)
-    probe = _probe_commands._probe_service(spec)
+    probe = _probe_commands.probe_service(spec)
     assert probe.alive is None
     assert probe.label == "unavailable"
     # The type AND the message: "the probe is broken" and "the daemon is down" are
@@ -103,12 +96,9 @@ def test_probe_survives_an_identity_probe_that_raises() -> None:
     assert "no socket for you" in probe.detail
 
 
-def test_service_without_identity_probe_cannot_claim_readiness(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_service_without_identity_probe_cannot_claim_readiness() -> None:
     spec = replace(_spec_by_service("gateway"), identity_probe=None)
-    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _url: True)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    result = _probe_commands._probe_service(spec)
+    result = _probe_commands.probe_service(spec)
     assert result.alive is None
     assert result.label == "unavailable"
 

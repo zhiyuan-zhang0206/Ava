@@ -7,7 +7,7 @@ from pathlib import Path
 from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import PrivateAttr
 
-from tests.e2e.fakes._recording import RecordingModel, exec_call, say, scratch_root
+from tests.e2e.fakes.scenario_recording import RecordingModel, exec_call, say, scratch_root
 
 
 def sandbox() -> Path:

@@ -35,4 +35,10 @@ suite (no-args default scope, hard-error on an unresolvable target,
 out-of-repo targets scan under their absolute path) is documented once:
 [[scripts/lint/docs/lint.ava.okf.md]].
 
+`lint_no_cjk.py` and `lint_no_tailnet.py` also expose `main(argv, *, repo_root)`
+for callers scanning an explicitly chosen repository. Without `repo_root`, both
+use their own checkout, including standalone CLI invocation. The public entry
+owns target validation, default Git-index scope, exclusions, diagnostics, and
+exit status; file-scanning algorithms remain private.
+
 Parent: [[scripts/docs/scripts.ava.okf.md|scripts]].

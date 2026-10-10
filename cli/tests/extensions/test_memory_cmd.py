@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from cli import main as _main
+from cli import parsers as _parsers
 from cli.commands.extensions import memory as _memory
 
 
@@ -161,7 +162,7 @@ def test_memory_search_parser_defaults_and_forwards_flags(
 @pytest.mark.parametrize("query", ["", "   ", "\t", "\n"])
 def test_memory_search_parser_rejects_empty_or_whitespace_query(query: str) -> None:
     with pytest.raises(SystemExit) as exited:
-        _main._build_parser().parse_args(["memory", "search", query])
+        _parsers.parse_args(["memory", "search", query])
 
     assert exited.value.code == 2
 
@@ -169,13 +170,13 @@ def test_memory_search_parser_rejects_empty_or_whitespace_query(query: str) -> N
 @pytest.mark.parametrize("limit", ["0", "101"])
 def test_memory_search_parser_rejects_out_of_range_limit(limit: str) -> None:
     with pytest.raises(SystemExit) as exited:
-        _main._build_parser().parse_args(["memory", "search", "alpha", "--limit", limit])
+        _parsers.parse_args(["memory", "search", "alpha", "--limit", limit])
 
     assert exited.value.code == 2
 
 
 @pytest.mark.parametrize("limit", ["1", "100"])
 def test_memory_search_parser_accepts_limit_bounds(limit: str) -> None:
-    args = _main._build_parser().parse_args(["memory", "search", "alpha", "--limit", limit])
+    args = _parsers.parse_args(["memory", "search", "alpha", "--limit", limit])
 
     assert args.limit == int(limit)

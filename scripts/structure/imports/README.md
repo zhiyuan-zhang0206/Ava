@@ -5,6 +5,10 @@ dependency resolution. Its `ModuleSourceLookup` protocol owns exact source
 lookup and the checkout resource anchor; facts and mock proofs import it directly.
 `cache.py` stores normalized production statements;
 resolved module edges always use the current checkout.
+Its public entry exposes `production_imports()` and the cache path. Consumers
+compare cold and warm public results; cache tests observe source-file reads
+without replacing the private parser. `lazy_modules.ModuleMap` is the existing
+public lazy-index capability, with membership distinct from value construction.
 
 `executed.py` supplies bounded facts about actual Python `-c` inputs. It follows
 literal source, one plain binding and local undecorated helpers that pass a
@@ -14,6 +18,11 @@ argument data. `**kwargs` and unpacking before a positional source stay unknown.
 Literal `-W`/`-X` operands are consumed as interpreter options; source selection
 stops at a script, `-m` or `--`. Launchers and Python executables must resolve
 through their imported bindings; unrelated source samples do not participate.
+
+`is_launcher(origin)` exposes the owner's existing lexical-origin predicate;
+the launcher set remains private. A positive result does not prove a Python
+executable or bounded source. `inputs()` and `module_input()` still perform
+those checks, and callers must retain their unresolved evidence.
 
 `inputs()` returns known source texts and structured `Unresolved` facts with
 the owning path, launch line and reason. `import_facts()` parses each source
@@ -51,12 +60,12 @@ their evidence gaps. A root LCA already established from known subjects may
 still retain unknown inputs in the independent locality analysis; completeness
 failure is not a different placement conclusion.
 
-The root integration owner coordinates the private-policy design discussion.
-This contribution does not select a replacement authority rule. Remove the
-legacy adapter only after that design is resolved, its real consumers and
-private seams are reconciled, and the relevant tests and full-tree checks pass
-without exemptions. The test-placement owner independently closes raw-LCA and
-fixture/lane migration; a locality pass does not approve private authorization.
+The approved component contract makes private names file-local, including
+tests. The public-contract migration audit is not yet enabled as a repository
+gate. Remove the legacy authority adapter only after its real consumers and
+private seams are reconciled and complete checks pass without exemptions.
+Test placement remains independent; a locality pass does not approve private
+authorization.
 
 `style.py` supplies a pure rule for qualified imports in the coordinated
 import-style migration.

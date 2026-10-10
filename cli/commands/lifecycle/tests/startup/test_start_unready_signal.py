@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import cli.commands._probe as _probe_commands
+import cli.commands.probe as _probe_commands
+from base import telemetry
 from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import start as start_commands
 from ops.roster.service_spec import _GATEWAY
@@ -27,12 +28,12 @@ def emitted(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         assert isinstance(attributes, dict)
         rows.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr(_probe_commands.telemetry, "emit", emit)
+    monkeypatch.setattr(telemetry, "emit", emit)
     return rows
 
 
 def test_one_event_per_non_critical_service(emitted: list[dict[str, object]]) -> None:
-    _probe_commands._report_non_critical_unready_services((_spec("labeler"), _spec("watcher")))
+    _probe_commands.report_non_critical_unready_services((_spec("labeler"), _spec("watcher")))
 
     assert emitted == [{"service": "ava-labeler"}, {"service": "ava-watcher"}]
 

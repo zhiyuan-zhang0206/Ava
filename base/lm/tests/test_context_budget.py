@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,7 @@ def test_budget_is_thirty_forty_percent_of_a_1m_window(*, model_catalog: ModelCa
         "claude-sonnet-5",
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert budget.max_context_tokens == 1_000_000
@@ -47,7 +48,7 @@ def test_deepseek_budget_is_374k_soft_512k_hard(*, model_catalog: ModelCatalog) 
         "deepseek-flash",
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert budget.max_context_tokens == 1_000_000
@@ -63,7 +64,7 @@ def test_budget_scales_to_a_smaller_window(*, model_catalog: ModelCatalog) -> No
         "claude-haiku-4-5-20251001",
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert budget.max_context_tokens == 200_000
@@ -86,7 +87,7 @@ def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule(
                 model,
                 catalog=model_catalog,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
             window = budget.max_context_tokens
@@ -104,7 +105,7 @@ def test_fractions_are_configurable(
         "deepseek-flash",
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert budget.hard_compact_tokens == 500_000
@@ -124,7 +125,7 @@ def test_ceiling_caps_the_hard_threshold(
         "deepseek-flash",
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert budget.hard_compact_tokens == 150_000
@@ -146,7 +147,7 @@ def test_ceiling_above_the_fraction_is_inert(
         "deepseek-flash",
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 0)
@@ -154,7 +155,7 @@ def test_ceiling_above_the_fraction_is_inert(
         "deepseek-flash",
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert capped == uncapped
@@ -172,7 +173,7 @@ def test_soft_stays_below_hard_for_every_spawnable_model(*, model_catalog: Model
                 model,
                 catalog=model_catalog,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
             assert 0 < budget.soft_compact_tokens < budget.hard_compact_tokens, model
@@ -187,7 +188,7 @@ def test_unknown_model_raises(*, model_catalog: ModelCatalog) -> None:
             "no-such-model",
             catalog=model_catalog,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
 
@@ -208,7 +209,7 @@ def test_every_supported_model_resolves(*, model_catalog: ModelCatalog) -> None:
                 model,
                 catalog=model_catalog,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 

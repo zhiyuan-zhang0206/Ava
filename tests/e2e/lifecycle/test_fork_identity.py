@@ -29,8 +29,8 @@ import pytest
 from base.agents import AgentStatus
 from base.config import settings
 from tests.e2e._db import wait_for_status
-from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.fork_identity import FORK_OK, FORK_PROMPT
+from tests.e2e.fixture_environment import E2EEnv
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.fork_identity:build")

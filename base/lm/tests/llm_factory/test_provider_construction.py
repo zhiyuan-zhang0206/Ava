@@ -10,6 +10,8 @@ deepseek-* uses ChatAnthropic + DeepSeek anthropic-compatible endpoint
 
 from __future__ import annotations
 
+from dataclasses import fields
+
 import pytest
 from langchain_anthropic import ChatAnthropic
 from pydantic import SecretStr
@@ -33,7 +35,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         from langchain_openai import ChatOpenAI
@@ -52,7 +54,7 @@ class TestProviderConstruction:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -73,7 +75,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatOpenAI)
@@ -92,7 +94,7 @@ class TestProviderConstruction:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -112,7 +114,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatOpenAI)
@@ -137,7 +139,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -155,7 +157,7 @@ class TestProviderConstruction:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -174,7 +176,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatMoonshot)
@@ -191,7 +193,7 @@ class TestProviderConstruction:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -202,7 +204,7 @@ class TestProviderConstruction:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -217,7 +219,7 @@ class TestProviderConstruction:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
         assert "mistral-*" in str(exc_info.value)
@@ -237,7 +239,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -257,7 +259,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -275,7 +277,7 @@ class TestProviderConstruction:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -295,7 +297,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -315,7 +317,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -339,7 +341,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -362,7 +364,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -380,7 +382,7 @@ class TestProviderConstruction:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -402,7 +404,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatMoonshot)
@@ -423,7 +425,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatMoonshot)
@@ -446,7 +448,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -465,7 +467,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -484,7 +486,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -503,7 +505,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatAnthropic)
@@ -520,7 +522,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatAnthropic)
@@ -539,7 +541,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatGoogleGenerativeAI)
@@ -558,7 +560,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatOpenAI)
@@ -580,7 +582,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatGoogleGenerativeAI)
@@ -601,7 +603,7 @@ class TestProviderConstruction:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatMoonshot)

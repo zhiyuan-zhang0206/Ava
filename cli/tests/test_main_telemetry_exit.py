@@ -19,7 +19,7 @@ _CHILD = r"""
 import argparse
 import concurrent.futures.thread
 import sys
-from cli import main
+from cli import main, parsers
 from base import telemetry
 from base.telemetry import emitter, event_store
 from base.telemetry.metrics import observed_metrics
@@ -40,7 +40,7 @@ def dispatch(args):
 
 parser = argparse.ArgumentParser()
 parser.set_defaults(func=dispatch)
-main._build_parser = lambda *, retained_children: parser
+parsers.build_parser = lambda *, retained_children: parser
 try:
     result = main.main([])
 except RuntimeError as exc:

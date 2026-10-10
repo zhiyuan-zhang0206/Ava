@@ -27,8 +27,8 @@ from playwright.sync_api import Page
 
 from base.agents import AgentStatus
 from tests.e2e._db import wait_for_status
-from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.error_recovery import ERROR_MSG, RECOVERY_REPLY
+from tests.e2e.fixture_environment import E2EEnv
 
 _UNRECOGNIZED_RE = re.compile(
     "Unrecognized system_marker|\u65e0\u6cd5\u8bc6\u522b\u7684 system_marker"

@@ -9,8 +9,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
-from ava.tests.understand._understand_helpers import mock_deepseek as mock_deepseek
-from ava.tests.understand._understand_helpers import understand_mod
+from ava.tests.understand.provider_support import ProviderCapture
+from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
+from ava.understand import understand
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 
@@ -21,26 +22,26 @@ def test_batch_targets_validation() -> None:
     """targets must be a list of dicts with prompt + exactly one of paths/text."""
     # targets not a list
     with pytest.raises(TypeError, match="takes a list of target dicts"):
-        understand_mod.understand("not a list")  # type: ignore[arg-type]
+        understand("not a list")  # type: ignore[arg-type]
 
     # target not a dict
     with pytest.raises(TypeError, match="must be a dict"):
-        understand_mod.understand(["not a dict"])  # type: ignore[list-item]
+        understand(["not a dict"])  # type: ignore[list-item]
 
     # missing prompt
     with pytest.raises(ValueError, match="missing required key 'prompt'"):
-        understand_mod.understand([{"paths": ["x.txt"]}])
+        understand([{"paths": ["x.txt"]}])
 
     # both paths and text
     with pytest.raises(ValueError, match="exactly one of 'text' / 'paths'"):
-        understand_mod.understand([{"prompt": "p", "paths": ["x.txt"], "text": "y"}])
+        understand([{"prompt": "p", "paths": ["x.txt"], "text": "y"}])
 
     # neither paths nor text
     with pytest.raises(ValueError, match="exactly one of 'text' / 'paths'"):
-        understand_mod.understand([{"prompt": "p"}])
+        understand([{"prompt": "p"}])
 
 
-def test_batch_text_concurrent(mock_deepseek: dict[str, Any]) -> None:
+def test_batch_text_concurrent(mock_deepseek: ProviderCapture) -> None:
     """Multiple text prompts run concurrently — all complete, order preserved."""
 
     # Make each invoke return a unique answer so we can verify order
@@ -52,22 +53,22 @@ def test_batch_text_concurrent(mock_deepseek: dict[str, Any]) -> None:
         response.response_metadata = {}
         return response
 
-    mock_deepseek["llm"].invoke.side_effect = _tracking_invoke
+    mock_deepseek.invoke.side_effect = _tracking_invoke
 
     targets = [
         {"prompt": "first question", "text": "material A"},
         {"prompt": "second question", "text": "material B"},
         {"prompt": "third question", "text": "material C"},
     ]
-    results = understand_mod.understand(targets)
+    results = understand(targets)
     assert isinstance(results, list)
-    assert len(results) == 3  # pyright: ignore[reportUnknownArgumentType] — dynamic module members
+    assert len(results) == 3
     assert results[0] == "answer to: first question"
     assert results[1] == "answer to: second question"
     assert results[2] == "answer to: third question"
 
 
-def test_batch_mixed_paths_and_text(mock_deepseek: dict[str, Any], tmp_path: Path) -> None:
+def test_batch_mixed_paths_and_text(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
     """Batch targets can mix paths= and text= sources."""
     f = tmp_path / "readme.md"
     f.write_text("# Project\nDescription here.", encoding="utf-8")
@@ -83,14 +84,14 @@ def test_batch_mixed_paths_and_text(mock_deepseek: dict[str, Any], tmp_path: Pat
         response.response_metadata = {}
         return response
 
-    mock_deepseek["llm"].invoke.side_effect = _tracking_invoke
+    mock_deepseek.invoke.side_effect = _tracking_invoke
 
     targets: list[dict[str, str | list[str]]] = [
         {"prompt": "summarize", "text": "inline text"},
         {"prompt": "extract", "paths": [str(f)]},
         {"prompt": "analyze", "text": "more inline"},
     ]
-    results = understand_mod.understand(targets)
+    results = understand(targets)
     assert len(results) == 3
     assert results[0] == "ok: summarize"
     assert results[1] == "ok: extract"
@@ -99,7 +100,7 @@ def test_batch_mixed_paths_and_text(mock_deepseek: dict[str, Any], tmp_path: Pat
     assert calls_by_prompt["extract"] == "# Project\nDescription here."
 
 
-def test_batch_default_concurrency_uses_the_shared_ceiling(mock_deepseek: dict[str, Any]) -> None:
+def test_batch_default_concurrency_uses_the_shared_ceiling(mock_deepseek: ProviderCapture) -> None:
     """Omitted `max_concurrent` must not exceed the public default cap.
 
     The default executor can have fewer workers than the request ceiling, so
@@ -126,29 +127,29 @@ def test_batch_default_concurrency_uses_the_shared_ceiling(mock_deepseek: dict[s
         response.response_metadata = {}
         return response
 
-    mock_deepseek["llm"].invoke.side_effect = _tracking_invoke
+    mock_deepseek.invoke.side_effect = _tracking_invoke
 
     targets = [{"prompt": f"q{i}", "text": f"m{i}"} for i in range(n)]
-    results = understand_mod.understand(targets)
+    results = understand(targets)
     assert results == ["ok"] * n
     assert peak <= DEFAULT_BATCH_MAX_CONCURRENT
 
 
-def test_max_concurrent_validation(mock_deepseek: dict[str, Any]) -> None:
+def test_max_concurrent_validation(mock_deepseek: ProviderCapture) -> None:
     """max_concurrent must be a positive int or None — bad values fail fast
     before any model call."""
     with pytest.raises(ValueError, match="at least 1"):
-        understand_mod.understand([{"prompt": "x", "text": "y"}], max_concurrent=0)
+        understand([{"prompt": "x", "text": "y"}], max_concurrent=0)
     with pytest.raises(ValueError, match="at least 1"):
-        understand_mod.understand([{"prompt": "x", "text": "y"}], max_concurrent=-2)
+        understand([{"prompt": "x", "text": "y"}], max_concurrent=-2)
     with pytest.raises(TypeError, match="int or None"):
-        understand_mod.understand(
+        understand(
             [{"prompt": "x", "text": "y"}],
             max_concurrent="4",  # type: ignore[arg-type]
         )
 
 
-def test_max_concurrent_caps_inflight_calls(mock_deepseek: dict[str, Any]) -> None:
+def test_max_concurrent_caps_inflight_calls(mock_deepseek: ProviderCapture) -> None:
     """max_concurrent=N keeps at most N model calls in flight — the observed
     peak never exceeds the ceiling, and the batch still completes in order."""
     import threading
@@ -172,14 +173,14 @@ def test_max_concurrent_caps_inflight_calls(mock_deepseek: dict[str, Any]) -> No
         response.response_metadata = {}
         return response
 
-    mock_deepseek["llm"].invoke.side_effect = _tracking_invoke
+    mock_deepseek.invoke.side_effect = _tracking_invoke
     targets = [{"prompt": f"q{i}", "text": f"m{i}"} for i in range(n_targets)]
-    results = understand_mod.understand(targets, max_concurrent=ceiling)
+    results = understand(targets, max_concurrent=ceiling)
     assert results == ["ok"] * n_targets
     assert peak == ceiling, f"peak in-flight {peak} exceeded ceiling {ceiling}"
 
 
-def test_max_concurrent_one_serializes(mock_deepseek: dict[str, Any]) -> None:
+def test_max_concurrent_one_serializes(mock_deepseek: ProviderCapture) -> None:
     """max_concurrent=1 runs every target strictly one after another — peak
     in-flight is exactly 1."""
     import threading
@@ -202,14 +203,14 @@ def test_max_concurrent_one_serializes(mock_deepseek: dict[str, Any]) -> None:
         response.response_metadata = {}
         return response
 
-    mock_deepseek["llm"].invoke.side_effect = _tracking_invoke
+    mock_deepseek.invoke.side_effect = _tracking_invoke
     targets = [{"prompt": f"q{i}", "text": f"m{i}"} for i in range(3)]
-    results = understand_mod.understand(targets, max_concurrent=1)
+    results = understand(targets, max_concurrent=1)
     assert results == ["ok"] * 3
     assert peak == 1
 
 
-def test_batch_error_propagates(mock_deepseek: dict[str, Any], tmp_path: Path) -> None:
+def test_batch_error_propagates(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
     """When one target fails, the error propagates immediately (asyncio.gather behavior)."""
     f = tmp_path / "exists.txt"
     f.write_text("content", encoding="utf-8")
@@ -220,4 +221,4 @@ def test_batch_error_propagates(mock_deepseek: dict[str, Any], tmp_path: Path) -
         {"prompt": "q3", "text": "also ok"},
     ]
     with pytest.raises(FileNotFoundError):
-        understand_mod.understand(targets)
+        understand(targets)

@@ -1,5 +1,7 @@
 """Actual SDK events retain the service receipt through LangChain conversion."""
 
+from dataclasses import fields
+
 import pytest
 from anthropic.types import Message, RawMessageDeltaEvent, RawMessageStartEvent
 from langchain_core.messages import AIMessage
@@ -37,7 +39,7 @@ def test_nonstream_receipt_survives_output_conversion(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert isinstance(model, ThinkingTokensChatAnthropic)
@@ -60,7 +62,7 @@ def test_stream_receipt_is_emitted_once_when_chunks_are_combined(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert isinstance(model, ThinkingTokensChatAnthropic)

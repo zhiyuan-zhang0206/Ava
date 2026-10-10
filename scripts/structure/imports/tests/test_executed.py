@@ -17,6 +17,31 @@ def _inputs(text: str) -> executed.Inputs:
 
 
 @pytest.mark.parametrize(
+    "origin, expected",
+    [
+        ("subprocess.run", True),
+        ("subprocess.Popen", True),
+        ("subprocess.call", True),
+        ("subprocess.check_call", True),
+        ("subprocess.check_output", True),
+        ("asyncio.create_subprocess_exec", True),
+        ("asyncio.create_subprocess_shell", False),
+        ("user.run", False),
+        ("run", False),
+    ],
+)
+def test_launcher_origin_is_owned_without_certifying_python_input(
+    origin: str, expected: bool
+) -> None:
+    assert executed.is_launcher(origin) is expected
+
+
+def test_launcher_origin_alone_does_not_certify_an_executed_source() -> None:
+    assert executed.is_launcher("subprocess.run")
+    assert _inputs("import subprocess\nsubprocess.run(['echo', 'not Python'])") == executed.Inputs()
+
+
+@pytest.mark.parametrize(
     "launch",
     [
         "subprocess.run([sys.executable, '-c', code])",

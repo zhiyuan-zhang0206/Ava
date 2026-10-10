@@ -9,6 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+__all__ = [
+    "SERVICE_GROUPS",
+    "build",
+    "unit_of",
+]
+
 SERVICE_GROUPS = frozenset(
     {"agent_runner", "backup", "derived", "desktop", "entrypoints", "supervision", "upkeep", "wake"}
 )

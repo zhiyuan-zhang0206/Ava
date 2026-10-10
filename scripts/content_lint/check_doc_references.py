@@ -49,8 +49,8 @@ Three doc trees get exemptions, not a blanket skip:
 ## What it checks
 
 1. **CLI flags.** Every `--flag` written as part of a command invocation,
-   checked against the live source of truth: the argparse tree from
-   `cli.main._build_parser` and
+   checked against the live source of truth: command options from
+   `cli.parsers.command_options` and
    each `scripts/*.sh`'s own case arms.
 
    Three things this gets right that the obvious version does not, each a false
@@ -106,7 +106,6 @@ and each one backtracked catastrophically on ordinary prose.
 
 from __future__ import annotations
 
-import argparse
 import functools
 import re
 import subprocess
@@ -140,33 +139,15 @@ _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 _PLANNED = re.compile(r"\s*\(planned\)", re.IGNORECASE)
 
 
-def _options(parser: argparse.ArgumentParser) -> set[str]:
-    out: set[str] = set()
-    for action in parser._actions:
-        out.update(s for s in action.option_strings if s.startswith("--"))
-    return out
-
-
 def ava_flags() -> dict[tuple[str, ...], set[str]]:
     """Options keyed by the command path that accepts them.
 
     Keyed rather than unioned: a flat set would accept `ava stop --machine-name`
     because `--machine-name` exists on `start`, which is the false negative this
     tool exists to avoid."""
-    from cli.main import _build_parser
+    from cli.parsers import command_options
 
-    parser = _build_parser()
-    by_path: dict[tuple[str, ...], set[str]] = {("ava",): _options(parser)}
-    stack: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = [(("ava",), parser)]
-    while stack:
-        path, current = stack.pop()
-        for action in current._actions:
-            if isinstance(action, argparse._SubParsersAction):
-                for name, sub in action.choices.items():
-                    child = (*path, name)
-                    by_path[child] = _options(sub)
-                    stack.append((child, sub))
-    return by_path
+    return command_options()
 
 
 # A case arm opens a line; `$(node --version)` inside an echo, and a `--role)` in

@@ -130,7 +130,7 @@ def _port_findings(roles: MachineRoles) -> tuple[list[str], list[str]]:
     Detection failures are observations, not refusals: a preflight must never be
     the thing that takes the host down.
     """
-    import cli.commands._probe as _probe_commands
+    import cli.commands.probe as _probe_commands
     import ops.roster as _roster
     from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands.lifecycle.root_driver import _root_tree_roster
@@ -138,7 +138,7 @@ def _port_findings(roles: MachineRoles) -> tuple[list[str], list[str]]:
     try:
         available = {s.session for s in _roster.build_services()}
         roster = _root_tree_roster(roles, resolve_selection(available, persist=False))
-        occupied = _probe_commands._occupied_health_ports(roster)
+        occupied = _probe_commands.occupied_health_ports(roster)
     except Exception as exc:  # a preflight must not fail the update
         return [], [f"health-port check skipped: {exc}"]
 

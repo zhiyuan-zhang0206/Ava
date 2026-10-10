@@ -46,11 +46,9 @@ subpackages hold the domains, each an independent package door:
   `status`, the pending-migration step, and the single application root they
   drive: [[cli/commands/lifecycle/docs/lifecycle.ava.okf.md|Host lifecycle]].
 
-`start.py` / `stop.py` / `status.py` / `maintenance.py` / `migrations.py` and
-the `_`-prefixed steps host commands call (`_probe`, `_setup`, `_repo`,
-`_start_gui_chain`, `_ownership_preflight`, ...) stay directly under
-`cli/commands/`. `root_driver.py`, `service_stop.py` and `start_generation.py`
-are internal steps under public names because other packages reach them.
+`cli.commands.probe` owns service evidence, health-port occupancy checks and
+readiness reports, with an explicit `__all__` contract. Its declaration predicate
+stays local; tiering and source drift stay with their `base.deploy` owners.
 
 `stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
 kernel with the data plane and browser kept; terminals are closed like in any

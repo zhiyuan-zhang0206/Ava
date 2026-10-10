@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from scripts.structure import placement
+from scripts.structure.placement_evidence import IncompleteReferenceEvidenceError
 from scripts.structure.tests.patch_repo import make_repo
 
 _PATH = "scripts/tests/test_probe.py"
@@ -49,7 +50,7 @@ def test_unknown_execution_keeps_known_references_but_legacy_list_fails(tmp_path
     assert [r.module for r in evidence.refs] == ["base.config"]
     assert len(evidence.unresolved) == 1
     with pytest.raises(
-        placement.IncompleteReferenceEvidenceError, match=r"scripts/tests/test_probe\.py:2:"
+        IncompleteReferenceEvidenceError, match=r"scripts/tests/test_probe\.py:2:"
     ) as raised:
         placement.collect_references(tree, index, _PATH)
     assert raised.value.evidence == evidence
@@ -79,7 +80,7 @@ def test_legacy_patch_adapter_carries_unknown_without_claiming_complete_placemen
     assert result.placement.home == "base/config"
     assert [ref.module for ref in result.evidence.refs] == ["base.config"]
     assert [(gap.path, gap.line) for gap in result.evidence.unresolved] == [(_PATH, 2)]
-    with pytest.raises(placement.IncompleteReferenceEvidenceError):
+    with pytest.raises(IncompleteReferenceEvidenceError):
         placement.place(_PATH, tree, index)
 
 
@@ -114,6 +115,6 @@ def test_resolved_option_does_not_hide_a_remaining_dynamic_source(tmp_path: Path
     evidence = placement.collect_reference_evidence(tree, index, _PATH)
     assert [(ref.kind, ref.module) for ref in evidence.refs] == [("embedded-import", "base.config")]
     assert [(gap.path, gap.line) for gap in evidence.unresolved] == [(_PATH, 3)]
-    with pytest.raises(placement.IncompleteReferenceEvidenceError) as raised:
+    with pytest.raises(IncompleteReferenceEvidenceError) as raised:
         placement.collect_references(tree, index, _PATH)
     assert raised.value.evidence == evidence

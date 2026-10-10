@@ -23,6 +23,8 @@ from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import PrivateAttr
 
+__all__ = ["ScriptExhaustedError", "ScriptedFakeChatModel"]
+
 
 class ScriptExhaustedError(RuntimeError):
     """SCRIPT cursor out of bounds -- scenario did not cover the current turn.

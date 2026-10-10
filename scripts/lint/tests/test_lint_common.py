@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import clock_lattice, code_structure, termination_source
+from scripts.lint import clock_lattice, termination_source
 from scripts.lint.diagnostics import logger_add_diagnose, loguru_format, no_emoji, time_bomb
 from scripts.structure import lint_common
 
@@ -34,10 +34,8 @@ def test_missing_scan_dir_is_an_error(tmp_path: Path) -> None:
     "scan_dirs",
     [
         clock_lattice._SCAN_DIRS,
-        code_structure._SCAN_DIRS,
         no_emoji._SCAN_DIRS,
         termination_source._SCAN_DIRS,
-        time_bomb._SCAN_DIRS,
         logger_add_diagnose._SCAN_DIRS,
         loguru_format._SCAN_DIRS,
     ],
@@ -58,3 +56,16 @@ def test_pytest_test_scope_rejects_unsupported_directory_patterns(pattern: str) 
 def test_pytest_test_scope_rejects_duplicate_hosts() -> None:
     with pytest.raises(ValueError, match="duplicate pytest test host"):
         lint_common.pytest_test_hosts('[tool.pytest.ini_options]\ntestpaths = ["tests", "tests"]\n')
+
+
+@pytest.mark.parametrize("directory", (*lint_common.FRAMEWORK_DIRS, "scripts"))
+def test_time_bomb_default_scan_covers_every_framework_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], directory: str
+) -> None:
+    for name in (*lint_common.FRAMEWORK_DIRS, "scripts", "tests"):
+        (tmp_path / name).mkdir()
+    target = tmp_path / directory / "tests" / "test_window.py"
+    target.parent.mkdir()
+    target.write_text('since = "2026-09-06"\n', encoding="utf-8")
+    assert time_bomb.main([], repo_root=tmp_path) == 1
+    assert f"{target}:1: time-bomb fixture date" in capsys.readouterr().err

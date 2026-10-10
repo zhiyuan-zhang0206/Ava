@@ -21,9 +21,9 @@ from base.events.live.announce import (
 )
 from base.events.live.bus import EventBus
 from tests.components.base.poll_until import poll_until
-from tests.e2e._env import E2EEnv
-from tests.e2e.fakes._recording import model_inputs, reset_record
+from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
 from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY
+from tests.e2e.fixture_environment import E2EEnv
 
 
 def _seed_active_lease(agent_id: int, relay_token: str) -> tuple[UUID, int]:

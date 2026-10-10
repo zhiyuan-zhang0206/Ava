@@ -1,6 +1,6 @@
 """Fast IDs preserve selection, vendor requests and actual-service accounting."""
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import UTC, datetime
 from typing import cast
 
@@ -55,7 +55,7 @@ def test_openai_wire_model_and_service_tier(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert isinstance(model, ChatOpenAI)
@@ -76,7 +76,7 @@ def test_anthropic_wire_model_speed_and_beta(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert isinstance(model, ThinkingTokensChatAnthropic)

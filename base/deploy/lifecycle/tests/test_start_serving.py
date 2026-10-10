@@ -182,7 +182,7 @@ def test_direct_process_e2e_injects_only_its_explicit_fixture_gate(
     import sys
 
     from base.deploy.lifecycle import start_serving
-    from tests.e2e._proc import fixture_entrypoint
+    from tests.e2e.process_support import fixture_entrypoint
 
     gate = tmp_path / "e2e-serving"
     monkeypatch.setattr(sys, "argv", ["fixture", str(gate), "fixture_target"])

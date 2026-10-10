@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
+
 import pytest
 
 from base.config import get_field, settings
@@ -102,7 +104,7 @@ class TestResolveOverride:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, _FakeLLM)
@@ -111,7 +113,7 @@ class TestResolveOverride:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(bound, _FakeLLM)
@@ -124,7 +126,7 @@ class TestResolveOverride:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -142,6 +144,6 @@ class TestResolveOverride:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )

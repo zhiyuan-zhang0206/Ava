@@ -10,6 +10,18 @@ from pathlib import PurePosixPath
 
 from scripts.structure.imports import executed
 
+__all__ = [
+    "IncompleteReferenceEvidenceError",
+    "LegacyPlacement",
+    "Placement",
+    "Ref",
+    "ReferenceEvidence",
+    "RepoRoots",
+    "SubjectLCA",
+    "file_ascents",
+    "subject_lca",
+]
+
 
 def _last_name(node: ast.expr) -> str:
     """`Path` for `Path` and `pathlib.Path`, "" for anything that is not a plain name."""

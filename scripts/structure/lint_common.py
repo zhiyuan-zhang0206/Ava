@@ -10,6 +10,24 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
+__all__ = [
+    "FRAMEWORK_DIRS",
+    "LINT_TOOLING",
+    "ONLY_FLAG",
+    "TEST_DIR",
+    "changed_scope",
+    "format_violation",
+    "is_repo_test_file",
+    "is_test_path",
+    "pytest_test_hosts",
+    "read_utf8_text",
+    "resolve_targets",
+    "restrict",
+    "scan_roots",
+    "split_only",
+    "tracked_files",
+]
+
 # The framework code: every production Python package at the repo root. Lints
 # whose scope is "the framework" import this instead of keeping their own copy,
 # so a new or renamed package cannot drift out of one lint's scope unnoticed.
