@@ -3081,6 +3081,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/insights/run-timeline/link-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Timeline Link Content
+         * @description The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`).
+         */
+        get: operations["get_run_timeline_link_content_api_insights_run_timeline_link_content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/event-resolutions": {
         parameters: {
             query?: never;
@@ -7940,11 +7960,11 @@ export interface components {
          * @description One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.
          *
          *     A `notice` is an agent posting a notice to the user (`agent_notices`, the structured
-         *     agent-to-user channel): its receiver is None and `preview` its title.
+         *     agent-to-user channel): its receiver is None and `notice_id` its row. The text of a message or
+         *     notice is not in the list; `/run-timeline/link-content` serves it for the one that is selected.
          *
          *     `inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent
-         *     a fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is
-         *     the start of the message.
+         *     a fork was copied from (fork only; the sender is the agent that executed the fork).
          */
         RunTimelineLink: {
             /**
@@ -7965,8 +7985,18 @@ export interface components {
             inbound_id: number | null;
             /** Fork From */
             fork_from: number | null;
-            /** Preview */
-            preview: string | null;
+            /** Notice Id */
+            notice_id: number | null;
+        };
+        /**
+         * RunTimelineLinkContent
+         * @description GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one notice.
+         */
+        RunTimelineLinkContent: {
+            /** Title */
+            title: string | null;
+            /** Content */
+            content: string;
         };
         /**
          * RunTimelineLinks
@@ -13335,6 +13365,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunTimelineLinks"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_timeline_link_content_api_insights_run_timeline_link_content_get: {
+        parameters: {
+            query?: {
+                inbound_id?: number | null;
+                notice_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTimelineLinkContent"];
                 };
             };
             /** @description Validation Error */

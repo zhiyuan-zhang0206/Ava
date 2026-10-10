@@ -6228,6 +6228,71 @@
         }
       }
     },
+    "/api/insights/run-timeline/link-content": {
+      "get": {
+        "summary": "Get Run Timeline Link Content",
+        "description": "The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`).",
+        "operationId": "get_run_timeline_link_content_api_insights_run_timeline_link_content_get",
+        "parameters": [
+          {
+            "name": "inbound_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Inbound Id"
+            }
+          },
+          {
+            "name": "notice_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Notice Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTimelineLinkContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/event-resolutions": {
       "post": {
         "summary": "Create Event Resolution",
@@ -16391,16 +16456,16 @@
             ],
             "title": "Fork From"
           },
-          "preview": {
+          "notice_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Preview"
+            "title": "Notice Id"
           }
         },
         "type": "object",
@@ -16411,10 +16476,36 @@
           "receiver",
           "inbound_id",
           "fork_from",
-          "preview"
+          "notice_id"
         ],
         "title": "RunTimelineLink",
-        "description": "One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.\n\nA `notice` is an agent posting a notice to the user (`agent_notices`, the structured\nagent-to-user channel): its receiver is None and `preview` its title.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is\nthe start of the message."
+        "description": "One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.\n\nA `notice` is an agent posting a notice to the user (`agent_notices`, the structured\nagent-to-user channel): its receiver is None and `notice_id` its row. The text of a message or\nnotice is not in the list; `/run-timeline/link-content` serves it for the one that is selected.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork)."
+      },
+      "RunTimelineLinkContent": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "content"
+        ],
+        "title": "RunTimelineLinkContent",
+        "description": "GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one notice."
       },
       "RunTimelineLinks": {
         "properties": {

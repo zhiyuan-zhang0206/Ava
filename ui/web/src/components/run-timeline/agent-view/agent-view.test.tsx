@@ -4,10 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineLink, RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
-const { getRunTimeline, getRunTimelineLinks, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings, useMediaQuery } =
+const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings, useMediaQuery } =
   vi.hoisted(() => ({
     getRunTimeline: vi.fn<(agentId: number, options?: object) => Promise<RunTimelineResponse>>(),
     getRunTimelineLinks: vi.fn(),
+    getRunTimelineLinkContent: vi.fn(),
     getAgentRoster: vi.fn(),
     getContextBreakdown: vi.fn(),
     getRunTimelineContext: vi.fn(),
@@ -18,7 +19,7 @@ const { getRunTimeline, getRunTimelineLinks, getAgentRoster, getContextBreakdown
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimeline, getRunTimelineLinks, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings },
+  api: { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings },
 }));
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
@@ -96,6 +97,7 @@ beforeEach(() => {
   getRunTimeline.mockReset();
   getRunTimelineLinks.mockReset();
   getRunTimelineLinks.mockResolvedValue({ links: [] });
+  getRunTimelineLinkContent.mockResolvedValue({ title: "need a decision", content: "the **full** text" });
   getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent]));
   getAgentRoster.mockReset();
   getAgentRoster.mockResolvedValue({
@@ -267,7 +269,7 @@ describe("arrows between agents", () => {
     receiver: 8,
     inbound_id: null,
     fork_from: null,
-    preview: null,
+    notice_id: null,
     ...partial,
   });
   const LINKS = [
@@ -443,7 +445,7 @@ describe("arrows between agents", () => {
     getRunTimelineLinks.mockResolvedValue({
       links: [
         link({ kind: "terminate", ts: at(50), sender: null, receiver: 8 }),
-        link({ kind: "notice", ts: at(55), sender: 7, receiver: null, preview: "need a decision" }),
+        link({ kind: "notice", ts: at(55), sender: 7, receiver: null, notice_id: 11 }),
       ],
     });
     render("7,8");
@@ -453,7 +455,8 @@ describe("arrows between agents", () => {
     fireEvent.click(within(screen.getByTestId("agent-view-user")).getAllByTestId("run-timeline-link-tick")[3]);
     const detail = await screen.findByTestId("run-timeline-link-detail");
     expect(detail.textContent).toContain("User");
-    expect(detail.textContent).toContain("need a decision");
+    await waitFor(() => expect(detail.textContent).toContain("need a decision"));
+    expect(getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 11 });
     expect(screen.queryByTestId("run-timeline-link-add-agent")).toBeNull();
     // The legend counts them with the rest: two chat messages and one notice (the terminate is its own kind).
     expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 2");

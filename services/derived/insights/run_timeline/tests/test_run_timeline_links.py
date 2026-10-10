@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import LiteralString
+from types import SimpleNamespace
+from typing import LiteralString, cast
 
 import psycopg
 import pytest
+from fastapi import HTTPException, Request
 
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -96,7 +98,8 @@ def test_a_chat_message_goes_from_its_source_to_the_agent_it_was_written_to(
     inbound_id = message(db_conn, receiver=receiver, sender=405, content="do   the\nthing")
     [link] = read(receiver, kinds=("send_message",))
     assert (link.kind, link.sender, link.receiver) == ("send_message", 405, receiver)
-    assert (link.inbound_id, link.preview) == (inbound_id, "do the thing")
+    assert link.inbound_id == inbound_id
+    assert not hasattr(link, "preview")  # the text is served on demand, not in the list
 
 
 def test_only_chat_messages_are_links_a_task_assignment_is_not(
@@ -181,12 +184,8 @@ def test_a_notice_is_an_agent_posting_to_the_user(
     )
     db_conn.commit()
     [link] = read(receiver, kinds=("notice",))
-    assert (link.kind, link.sender, link.receiver, link.preview) == (
-        "notice",
-        receiver,
-        None,
-        "need a decision",
-    )
+    assert (link.kind, link.sender, link.receiver) == ("notice", receiver, None)
+    assert link.notice_id is not None
     assert read(receiver + 1, kinds=("notice",)) == []
 
 
@@ -205,3 +204,45 @@ def test_a_window_longer_than_a_page_is_read_completely(
     for hours in (5, 4, 3, 2, 1):
         message(db_conn, receiver=receiver, sender=405, hours_ago=hours)
     assert len(read(receiver, kinds=("send_message",))) == 5
+
+
+def _content(**params: int):
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(db=Database.from_settings()))
+    )
+    return links.get_run_timeline_link_content(cast(Request, request), **params)
+
+
+def test_the_full_text_of_a_message_is_served_uncut(
+    db_conn: psycopg.Connection, receiver: int
+) -> None:
+    long = "line one\n\n" + "x" * 5000
+    inbound_id = message(db_conn, receiver=receiver, sender=405, content=long)
+    served = _content(inbound_id=inbound_id)
+    assert (served.title, served.content) == (None, long)
+
+
+def test_only_a_chat_message_is_served(db_conn: psycopg.Connection, receiver: int) -> None:
+    note = message(db_conn, receiver=receiver, sender=405, kind="system_note")
+    with pytest.raises(HTTPException) as gone:
+        _content(inbound_id=note)
+    assert gone.value.status_code == 404
+
+
+def test_a_notice_is_served_with_title_and_text(db_conn: psycopg.Connection, receiver: int) -> None:
+    row = db_conn.execute(
+        "INSERT INTO agent_notices (local_id, agent_id, title, content, priority, require_response, expire_at) "
+        "VALUES (1, %s, 'a title', '## body', 'P1', false, now() + interval '1 day') RETURNING id",
+        (receiver,),
+    ).fetchone()
+    assert row is not None
+    db_conn.commit()
+    served = _content(notice_id=int(row[0]))
+    assert (served.title, served.content) == ("a title", "## body")
+
+
+def test_exactly_one_reference_is_required() -> None:
+    for params in ({}, {"inbound_id": 1, "notice_id": 1}):
+        with pytest.raises(HTTPException) as bad:
+            _content(**params)
+        assert bad.value.status_code == 422

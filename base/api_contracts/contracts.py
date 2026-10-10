@@ -536,6 +536,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/insights/run-timeline/links"): RouteContract(
         note="read-only: agent-to-agent audit events (chat messages, spawn, fork, terminate, restart, resurrect) with an end among the asked agents",
     ),
+    ("GET", "/api/insights/run-timeline/link-content"): RouteContract(
+        note="read-only: the full text of one chat message or notice behind a selected arrow",
+    ),
     ("GET", "/api/insights/{rest:path}"): RouteContract(
         note="read-only: proxied untouched to the insights service, which builds every insights read from the record",
     ),

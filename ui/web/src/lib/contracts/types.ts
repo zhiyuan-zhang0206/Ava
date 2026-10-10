@@ -201,6 +201,7 @@ export type RunTimelineNode = Schemas["RunTimelineNode"];
 export type RunTimelineUnit = Schemas["RunTimelineUnit"];
 export type RunTimelineLink = Schemas["RunTimelineLink"];
 export type RunTimelineLinks = Schemas["RunTimelineLinks"];
+export type RunTimelineLinkContent = Schemas["RunTimelineLinkContent"];
 export type RunTimelineUsage = Schemas["RunTimelineUsage"];
 export type RunTimelineGeneration = Schemas["RunTimelineGeneration"];
 export type RunTimelineContext = Schemas["RunTimelineContext"];

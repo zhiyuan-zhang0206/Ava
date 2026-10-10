@@ -22,6 +22,7 @@ from base.events.reads import audit_rows
 from services.derived.insights.run_timeline.schemas import (
     LinkKind,
     RunTimelineLink,
+    RunTimelineLinkContent,
     RunTimelineLinks,
 )
 
@@ -31,7 +32,6 @@ router = APIRouter()
 _AUDIT_KINDS: list[str] = [kind for kind in get_args(LinkKind) if kind != "notice"]
 # A transport page, not a display limit: the reader pages until the window is exhausted.
 _PAGE_SIZE = 500
-_PREVIEW_CHARS = 160
 _AGENT_PREFIX = "agent:"
 _HUMAN_SOURCES = ("user", "ui:page:")
 
@@ -78,10 +78,7 @@ def _link(row: dict[str, object]) -> RunTimelineLink | None:
     # An event an agent did to itself is not between agents.
     if not drawn or receiver is None or sender == receiver:
         return None
-    raw = row["attributes"]
-    attrs = cast(dict[str, object], raw) if isinstance(raw, dict) else {}
     kind = cast(LinkKind, row["event_name"])
-    content = attrs.get("content")
     return RunTimelineLink(
         kind=kind,
         ts=cast(datetime, row["ts"]),
@@ -89,7 +86,7 @@ def _link(row: dict[str, object]) -> RunTimelineLink | None:
         receiver=receiver,
         inbound_id=_message_inbound(row),
         fork_from=_int(row["target_agent_id"]) if kind == "fork" else None,
-        preview=" ".join(content.split())[:_PREVIEW_CHARS] if isinstance(content, str) else None,
+        notice_id=None,
     )
 
 
@@ -98,7 +95,7 @@ def _notices(
 ) -> list[RunTimelineLink]:
     """Notices the agents posted to the user in the window: the one structured agent-to-user channel."""
     rows = conn.execute(
-        "SELECT agent_id, created_at, title FROM agent_notices "
+        "SELECT id, agent_id, created_at FROM agent_notices "
         "WHERE agent_id = ANY(%s) AND created_at >= %s AND created_at <= %s ORDER BY created_at, id",
         [agents, start, end],
     ).fetchall()
@@ -110,9 +107,9 @@ def _notices(
             receiver=None,
             inbound_id=None,
             fork_from=None,
-            preview=" ".join(str(title).split())[:_PREVIEW_CHARS],
+            notice_id=int(notice_id),
         )
-        for agent_id, created_at, title in rows
+        for notice_id, agent_id, created_at in rows
     ]
 
 
@@ -165,3 +162,33 @@ def get_run_timeline_links(
         raise HTTPException(status_code=422, detail="from must be earlier than to")
     db: Database = request.app.state.db
     return RunTimelineLinks(links=read(db, ids, from_, to))
+
+
+@router.get("/api/insights/run-timeline/link-content")
+def get_run_timeline_link_content(
+    request: Request,
+    inbound_id: Annotated[int | None, Query(ge=1)] = None,
+    notice_id: Annotated[int | None, Query(ge=1)] = None,
+) -> RunTimelineLinkContent:
+    """The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`); exactly one."""
+    if (inbound_id is None) == (notice_id is None):
+        raise HTTPException(status_code=422, detail="give exactly one of inbound_id and notice_id")
+    db: Database = request.app.state.db
+    with db.connect(autocommit=True) as conn:
+        if inbound_id is not None:
+            row = conn.execute(
+                "SELECT content FROM inbound_messages WHERE id = %s AND kind = 'chat'", [inbound_id]
+            ).fetchone()
+            found = None if row is None else RunTimelineLinkContent(title=None, content=str(row[0]))
+        else:
+            row = conn.execute(
+                "SELECT title, content FROM agent_notices WHERE id = %s", [notice_id]
+            ).fetchone()
+            found = (
+                None
+                if row is None
+                else RunTimelineLinkContent(title=str(row[0]), content=str(row[1] or ""))
+            )
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such message or notice")
+    return found

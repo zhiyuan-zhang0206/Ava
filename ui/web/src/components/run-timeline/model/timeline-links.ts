@@ -106,7 +106,7 @@ export function resolveLinks(
       const ms = Date.parse(unit.start);
       out.push({
         key: `user-${id}-${unit.i0}`,
-        link: { kind: "send_message", ts: unit.start, sender: null, receiver: id, inbound_id: unit.inbound_id, fork_from: null, preview: unit.preview },
+        link: { kind: "send_message", ts: unit.start, sender: null, receiver: id, inbound_id: unit.inbound_id, fork_from: null, notice_id: null },
         from: { row: "user", agent: 0, ms },
         to: { row: "units", agent: id, ms: middle(unit) },
         external: null,

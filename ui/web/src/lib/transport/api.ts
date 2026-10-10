@@ -61,6 +61,7 @@ import type { NoticesFeed,
   RestartAgentResponse,
   ResurrectAgentResponse,
   RunTimelineContext,
+  RunTimelineLinkContent,
   RunTimelineLinks,
   RunTimelineMessages,
   RunTimelineResponse,
@@ -324,6 +325,14 @@ export const api = {
   ): Promise<RunTimelineLinks> => {
     const params = new URLSearchParams({ agents: agents.join(","), from: window.from, to: window.to });
     return f(`/api/insights/run-timeline/links?${params.toString()}`).then(ok<RunTimelineLinks>);
+  },
+
+  // The full text of the chat message or notice behind a selected arrow.
+  getRunTimelineLinkContent: (
+    ref: { inbound_id: number } | { notice_id: number },
+  ): Promise<RunTimelineLinkContent> => {
+    const params = new URLSearchParams(Object.entries(ref).map(([k, v]) => [k, String(v)]));
+    return f(`/api/insights/run-timeline/link-content?${params.toString()}`).then(ok<RunTimelineLinkContent>);
   },
 
   // The context breakdown of the LLM request at (or next after) message `at`:
