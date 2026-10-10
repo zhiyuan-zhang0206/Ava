@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from base.host.proc import run_bounded
 
 _PROBE = """
 import sys
@@ -41,13 +42,12 @@ def test_ci_throwaway_storage_reaches_separate_clusters_and_cleans_them() -> Non
     with tempfile.TemporaryDirectory(prefix="ava-ci-pg-", dir="/tmp") as directory:
         scratch = Path(directory) / "pg"
         scratch.mkdir()
-        result = subprocess.run(  # noqa: S603 — literal probe and test-owned paths
+        result = run_bounded(
             [sys.executable, "-c", _PROBE, str(scratch)],
             env={**os.environ, "AVA_PG_THROWAWAY_BASE": str(scratch), "TMPDIR": directory},
             capture_output=True,
             text=True,
             timeout=30,
-            check=False,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert list(scratch.iterdir()) == []
