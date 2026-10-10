@@ -7,6 +7,7 @@ import pytest
 
 import base.db
 from base.cluster import session_name
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
 from base.sessions.pty.client import SessionInfo
 from gateway.schedules import session_control
@@ -90,10 +91,10 @@ def _insert(conn: psycopg.Connection) -> int:
 
 
 def test_acknowledgement_loss_adopts_session_across_manager_restart(
-    db_conn: psycopg.Connection, backend: Backend
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
         assert manager.ScheduleManager(pool).sync_one(sid)
         # Simulate crash after convergence but before queue acknowledgement.
@@ -109,13 +110,13 @@ def test_acknowledgement_loss_adopts_session_across_manager_restart(
     "entrypoint", ["services.wake.schedule_manager.runner", "gateway.schedules.runner"]
 )
 def test_crash_after_session_birth_before_applied_write_adopts_provenance(
-    db_conn: psycopg.Connection, backend: Backend, entrypoint: str
+    db_conn: psycopg.Connection, backend: Backend, entrypoint: str, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
     backend.commands[session_name(f"schedule-{sid}")] = (
         f".venv/bin/python -m {entrypoint} {sid} 1; exit $?"
     )
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         assert manager.ScheduleManager(pool).sync_one(sid)
     assert backend.launches == 0
     assert backend.killed == []
@@ -125,14 +126,14 @@ def test_crash_after_session_birth_before_applied_write_adopts_provenance(
 
 
 def test_completed_applied_revision_is_not_rerun_by_unacknowledged_queue(
-    db_conn: psycopg.Connection, backend: Backend
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
     db_conn.execute(
         "UPDATE schedules SET applied_revision = 1, status = 'completed' WHERE id = %s", (sid,)
     )
     db_conn.commit()
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
         assert requests.consume_requests(pool, manager.ScheduleManager(pool)) == 1
     assert backend.launches == 0
@@ -140,14 +141,14 @@ def test_completed_applied_revision_is_not_rerun_by_unacknowledged_queue(
 
 
 def test_reap_failure_keeps_convergence_pending(
-    db_conn: psycopg.Connection, backend: Backend
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
     backend.commands[session_name(f"schedule-{sid}")] = (
         f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 0; exit $?"
     )
     backend.fail_reap = True
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
         assert requests.consume_requests(pool, manager.ScheduleManager(pool)) == 0
     assert backend.launches == 0
@@ -155,11 +156,11 @@ def test_reap_failure_keeps_convergence_pending(
 
 
 def test_failed_revision_keeps_backoff_across_consumer_retries(
-    db_conn: psycopg.Connection, backend: Backend
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
     backend.fail_launch = True
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         assert not manager.ScheduleManager(pool).sync_one(sid)
         assert not manager.ScheduleManager(pool).sync_one(sid)
     assert backend.launches == 1
@@ -169,7 +170,11 @@ def test_failed_revision_keeps_backoff_across_consumer_retries(
 
 
 def test_an_uncertain_live_revision_is_never_blindly_replaced(
-    db_conn: psycopg.Connection, backend: Backend, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    backend: Backend,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     sid = _insert(db_conn)
     backend.commands[session_name(f"schedule-{sid}")] = (
@@ -180,7 +185,7 @@ def test_an_uncertain_live_revision_is_never_blindly_replaced(
         return []
 
     monkeypatch.setattr(revisions.client, "list_sessions", unavailable)
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
         assert requests.consume_requests(pool, manager.ScheduleManager(pool)) == 0
     assert backend.launches == 0
@@ -189,7 +194,7 @@ def test_an_uncertain_live_revision_is_never_blindly_replaced(
 
 
 def test_a_failed_schedule_does_not_block_other_queued_revisions(
-    db_conn: psycopg.Connection, backend: Backend
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
     backend.commands[session_name(f"schedule-{sid}")] = "legacy"
@@ -200,7 +205,7 @@ def test_a_failed_schedule_does_not_block_other_queued_revisions(
     assert row is not None
     other = row[0]
     db_conn.commit()
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
         session_control.enqueue_blocking(pool, other)
         assert requests.consume_requests(pool, manager.ScheduleManager(pool)) == 1
@@ -209,7 +214,11 @@ def test_a_failed_schedule_does_not_block_other_queued_revisions(
 
 
 def test_independent_managers_cannot_own_one_schedule_concurrently(
-    db_conn: psycopg.Connection, backend: Backend, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    backend: Backend,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
@@ -226,7 +235,10 @@ def test_independent_managers_cannot_own_one_schedule_concurrently(
         return result
 
     monkeypatch.setattr(backend, "new_session", blocked)
-    with base.db.pool(max_size=4) as pool, ThreadPoolExecutor(max_workers=2) as workers:
+    with (
+        base.db.pool(max_size=4, gate=database_gate) as pool,
+        ThreadPoolExecutor(max_workers=2) as workers,
+    ):
         first = workers.submit(manager.ScheduleManager(pool).sync_one, sid)
         try:
             assert started.wait(5)
@@ -240,13 +252,17 @@ def test_independent_managers_cannot_own_one_schedule_concurrently(
 
 
 def test_newer_edit_during_launch_is_not_acknowledged_as_applied(
-    db_conn: psycopg.Connection, backend: Backend, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    backend: Backend,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from gateway.schedules import router
 
     sid = _insert(db_conn)
     allocate = backend.new_session
-    with base.db.pool(max_size=4) as pool:
+    with base.db.pool(max_size=4, gate=database_gate) as pool:
 
         def edit_during_launch(name: str, cmd: str, cwd: object, *, env: dict[str, str]) -> bool:
             result = allocate(name, cmd, cwd, env=env)
@@ -268,10 +284,10 @@ def test_newer_edit_during_launch_is_not_acknowledged_as_applied(
 
 
 def test_old_reap_retry_cannot_kill_a_matching_applied_replacement(
-    db_conn: psycopg.Connection, backend: Backend
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         mgr = manager.ScheduleManager(pool)
         assert mgr.sync_one(sid)
         mgr._reap_retries.add(sid)

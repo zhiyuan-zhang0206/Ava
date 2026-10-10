@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from base.db import Database, fetch_one, pool
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from gateway.agents.system_note import _system_note_blocking
 from gateway.app import app
@@ -34,12 +35,17 @@ def test_concurrent_retries_return_one_inbound(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         agent = int(fetch_one(cur, "fixture insert")[0])
     db_conn.commit()
-    with pool(max_size=4) as note_pool, ThreadPoolExecutor(max_workers=4) as executor:
+    with (
+        pool(max_size=4, gate=database_gate) as note_pool,
+        ThreadPoolExecutor(max_workers=4) as executor,
+    ):
 
         def send() -> int:
             return _system_note_blocking(
@@ -66,6 +72,8 @@ def test_replay_survives_reassignment_and_checks_content(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
@@ -79,7 +87,7 @@ def test_replay_survives_reassignment_and_checks_content(
         )
         task = int(fetch_one(cur, "fixture insert")[0])
     db_conn.commit()
-    with pool(max_size=1) as note_pool:
+    with pool(max_size=1, gate=database_gate) as note_pool:
         args = (database, event_bus, note_pool, agent, "note", "system", "task", task)
         first = _system_note_blocking(*args, client_message_id="assignment-note")
         with db_conn.cursor() as cur:
