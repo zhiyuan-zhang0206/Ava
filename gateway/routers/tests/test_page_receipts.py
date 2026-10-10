@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -119,10 +120,10 @@ def test_registration_replay_cannot_close_later_page(
     monkeypatch.setattr(settings.daemon, "page_default_ttl_seconds", 1)
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://changed.invalid")
 
-    async def no_old_events(*args: object) -> None:
+    async def no_old_events(*args: object, **kwargs: object) -> None:
         raise AssertionError("replaying historical acceptance must not publish obsolete events")
 
-    monkeypatch.setattr(pages, "_publish_page_event", no_old_events)
+    monkeypatch.setattr(app.state.bus, "publish_best_effort", no_old_events)
     replay = client.post(_path(agent), json=BODY, headers=HEADERS)
     assert replay.status_code == 201 and replay.json() == first.json()
     assert db_conn.execute("SELECT id FROM agent_pages WHERE closed_at IS NULL").fetchall() == [
@@ -200,10 +201,10 @@ def test_fresh_already_closed_observation_is_accepted(
     body = {"expected_page_id": first["id"]}
     accepted = client.post(_close_path(agent), json=body, headers=_key("close"))
 
-    async def forbid_old_hint(*args: object) -> None:
+    async def forbid_old_hint(*args: object, **kwargs: object) -> None:
         raise AssertionError("already-closed acceptance must not publish obsolete name hints")
 
-    monkeypatch.setattr(pages, "_publish_page_event", forbid_old_hint)
+    monkeypatch.setattr(app.state.bus, "publish_best_effort", forbid_old_hint)
     no_effect = client.post(_close_path(agent), json=body, headers=_key("already-closed"))
     assert no_effect.status_code == 200 and no_effect.json() == accepted.json()
 
@@ -227,12 +228,14 @@ def test_failure_before_receipt_rolls_back_replacement(
 ) -> None:
     agent = _agent(db_conn)
     first = client.post(_path(agent), json=BODY, headers=HEADERS)
-    original_finish = page_acceptance._finish
+    original_execute = cast("Any", psycopg.Connection.execute)
 
-    def fail(*args: object) -> None:
-        raise HTTPException(status_code=503, detail="fault before page receipt commit")
+    def fail(connection: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(query, str) and query.startswith("INSERT INTO page_operation_receipts"):
+            raise HTTPException(status_code=503, detail="fault before page receipt commit")
+        return original_execute(connection, query, *args, **kwargs)
 
-    monkeypatch.setattr(page_acceptance, "_finish", fail)
+    monkeypatch.setattr(psycopg.Connection, "execute", fail)
     assert (
         client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("pending")).status_code
         == 503
@@ -242,7 +245,7 @@ def test_failure_before_receipt_rolls_back_replacement(
     ]
     assert db_conn.execute("SELECT count(*) FROM page_operation_receipts").fetchone() == (1,)
     db_conn.commit()
-    monkeypatch.setattr(page_acceptance, "_finish", original_finish)
+    monkeypatch.setattr(psycopg.Connection, "execute", original_execute)
     recovered = client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("pending"))
     assert recovered.status_code == 201
 
@@ -319,12 +322,12 @@ def test_commit_survives_response_tail_failure(
 ) -> None:
     agent = _agent(db_conn)
 
-    async def fail_tail(*args: object) -> None:
+    async def fail_tail(*args: object, **kwargs: object) -> None:
         raise HTTPException(
             status_code=503, detail="acceptance committed; response tail unavailable"
         )
 
-    monkeypatch.setattr(pages, "_publish_page_event", fail_tail)
+    monkeypatch.setattr(app.state.bus, "publish_best_effort", fail_tail)
     assert client.post(_path(agent), json=BODY, headers=HEADERS).status_code == 503
     row = db_conn.execute("SELECT id FROM agent_pages WHERE agent_id=%s", (agent,)).fetchone()
     replay = client.post(_path(agent), json=BODY, headers=HEADERS)
@@ -396,22 +399,20 @@ def test_placement_is_locked_before_host_validation(
     db_conn.execute("UPDATE agents_meta SET machine='page-home' WHERE id=%s", (agent,))
     db_conn.commit()
     entered, proceed = Event(), Event()
-    original = pages._validate_page_dial_target
+    original = app.state.page_host_cache.dial_hosts
 
     def paused_validation(
         pool: ConnectionPool,
-        cache: pages.PageHostCache,
-        agent_id: int,
-        host: str,
-        port: int,
+        machine: str,
         *,
         connection: psycopg.Connection | None = None,
-    ) -> None:
+    ) -> frozenset[str]:
+        assert connection is not None
         entered.set()
         assert proceed.wait(5), "test did not release target validation"
-        original(pool, cache, agent_id, host, port, connection=connection)
+        return original(pool, machine, connection=connection)
 
-    monkeypatch.setattr(pages, "_validate_page_dial_target", paused_validation)
+    monkeypatch.setattr(app.state.page_host_cache, "dial_hosts", paused_validation)
     with ThreadPoolExecutor(max_workers=1) as executor:
         accepted = executor.submit(
             client.post, _path(agent), json={**BODY, "host": "page-home"}, headers=HEADERS
