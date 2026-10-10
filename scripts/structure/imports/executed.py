@@ -7,11 +7,9 @@ followed. Other execution inputs stay unresolved; this is not a Python evaluator
 from __future__ import annotations
 
 import ast
-from collections import Counter
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-from . import normalize
+from . import bindings
 
 _LAUNCHERS = frozenset(
     {f"subprocess.{name}" for name in ("run", "Popen", "call", "check_call", "check_output")}
@@ -45,95 +43,7 @@ class Inputs:
     unresolved: list[Unresolved] = field(default_factory=list[Unresolved])
 
 
-def _local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
-    """Walk this lexical scope, keeping nested scope bodies out of its bindings."""
-    for child in ast.iter_child_nodes(tree):
-        yield child
-        if not isinstance(
-            child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
-        ):
-            yield from _local_nodes(child)
-
-
-class _Scope:
-    def __init__(self, tree: ast.AST, path: str, parent: _Scope | None = None) -> None:
-        self.parent = parent
-        self.is_class = isinstance(tree, ast.ClassDef)
-        self.values: dict[str, ast.expr] = {}
-        self.origins: dict[str, str] = {}
-        self.functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
-        self.stores: Counter[str] = Counter()
-        for node in _local_nodes(tree):
-            self._bind(node, path)
-        if isinstance(tree, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
-            args = tree.args
-            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
-                self.stores[arg.arg] += 1
-            for arg in (args.vararg, args.kwarg):
-                if arg is not None:
-                    self.stores[arg.arg] += 1
-
-    def _bind(self, node: ast.AST, path: str) -> None:
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            self.stores[node.id] += 1
-        elif isinstance(node, ast.Assign):
-            self._assignment(node.targets, node.value)
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
-            self.values[node.target.id] = node.value
-        elif isinstance(node, ast.Import | ast.ImportFrom):
-            self._import(node, path)
-        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            self.functions[node.name] = node
-            self.stores[node.name] += 1
-        elif isinstance(node, ast.ClassDef):
-            self.stores[node.name] += 1
-
-    def _assignment(self, targets: list[ast.expr], value: ast.expr) -> None:
-        for target in targets:
-            if isinstance(target, ast.Name):
-                self.values[target.id] = value
-
-    def _import(self, node: ast.Import | ast.ImportFrom, path: str) -> None:
-        if isinstance(node, ast.ImportFrom) and node.level and not path:
-            return
-        for name, origin in normalize(node, path).origins.items():
-            self.origins[name] = origin
-            self.stores[name] += 1
-
-    def value(self, node: ast.expr) -> ast.expr:
-        """One unambiguous plain binding; parameters and rebinding remain opaque."""
-        if not isinstance(node, ast.Name):
-            return node
-        if node.id not in self.stores and self.parent is not None:
-            return self.parent.value(node)
-        return self.values.get(node.id, node) if self.stores[node.id] == 1 else node
-
-    def origin(self, node: ast.expr) -> str:
-        if isinstance(node, ast.Attribute):
-            base = self.origin(node.value)
-            return f"{base}.{node.attr}" if base else ""
-        if not isinstance(node, ast.Name):
-            return ""
-        if node.id not in self.stores and self.parent is not None:
-            return self.parent.origin(node)
-        if node.id == "__import__" and node.id not in self.stores:
-            return node.id
-        return self.origins.get(node.id, "") if self.stores[node.id] == 1 else ""
-
-    def function(self, name: str) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, _Scope] | None:
-        if name not in self.stores and self.parent is not None:
-            return self.parent.function(name)
-        node = self.functions.get(name)
-        return (node, self) if node is not None and self.stores[name] == 1 else None
-
-    def nested_parent(self) -> _Scope:
-        scope = self
-        while scope.is_class and scope.parent is not None:
-            scope = scope.parent
-        return scope
-
-
-def _argv(call: ast.Call, scope: _Scope) -> list[ast.expr] | None:
+def _argv(call: ast.Call, scope: bindings.Scope) -> list[ast.expr] | None:
     if scope.origin(call.func) == "asyncio.create_subprocess_exec":
         return call.args
     first = (
@@ -151,14 +61,18 @@ def _literal_text(node: ast.expr | None) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
-def _python_argv(call: ast.Call, scope: _Scope) -> list[ast.expr] | None:
+def _python_argv(call: ast.Call, scope: bindings.Scope) -> list[ast.expr] | None:
     argv = _argv(call, scope)
     if not argv or scope.origin(scope.value(argv[0])) != "sys.executable":
         return None
-    return argv if any(_literal_text(scope.value(item)) == "-c" for item in argv[1:]) else None
+    return (
+        argv if any(_literal_text(scope.value(item)) in {"-c", "-m"} for item in argv[1:]) else None
+    )
 
 
-def _code_input(call: ast.Call, scope: _Scope) -> tuple[ast.expr | None, str | None]:
+def _code_input(
+    call: ast.Call, scope: bindings.Scope, mode: str = "-c"
+) -> tuple[ast.expr | None, str | None]:
     """Locate -c without confusing option operands or trailing argv data with source."""
     argv = _python_argv(call, scope)
     if argv is None:
@@ -168,31 +82,36 @@ def _code_input(call: ast.Call, scope: _Scope) -> tuple[ast.expr | None, str | N
         flag = _literal_text(scope.value(argv[offset]))
         if flag is None:
             return None, "Python interpreter options are not literal"
-        if flag == "-c":
+        if flag == mode:
             if offset + 1 < len(argv):
                 return argv[offset + 1], None
-            return None, "Python -c argv has no source argument"
+            return None, f"Python {mode} argv has no input argument"
         if flag in {"-W", "-X"}:
             operand = scope.value(argv[offset + 1]) if offset + 1 < len(argv) else None
             if _literal_text(operand) is None:
                 return None, "Python interpreter option operands are not literal"
             offset += 2
-        elif not flag.startswith("-") or flag in {"-m", "--"}:
+        elif not flag.startswith("-") or flag in {"-c", "-m", "--"}:
             return None, None
         else:
             offset += 1
     return None, None
 
 
+def module_input(call: ast.Call, scope: bindings.Scope) -> tuple[ast.expr | None, str | None]:
+    """The actual Python -m operand, sharing the -c interpreter-option grammar."""
+    return _code_input(call, scope, "-m")
+
+
 def _helper_parameter(
-    node: ast.FunctionDef | ast.AsyncFunctionDef, parent: _Scope, path: str
+    node: ast.FunctionDef | ast.AsyncFunctionDef, parent: bindings.Scope, path: str
 ) -> str | None:
     if node.decorator_list:
         return None
-    scope = _Scope(node, path, parent.nested_parent())
+    scope = bindings.Scope(node, path, parent.nested_parent())
     launches = [
         call
-        for call in _local_nodes(node)
+        for call in bindings.local_nodes(node)
         if isinstance(call, ast.Call) and scope.origin(call.func) in _LAUNCHERS
     ]
     if len(launches) != 1:
@@ -268,24 +187,28 @@ def _literal_default(
 class _Inputs(ast.NodeVisitor):
     def __init__(self, tree: ast.AST, path: str) -> None:
         self.path = path
-        self.scope = _Scope(tree, path)
+        self.scope = bindings.Scope(tree, path)
         self.result = Inputs()
         self._template_launches: dict[int, tuple[int, ast.Call]] = {}
         self._used_functions: set[int] = set()
 
-    def _nested(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> None:
+    def _nested(self, node: bindings.ScopeNode) -> None:
         parent = self.scope
+        outer, inner = bindings.scope_parts(node)
+        for expression in outer:
+            self.visit(expression)
         lexical_parent = parent.nested_parent()
-        self.scope = _Scope(node, self.path, lexical_parent)
+        self.scope = bindings.Scope(node, self.path, lexical_parent)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             parameter = _helper_parameter(node, lexical_parent, self.path)
             if parameter is not None:
                 self._template_launches.update(
                     (id(call), (id(node), call))
-                    for call in _local_nodes(node)
+                    for call in bindings.local_nodes(node)
                     if isinstance(call, ast.Call) and self.scope.origin(call.func) in _LAUNCHERS
                 )
-        self.generic_visit(node)
+        for statement in inner:
+            self.visit(statement)
         self.scope = parent
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -298,10 +221,19 @@ class _Inputs(ast.NodeVisitor):
         self._nested(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        parent = self.scope
-        self.scope = _Scope(node, self.path, parent.nested_parent())
-        self.generic_visit(node)
-        self.scope = parent
+        self._nested(node)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._nested(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._nested(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._nested(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._nested(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         if self.scope.origin(node.func) in _LAUNCHERS and id(node) not in self._template_launches:
@@ -387,13 +319,17 @@ def import_facts(source: Source, path: str) -> ImportFacts:
 
 class _ImportFacts(ast.NodeVisitor):
     def __init__(self, tree: ast.AST, source: Source, path: str, facts: ImportFacts) -> None:
-        self.scope = _Scope(tree, "")
+        self.scope = bindings.Scope(tree, "")
         self.source, self.path, self.facts = source, path, facts
 
-    def _nested(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> None:
+    def _nested(self, node: bindings.ScopeNode) -> None:
         parent = self.scope
-        self.scope = _Scope(node, "", parent.nested_parent())
-        self.generic_visit(node)
+        outer, inner = bindings.scope_parts(node)
+        for expression in outer:
+            self.visit(expression)
+        self.scope = bindings.Scope(node, "", parent.nested_parent())
+        for statement in inner:
+            self.visit(statement)
         self.scope = parent
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -406,10 +342,19 @@ class _ImportFacts(ast.NodeVisitor):
         self._nested(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        parent = self.scope
-        self.scope = _Scope(node, "", parent.nested_parent())
-        self.generic_visit(node)
-        self.scope = parent
+        self._nested(node)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._nested(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._nested(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._nested(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._nested(node)
 
     def visit_Import(self, node: ast.Import) -> None:
         self.facts.clauses.append(node)

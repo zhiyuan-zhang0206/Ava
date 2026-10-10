@@ -342,13 +342,17 @@ def test_python_files_makes_location_the_test_definition(tmp_path: Path) -> None
 
 
 def test_a_module_named_test_outside_a_tests_directory_is_not_a_repo_test() -> None:
-    """The two known production modules named `test_*.py`, so a new one is noticed here."""
+    """Known production modules named `test_*.py` remain outside pytest collection."""
     outside = sorted(
         path
         for path in _tracked("*.py")
         if Path(path).name.startswith("test_") and "tests" not in path.split("/")[:-1]
     )
-    assert outside == ["base/db/test_db_guard.py", "scripts/ci/test_selector.py"]
+    assert outside == [
+        "base/db/test_db_guard.py",
+        "scripts/ci/test_impact.py",
+        "scripts/ci/test_selector.py",
+    ]
 
 
 @pytest.mark.parametrize("step", ["Run pytest shard", "Run flaky pytest bucket serially"])
