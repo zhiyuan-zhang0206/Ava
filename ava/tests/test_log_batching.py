@@ -12,6 +12,9 @@ from base import telemetry
 from datetime import UTC, datetime
 pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
 pipe._queue = queue.Queue(maxsize=1)
+pipe._admission_lock = threading.Lock()
+pipe._stop_requested = threading.Event()
+pipe._finished = threading.Event()
 pipe._dropped_lock = threading.Lock()
 pipe.dropped = 0
 pipe._drop_example = None
