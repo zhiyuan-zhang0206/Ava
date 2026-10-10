@@ -35,6 +35,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from base.agents import ShellSessionKillTiming
+from base.agents.messages.delivery_outbox import DeliverySenderConfig
 from ops.rpc_schemas.billing_recovery import BillingRecoveryMode, BillingRecoveryRunOutcome
 
 _TIMEOUT_S = 15.0
@@ -159,6 +160,7 @@ def cmd_agents_send(
     tail_file: str | None = None,
     *,
     completion: bool = False,
+    sender: DeliverySenderConfig | None = None,
 ) -> int:
     """`ava agents send <id> <content> --source S [--tail-file PATH]` — deliver a
     chat inbound via POST /api/agents/{id}/messages.
@@ -193,6 +195,7 @@ def cmd_agents_send(
         source=source,
         tail_file=tail_file,
         completion=completion,
+        sender=sender,
     )
     print(f"  ✓ agent {agent_id} send: {status}")
     return 0
@@ -227,6 +230,7 @@ def send_agent_message(
     source: str,
     tail_file: str | None = None,
     completion: bool = False,
+    sender: DeliverySenderConfig | None = None,
 ) -> str:
     """Deliver one chat inbound to `agent_id` carrying `source` — the single transport.
 
@@ -254,13 +258,14 @@ def send_agent_message(
     from base.config.service_read import ConfigAuthority
     from base.paths import ava_home
 
-    sender = delivery_outbox.DeliverySenderConfig(
-        ConfigAuthority(
-            runtime=settings,
-            all_domains=settings if settings.profile is None else Settings(profile=None),
-            env_path=ava_home() / ".env",
+    if sender is None:
+        sender = delivery_outbox.DeliverySenderConfig(
+            ConfigAuthority(
+                runtime=settings,
+                all_domains=settings if settings.profile is None else Settings(profile=None),
+                env_path=ava_home() / ".env",
+            )
         )
-    )
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.host.net.http_dial import post as dial_post
 
@@ -312,6 +317,7 @@ def send_agent_message(
         )
     elif resp.is_success:
         delivery_outbox.retire_send(
+            sender=sender,
             agent_id=agent_id,
             source=source,
             content=content,
@@ -320,6 +326,7 @@ def send_agent_message(
         )
     else:
         delivery_outbox.retire_send(
+            sender=sender,
             agent_id=agent_id,
             source=source,
             content=content,

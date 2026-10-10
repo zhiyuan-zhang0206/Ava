@@ -312,6 +312,7 @@ def install(
     *,
     catalog: ModelCatalog | None = None,
     authority: ConfigAuthority | None = None,
+    delivery_sender: DeliverySenderConfig | None = None,
 ) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `ava`; return the registry of the plugins admitted.
 
@@ -324,6 +325,8 @@ def install(
         raise RuntimeError(
             "the SDK surface is already installed; uninstall() it before installing another registry"
         )
+    if delivery_sender is not None and delivery_sender.authority is not authority:
+        raise ValueError("delivery sender belongs to another configuration authority")
     from base.packages.plugins import config_registration, flags
 
     from . import metering, sdk_disable
@@ -377,7 +380,8 @@ def install(
         configs=MappingProxyType(dict(build.configs)),
         catalog=catalog,
         authority=authority,
-        delivery_sender=DeliverySenderConfig(authority) if authority is not None else None,
+        delivery_sender=delivery_sender
+        or (DeliverySenderConfig(authority) if authority is not None else None),
     )
     setattr(ava_module(), _SLOT, installation)
     return installation.registry
@@ -396,8 +400,8 @@ def apply_config_overlay(overlay: dict[str, object]) -> None:
     setattr(ava_module(), _SLOT, replace(current, configs=MappingProxyType(configs)))
 
 
-def uninstall() -> None:
-    """Take the installed SDK surface back out of the process (a no-op when none is installed)."""
+def uninstall() -> Installation | None:
+    """Remove the SDK surface and return its owners for an explicit subsequent reinstall."""
     from . import metering
 
     installation = installed()
@@ -406,6 +410,7 @@ def uninstall() -> None:
     if installation is None:
         # A `_LOADING` marker is not an installation: leave it in place (a load may be
         # in flight; a failed attempt stays un-retried), a fresh install overwrites it.
-        return
+        return None
     setattr(ava_module(), _SLOT, None)
     _run(list(installation.undo))
+    return installation

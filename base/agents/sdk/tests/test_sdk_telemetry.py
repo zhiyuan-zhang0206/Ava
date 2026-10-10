@@ -448,11 +448,11 @@ def test_no_local_participant_uses_the_real_optional_gate(
 ) -> None:
     from base.agents.impersonation import manifest
 
-    assert manifest.admit_local_sdk_call() is None
+    with manifest.admitted_local_sdk_call() as admission:
+        assert admission is None
     emitted = _spy_emit(monkeypatch)
 
     def body() -> str:
-        assert not manifest.local_sdk_call_was_admitted()
         return "without-participant"
 
     assert (

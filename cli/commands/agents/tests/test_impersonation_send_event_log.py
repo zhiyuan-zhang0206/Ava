@@ -95,7 +95,6 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
         return snapshot
 
     monkeypatch.setattr(outbox, "limits", read_limits)
-    outbox._reset_caches_for_tests()
     monkeypatch.setattr(
         "base.native_process.ownership.process_metadata", lambda: attested_caller(lease)
     )

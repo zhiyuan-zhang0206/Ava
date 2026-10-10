@@ -646,10 +646,12 @@ def _record_skill_invoked(skill: Skill) -> None:
     kind: a failed write logs an error with its traceback and emits an
     `audit_write_failed` anomaly event instead of raising.
     """
+    import ava
     from ava.sdk_surface.agent_identity import require_agent_id
 
+    context = getattr(ava, "context", None)
     try:
-        agent = require_agent_id()
+        agent = require_agent_id(context)
     except RuntimeError:
         return
 
@@ -662,6 +664,7 @@ def _record_skill_invoked(skill: Skill) -> None:
         record_audit_reported,
     )
 
+    capture_owner = None if context is None else context.sdk_capture
     record_audit_reported(
         database(),
         prepare_event_log(
@@ -674,6 +677,7 @@ def _record_skill_invoked(skill: Skill) -> None:
                 invocation_depth="loaded",
             ).model_dump(),
         ),
+        **({"capture": capture_owner.capture_local_event} if capture_owner is not None else {}),
     )
 
 

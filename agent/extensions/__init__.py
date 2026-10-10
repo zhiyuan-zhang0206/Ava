@@ -153,8 +153,12 @@ def load_extensions(
     from ava.sdk_surface import install as sdk_install
     from ava.sdk_surface.plugin_loader import safe_load_plugin_module
 
-    if not surface:
-        sdk_install.uninstall()
+    previous = sdk_install.uninstall() if not surface else None
+    sender = (
+        previous.delivery_sender
+        if previous is not None and previous.authority is authority
+        else None
+    )
 
     discovered, config = _discovered_and_config(report)
 
@@ -178,7 +182,14 @@ def load_extensions(
 
     registry = build_registry(SURFACE_FACES if surface else ALL_FACES, report)
     return LoadedExtensions(
-        config, sdk_install.install(registry, report, catalog=catalog, authority=authority)
+        config,
+        sdk_install.install(
+            registry,
+            report,
+            catalog=catalog,
+            authority=authority,
+            delivery_sender=sender,
+        ),
     )
 
 

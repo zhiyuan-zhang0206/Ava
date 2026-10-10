@@ -94,9 +94,7 @@ def journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     )
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
     env_path.write_text("AVA_DELIVERY_OUTBOX_ENABLED=true\n")
-    outbox._reset_caches_for_tests()
     yield tmp_path
-    outbox._reset_caches_for_tests()
 
 
 def _ok_response() -> MagicMock:
@@ -376,7 +374,6 @@ def test_disabled_outbox_records_nothing_and_never_reuses_keys(
         return _limits(enabled=False)
 
     monkeypatch.setattr(outbox, "limits", read_limits)
-    outbox._reset_caches_for_tests()
     mock_client.post.side_effect = httpx.ConnectError("refused")
     with pytest.raises(GatewayUnavailable):
         send_message(42, content="hello", source="watcher:7")

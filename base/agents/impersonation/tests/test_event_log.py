@@ -17,14 +17,13 @@ from base.agents.impersonation import event_log
 from base.agents.impersonation import history as history
 from base.agents.impersonation.event_signals import emit_incomplete_event_logs
 from base.agents.impersonation.manifest import (
+    LocalCaptureGate,
     LocalParticipant,
-    bind_local_participant,
     capture_local_event,
     open_local_participant,
     pending_reason,
     record_central_event,
     seal_local_participant,
-    unbind_local_participant,
 )
 from base.agents.impersonation.tests import test_history as history_cases
 from base.cluster.machine import machine_name
@@ -127,12 +126,9 @@ def _participant(owner: RuntimeIncarnation, lease: dict[str, Any], key: str) -> 
 
 
 def _capture(participant: LocalParticipant, events: list[Event]) -> None:
-    bind_local_participant(participant)
-    try:
-        for event in events:
-            capture_local_event(event)
-    finally:
-        unbind_local_participant(participant)
+    gate = LocalCaptureGate(participant)
+    for event in events:
+        capture_local_event(event, gate=gate)
 
 
 def test_new_automatic_lease_is_log_native(lease: dict[str, Any]) -> None:
@@ -259,7 +255,7 @@ def test_local_events_are_recorded_sealed_and_complete_at_release(
     first, second = _sdk_event(owner.agent_id, "one"), _sdk_event(owner.agent_id, "two")
     _capture(participant, [first, second, first])
     assert _rows(db_conn, lease["id"], "local-happy") == 2
-    seal_local_participant(participant)
+    seal_local_participant(LocalCaptureGate(participant))
     assert db_conn.execute(
         "SELECT state,item_count FROM agent_impersonation_event_participants "
         "WHERE lease_id=%s AND source_key='local-happy'",
@@ -303,7 +299,7 @@ def test_expiry_with_an_open_source_stays_pending_until_it_seals(
 
     _capture(participant, [_sdk_event(owner.agent_id, "after-expiry")])
     assert _rows(db_conn, lease["id"], "late-seal") == 1
-    seal_local_participant(participant)
+    seal_local_participant(LocalCaptureGate(participant))
     done = history.resolve(database, owner.agent_id, 0)
     assert done["events_completed_at"] is not None
     assert pending_reason(done) is None
@@ -346,7 +342,8 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
 ) -> None:
     monkeypatch.setattr(event_log, "MAX_LOG_ENTRIES", 1)
     participant = _participant(owner, lease, "capped")
-    _capture(participant, [_sdk_event(owner.agent_id, "over-cap")])
+    with pytest.raises(RuntimeError, match="entry cap"):
+        _capture(participant, [_sdk_event(owner.agent_id, "over-cap")])
     assert db_conn.execute(
         "SELECT state FROM agent_impersonation_event_participants WHERE lease_id=%s "
         "AND source_key='capped'",
@@ -390,7 +387,7 @@ def test_an_ended_lease_with_an_open_source_signals_by_state_until_it_seals(
     assert events[0]["lease_id"] == participant.lease_id
     assert events[0]["agent_id"] == owner.agent_id
     loguru_records.clear()
-    seal_local_participant(participant)
+    seal_local_participant(LocalCaptureGate(participant))
     assert emit_incomplete_event_logs(db_conn) == 0
     assert _incomplete_events(loguru_records) == []
 
@@ -403,7 +400,7 @@ def test_agent_termination_completes_a_fully_sealed_lease(
 ) -> None:
     participant = _participant(owner, lease, "terminated")
     _capture(participant, [_sdk_event(owner.agent_id, "before-termination")])
-    seal_local_participant(participant)
+    seal_local_participant(LocalCaptureGate(participant))
     # SQL ends the lease, then closes admission: the close must finish the lease too.
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
@@ -426,7 +423,7 @@ def test_the_handoff_lists_events_in_call_order_not_write_order(
         for offset, fn in ((0, "agents.list_agents"), (1, "agents.get_status"), (2, "x.third"))
     ]
     _capture(participant, list(reversed(calls)))
-    seal_local_participant(participant)
+    seal_local_participant(LocalCaptureGate(participant))
     leases.release(
         database, event_bus, participant.lease_id, attested_caller(lease), "Three calls in order"
     )
@@ -467,7 +464,7 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     db_conn.commit()
 
     _capture(participant, [_sdk_event(owner.agent_id, "after-handoff")])
-    seal_local_participant(participant)
+    seal_local_participant(LocalCaptureGate(participant))
     exported = json.loads(Path(path).read_text())
     delivery = exported["statistics"]["event_delivery"]
     assert delivery["state"] == "complete"
@@ -489,7 +486,7 @@ def test_the_reaper_pass_signals_a_stuck_source_until_it_seals(
     with pool(max_size=2) as reaper_pool:
         assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1
         assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1  # state, not edge
-        seal_local_participant(participant)
+        seal_local_participant(LocalCaptureGate(participant))
         assert maintenance.signal_incomplete_event_logs(reaper_pool) == 0
     assert [e["condition"] for e in _incomplete_events(loguru_records)] == [
         "seal_stuck",

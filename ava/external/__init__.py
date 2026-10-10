@@ -104,7 +104,8 @@ class Attachment:
         self._stack = ExitStack()
         # The attached agent's pins and plugin-config view (`ava.sdk_surface.settings._attached` reads it through the lease), once loaded.
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
-        self._event_participant: Any = None
+        self._event_gate: Any = None
+        self._call_lock = Lock()
         # The process's own context, put back at detach; `_bound` says this attachment bound one.
         self._prior_context = bound
         self._bound = False
@@ -172,9 +173,31 @@ class Attachment:
                 bound or AvaContext(clients=process_context.process_clients()),
                 catalog=sdk_settings.model_catalog(),
                 identity=dataclasses.replace(own, lease=borrowed),
+                sdk_capture=self,
             )
         )
         self._bound = True
+
+    def admit_sdk_call(self) -> Any:
+        """Snapshot this call's original gate before its body can run."""
+        with self._call_lock:
+            if self._closed or self._closing:
+                raise RuntimeError("external attachment is closing or closed")
+            gate = self._event_gate
+            if gate is None:
+                self._validate()
+                return None
+            with gate.condition:
+                if self._closed or self._closing or gate.admission_closed:
+                    raise RuntimeError("external attachment is closing or closed")
+                self._validate()
+                return gate.admit()
+
+    def capture_local_event(self, event: Any) -> Any:
+        """Capture a direct audit using this attachment's own retained receipt."""
+        from base.agents.impersonation.manifest import capture_local_event
+
+        return capture_local_event(event, gate=self._event_gate)
 
     def _lease(self) -> dict[str, Any]:
         lease = control.require_active(database(), self.lease_id, process_metadata())
@@ -182,14 +205,9 @@ class Attachment:
             raise RuntimeError(f"external SDK must run on agent machine {lease['machine']!r}")
         return lease
 
-    def _validate(self, *, allow_closing: bool = False) -> int:
+    def _validate(self) -> int:
         if self._closed:
             raise RuntimeError("external attachment is closed")
-        if self._closing and not allow_closing:
-            from base.agents.impersonation.manifest import local_sdk_call_was_admitted
-
-            if not local_sdk_call_was_admitted():
-                raise RuntimeError("external attachment is closing")
         lease = self._lease()
         if lease["delta_version"] != self._version:
             raise RuntimeError(
@@ -205,7 +223,9 @@ class Attachment:
         """Stage plugin state; attachment close alone may finish this operation."""
         import ava
 
-        self._validate(allow_closing=allow_closing)
+        if self._closing and not allow_closing:
+            raise RuntimeError("external attachment is closing")
+        self._validate()
         if not isinstance(ava.state_update, dict):
             raise TypeError("external plugin state update must be a dict")
         if ava.state_update:
@@ -224,6 +244,7 @@ class Attachment:
         """Flush plugin changes and remove the borrowed identity even if flushing fails."""
         if self._closed or self._closing:
             return
+        primary: BaseException | None = None
         try:
             self._begin_event_participant_close()
             was_permitted = _close_flush_permitted()
@@ -232,22 +253,30 @@ class Attachment:
                 self.flush()
             finally:
                 _close_flush_permission.allowed = was_permitted
-        finally:
+        except BaseException as exc:
+            primary = exc
+        # Receipt closure precedes observation delivery and detach. Every cleanup
+        # runs; a later failure cannot replace the exact original close error.
+        for cleanup in (
+            self._seal_event_participant,
+            _deliver_telemetry_before_detach,
+            self._detach,
+        ):
             try:
-                # Receipt closure precedes the best-effort observation flush: the
-                # receipt seals the event log, which no longer depends on delivery.
-                self._seal_event_participant()
-            finally:
-                try:
-                    _deliver_telemetry_before_detach()
-                finally:
-                    self._detach()
+                cleanup()
+            except BaseException as secondary:
+                if primary is None:
+                    primary = secondary
+                else:
+                    primary.add_note(f"Attachment close cleanup also failed: {secondary!r}")
+        if primary is not None:
+            raise primary
 
     def _open_event_participant(self) -> None:
         """Register this controller before it can emit a protocol-v1 event."""
         from base.agents.impersonation.manifest import (
+            LocalCaptureGate,
             LocalParticipant,
-            bind_local_participant,
             is_log_native,
             open_local_participant,
         )
@@ -264,12 +293,11 @@ class Attachment:
                 source_key=source_key,
                 db=db,
             )
-            bind_local_participant(participant)
-            self._event_participant = participant
+            self._event_gate = LocalCaptureGate(participant)
 
     def _seal_event_participant(self) -> None:
         """Close admission, drain local SDK work, then seal the durable receipt."""
-        if self._event_participant is None:
+        if self._event_gate is None:
             return
         from base.agents.impersonation.manifest import (
             close_local_participant_admission,
@@ -278,27 +306,28 @@ class Attachment:
         from base.config import settings
 
         drained = close_local_participant_admission(
-            self._event_participant,
+            self._event_gate,
             timeout=settings.general.impersonation_event_seal_wait_seconds,
         )
         # A call still running after the wait seals its own source when it drains; the
         # wait never turns a live source into an empty or failed receipt. An ended lease
         # that keeps an open source is signalled by state (impersonation_event_log_incomplete).
         if drained:
-            seal_local_participant(self._event_participant)
+            seal_local_participant(self._event_gate)
 
     def _begin_event_participant_close(self) -> None:
         """Atomically start close and fence new SDK admission."""
-        if self._event_participant is None:
-            self._closing = True
+        if self._event_gate is None:
+            with self._call_lock:
+                self._closing = True
             return
         from base.agents.impersonation.manifest import begin_local_participant_close
 
         # The gate lock makes setting `_closing` and closing admission one
         # linearization point. A call admitted before it may drain; one that
-        # starts after it has no admission and `_validate` rejects it.
+        # starts after it is rejected by its public call admission owner.
         begin_local_participant_close(
-            self._event_participant,
+            self._event_gate,
             lambda: setattr(self, "_closing", True),
         )
 
@@ -310,11 +339,6 @@ class Attachment:
             return
         self._closed = True
         try:
-            if self._event_participant is not None:
-                from base.agents.impersonation.manifest import unbind_local_participant
-
-                unbind_local_participant(self._event_participant)
-                self._event_participant = None
             if self._bound and self._prior_context is not None:
                 ava.bind_context(self._prior_context)
             elif self._bound:
@@ -342,7 +366,12 @@ class Attachment:
         _error: BaseException | None,
         _trace: TracebackType | None,
     ) -> None:
-        self.close()
+        try:
+            self.close()
+        except BaseException as secondary:
+            if _error is None:
+                raise
+            _error.add_note(f"Attachment context cleanup also failed: {secondary!r}")
 
 
 def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
