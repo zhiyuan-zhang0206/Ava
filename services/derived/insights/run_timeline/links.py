@@ -49,7 +49,9 @@ def _int(value: object) -> int | None:
 
 def _message_inbound(row: dict[str, object]) -> int | None:
     attrs = row["attributes"]
-    return _int(attrs.get("inbound_id")) if isinstance(attrs, dict) else None
+    return (
+        _int(cast(dict[str, object], attrs).get("inbound_id")) if isinstance(attrs, dict) else None
+    )
 
 
 def _chat_inbounds(conn: psycopg.Connection, page: list[dict[str, Any]]) -> set[int]:
