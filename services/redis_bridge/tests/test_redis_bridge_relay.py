@@ -16,18 +16,16 @@ from services.redis_bridge import relay
 
 
 @pytest.fixture
-def connection() -> Iterator[tuple[socket.socket, socket.socket, threading.Thread]]:
+def connection() -> Iterator[tuple[socket.socket, socket.socket, relay._Connection]]:
     client, relay_client = socket.socketpair()
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen(1)
         listener.settimeout(3.0)
-        handler = threading.Thread(
-            target=relay._handle,
-            args=(relay_client, ("127.0.0.1", 12345), listener.getsockname()),
-            daemon=True,
+        errors: list[BaseException] = []
+        handler = relay._Connection(
+            relay_client, ("127.0.0.1", 12345), listener.getsockname(), errors.append
         )
-        handler.start()
         backend, _ = listener.accept()
     client.settimeout(3.0)
     backend.settimeout(3.0)
@@ -38,8 +36,8 @@ def connection() -> Iterator[tuple[socket.socket, socket.socket, threading.Threa
             with suppress(OSError):
                 endpoint.shutdown(socket.SHUT_RDWR)
             endpoint.close()
-        handler.join(timeout=3.0)
-        assert not handler.is_alive(), "relay must reclaim both pumps on peer closure"
+        assert handler.stop(3.0), "relay must reclaim both pumps on peer closure"
+        assert not errors
         assert relay_client.fileno() == -1
 
 
@@ -51,7 +49,7 @@ def _read_to_eof(endpoint: socket.socket) -> bytes:
 
 
 def test_idle_connection_survives_the_five_second_connect_deadline(
-    connection: tuple[socket.socket, socket.socket, threading.Thread],
+    connection: tuple[socket.socket, socket.socket, relay._Connection],
 ) -> None:
     client, backend, handler = connection
     backend.sendall(b"ready")
@@ -59,8 +57,8 @@ def test_idle_connection_survives_the_five_second_connect_deadline(
 
     # A real idle wait is intentional: a socketpair mock never inherits the
     # timeout socket.create_connection installs on the connected backend.
-    handler.join(timeout=6.0)
-    assert handler.is_alive(), "an established connection must have no idle deadline"
+    handler._thread.join(timeout=6.0)
+    assert handler._thread.is_alive(), "an established connection must have no idle deadline"
     backend.sendall(b"wake")
     assert client.recv(4) == b"wake"
     client.sendall(b"ack")
@@ -69,7 +67,7 @@ def test_idle_connection_survives_the_five_second_connect_deadline(
 
 @pytest.mark.parametrize("initiator", ["client", "backend"])
 def test_half_close_delivers_the_complete_reverse_stream(
-    connection: tuple[socket.socket, socket.socket, threading.Thread],
+    connection: tuple[socket.socket, socket.socket, relay._Connection],
     initiator: str,
 ) -> None:
     client, backend, handler = connection
@@ -88,12 +86,12 @@ def test_half_close_delivers_the_complete_reverse_stream(
         received = _read_to_eof(first)
         result.result(timeout=3.0)
     assert received == payload
-    handler.join(timeout=3.0)
-    assert not handler.is_alive()
+    handler._thread.join(timeout=3.0)
+    assert not handler._thread.is_alive()
 
 
 def test_reset_backend_reclaims_a_pump_blocked_on_an_open_client(
-    connection: tuple[socket.socket, socket.socket, threading.Thread],
+    connection: tuple[socket.socket, socket.socket, relay._Connection],
 ) -> None:
     client, backend, handler = connection
     client.sendall(b"ready")
@@ -101,6 +99,32 @@ def test_reset_backend_reclaims_a_pump_blocked_on_an_open_client(
     linger_format = "HH" if sys.platform == "win32" else "ii"
     backend.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack(linger_format, 1, 0))
     backend.close()
-    handler.join(timeout=3.0)
-    assert not handler.is_alive(), "a transport failure must interrupt the reverse pump"
+    handler._thread.join(timeout=3.0)
+    assert not handler._thread.is_alive(), "a transport failure must interrupt the reverse pump"
     assert client.recv(1) == b""
+
+
+def test_backpressure_preserves_all_bytes_until_the_receiver_drains(
+    connection: tuple[socket.socket, socket.socket, relay._Connection],
+) -> None:
+    client, backend, handler = connection
+    client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+    assert handler._backend is not None
+    handler._backend.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+    payload = bytes(range(256)) * 16384
+    sent = threading.Event()
+
+    def send() -> None:
+        client.sendall(payload)
+        client.shutdown(socket.SHUT_WR)
+        sent.set()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        sending = executor.submit(send)
+        assert not sent.wait(0.05), "a full destination must backpressure the source"
+        assert _read_to_eof(backend) == payload
+        sending.result(timeout=3.0)
+    backend.shutdown(socket.SHUT_WR)
+    assert _read_to_eof(client) == b""
+    handler._thread.join(timeout=3.0)
+    assert handler.completed()
