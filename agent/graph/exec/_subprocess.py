@@ -2,7 +2,7 @@
 collect one disposable child per execute_code call.
 
 The parent polls every 50ms and owns teardown through direct-child reap,
-root-independent process-domain close, and a bounded output-reader join. POSIX
+root-independent process-domain close, and a bounded output EOF tail. POSIX
 owns a new process group. The child's result
 envelope stays advisory except for lifecycle outcomes. It spawns
 `python -I -B -X utf8 -m agent.execution.child`: isolated mode keeps the inherited cwd
@@ -15,13 +15,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import io
 import json
 import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -38,6 +36,7 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.paths import exec_run_dir
 
 from . import _process
+from ._output_pipe import ExecOutputPipe
 from ._result import (
     ExecChildError,
     _construct_exec_result,
@@ -209,28 +208,6 @@ def _spawn(
         raise _ExecNeverStartedError(str(original)) from original
 
 
-def _drain_output(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
-    """Reader thread: pull merged stdout+stderr chunks into the shared stream
-    until pipe EOF. Decoded lossily (`errors="replace"`) — the envelope and the
-    result path never depend on this decode."""
-    stdout = proc.stdout
-    assert isinstance(stdout, io.BufferedReader), (  # noqa: S101 — PIPE was requested at spawn
-        f"exec child stdout is {type(stdout).__name__}, expected BufferedReader"
-    )
-    try:
-        while True:
-            # read1: at most one raw pipe read — returns the bytes available
-            # NOW. Plain read(65536) blocks until the buffer fills or EOF,
-            # which would hold every chunk back until the child exits and
-            # kill live streaming (verified: the first version did exactly that).
-            chunk = stdout.read1(65536)
-            if not chunk:
-                return
-            stream.write(chunk.decode("utf-8", errors="replace"))
-    except (OSError, ValueError):
-        return  # pipe broken mid-run — whatever was captured stands
-
-
 async def _poll_child(
     proc: subprocess.Popen[bytes],
     root_exit_task: asyncio.Task[None],
@@ -239,12 +216,14 @@ async def _poll_child(
     cancel_event: asyncio.Event,
     timeout: float,
     domain_close: _process.DomainCloseOwner,
+    reader: ExecOutputPipe,
 ) -> tuple[bool, bool]:
     """Poll every 50ms and publish chunks. POSIX signals SIGINT on cancel and
     SIGTERM on deadline. Returns
     (cancelled, timed_out); on a same-tick race cancel wins."""
     deadline = time.monotonic() + timeout
     while not root_exit_task.done():
+        reader.pump()
         # Incrementally publish accumulated stream chunks to frontend.
         if chunk_publisher is not None:
             pending = stream.take_pending()
@@ -299,7 +278,7 @@ async def _finish_failed_run(
     reap_task: asyncio.Task[int] | None,
     domain_close: _process.DomainCloseOwner | None,
     reader_join_task: asyncio.Task[None] | None,
-    reader: threading.Thread | None,
+    reader: ExecOutputPipe | None,
     *,
     request_paths: tuple[Path, Path] | None = None,
     resources: HostedTurnResources | None,
@@ -361,15 +340,15 @@ def _retain_late_reader_completion(
     failure: _process.ExecTeardownError,
     request: Path,
     result: Path,
-    reader: threading.Thread | None,
+    reader: ExecOutputPipe | None,
     *,
     resources: HostedTurnResources | None,
 ) -> None:
-    """A failed bounded join may later finish; other failed stages stay unknown.
+    """A pipe exceeding its bounded EOF tail may finish later; other failures stay unknown.
 
     ExecTeardownError includes every failed stage after all owner tasks have
     completed. A reader-only failure therefore positively proves close/root/reap.
-    This callback waits for that same reader, never retries a released POSIX pgid.
+    This observer pumps that same pipe, never retries a released POSIX pgid.
     """
     scope = resources
     if scope is None or reader is None or not failure.failures:
@@ -379,10 +358,12 @@ def _retain_late_reader_completion(
     domain = scope.unresolved[request]
 
     async def complete_reader() -> None:
-        # This is optional observation, not a second join owner. Cancellation
-        # must not strand an executor thread waiting for a detached pipe writer.
-        while reader.is_alive():
-            await asyncio.sleep(0.05)
+        # The original pipe stays unresolved until actual EOF. Observation
+        # yields between nonblocking reads and does not acquire writer kill authority.
+        while not reader.closed:
+            reader.pump()
+            if not reader.closed:
+                await asyncio.sleep(0.05)
         if scope.complete(request, domain):
             for path in (request, result):
                 with contextlib.suppress(FileNotFoundError):
@@ -491,7 +472,7 @@ async def _run_legacy_subprocess(
 
     stream = StreamingTextIO(max_chars=accumulation_max_chars)
     domain: ExecProcessDomain | None = None
-    reader: threading.Thread | None = None
+    reader: ExecOutputPipe | None = None
     root_exit_task: asyncio.Task[None] | None = None
     reap_task: asyncio.Task[int] | None = None
     domain_close: _process.DomainCloseOwner | None = None
@@ -523,13 +504,8 @@ async def _run_legacy_subprocess(
         domain_close = _process.DomainCloseOwner(domain, root_exit_task)
         reap_task = _process.start_reap(proc, domain_close)
 
-        reader = threading.Thread(
-            target=_drain_output,
-            args=(proc, stream),
-            daemon=True,
-            name=f"exec-reader-{agent_id}",
-        )
-        reader.start()
+        reader = ExecOutputPipe(proc, stream)
+        reader.watch()
 
         reader_join_task = _process.start_reader_join(reap_task, reader, proc.pid)
 
@@ -541,6 +517,7 @@ async def _run_legacy_subprocess(
             cancel_event,
             timeout,
             domain_close,
+            reader,
         )
         await _collect_child(
             proc,
@@ -571,7 +548,7 @@ async def _run_legacy_subprocess(
     except asyncio.CancelledError as original:
         # The exec node's outer shield (asyncio.wait_for) cancels this task on
         # node timeout. Cancellation is not complete until every owned resource
-        # is settled; otherwise the next exec inherits a zombie/thread leak.
+        # is settled; otherwise the next exec inherits unresolved process/pipe resources.
         resources_settled = await _finish_failed_run(
             original,
             root_exit_task,

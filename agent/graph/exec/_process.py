@@ -1,7 +1,7 @@
 """Owned lifetime of one disposable ``execute_code`` process tree.
 
 Each run has exactly one direct-child reap task, one domain-close task, and one
-reader-join task. The direct child owns a POSIX process group.
+bounded output EOF tail task. The direct child owns a POSIX process group.
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ import psutil
 
 from base.log import logger
 from base.native_process.exec_domain import ExecProcessDomain as ExecProcessDomain
+
+from ._output_pipe import ExecOutputPipe
 
 _READER_JOIN_TIMEOUT_S = 5.0
 _EMERGENCY_SETTLE_TIMEOUT_S = 5.0
@@ -141,18 +143,16 @@ def start_reap(proc: subprocess.Popen[bytes], domain_close: DomainCloseOwner) ->
 
 
 def start_reader_join(
-    reap_task: asyncio.Task[int], reader: threading.Thread, pid: int
+    reap_task: asyncio.Task[int], reader: ExecOutputPipe, pid: int
 ) -> asyncio.Task[None]:
-    """Make one bounded reader join after the root's sole reap attempt."""
+    """Pump one bounded output EOF tail after the root's sole reap attempt."""
 
     async def _join_after_reap() -> None:
         # Wait for the reap to settle without reading its result: `settle_resources` reports
-        # a reap failure, and the reader is still joined once.
+        # a reap failure, and the output tail is still pumped once.
         await asyncio.wait({reap_task})
-        # Put the bound inside Thread.join: wait_for(to_thread(join)) cancels
-        # only the Future and leaves the executor worker blocked indefinitely.
-        await asyncio.to_thread(reader.join, _READER_JOIN_TIMEOUT_S)
-        if reader.is_alive():
+        await reader.finish(_READER_JOIN_TIMEOUT_S)
+        if not reader.closed:
             raise RuntimeError(
                 f"exec reader for pid {pid} remained alive after its process "
                 f"domain closed and {_READER_JOIN_TIMEOUT_S}s join elapsed"
@@ -197,8 +197,8 @@ async def settle_resources(
 ) -> tuple[TeardownFailure, ...]:
     """Observe every cleanup owner, then return failures in stable priority.
 
-    Failed closure stops exit observation and blocks reap; the bounded reader
-    join still runs. The retained child is unresolved, never declared exited.
+    Failed closure stops exit observation and blocks reap; the bounded output
+    tail still runs. The retained child is unresolved, never declared exited.
     """
     if request_stop:
         domain_close.request()
@@ -237,7 +237,7 @@ async def finish_teardown_despite_cancellation(
     domain_close: DomainCloseOwner,
     reader_join_task: asyncio.Task[None] | None,
 ) -> tuple[TeardownFailure, ...]:
-    """Finish the close→reap→reader barrier despite repeated cancellation."""
+    """Finish the close→reap→output EOF barrier despite repeated cancellation."""
 
     async def _cleanup() -> tuple[TeardownFailure, ...]:
         return await settle_resources(
@@ -259,7 +259,7 @@ async def finish_teardown_despite_cancellation(
 
 def settle_cancelled_owners(
     domain_close: DomainCloseOwner,
-    reader: threading.Thread | None,
+    reader: ExecOutputPipe | None,
 ) -> tuple[TeardownFailure, ...]:
     """Synchronously settle resources whose async owners Runner cancelled.
 
@@ -288,11 +288,11 @@ def settle_cancelled_owners(
 
     if reader is not None:
         try:
-            reader.join(max(0.0, deadline - time.monotonic()))
+            reader.finish_now(max(0.0, deadline - time.monotonic()))
         except BaseException as exc:
             failures.append(TeardownFailure("reader_join", exc))
         else:
-            if reader.is_alive():
+            if not reader.closed:
                 failures.append(
                     TeardownFailure(
                         "reader_join",
