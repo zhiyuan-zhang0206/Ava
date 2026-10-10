@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "base/events/live/redis_listener.py::asyncio-task:RedisInboundListener._wait_one_impl": 2
-  }
-}

@@ -56,14 +56,16 @@ def _client(monkeypatch: pytest.MonkeyPatch, redis: _Redis) -> None:
     monkeypatch.setattr(redis_listener.aredis.Redis, "from_url", from_url)
 
 
+@pytest.mark.parametrize("eager", [False, True])
 async def test_cancelling_open_wait_cancels_child_without_waiting_for_rollback(
     monkeypatch: pytest.MonkeyPatch,
+    eager: bool,
 ) -> None:
     pubsub = _PubSub()
     redis = _Redis(pubsub)
     _client(monkeypatch, redis)
     listener = redis_listener.RedisInboundListener("redis://unused", 7001)
-    parent = asyncio.create_task(listener.wait_one(30))
+    parent = asyncio.create_task(listener.ensure_listening() if eager else listener.wait_one(30))
     try:
         await pubsub.entered.wait()
         parent.cancel()

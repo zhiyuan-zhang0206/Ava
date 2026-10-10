@@ -1,9 +1,9 @@
 """Long-lived Redis pub/sub listener with auto-reconnect + re-subscribe.
 
 Wraps a per-agent subscription for external CLI message waiting, exposing
-`wait_one`, `ensure_listening` and `close`. The agent host uses its own shared
-subscription and durable pending-work scan; idle agents do not park a graph
-invocation on this listener.
+`wait_one`, `ensure_listening`, resource `close` and terminal `stop`. The agent
+host uses its own shared subscription and durable pending-work scan; idle agents
+do not park a graph invocation on this listener.
 
 Channel: `<prefix>:inbound:{agent_id}` (`base.cluster.inbound_channel`), inside
 the cluster Redis ACL grant. Wake delivery uses Redis because PgBouncer
@@ -24,6 +24,7 @@ socket can answer ping while its `get_message` remains stuck forever.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from enum import StrEnum
 from typing import Any, cast
@@ -78,13 +79,21 @@ class WakeFailure(StrEnum):
     ACL_DENIED = "acl_denied"
 
 
+class _Phase(StrEnum):
+    OPEN = "open"
+    EAGER_OPEN = "eager-open"
+    CONSUME = "consume"
+    CONSUME_CLEANUP = "consume-cleanup"
+    STOP_CLEANUP = "stop-cleanup"
+
+
 class RedisInboundListener:
     """Per-agent Redis pub/sub listener for inbound message wake-ups.
 
     Subscribes to the cluster-scoped `<prefix>:inbound:{agent_id}`
     (`base.cluster.inbound_channel`) and exposes `wait_one(timeout)` /
-    `ensure_listening()` / `close()` — the interface `wait_for_inbound` relies
-    on.
+    `ensure_listening()` / resource `close()`, with terminal `stop()` owned by
+    the CLI consumer lifetime.
 
     Auto-reconnects on connection loss: if the Redis connection dies
     (network blip, Redis restart), the next `wait_one` or `ensure_listening`
@@ -102,6 +111,13 @@ class RedisInboundListener:
         self._redis: aredis.Redis | None = None
         self._pubsub: _RedisPubSub | None = None
         self._lock = asyncio.Lock()
+        self._stopped = False
+        self._generation = 0
+        self._operations: dict[asyncio.Task[Any], _Phase] = {}
+        self._operation_number = 0
+        self._abandoned: set[asyncio.Task[Any]] = set()
+        self._late_errors: list[BaseException] = []
+        self._stop_cleanup: asyncio.Task[None] | None = None
         # Serialize concurrent wait_one() calls so they never run two
         # _consume_one -> pubsub.get_message() reads on the same asyncio
         # StreamReader at once — that trips "readuntil() called while another
@@ -113,6 +129,82 @@ class RedisInboundListener:
         self._wake_degraded = False
         self._wake_degrade_reason: str | None = None
         self._wake_degraded_at: float | None = None
+
+    @property
+    def unfinished_work(self) -> tuple[str, ...]:
+        """Known operations still running; returning from wait/stop is not termination."""
+        return tuple(sorted(task.get_name() for task in self._operations if not task.done()))
+
+    def _own_operation(self, task: asyncio.Task[Any], phase: _Phase) -> None:
+        self._operation_number += 1
+        task.set_name(
+            f"redis-inbound:{self._agent_id}:{phase.value}:{self._generation}:{self._operation_number}"
+        )
+        self._operations[task] = phase
+        task.add_done_callback(self._operation_done)
+
+    def _operation_done(self, task: asyncio.Task[Any]) -> None:
+        if task.cancelled():
+            if task in self._abandoned:
+                self._abandoned.remove(task)
+                self._operations.pop(task)
+            return
+        error = task.exception()
+        if task not in self._abandoned:
+            return  # Reading the result leaves propagation with the in-flight caller.
+        self._abandoned.remove(task)
+        phase = self._operations.pop(task)
+        if error is None or isinstance(error, (OSError, aredis.RedisError)):
+            return
+        if isinstance(error, TypeError) and phase in (
+            _Phase.OPEN,
+            _Phase.EAGER_OPEN,
+            _Phase.CONSUME,
+        ):
+            return  # The existing Redis dead-transport quirk contract excludes cleanup.
+        self._report_late_error(error, task)
+
+    def _report_late_error(self, error: BaseException, task: asyncio.Task[Any] | None) -> None:
+        self._late_errors.append(error)
+        asyncio.get_running_loop().call_exception_handler(
+            {
+                "message": "Redis inbound listener abandoned operation failed",
+                "exception": error,
+                "task": task,
+                "listener": self,
+            }
+        )
+
+    def _release_operation(self, task: asyncio.Task[Any], *, claimed: bool) -> None:
+        if claimed:
+            self._operations.pop(task)
+            return
+        self._abandoned.add(task)
+        if task.done():
+            # Completion and caller cancellation can happen in the same loop tick.
+            self._operation_done(task)
+        elif task.cancelling() == 0:
+            task.cancel()
+
+    async def _wait_for_operation(
+        self, task: asyncio.Task[Any], timeout: float, *, opening: bool = False
+    ) -> bool:
+        claimed = False
+        try:
+            done, _ = await asyncio.wait({task}, timeout=timeout)
+            claimed = bool(done)
+            return claimed
+        finally:
+            if opening and not claimed and not task.done():
+                self._generation += 1
+            self._release_operation(task, claimed=claimed)
+
+    def _check_admission(self) -> None:
+        if self._stopped:
+            raise RuntimeError("Redis inbound listener has stopped")
+
+    def _subscription_is_current(self, pubsub: _RedisPubSub, generation: int) -> bool:
+        return generation == self._generation and pubsub is self._pubsub and self._redis is not None
 
     @property
     def wake_state(self) -> WakeState:
@@ -177,6 +269,7 @@ class RedisInboundListener:
         only attached to `self._redis` / `self._pubsub` after subscribe
         succeeds; on failure the local objects are closed before raising.
         """
+        generation = self._generation
         redis = aredis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
             self._redis_url,
             decode_responses=True,
@@ -198,13 +291,17 @@ class RedisInboundListener:
             # (agent 2613, 2026-08-04).
             connection_class=_TransportAwareAsyncConnection,
         )
+        pubsub: _RedisPubSub | None = None
         try:
             # redis-py types pubsub()'s **kwargs as Unknown; the call itself is fully typed.
             pubsub = redis.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
             await pubsub.subscribe(self._channel)
-        except BaseException:
-            await self._aclose_handle(redis, "redis connection during open rollback")
+        except BaseException as primary:
+            await self._close_handles(pubsub, redis, primary=primary)
             raise
+        if self._stopped or generation != self._generation:
+            await self._close_handles(pubsub, redis)
+            raise asyncio.CancelledError
         self._redis = redis
         self._pubsub = pubsub
         return pubsub
@@ -215,6 +312,7 @@ class RedisInboundListener:
         Idempotent — if the current connection is alive, returns it as-is.
         """
         async with self._lock:
+            self._check_admission()
             if self._pubsub is not None and self._redis is not None:
                 try:
                     # Probe the PUBSUB connection, not the client pool.
@@ -230,13 +328,6 @@ class RedisInboundListener:
                 except (TimeoutError, OSError, aredis.RedisError, TypeError):
                     # Connection dead — close and reopen below. TypeError is redis-py's
                     # dead-transport health-check quirk (see `_open_and_subscribe`).
-                    await self._close_inner()
-                except Exception:
-                    logger.opt(exception=True).warning(
-                        "RedisInboundListener[agent={a}]: pubsub liveness probe failed "
-                        "unexpectedly; reconnecting",
-                        a=self._agent_id,
-                    )
                     await self._close_inner()
             return await self._open_and_subscribe()
 
@@ -256,10 +347,20 @@ class RedisInboundListener:
         that fails synchronously. It does NOT clear the denied latch: only a
         clean consume in `wait_one` proves the channel is readable.
         """
+        self._check_admission()
+        task = asyncio.create_task(self._ensure_subscribed())
+        self._own_operation(task, _Phase.EAGER_OPEN)
+        claimed = False
         try:
-            await self._ensure_subscribed()
+            await asyncio.wait({task})
+            claimed = True
+            task.result()
         except aredis.ResponseError as exc:
             self._note_subscribe_denied(exc)
+        finally:
+            if not claimed and not task.done():
+                self._generation += 1
+            self._release_operation(task, claimed=claimed)
 
     def _note_subscribe_denied(self, exc: aredis.ResponseError) -> None:
         """Log a redis subscribe rejection once per episode (until it recovers).
@@ -309,7 +410,8 @@ class RedisInboundListener:
         full wait budget. The caller-provided remaining budget also bounds this
         command: a timeout drops both Redis handles before returning False, so
         the caller can run its SELECT recheck and a later wait can reconnect.
-        Other failures return False and fall back to the normal wait.
+        Expected transport failures return False and fall back to the normal
+        wait. Unknown errors propagate to the active caller.
         """
         redis = self._redis
         if redis is None or timeout <= 0:
@@ -330,7 +432,7 @@ class RedisInboundListener:
             async with self._lock:
                 await self._close_inner()
             return False
-        except Exception as exc:
+        except (OSError, aredis.RedisError, TypeError) as exc:
             # First failure of the degraded episode carries the traceback; repeats stay at
             # debug so a persistent outage does not warn on every wait.
             first = not self._wake_degraded
@@ -394,7 +496,9 @@ class RedisInboundListener:
         incoming data" guard. The lock keeps the pubsub connection
         single-consumer.
         """
+        self._check_admission()
         async with self._wait_lock:
+            self._check_admission()
             await self._wait_one_impl(timeout)
 
     async def _wait_one_impl(self, timeout: float) -> None:
@@ -415,13 +519,10 @@ class RedisInboundListener:
                 return
             try:
                 # Open/reconnect must honour the caller's budget.
-                open_task = asyncio.ensure_future(self._ensure_subscribed())
-                try:
-                    done, _ = await asyncio.wait({open_task}, timeout=remaining)
-                finally:
-                    if not open_task.done():
-                        open_task.cancel()
-                if not done:
+                self._check_admission()
+                open_task = asyncio.create_task(self._ensure_subscribed())
+                self._own_operation(open_task, _Phase.OPEN)
+                if not await self._wait_for_operation(open_task, remaining, opening=True):
                     self._mark_wake_degraded(WakeFailure.OPEN_ABANDON)
                     logger.warning(
                         "RedisInboundListener[agent={a}]: open/subscribe did not "
@@ -431,6 +532,9 @@ class RedisInboundListener:
                     )
                     return
                 pubsub = open_task.result()
+                generation = self._generation
+                if not self._subscription_is_current(pubsub, generation):
+                    continue
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     return
@@ -445,16 +549,16 @@ class RedisInboundListener:
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     return
+                # GETDEL can yield across stop or replacement of this subscription.
+                self._check_admission()
+                if not self._subscription_is_current(pubsub, generation):
+                    continue
                 # Consume with bounded budget (see `_CONSUME_ABANDON_GRACE`).
-                consume_task = asyncio.ensure_future(self._consume_one(pubsub, remaining))
-                try:
-                    done, _ = await asyncio.wait(
-                        {consume_task}, timeout=remaining + _CONSUME_ABANDON_GRACE
-                    )
-                finally:
-                    if not consume_task.done():
-                        consume_task.cancel()
-                if not done:
+                consume_task = asyncio.create_task(self._consume_one(pubsub, remaining))
+                self._own_operation(consume_task, _Phase.CONSUME)
+                if not await self._wait_for_operation(
+                    consume_task, remaining + _CONSUME_ABANDON_GRACE
+                ):
                     await self._abandon_consume(remaining)
                     return
                 consume_task.result()
@@ -515,20 +619,54 @@ class RedisInboundListener:
             r=remaining,
             g=_CONSUME_ABANDON_GRACE,
         )
-        async with self._lock:
-            await self._close_inner()
+        self._generation += 1
+        pubsub, redis = self._pubsub, self._redis
+        self._pubsub = None
+        self._redis = None
+        cleanup = asyncio.create_task(self._close_handles(pubsub, redis))
+        self._own_operation(cleanup, _Phase.CONSUME_CLEANUP)
+        self._abandoned.add(cleanup)
 
     async def _close_inner(self) -> None:
         """Close the underlying Redis connection + pubsub.  Caller must hold
         `self._lock`."""
+        self._generation += 1
         pubsub = self._pubsub
         redis = self._redis
         self._pubsub = None
         self._redis = None
-        if pubsub is not None:
-            await self._aclose_handle(pubsub, "pubsub")
-        if redis is not None:
-            await self._aclose_handle(redis, "redis connection")
+        await self._close_handles(pubsub, redis)
+
+    async def _close_handles(
+        self,
+        pubsub: _RedisPubSub | None,
+        redis: aredis.Redis | None,
+        *,
+        primary: BaseException | None = None,
+    ) -> None:
+        errors: list[Exception] = []
+        for handle, what in ((pubsub, "pubsub"), (redis, "redis connection")):
+            if handle is None:
+                continue
+            try:
+                await self._aclose_handle(handle, what)
+            except Exception as error:
+                logger.opt(exception=True).warning(
+                    "RedisInboundListener[agent={a}]: closing {what} failed",
+                    a=self._agent_id,
+                    what=what,
+                )
+                errors.append(error)
+        if errors:
+            if primary is not None:
+                for error in errors:
+                    primary.add_note(f"Redis cleanup also failed: {error!r}")
+                    self._report_late_error(error, asyncio.current_task())
+            else:
+                first, *additional = errors
+                for error in additional:
+                    first.add_note(f"Redis cleanup also failed: {error!r}")
+                raise first
 
     async def _aclose_handle(self, handle: _RedisPubSub | aredis.Redis, what: str) -> None:
         """Close one redis handle during teardown; a close failure must not abort the rest.
@@ -545,15 +683,60 @@ class RedisInboundListener:
                 what=what,
                 exc=exc,
             )
-        except Exception:
-            logger.opt(exception=True).warning(
-                "RedisInboundListener[agent={a}]: closing {what} failed unexpectedly; "
-                "the handle is dropped without a clean close",
-                a=self._agent_id,
-                what=what,
-            )
 
     async def close(self) -> None:
-        """Close the underlying connection for clean shutdown."""
+        """Close the current connection, allowing a later request to reconnect."""
         async with self._lock:
             await self._close_inner()
+
+    def _cancel_active_operations(self) -> None:
+        for task in self._operations:
+            if task not in self._abandoned and not task.done() and task.cancelling() == 0:
+                task.cancel()
+
+    def _observe_abandoned_results(self) -> None:
+        for task in tuple(self._abandoned):
+            if task.done():
+                self._operation_done(task)
+        if self._late_errors:
+            first, *additional = self._late_errors
+            for error in additional:
+                note = f"Another abandoned Redis operation failed: {error!r}"
+                if note not in getattr(first, "__notes__", ()):
+                    first.add_note(note)
+            raise first
+
+    async def stop(self, *, timeout: float = 2.0) -> tuple[str, ...]:
+        """Stop admission and join known work within a finite best-effort budget.
+
+        The caller can override this local observation timeout. Unfinished
+        identities are returned and remain observable on this owner.
+        Unknown abandoned failures are reported immediately and raised here when
+        already available. A later failure cannot be raised by a past stop call;
+        calling stop again observes it. Event-loop shutdown may still await work
+        that resists cancellation, so this is not a process-exit guarantee.
+        """
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("stop timeout must be finite and nonnegative")
+        if not self._stopped:
+            self._stopped = True
+            self._generation += 1
+            self._cancel_active_operations()
+            pubsub, redis = self._pubsub, self._redis
+            self._pubsub = None
+            self._redis = None
+            self._stop_cleanup = asyncio.create_task(self._close_handles(pubsub, redis))
+            self._own_operation(self._stop_cleanup, _Phase.STOP_CLEANUP)
+            self._abandoned.add(self._stop_cleanup)
+        pending = {task for task in self._operations if not task.done()}
+        if pending:
+            await asyncio.wait(pending, timeout=timeout)
+        unfinished = self.unfinished_work
+        if unfinished:
+            logger.warning(
+                "RedisInboundListener[agent={a}]: stop budget exhausted; unfinished work: {work}",
+                a=self._agent_id,
+                work=unfinished,
+            )
+        self._observe_abandoned_results()
+        return unfinished
