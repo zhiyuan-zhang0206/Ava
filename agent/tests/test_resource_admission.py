@@ -1,11 +1,15 @@
 """Actual resource admission and exact completion preserve predecessor facts."""
 
 import asyncio
+import os
 import threading
+from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
+import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.incarnation.resources import (
@@ -16,6 +20,13 @@ from base.agents.incarnation.tests.test_resources import _force
 from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.pin_agent import exec_context
+
+
+@pytest.fixture(autouse=True)
+def restore_process_delivery() -> Iterator[None]:
+    """Own cold process-client configuration delivery for this consumer scope."""
+    with patch.dict(os.environ):
+        yield
 
 
 async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
