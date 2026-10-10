@@ -143,13 +143,13 @@ async def start_participants(
 
 async def stop_participants(started: Sequence[WiringParticipant]) -> None:
     """Attempt every stop in reverse order, then raise all unexpected failures."""
-    failures: list[Exception] = []
+    failures: list[BaseException] = []
     for participant in reversed(started):
         try:
             result = participant.stop()
             if inspect.isawaitable(result):
                 await result
-        except Exception as exc:
+        except BaseException as exc:
             failures.append(exc)
     if failures:
-        raise ExceptionGroup("wiring participants failed to stop", failures)
+        raise BaseExceptionGroup("wiring participants failed to stop", failures)

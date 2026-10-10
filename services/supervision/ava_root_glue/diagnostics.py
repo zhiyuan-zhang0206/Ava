@@ -55,8 +55,32 @@ class DiagnosticMonitor:
         if len({check.name for check in self._checks}) != len(self._checks):
             raise ValueError("duplicate diagnostic name")
         self._states = {check.name: _State(ProbeRunner()) for check in self._checks}
+        self.unfinished_probes: tuple[str, ...] = ()
+        self._closed = False
+
+    async def stop(self) -> None:
+        """Close the finite roster and join its native workers within one budget."""
+        self._closed = True
+        for state in self._states.values():
+            state.runner.close()
+        deadline = time.monotonic() + 0.2
+        unfinished: list[str] = []
+        failures: list[BaseException] = []
+        for name, state in self._states.items():
+            try:
+                if not state.runner.stop(max(0.0, deadline - time.monotonic())):
+                    unfinished.append(name)
+            except BaseException as exc:
+                failures.append(exc)
+        self.unfinished_probes = tuple(unfinished)
+        if unfinished:
+            _log.warning("root diagnostics stopped with unfinished observations: %s", unfinished)
+        if failures:
+            raise BaseExceptionGroup("root diagnostic teardown failed", failures)
 
     async def run_round(self) -> None:
+        if self._closed:
+            raise RuntimeError("root diagnostic admission closed")
         await asyncio.gather(*(self._check(check) for check in self._checks))
 
     async def _check(self, check: Diagnostic) -> None:
@@ -199,10 +223,20 @@ class RootHealthRounds:
     async def stop(self) -> None:
         task = self._task
         self._task = None
+        failures: list[BaseException] = []
         if task is not None:
             task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+            try:
+                with suppress(asyncio.CancelledError):
+                    await task
+            except BaseException as exc:
+                failures.append(exc)
+        for owner in (self._health, self._diagnostics):
+            try:
+                await owner.stop()
+            except BaseException as exc:
+                failures.append(exc)
+        if task is not None:
             from base.log import logger
 
             logger.info(
@@ -215,4 +249,9 @@ class RootHealthRounds:
             self._expected_since = None
             from base import telemetry
 
-            await asyncio.to_thread(telemetry.sync, timeout=2, bounded=True)
+            try:
+                await asyncio.to_thread(telemetry.sync, timeout=2, bounded=True)
+            except BaseException as exc:
+                failures.append(exc)
+        if failures:
+            raise BaseExceptionGroup("root health rounds teardown failed", failures)
