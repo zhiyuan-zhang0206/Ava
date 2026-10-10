@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveCompact } from "@/lib/timeline/timeline-store";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { CompactingBlock } from "./compacting-block";
+import { liveClockSubscriberCount } from "./reasoning-clock";
 
 function renderWithQuery(ui: ReactElement) {
   const qc = new QueryClient({
@@ -88,6 +89,32 @@ describe("CompactingBlock", () => {
       vi.advanceTimersByTime(3_000);
     });
     expect(screen.queryByTestId("compacting-block")).toBeNull();
+  });
+
+  it("stops the live clock once settled; the grace expiry still hides it", () => {
+    setLive();
+    renderWithQuery(<CompactingBlock />);
+    expect(liveClockSubscriberCount()).toBe(1);
+    act(() => {
+      setLive({ status: "success", finishedAt: "2026-09-14T03:00:10+00:00" });
+    });
+    expect(liveClockSubscriberCount()).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(7_000);
+    });
+    expect(screen.queryByTestId("compacting-block")).toBeNull();
+  });
+
+  it("stops the live clock when a running block self-hides after losing its terminal", () => {
+    setLive({ startedAt: "2026-09-14T02:30:30+00:00" });
+    renderWithQuery(<CompactingBlock />);
+    expect(screen.getByTestId("compacting-block")).toBeTruthy();
+    expect(liveClockSubscriberCount()).toBe(1);
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(screen.queryByTestId("compacting-block")).toBeNull();
+    expect(liveClockSubscriberCount()).toBe(0);
   });
 
   it("labels a superseded run", () => {
