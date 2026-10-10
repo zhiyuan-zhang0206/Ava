@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 
@@ -20,6 +21,14 @@ class ModuleLookup(Protocol):
     def kind(self, dotted: str) -> str | None: ...
 
     def resolve_prefix(self, dotted: str, tops: Sequence[str]) -> str | None: ...
+
+
+class ModuleSourceLookup(ModuleLookup, Protocol):
+    """Resolve exact source files and anchored resources in the same checkout."""
+
+    repo_root: Path
+
+    def file(self, dotted: str) -> str | None: ...
 
 
 class InvalidRelativeImportError(ImportError):

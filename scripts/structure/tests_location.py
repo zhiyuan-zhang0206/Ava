@@ -1,69 +1,34 @@
-"""Keep a test out of the top-level `tests/` unless it is registered there.
+"""Keep root tests only when their complete subjects prove root or policy already owns them.
 
-Run: `.venv/bin/python scripts/structure/tests_location.py [path ...] [--only FILE ...]` (no
-argument checks every tracked `tests/**/test_*.py`; explicit paths judge exactly those tests; an
-explicit path that does not exist is an error (stderr + exit 1)). `--only FILE ...` is the commit
-hook's changed-files mode (`scripts/lint/docs/changed-files-mode.ava.okf.md`): it judges the
-changed top-level tests, and a changed lint tool or registry (everything under
-`scripts/structure/`) widens it to every tracked test. `--suggest PATH ...` prints where a test
-belongs and exits 0: the one mode that reads the production code
-(`scripts/structure/tests_location_suggest.py`); the checks never do. Also run via pre-commit and
-in the CI structure job (`pre-commit run --all-files`).
+Run `.venv/bin/python scripts/structure/tests_location.py [path ...] [--only FILE ...]`.
+No arguments check tracked top-level `tests/**/test_*.py`; named missing paths fail.
+The changed-files hook judges changed root tests; a structure-tool change widens it
+to the tracked root tests. Pre-push and CI run the same rule over all files.
 
-## Why
+Existing BY_DESIGN and ALLOWED entries retain their path policy, including stale,
+needless and malformed-entry rejection. An unregistered root test instead needs a
+complete subject-LCA proof from `placement_evidence.subject_lca()`: resolved strong Python references,
+without replacement-only evidence or test support, must span directories whose
+common ancestor is the repository root. Unknown dependencies, empty subjects,
+sample strings and the legacy all-patch fallback never certify placement.
 
-A test belongs in the `tests/` directory of the package it proves (`<pkg>/**/tests/`), where the
-package's owner sees it change with the code. While tests moved into packages, new ones kept
-landing in the top-level `tests/` (29 new top-level test files in the 36 hours to 2026-10-01, 20
-of them moved or deleted again afterwards), and every such file costs a second move later: the
-flaky-test quarantine and `.test_durations` are keyed by path, so a move resets both. Nothing
-refused the file at the door.
+This query consumes the shared facts and module resolver, not production import
+direction or the legacy private-patch home heuristic. Known resources alone do not
+prove a Python subject; unresolved resource inputs still prevent certification.
+It reads only a candidate's source and exact dependency locations, not all runtime
+fixture dependencies or the repository's reverse impact closure. Registered and
+by-design tests retain the path-only fast path. No new registration is required
+for a genuine cross-package subject proof, and no baseline is introduced.
 
-## The rule
-
-A top-level test is a `test_*.py` file anywhere under `tests/`. It may stay only when one of these
-holds, all decided from its path alone:
-
-1. its directory or file is in `BY_DESIGN` (`scripts/structure/tests_location_allowed.py`): the
-   end-to-end tests, the browser UI tests, the shared fixtures and factories, the real-process
-   proofs, none of which has a package to live in;
-2. it is in `ALLOWED` (same file) with a category and a one-line reason: `contract` (the
-   test's subject is a repository artifact (workflows, `pyproject.toml`, the schema, migrations,
-   `ui/`, `schedules/`, skill scripts) or the test harness itself, which no package owns; a scan
-   over the whole tree counts) or `integration` (it spans units that may not import each other,
-   so no package may hold it).
-
-Any other top-level test is a violation: a new one is refused at the door, there is no list of
-debt to add it to. The verdict never looks at what the test imports, so it cannot move with an
-unrelated production commit, and the check is a set lookup per file. A registered file that no
-longer exists, an `ALLOWED` entry that a registered file does not need (it sits under
-`BY_DESIGN`), a malformed entry: all fail, so the registry cannot rot into a permit wall.
-
-## Fixing a violation
-
-Move the test into the `tests/` directory of the package it tests
-(`.venv/bin/python scripts/structure/tests_location.py --suggest <file>` names the lowest package
-that may legally hold it, or says why none can), with `git mv`. A test moved into a directory whose
-`path_scopes.toml` does not name it silently loses the autouse isolation fixtures its old
-directory had: name it in the new directory's `path_scopes.toml`
-(`tests/ci/test_path_scopes.py` fails when it is missing). A test that cannot live in a package is
-registered in `ALLOWED`, `contract` or `integration`, with a reason a reviewer can check.
-
-## Scope and cost
-
-Only paths, and only relative ones: every judgment is on the repo-relative POSIX path of a tracked
-file, never on where the checkout sits (a repository under `/tmp/...` or inside a `tests/` or
-`e2e/` directory gets the same verdicts). The checked files and the registry are read; no module
-index, no import graph, no `place()`. A commit hook (`--only`) costs a process start in
-proportion to the changed test files; the registry's entries are checked for existence on every
-run (a stat each). The pre-push hook and CI's `backend-structure` (`pre-commit run --all-files`)
-check every tracked top-level test, which is also where a deleted or renamed test's stale entry is
-found when no commit hook saw it. Whether a registered test still has a package home is
-deliberately not checked here: it needs the placement rule, which is not sub-second.
+A rejected single-component root test must move into its subject directory's
+`tests/`. `--suggest PATH ...` explains this same proof. After `git mv`, preserve
+its autouse fixtures in the destination's `path_scopes.toml`. Package-local tests
+are outside this gate's scope; this change does not launch a whole-tree migration.
 """
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -81,16 +46,10 @@ _CATEGORIES = ("contract", "integration")
 
 _SUGGEST = "--suggest"
 _GUIDE = (
-    "A top-level test must move into the tests/ directory of the package it tests (`git mv`), "
-    "unless it is registered:\n"
-    "  - path_scopes.toml: if the test's old directory has one that names the test, name it in the "
-    "new directory's path_scopes.toml too, or the autouse isolation fixtures silently stop "
-    "applying to the moved test (tests/ci/test_path_scopes.py fails; see "
-    "tests/fixtures/path_scopes.py).\n"
-    "  - scripts/structure/tests_location_allowed.py: a test that cannot live in a package is "
-    "registered as `contract` (its subject is a repository artifact or the test harness itself, "
-    "which no package owns) or `integration` (it spans units that may not import each other), "
-    "with a one-line reason.\n"
+    "A top-level test needs complete subject evidence whose LCA is root. Otherwise use `git mv` "
+    "into its subject's tests/ directory and preserve path_scopes.toml isolation fixtures "
+    "(tests/ci/test_path_scopes.py checks the fixture binding). Unknown inputs must be resolved; "
+    "replacement-only and sample evidence cannot certify placement. "
     "Rule: scripts/structure/tests_location.py."
 )
 
@@ -138,14 +97,39 @@ def registry_errors(allowed: Mapping[str, tuple[str, str]], repo_root: Path) -> 
     return errors
 
 
-def unregistered_errors(files: list[str], allowed: Mapping[str, tuple[str, str]]) -> list[str]:
-    """One message per top-level test that is neither by design nor allowed."""
-    return [
-        f"{rel}:1: a top-level test that is not registered: move it into the tests/ directory of "
-        f"the package it tests (`.venv/bin/python scripts/structure/tests_location.py --suggest {rel}`)"
+def unregistered_errors(
+    files: list[str], allowed: Mapping[str, tuple[str, str]], repo_root: Path
+) -> list[str]:
+    """Unregistered root tests must prove root from complete, resolved Python subjects."""
+    candidates = [
+        rel
         for rel in files
         if is_top_level_test(rel) and stays_by_design(rel) is None and rel not in allowed
     ]
+    if not candidates:
+        return []
+    from scripts.structure import placement, placement_evidence
+
+    index = placement.ModuleIndex(repo_root)
+    errors: list[str] = []
+    for rel in candidates:
+        tree = ast.parse((repo_root / rel).read_text(encoding="utf-8"), filename=rel)
+        result = placement_evidence.subject_lca(tree, rel, index)
+        if result.directory == "":
+            continue
+        if result.unknown:
+            detail = "incomplete subject evidence: " + "; ".join(
+                f"{u.path}:{u.line}: {u.reason}" for u in result.unknown
+            )
+        elif result.directory is None:
+            detail = "no subject proves a root LCA"
+        else:
+            detail = f"subject LCA is {result.directory}; move into {result.directory}/tests/"
+        errors.append(
+            f"{rel}:1: a top-level test that is not registered has no root proof: {detail} "
+            f"(`.venv/bin/python scripts/structure/tests_location.py --suggest {rel}`)"
+        )
+    return errors
 
 
 def _tracked_tests(repo_root: Path) -> list[str]:
@@ -210,7 +194,7 @@ def main(
     files = _files_to_check(argv, only, repo_root)
     if files is None:
         return 1
-    errors = [*unregistered_errors(files, allowed), *registry_errors(allowed, repo_root)]
+    errors = [*unregistered_errors(files, allowed, repo_root), *registry_errors(allowed, repo_root)]
     for error in errors:
         print(error)
     if errors:

@@ -8,6 +8,7 @@ import os
 import subprocess
 import tarfile
 import tempfile
+from collections import deque
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -153,22 +154,42 @@ def build_impact(root: Path, tests: frozenset[str]) -> Impact:
         )
         incomplete[rel] = evidence.unknown
 
-    reverse: dict[str, set[str]] = {}
-    unknown: set[Unknown] = set()
-    for test in sorted(tests):
-        pending = [test]
-        visited: set[str] = set()
-        while pending:
-            dependency = pending.pop()
-            if dependency in visited:
-                continue
-            visited.add(dependency)
-            reverse.setdefault(dependency, set()).add(test)
-            unknown.update(incomplete.get(dependency, ()))
-            pending.extend(edges.get(dependency, ()))
+    reverse = _tests_by_input(edges, tests)
+    unknown = {item for dependency in reverse for item in incomplete.get(dependency, ())}
     return Impact(
         reverse, tuple(sorted(unknown, key=lambda item: (item.path, item.line, item.expression)))
     )
+
+
+def _tests_by_input(edges: dict[str, set[str]], tests: frozenset[str]) -> dict[str, set[str]]:
+    """Propagate test consumers together, including cycles and shared dependencies."""
+    ordered = sorted(tests)
+    # Each bit is one test; unions avoid revisiting shared edges for each consumer.
+    reached = {test: 1 << offset for offset, test in enumerate(ordered)}
+    pending = deque(ordered)
+    queued = set(ordered)
+    while pending:
+        source = pending.popleft()
+        queued.remove(source)
+        consumer_bits = reached[source]
+        for dependency in edges.get(source, ()):
+            before = reached.get(dependency, 0)
+            after = before | consumer_bits
+            if before != after:
+                reached[dependency] = after
+                if dependency not in queued:
+                    pending.append(dependency)
+                    queued.add(dependency)
+    reverse: dict[str, set[str]] = {}
+    for path, bits in reached.items():
+        consumer_names: set[str] = set()
+        remaining = bits
+        while remaining:
+            flag = remaining & -remaining
+            consumer_names.add(ordered[flag.bit_length() - 1])
+            remaining ^= flag
+        reverse[path] = consumer_names
+    return reverse
 
 
 @contextmanager

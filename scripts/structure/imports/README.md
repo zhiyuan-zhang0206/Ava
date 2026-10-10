@@ -1,7 +1,9 @@
 # Static import ownership
 
 `__init__.py` owns normalized clauses, package anchors, bindings and direct
-dependency resolution. `cache.py` stores normalized production statements;
+dependency resolution. Its `ModuleSourceLookup` protocol owns exact source
+lookup and the checkout resource anchor; facts and mock proofs import it directly.
+`cache.py` stores normalized production statements;
 resolved module edges always use the current checkout.
 
 `executed.py` supplies bounded facts about actual Python `-c` inputs. It follows
@@ -77,5 +79,16 @@ import strings, patch strings and non-executed source samples are separate
 collector evidence. It preserves alias facts and diagnoses rather than applying
 an automatic rewrite that could change which object a local name binds.
 
+`bindings.local_nodes()` preserves lexical depth-first order with an explicit
+iterator stack, so deep expressions do not repeatedly relay each node through
+recursive generators. Nested bodies and definition-time inputs retain the same
+scope boundaries.
+
 Import-linter contracts, private package doors and test-placement rules remain
 responsible for their existing boundaries.
+
+`placement_evidence.subject_lca()` consumes the unpruned shared facts for root-test
+admission, then removes replacement-only and test-support subjects without the
+legacy all-patch fallback. It requires zero unknown inputs, including resource
+gaps, and at least one resolved Python subject. Its exact-directory LCA does
+not read empirical production edges or choose a unit by import direction.
