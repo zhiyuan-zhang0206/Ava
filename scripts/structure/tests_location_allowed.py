@@ -164,7 +164,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/ci/test_owned_gateway_port.py": (
         "contract",
-        "runs the real-uvicorn inherited-socket proof with the e2e harness (tests/e2e/_proc.py), wired by .github/workflows/e2e-owned-port.yml",
+        "runs the real-uvicorn inherited-socket proof with the e2e harness (tests/e2e/process_support.py), wired by .github/workflows/e2e-owned-port.yml",
     ),
     "tests/ci/test_path_scopes.py": (
         "contract",
@@ -428,7 +428,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/harness/test_e2e_residue_sweep.py": (
         "contract",
-        "tests the e2e residue reaper, tests/e2e/_proc.py",
+        "tests the e2e residue reaper, tests/e2e/process_support.py",
     ),
     "tests/harness/test_e2e_truncate_retry.py": (
         "contract",

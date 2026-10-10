@@ -472,8 +472,8 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every intended service needs positive evidence; disabled services do not."""
-    import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.probe as _probe_commands
     from ops.roster.service_spec import (
         _GATEWAY,  # typed frozenset[MachineRole]; value irrelevant (roster stubbed)
         ServiceSpec,
@@ -504,7 +504,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
         alive = {"frontend": False, "gateway": True, "browser-mcp": None}[spec.session]
         return _probe_commands.ServiceProbe(alive, "probe", "")
 
-    monkeypatch.setattr(_probe_commands, "_probe_service", _probe)
+    monkeypatch.setattr(_probe_commands, "probe_service", _probe)
 
     assert cluster_health._service_probes() == ["frontend", "browser-mcp"]
 
@@ -512,8 +512,8 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
 def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.probe as _probe_commands
     import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
@@ -528,7 +528,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
         recorded_sessions.append(spec.session)
         return _probe_commands.ServiceProbe(True, "probe", "")
 
-    monkeypatch.setattr(_probe_commands, "_probe_service", _record_probe)
+    monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
     assert cluster_health._service_probes() == []
     assert "otel-collector" not in recorded_sessions
@@ -537,8 +537,8 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_endpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.probe as _probe_commands
     import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
@@ -553,7 +553,7 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
         recorded_sessions.append(spec.session)
         return _probe_commands.ServiceProbe(True, "probe", "")
 
-    monkeypatch.setattr(_probe_commands, "_probe_service", _record_probe)
+    monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
     assert cluster_health._service_probes() == []
     assert "otel-collector" in recorded_sessions
@@ -562,8 +562,8 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
 def test_service_probes_checks_otel_collector_on_lgtm_gateway(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.probe as _probe_commands
     import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
@@ -578,7 +578,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
         recorded_sessions.append(spec.session)
         return _probe_commands.ServiceProbe(True, "probe", "")
 
-    monkeypatch.setattr(_probe_commands, "_probe_service", _record_probe)
+    monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
     assert cluster_health._service_probes() == []
     assert "otel-collector" in recorded_sessions
@@ -589,8 +589,8 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
     fact failed: "answering, but its home is /home/ava/.ava" is another unit on
     this unit's port — a different incident from "nothing is listening", and one
     no amount of waiting fixes."""
-    import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.probe as _probe_commands
     from ops.roster.service_spec import _GATEWAY, ServiceSpec
 
     spec = ServiceSpec(session="ops", cmd="x", capabilities=_GATEWAY, requires_db=True)
@@ -602,7 +602,7 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _probe_commands,
-        "_probe_service",
+        "probe_service",
         lambda _spec: _probe_commands.ServiceProbe(
             False, "identity", "home='/home/ava/.ava' != '/u/.ava'"
         ),  # pyright: ignore[reportUnknownArgumentType]
@@ -623,8 +623,8 @@ def test_service_probes_unknown_roster_is_unhealthy(monkeypatch: pytest.MonkeyPa
 def test_service_probes_respect_durable_service_intent(
     monkeypatch: pytest.MonkeyPatch, mode: str, names: list[str]
 ) -> None:
-    import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.probe as _probe_commands
     import ops.roster.service_spec as _service_spec
     from base.deploy.lifecycle import service_selection
 
@@ -640,7 +640,7 @@ def test_service_probes_respect_durable_service_intent(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(_repo_commands, "_services_for_roles_annotated", roster)
-    monkeypatch.setattr(_probe_commands, "_probe_service", probe)
+    monkeypatch.setattr(_probe_commands, "probe_service", probe)
     monkeypatch.setattr(
         service_selection,
         "read_selection",

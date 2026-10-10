@@ -18,8 +18,29 @@ from pathlib import Path
 import psutil
 import pytest
 
-from base.sessions.posixproc import _group_empty
+from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty import client as pty_client
+
+__all__ = [
+    "E2EProcess",
+    "ManagedServer",
+    "ProcessInspection",
+    "ProcessObservation",
+    "ResidueSweepPlan",
+    "dead_server_evidence",
+    "fixture_entrypoint",
+    "kill_group_if_alive",
+    "kill_group_or_prove_already_gone",
+    "listener_evidence",
+    "managed_proc",
+    "proc_log_tail",
+    "pty_sessions_proc",
+    "registered_server",
+    "require_native_listener",
+    "scan_e2e_processes",
+    "sweep_stale_e2e_processes",
+    "wait_for_port",
+]
 
 
 def listener_evidence(port: int, phase: str) -> dict[str, object]:
@@ -54,6 +75,20 @@ def require_native_listener(pid: int, birth: float, port: int) -> None:
 # that should have been up but wasn't (issue #213) leaves its exit code and log
 # tail IN the failing report instead of only in an artifact nobody opens.
 _LIVE_SERVERS: dict[str, tuple[subprocess.Popen[str], str | None]] = {}
+
+
+@dataclass(frozen=True)
+class ManagedServer:
+    """A registered fixture handle; the registry stays with its process owner."""
+
+    process: subprocess.Popen[str]
+    log_path: str | None
+
+
+def registered_server(label: str) -> ManagedServer:
+    """Query one active fixture without granting mutation of the owner registry."""
+    process, log_path = _LIVE_SERVERS[label]
+    return ManagedServer(process, log_path)
 
 
 def proc_log_tail(log_path: str | None, n: int = 40) -> str:
@@ -115,7 +150,7 @@ def kill_group_or_prove_already_gone(
     outright — leaving a zombie that is the group's sole member. macOS answers
     `killpg` on such a zombie-only group with EPERM, not ESRCH (measured: 0/20
     in isolation, 3/3 under 8 CPU-saturating processes) — the same case
-    `base.sessions.posixproc._group_empty` already carries a fallback for.
+    `base.sessions.posixproc.process_group_has_live_members` already handles.
 
     Both halves must hold before the refusal reads as "already gone": the
     leader itself has actually exited (bounded `wait`, not just believed to),
@@ -129,7 +164,7 @@ def kill_group_or_prove_already_gone(
         raise AssertionError(
             f"killpg({proc.pid}, ...) raised {exc!r} but the leader never exited"
         ) from exc
-    if not _group_empty(proc.pid):
+    if process_group_has_live_members(proc.pid):
         raise AssertionError(
             f"killpg({proc.pid}, ...) raised {exc!r} but its process group still has live members"
         ) from exc
@@ -272,6 +307,24 @@ _REAP_GRACE_SEC = 2.0
 
 
 @dataclass(frozen=True)
+class ProcessObservation:
+    """One native process table row, before E2E ownership classification."""
+
+    pid: int
+    cmdline: str
+    env: str
+
+    @classmethod
+    def from_ps_row(cls, line: str) -> ProcessObservation | None:
+        """Decode a complete macOS process row, retaining command/environment boundaries."""
+        match = _PS_ENV_ROW_RE.match(line)
+        if match is None:
+            return None
+        command, env = _split_cmdline_env(match.group(2))
+        return cls(int(match.group(1)), command, env)
+
+
+@dataclass(frozen=True)
 class E2EProcess:
     """One live process owned by an e2e run, with the run id that owns it."""
 
@@ -279,6 +332,18 @@ class E2EProcess:
     pgid: int
     cmdline: str
     run: tuple[int, int]  # (owning pytest pid, suffix microsecond timestamp)
+
+    @classmethod
+    def from_observation(
+        cls, observation: ProcessObservation, *, pgid: int, cwd: str | None = None
+    ) -> E2EProcess | None:
+        """Classify environment-marked children and frontend build-directory observations."""
+        run = _parse_run_id(observation.env, _E2E_HOME_RUN_RE)
+        if run is None and _looks_like_frontend(observation.cmdline):
+            run = _parse_run_id(cwd or "", _E2E_BUILD_RUN_RE)
+        if run is None:
+            return None
+        return cls(observation.pid, pgid, observation.cmdline, run)
 
 
 def _parse_run_id(text: str, pattern: re.Pattern[str]) -> tuple[int, int] | None:
@@ -333,12 +398,9 @@ def _ps_rows_with_env() -> list[tuple[int, str, str]]:
         return []
     rows: list[tuple[int, str, str]] = []
     for line in out.splitlines():
-        m = _PS_ENV_ROW_RE.match(line)
-        if m is None:
-            continue
-        pid = int(m.group(1))
-        cmdline, env = _split_cmdline_env(m.group(2))
-        rows.append((pid, cmdline, env))
+        observation = ProcessObservation.from_ps_row(line)
+        if observation is not None:
+            rows.append((observation.pid, observation.cmdline, observation.env))
     return rows
 
 
@@ -388,19 +450,7 @@ def scan_e2e_processes() -> list[E2EProcess]:
     lays the e2e values): most processes carry `AVA_HOME=.../ava_e2e_home_...`;
     the frontend is found by its `.builds/build-<pid>_<ts>` cwd instead.
     """
-    procs: list[E2EProcess] = []
-    for pid, cmdline, env in _ps_rows_with_env():
-        run = _parse_run_id(env, _E2E_HOME_RUN_RE)
-        if run is None and _looks_like_frontend(cmdline):
-            run = _parse_run_id(_cwd_of(pid) or "", _E2E_BUILD_RUN_RE)
-        if run is None:
-            continue
-        try:
-            pgid = os.getpgid(pid)
-        except (ProcessLookupError, PermissionError):
-            continue
-        procs.append(E2EProcess(pid=pid, pgid=pgid, cmdline=cmdline, run=run))
-    return procs
+    return ProcessInspection().scan()
 
 
 _LIVE_RUN_HINTS = ("pytest", "xdist")
@@ -420,7 +470,9 @@ def _ps_command_of(pid: int) -> str | None:
     return out or None
 
 
-def _owner_live(owner_pid: int) -> bool:
+def _owner_live(
+    owner_pid: int, *, command: Callable[[int], str | None], probe: Callable[[int, int], None]
+) -> bool:
     """The owning run is really still alive.
 
     `os.kill(pid, 0)` alone is not enough: a dead pytest's pid can be recycled
@@ -430,26 +482,97 @@ def _owner_live(owner_pid: int) -> bool:
     is the second half of the check.
     """
     try:
-        os.kill(owner_pid, 0)
+        probe(owner_pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
-    cmdline = _ps_command_of(owner_pid)
+    cmdline = command(owner_pid)
     return cmdline is not None and any(hint in cmdline for hint in _LIVE_RUN_HINTS)
 
 
-def _identity_holds(pid: int, cmdline: str) -> bool:
+def _identity_holds(pid: int, cmdline: str, *, command: Callable[[int], str | None]) -> bool:
     """Re-verify a matched process right before signalling it (TOCTOU guard).
 
     Between scanning and signalling, a pid can be recycled by an unrelated
     process; a killpg / os.kill would then hit a foreign process. The command
     line is the identity token — whitespace-normalized, because `ps eww` and
     `ps -o command=` may differ only in padding."""
-    current = _ps_command_of(pid)
+    current = command(pid)
     if current is None:
         return False
     return " ".join(current.split()) == " ".join(cmdline.split())
+
+
+@dataclass(frozen=True)
+class ProcessInspection:
+    """Native observation boundary used by discovery and pre-signal identity queries.
+
+    Alternate transports supply observations, not ownership or signal decisions.
+    The classifier and guarded cleanup remain in this component.
+    """
+
+    rows: Callable[[], list[tuple[int, str, str]]] = _ps_rows_with_env
+    working_directory: Callable[[int], str | None] = _cwd_of
+    group: Callable[[int], int] = os.getpgid
+    command: Callable[[int], str | None] = _ps_command_of
+    probe: Callable[[int, int], None] = os.kill
+
+    def scan(self) -> list[E2EProcess]:
+        """Query currently identifiable E2E processes, omitting vanished processes."""
+        processes: list[E2EProcess] = []
+        for pid, command, env in self.rows():
+            observation = ProcessObservation(pid, command, env)
+            cwd = None
+            if _parse_run_id(env, _E2E_HOME_RUN_RE) is None and _looks_like_frontend(command):
+                cwd = self.working_directory(pid)
+            if E2EProcess.from_observation(observation, pgid=0, cwd=cwd) is None:
+                continue
+            try:
+                pgid = self.group(pid)
+            except (ProcessLookupError, PermissionError):
+                continue
+            process = E2EProcess.from_observation(observation, pgid=pgid, cwd=cwd)
+            if process is not None:
+                processes.append(process)
+        return processes
+
+    def owner_live(self, pid: int) -> bool:
+        """A live PID is an owner only while its command is a pytest/xdist run."""
+        return _owner_live(pid, command=self.command, probe=self.probe)
+
+    def matches(self, process: E2EProcess) -> bool:
+        """Recheck the observed command before signalling a potentially recycled PID."""
+        return _identity_holds(process.pid, process.cmdline, command=self.command)
+
+
+@dataclass(frozen=True)
+class ResidueSweepPlan:
+    """Immutable cleanup query result; never grants mutation of the process registry."""
+
+    groups: frozenset[int]
+    singles: frozenset[int]
+    owners: frozenset[int]
+
+    @classmethod
+    def from_processes(
+        cls,
+        processes: list[E2EProcess],
+        *,
+        own_pid: int,
+        own_pgrp: int,
+        include_own: bool,
+        owner_live: Callable[[int], bool],
+    ) -> ResidueSweepPlan:
+        """Plan cleanup while protecting concurrent runs and the caller's process group."""
+        groups, singles, owners = _sweep_targets(
+            processes,
+            own_pid=own_pid,
+            own_pgrp=own_pgrp,
+            include_own=include_own,
+            owner_live=owner_live,
+        )
+        return cls(frozenset(groups), frozenset(singles), frozenset(owners))
 
 
 def _sweep_targets(
@@ -495,39 +618,53 @@ def _sweep_targets(
     return groups, singles, owners
 
 
-def sweep_stale_e2e_processes(*, include_own: bool = False) -> int:
+def _signal_sweep_targets(
+    plan: ResidueSweepPlan,
+    process_by_pid: dict[int, E2EProcess],
+    inspection: ProcessInspection,
+    stop_signal: int,
+) -> None:
+    """Recheck identity independently for each signal phase and target."""
+    for pgid in plan.groups:
+        leader = process_by_pid.get(pgid)
+        if leader is None or not inspection.matches(leader):
+            continue
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, stop_signal)
+    for pid in plan.singles:
+        if not inspection.matches(process_by_pid[pid]):
+            continue
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, stop_signal)
+
+
+def sweep_stale_e2e_processes(
+    *, include_own: bool = False, inspection: ProcessInspection | None = None
+) -> int:
     """Kill e2e processes whose owning pytest run is gone; return the count.
 
     Run at session start (before this run spawns anything) and again at the
     e2e package teardown with `include_own=True`, so a process that escaped
     its fixture teardown during THIS session is also reaped.
     """
-    procs = scan_e2e_processes()
-    groups, singles, owners = _sweep_targets(
+    inspection = inspection or ProcessInspection()
+    procs = inspection.scan()
+    plan = ResidueSweepPlan.from_processes(
         procs,
         own_pid=os.getpid(),
         own_pgrp=os.getpgrp(),
         include_own=include_own,
-        owner_live=_owner_live,
+        owner_live=inspection.owner_live,
     )
+    groups, singles, owners = plan.groups, plan.singles, plan.owners
     if not groups and not singles:
         return 0
-    cmdline_by_pid = {proc.pid: proc.cmdline for proc in procs}
+    process_by_pid = {proc.pid: proc for proc in procs}
     # Every signal lands only after the process's identity is re-verified — a
     # killed pytest's pids can be recycled, and an unverified killpg/os.kill
     # would hit whatever now holds them. A leader whose identity no longer
     # holds is skipped; its members are still in `singles` and verified there.
-    for pgid in groups:
-        leader_cmdline = cmdline_by_pid.get(pgid)
-        if leader_cmdline is None or not _identity_holds(pgid, leader_cmdline):
-            continue
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, signal.SIGTERM)
-    for pid in singles:
-        if not _identity_holds(pid, cmdline_by_pid.get(pid, "")):
-            continue
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.kill(pid, signal.SIGTERM)
+    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGTERM)
     print(  # noqa: T201 -- must reach the terminal; loguru output is captured
         f"\nE2E RESIDUE: reaped {len(groups) + len(singles)} process(es) left by "
         f"dead pytest run(s) {sorted(owners)} (gateway/agent/daemon/frontend of a "
@@ -535,16 +672,7 @@ def sweep_stale_e2e_processes(*, include_own: bool = False) -> int:
         file=sys.stderr,
     )
     time.sleep(_REAP_GRACE_SEC)
-    for pgid in groups:
-        if not _identity_holds(pgid, cmdline_by_pid.get(pgid, "")):
-            continue
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, signal.SIGKILL)
-    for pid in singles:
-        if not _identity_holds(pid, cmdline_by_pid.get(pid, "")):
-            continue
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.kill(pid, signal.SIGKILL)
+    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGKILL)
     time.sleep(1.0)
     return len(groups) + len(singles)
 

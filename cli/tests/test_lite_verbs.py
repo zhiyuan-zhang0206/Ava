@@ -24,6 +24,7 @@ import pytest
 
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from cli import main as cli_main
+from cli import parsers
 
 
 def _dispatched_fetch_env(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> str | None:
@@ -36,7 +37,7 @@ def _dispatched_fetch_env(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> s
         return 0
 
     parser = types.SimpleNamespace(parse_args=lambda _argv: types.SimpleNamespace(func=handler))
-    monkeypatch.setattr(cli_main, "_build_parser", _ignoring_retention(lambda: parser))
+    monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
     monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
     assert cli_main.main(argv) == 0
     return seen["fetch"]
@@ -168,7 +169,7 @@ def test_lite_cli_uses_its_local_runner_api_token(
         return types.SimpleNamespace(func=handler)
 
     parser = types.SimpleNamespace(parse_args=parse_args)
-    monkeypatch.setattr(cli_main, "_build_parser", _ignoring_retention(lambda: parser))
+    monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
 
     assert cli_main.main(["agents"]) == 0
     assert seen == ([{}] if expected is None else [{"Authorization": f"Bearer {expected}"}])
@@ -200,7 +201,7 @@ def test_lite_cli_in_agent_profile_does_not_consume_operator_capability(
         return types.SimpleNamespace(func=handler)
 
     parser = types.SimpleNamespace(parse_args=parse_args)
-    monkeypatch.setattr(cli_main, "_build_parser", _ignoring_retention(lambda: parser))
+    monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
 
     assert cli_main.main(["agents"]) == 0
     assert "AVA_API_TOKEN" not in os.environ

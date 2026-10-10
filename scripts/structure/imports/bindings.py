@@ -10,6 +10,8 @@ from typing import cast
 
 from . import Binding, Clause, normalize
 
+__all__ = ["Scope", "ScopeNode", "local_nodes", "parameter_domains", "scope_parts"]
+
 type ScopeNode = (
     ast.FunctionDef
     | ast.AsyncFunctionDef

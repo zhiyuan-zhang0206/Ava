@@ -8,6 +8,7 @@ import pathlib
 import pytest
 
 from scripts.structure import imports, locality, patch_points, patch_targets, placement
+from scripts.structure.placement_evidence import Placement
 from scripts.structure.tests.patch_repo import make_repo, write
 
 
@@ -17,7 +18,7 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
     return make_repo(tmp_path)
 
 
-def _place(root: pathlib.Path, rel: str, text: str) -> placement.Placement:
+def _place(root: pathlib.Path, rel: str, text: str) -> Placement:
     write(root, rel, text)
     tree = ast.parse(text)
     return placement.place(rel, tree, placement.ModuleIndex(root))

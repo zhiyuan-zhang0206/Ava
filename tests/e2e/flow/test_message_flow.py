@@ -30,8 +30,8 @@ from base.agents import AgentStatus
 from base.config import settings
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status
-from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.message_flow import REPLY_TEXT
+from tests.e2e.fixture_environment import E2EEnv
 
 # The unrecognized-marker red alarm copy, en + zh. The #1017 user-visible
 # warning; its ABSENCE is the semantic assertion of every marker case.

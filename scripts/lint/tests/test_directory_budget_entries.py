@@ -12,6 +12,7 @@ from typing import Any, cast
 import pytest
 import yaml
 
+from base.host.proc import run_bounded
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 
@@ -21,7 +22,6 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
     """Every main() call scans only its own temporary root, with an empty baseline:
     the shard directory must exist (read_worktree() fails fast otherwise), so it
     gets its README.md and no shard files — a legitimate empty baseline."""
-    monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     directory = tmp_path / baseline_shards.SHARD_DIR
     directory.mkdir(parents=True)
@@ -33,7 +33,9 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
         ("add", baseline_shards.SHARD_DIR),
         ("-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Empty baseline"),
     ):
-        result = lcs._git(*args)
+        result = run_bounded(
+            ["git", "-C", str(tmp_path), *args], timeout=30, capture_output=True, text=True
+        )
         assert result.returncode == 0, result.stderr
 
 
@@ -57,12 +59,12 @@ def test_subdirectories_ci_never_checks_out_do_not_count(
     (package / "empty").mkdir()
     (package / "hidden_only").mkdir()
     (package / "hidden_only" / ".DS_Store").write_bytes(b"")
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
 
     _module(package / "real_pkg" / "module.py")
     _track(package / "real_pkg")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -76,7 +78,7 @@ def test_docs_layer_without_init_counts(
     (package / "docs").mkdir()
     (package / "docs" / "package.ava.okf.md").write_text("# doc\n", encoding="utf-8")
     _track(package)
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -90,12 +92,17 @@ def test_docs_package_with_init_counts(
         _module(package / f"entry_{index}.py")
     _module(package / "docs" / "__init__.py")
     _track(package)
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
 def _track(*paths: pathlib.Path) -> None:
-    result = lcs._git("add", "--", *(str(path) for path in paths))
+    result = run_bounded(
+        ["git", "-C", str(paths[0].parent), "add", "--", *(str(path) for path in paths)],
+        timeout=30,
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stderr
 
 
@@ -115,7 +122,7 @@ def test_every_tracked_directory_has_the_same_cap(
         (folder / f"entry_{index}.md").write_text("Documentation.\n", encoding="utf-8")
     _track(folder)
 
-    assert lcs.main([]) == int(count > 20)
+    assert lcs.main([], repo_root=tmp_path) == int(count > 20)
     output = capsys.readouterr().out
     assert (f"{directory}: directory has 21 direct entries" in output) == (count > 20)
 
@@ -132,7 +139,7 @@ def test_changed_files_of_every_suffix_check_their_directory(
     changed.write_bytes(b"x = 1\n")
     _track(folder)
 
-    assert lcs.main(["--only", str(changed)]) == 1
+    assert lcs.main(["--only", str(changed)], repo_root=tmp_path) == 1
     assert "docs: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -149,7 +156,7 @@ def test_tracked_hidden_members_and_docs_tests_migrations_take_parent_slots(
         member.write_text("{}\n", encoding="utf-8")
     _track(folder)
 
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "base/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -159,7 +166,7 @@ def test_root_can_exceed_the_cap_but_its_child_cannot(
     for index in range(21):
         (tmp_path / f"root_{index}.md").write_text("Root.\n", encoding="utf-8")
     _track(*(tmp_path.glob("root_*.md")))
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
     folder = tmp_path / "docs"
     folder.mkdir()
@@ -167,7 +174,7 @@ def test_root_can_exceed_the_cap_but_its_child_cannot(
         (folder / f"entry_{index}.md").write_text("Child.\n", encoding="utf-8")
     _track(*(tmp_path.glob("root_*.md")), folder)
 
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert "docs: directory has 21 direct entries" in output
     assert "root_" not in output
@@ -186,7 +193,7 @@ def test_untracked_local_artifacts_do_not_add_slots(
         for index in range(30):
             (folder / name / f"local_{index}.bin").write_bytes(b"\x00")
 
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -204,7 +211,7 @@ def test_git_filename_quoting_does_not_change_the_count(
     changed.write_text("Changed.\n", encoding="utf-8")
     _track(folder)
 
-    assert lcs.main(["--only", str(changed)]) == 1
+    assert lcs.main(["--only", str(changed)], repo_root=tmp_path) == 1
     assert "docs: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -227,11 +234,11 @@ def test_a_tracked_symlink_takes_one_slot_without_traversal(
     link.symlink_to(target, target_is_directory=target_kind == "directory")
     _track(folder)
 
-    assert lcs.main(["--only", str(link)]) == 0
+    assert lcs.main(["--only", str(link)], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
     (folder / "extra.md").write_text("Extra.\n", encoding="utf-8")
     _track(folder / "extra.md")
-    assert lcs.main(["--only", str(link)]) == 1
+    assert lcs.main(["--only", str(link)], repo_root=tmp_path) == 1
     assert "docs: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -247,15 +254,33 @@ def test_a_gitlink_takes_one_slot_without_scanning_local_contents(
     vendor.mkdir()
     for index in range(30):
         (vendor / f"local_{index}.md").write_text("Uninitialized gitlink.\n", encoding="utf-8")
-    revision = lcs._git("rev-parse", "HEAD").stdout.strip()
-    result = lcs._git("update-index", "--add", "--cacheinfo", f"160000,{revision},docs/vendor")
+    revision = run_bounded(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        timeout=30,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = run_bounded(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{revision},docs/vendor",
+        ],
+        timeout=30,
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stderr
 
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
     (folder / "extra.md").write_text("Extra.\n", encoding="utf-8")
     _track(folder / "extra.md")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "docs: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -328,8 +353,26 @@ def test_the_real_hook_selects_docs_hidden_links_and_gitlinks(
     (tmp_path / "docs/vendor").mkdir()
     names.append("docs/vendor")
     _track(*(tmp_path / name for name in names[:-1]))
-    revision = lcs._git("rev-parse", "HEAD").stdout.strip()
-    result = lcs._git("update-index", "--add", "--cacheinfo", f"160000,{revision},docs/vendor")
+    revision = run_bounded(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        timeout=30,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = run_bounded(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{revision},docs/vendor",
+        ],
+        timeout=30,
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stderr
     result = subprocess.run(
         [
@@ -374,9 +417,9 @@ def test_explicit_deep_target_checks_all_ancestors_without_an_unrelated_sibling(
         (unrelated / f"entry_{index}.ts").write_text("export {};\n", encoding="utf-8")
     _track(folder, unrelated)
 
-    assert lcs.main(["--only", str(changed)]) == 1
+    assert lcs.main(["--only", str(changed)], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert "docs: directory has 21 direct entries" in output
     assert "ui: directory" not in output
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "ui: directory has 21 direct entries" in capsys.readouterr().out

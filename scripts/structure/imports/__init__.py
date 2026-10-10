@@ -14,6 +14,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+__all__ = [
+    "Binding",
+    "Clause",
+    "Dependency",
+    "DependencyEvidence",
+    "IncompleteImportError",
+    "InvalidRelativeImportError",
+    "ModuleLookup",
+    "ModuleSourceLookup",
+    "dependencies",
+    "dependency_evidence",
+    "import_base",
+    "normalize",
+    "package_of",
+]
+
 
 class ModuleLookup(Protocol):
     """The current checkout's module resolver, independent of import syntax."""

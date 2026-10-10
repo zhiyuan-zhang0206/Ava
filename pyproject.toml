@@ -154,6 +154,84 @@ dev = [
 [tool.importlinter]
 root_packages = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
 
+# Explicit component entries are definition owners, not package barrels.
+# The migration audit fails on unclassified boundaries; these declarations do
+# not grant access to other modules, private members, or undeclared consumers.
+[[tool.ava.public_contracts.components]]
+module = "ava.tests.understand"
+entry_modules = ["ava.tests.understand.provider_support"]
+
+[[tool.ava.public_contracts.components]]
+module = "tests.e2e"
+entry_modules = [
+    "tests.e2e.fixture_environment",
+    "tests.e2e.process_support",
+    "tests.e2e.fakes.scripted_model",
+    "tests.e2e.fakes.scenario_recording",
+]
+
+[[tool.ava.public_contracts.components]]
+module = "cli.commands.probe"
+entry_modules = ["cli.commands.probe"]
+
+[[tool.ava.public_contracts.components]]
+module = "scripts.lint"
+entry_modules = [
+    "scripts.lint.code_structure",
+    "scripts.lint.diagnostics.time_bomb",
+]
+
+[[tool.ava.public_contracts.components]]
+module = "scripts.content_lint"
+entry_modules = [
+    "scripts.content_lint.lint_no_cjk",
+    "scripts.content_lint.lint_no_tailnet",
+]
+
+[[tool.ava.public_contracts.components]]
+module = "scripts.structure"
+entry_modules = [
+    "scripts.structure.lazy_modules",
+    "scripts.structure.lint_common",
+    "scripts.structure.patch_points",
+    "scripts.structure.placement_evidence",
+    "scripts.structure.service_units",
+]
+
+[[tool.ava.public_contracts.components]]
+module = "scripts.lint.public_contracts"
+entry_modules = ["scripts.lint.public_contracts"]
+
+[[tool.ava.public_contracts.components]]
+module = "base.host.proc"
+entry_modules = ["base.host.proc"]
+
+[[tool.ava.public_contracts.components]]
+module = "base.sessions.posixproc"
+entry_modules = ["base.sessions.posixproc"]
+
+[[tool.ava.public_contracts.components]]
+module = "scripts.structure.cochange"
+entry_modules = ["scripts.structure.cochange"]
+
+[[tool.ava.public_contracts.components]]
+module = "scripts.structure.imports"
+entry_modules = [
+    "scripts.structure.imports",
+    "scripts.structure.imports.bindings",
+    "scripts.structure.imports.cache",
+    "scripts.structure.imports.executed",
+    "scripts.structure.imports.facts",
+]
+
+[[tool.ava.public_contracts.components]]
+module = "scripts.structure.placement"
+entry_modules = ["scripts.structure.placement"]
+
+[[tool.ava.public_contracts.components]]
+module = "cli"
+entry_modules = ["cli.main", "cli.parsers"]
+
 [[tool.importlinter.contracts]]
 name = "Layered architecture (base < ava < agent < gateway < cli)"
 type = "layers"

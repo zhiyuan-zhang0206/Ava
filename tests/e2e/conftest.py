@@ -54,9 +54,10 @@ from base.agents import AgentStatus
 from base.config import settings
 from tests._containers import runner_projection
 from tests.e2e._authenticated_gateway import authenticated_gateway as authenticated_gateway
-from tests.e2e._env import E2EEnv
 from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_SOCKET, GATEWAY_URL
-from tests.e2e._proc import (
+from tests.e2e._truncate import truncate_with_deadlock_retry
+from tests.e2e.fixture_environment import E2EEnv
+from tests.e2e.process_support import (
     listener_evidence,
     managed_proc,
     proc_log_tail,
@@ -64,8 +65,7 @@ from tests.e2e._proc import (
     sweep_stale_e2e_processes,
     wait_for_port,
 )
-from tests.e2e._proc import pty_sessions_proc as pty_sessions_proc
-from tests.e2e._truncate import truncate_with_deadlock_retry
+from tests.e2e.process_support import pty_sessions_proc as pty_sessions_proc
 
 # ---- module-level overrides (run after top-level conftest) ---------------------
 
@@ -525,7 +525,7 @@ def gateway_proc(
     cmd = [
         sys.executable,
         "-m",
-        "tests.e2e._proc",
+        "tests.e2e.process_support",
         generation,
         "uvicorn",
         "tests.e2e._authenticated_gateway:create_app" if authenticated else "gateway.app:app",
@@ -618,7 +618,7 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
 @pytest.fixture
 def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None]:
     """Run the local agent host with this test's model and machine identity."""
-    cmd = [sys.executable, "-m", "tests.e2e._proc", gateway_proc, _AGENT_HOST_MODULE]
+    cmd = [sys.executable, "-m", "tests.e2e.process_support", gateway_proc, _AGENT_HOST_MODULE]
     env = os.environ.copy()
     # Prod-shaped launch: the `agent` profile (marker-less construction masked a
     # `runner`-profile soak crash, 2026-08-30) dialing as a write generation's
@@ -675,7 +675,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
         conn.commit()
     log_path = _LOG_DIR / f"ops-{_E2E_SUFFIX}.log"
     with managed_proc(
-        [sys.executable, "-m", "tests.e2e._proc", gateway_proc, _AGENT_OPS_MODULE],
+        [sys.executable, "-m", "tests.e2e.process_support", gateway_proc, _AGENT_OPS_MODULE],
         env=env,
         label="ops",
         log_path=str(log_path),
@@ -791,7 +791,7 @@ def pytest_runtest_makereport(
     report = cast(TestReport, cast(Any, outcome).get_result())
     if not report.failed:
         return
-    from tests.e2e._proc import dead_server_evidence
+    from tests.e2e.process_support import dead_server_evidence
 
     evidence = dead_server_evidence()
     if not evidence:

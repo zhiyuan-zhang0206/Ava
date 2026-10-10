@@ -3,7 +3,7 @@ on:
   pull_request:
     paths:
       - 'tests/e2e/_ports.py'
-      - 'tests/e2e/_proc.py'
+      - 'tests/e2e/process_support.py'
       - 'tests/e2e/conftest.py'
       - 'tests/ci/test_owned_gateway_port.py'
       - '.github/workflows/e2e-owned-port.yml'

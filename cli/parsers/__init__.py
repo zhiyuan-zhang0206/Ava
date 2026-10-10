@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+from typing import cast
 
 from cli.commands.agents.impersonation_parsers import add_impersonation_parser
 from cli.commands.agents.parsers import add_agents_parser
@@ -51,6 +52,8 @@ from cli.parsers.management import (
     _add_schedules_parser,
 )
 from cli.parsers.pty import _add_pty_parser
+
+__all__ = ["build_parser", "command_options", "parse_args"]
 
 
 def build_parser(
@@ -94,3 +97,44 @@ def build_parser(
     add_packages_parser(sub)
 
     return parser
+
+
+def parse_args(
+    argv: list[str] | None = None,
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> argparse.Namespace:
+    """Parse the operator command without dispatch or Settings construction.
+
+    None reads sys.argv as argparse does. Help and invalid arguments retain
+    argparse's output and SystemExit codes. Lifecycle handlers keep the supplied
+    child-owner list when the caller later dispatches the returned namespace.
+    """
+    return build_parser(retained_children=retained_children).parse_args(argv)
+
+
+def command_options() -> dict[tuple[str, ...], set[str]]:
+    """Long options accepted at each command path, including the `ava` root.
+
+    Aliases have their own paths. Options belong only to the parser accepting
+    them, so a start option never certifies the same spelling on stop. Return a
+    fresh snapshot for documentation checks without loading command runtimes.
+    """
+    root = build_parser()
+    by_path: dict[tuple[str, ...], set[str]] = {}
+    pending: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = [(("ava",), root)]
+    while pending:
+        path, parser = pending.pop()
+        by_path[path] = {
+            option
+            for action in parser._actions
+            for option in action.option_strings
+            if option.startswith("--")
+        }
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                subcommands = cast("argparse._SubParsersAction[argparse.ArgumentParser]", action)
+                pending.extend(
+                    ((*path, name), child) for name, child in subcommands.choices.items()
+                )
+    return by_path

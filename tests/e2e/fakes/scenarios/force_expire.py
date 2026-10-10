@@ -2,7 +2,7 @@
 
 from langchain_core.messages import AIMessage
 
-from tests.e2e.fakes._recording import RecordingModel
+from tests.e2e.fakes.scenario_recording import RecordingModel
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 FIRST_REPLY = "Ready for the external session."

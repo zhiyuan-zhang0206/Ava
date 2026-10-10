@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.converge.host as converge_host
@@ -17,6 +16,7 @@ import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_pre
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
+import cli.commands.probe as _probe_commands
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.sessions.pty.paths import SERVICE_UNIT
 from cli.commands.lifecycle.stop import _force_stop

@@ -11,11 +11,31 @@ from dataclasses import dataclass, field
 
 from . import bindings
 
+__all__ = [
+    "ImportFacts",
+    "Inputs",
+    "Source",
+    "Unresolved",
+    "import_facts",
+    "inputs",
+    "is_launcher",
+    "module_input",
+]
+
 _LAUNCHERS = frozenset(
     {f"subprocess.{name}" for name in ("run", "Popen", "call", "check_call", "check_output")}
     | {"asyncio.create_subprocess_exec"}
 )
 _DYNAMIC_IMPORTS = frozenset({"importlib.import_module", "runpy.run_module", "__import__"})
+
+
+def is_launcher(origin: str) -> bool:
+    """Whether a proved lexical origin belongs to this owner's launch grammar.
+
+    This does not prove that a call starts Python or supplies bounded source;
+    `inputs` and `module_input` retain their existing evidence responsibilities.
+    """
+    return origin in _LAUNCHERS
 
 
 @dataclass(frozen=True)

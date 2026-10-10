@@ -62,7 +62,6 @@ from base.agents import AgentStatus
 from base.config import settings
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
-from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_compact_history_off, pin_expand_runs_all
 from tests.e2e.fakes.scenarios.parked_compact import (
     POST_COMPACT_NARRATION,
@@ -70,6 +69,7 @@ from tests.e2e.fakes.scenarios.parked_compact import (
     REPLY_2,
     REPLY_3,
 )
+from tests.e2e.fixture_environment import E2EEnv
 
 
 def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:

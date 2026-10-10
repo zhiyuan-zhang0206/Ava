@@ -34,4 +34,4 @@ def _guard_health_port_gate(
     def no_occupied_ports(*_args: object, **_kwargs: object) -> tuple[()]:
         return ()
 
-    monkeypatch.setattr("cli.commands._probe._occupied_health_ports", no_occupied_ports)
+    monkeypatch.setattr("cli.commands.probe.occupied_health_ports", no_occupied_ports)

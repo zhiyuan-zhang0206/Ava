@@ -55,6 +55,8 @@ import re
 import sys
 from pathlib import Path
 
+__all__ = ["main"]
+
 # Project root (this script lives under scripts/)
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -96,16 +98,11 @@ def _is_locale_path(rel_path: str) -> bool:
 _LOCALE_PY_FILES = frozenset({"base/telemetry/alerts/copy.py", "base/packages/docs/pages_copy.py"})
 
 
-def _tracked_files() -> list[str]:
-    """Every git-tracked file, repo-relative, posix separators."""
-    return lint_common.tracked_files(_REPO_ROOT)
-
-
-def _scan_file(rel_path: str) -> list[tuple[int, str, str]]:
+def _scan_file(rel_path: str, repo_root: Path) -> list[tuple[int, str, str]]:
     """Return violations [(lineno, char, line_stripped), ...]."""
     if _is_locale_path(rel_path) or rel_path in _LOCALE_PY_FILES:
         return []
-    text = lint_common.read_utf8_text(_REPO_ROOT / rel_path)
+    text = lint_common.read_utf8_text(repo_root / rel_path)
     if text is None:
         return []
     violations: list[tuple[int, str, str]] = []
@@ -116,12 +113,13 @@ def _scan_file(rel_path: str) -> list[tuple[int, str, str]]:
     return violations
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
+    """Scan content under repo_root; standalone invocation uses this checkout."""
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
-    scope = lint_common.changed_scope(only, _REPO_ROOT)
+    scope = lint_common.changed_scope(only, repo_root)
     if argv:
-        scan, missing = lint_common.resolve_targets(argv, _REPO_ROOT)
+        scan, missing = lint_common.resolve_targets(argv, repo_root)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
@@ -130,13 +128,13 @@ def main(argv: list[str] | None = None) -> int:
             scope
         )  # the commit hook's changed files; the lint's scope is every tracked file
     else:
-        scan = _tracked_files()
+        scan = lint_common.tracked_files(repo_root)
 
     total = 0
     for rel in scan:
         if rel.startswith(".git/"):
             continue
-        for lineno, ch, content in _scan_file(rel):
+        for lineno, ch, content in _scan_file(rel, repo_root):
             total += 1
             print(lint_common.format_violation(rel, lineno, f"U+{ord(ch):04X} {ch!r}", content))
 

@@ -44,13 +44,13 @@ from pathlib import Path
 from scripts.structure import imports, locality
 from scripts.structure.patch_points import Point, extract_points
 from scripts.structure.placement import (
-    PATCH_TOPS,
+    CODE_TOPS,
     ModuleIndex,
-    ReferenceEvidence,
     collect_reference_evidence,
     legacy_patch_placement,
     unit_of,
 )
+from scripts.structure.placement_evidence import ReferenceEvidence
 
 SECTION = "patch_targets"
 Sites = dict[str, list[int]]
@@ -272,7 +272,7 @@ class Classifier:
         A private attribute past the module boundary (`mod.Class._name`, `mod._name`) belongs
         to the package of the module that defines it.
         """
-        found = locality._private_target(dotted, PATCH_TOPS, self.index.repo_root)
+        found = locality._private_target(dotted, CODE_TOPS, self.index.repo_root)
         if found is None:
             return None
         target, owner = found
@@ -289,7 +289,7 @@ class Classifier:
         if not origin:
             return None
         top = origin.split(".")[0]
-        if top not in PATCH_TOPS:
+        if top not in CODE_TOPS:
             return Site(line, "A", dotted, sub=boundary_kind(top))
         origin_split = self.index.split(origin)
         ambient = e_lookup(origin_split[0]) if origin_split else None

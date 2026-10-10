@@ -60,15 +60,9 @@ inputs: `imports/executed.py` retains unknown inputs; `placement_evidence.py` ow
 
 ## What a home depends on
 
-A result depends on the file's own text, `pyproject.toml` and the non-test source's direct
-imports (`ModuleIndex.importers`, read from the working tree on every run and cached per file
-by `imports/cache.py`; no dependency graph is committed). Moving the file into `<pkg>/tests/`
-does not change its home, but a production import change can: adding an import may lower the
-home of a test that references both ends, deleting one may raise it, and a
-dependency cycle keeps it at the bound. Because of that the lint that enforces a home (the
-patch-target lint) checks a changed test file alone at commit time and rescans everything at
-push and in CI; and the rule that will enforce a test's placement must require the *legal*
-directory, never the *lowest* one, or an unrelated production commit would force tests to move.
+The legacy home follows current code and import contracts. Dependency changes can
+change it; commit checks are scoped, while push and CI rescan the tree. It grants
+no private authority under component contracts.
 """
 
 from __future__ import annotations
@@ -87,24 +81,35 @@ from typing import cast
 from scripts.structure import imports, lint_common, placement_evidence, service_units
 from scripts.structure.imports import cache, executed, facts
 from scripts.structure.placement_evidence import (
-    IncompleteReferenceEvidenceError as IncompleteReferenceEvidenceError,
+    IncompleteReferenceEvidenceError,
+    LegacyPlacement,
+    Placement,
+    Ref,
+    ReferenceEvidence,
 )
-from scripts.structure.placement_evidence import (
-    LegacyPlacement as LegacyPlacement,
-)
-from scripts.structure.placement_evidence import (
-    Placement as Placement,
-)
-from scripts.structure.placement_evidence import (
-    Ref as Ref,
-)
-from scripts.structure.placement_evidence import (
-    ReferenceEvidence as ReferenceEvidence,
-)
+
+__all__ = [
+    "CODE_TOPS",
+    "STRONG_KINDS",
+    "TOP_LEVEL_FILES",
+    "TOP_LEVEL_PREFIXES",
+    "ModuleIndex",
+    "UnitGraph",
+    "collect_reference_evidence",
+    "collect_references",
+    "common_dir",
+    "is_top_level",
+    "legacy_patch_placement",
+    "place",
+    "placement_references",
+    "unit_graph",
+    "unit_of",
+    "unit_root",
+    "without_patch_evidence",
+]
 
 # First-party Python code participates in placement, including runnable templates.
 CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts", "schedules", "commands", "demos")
-PATCH_TOPS = CODE_TOPS
 _ARTIFACT_TOPS = (
     "db",
     "deploy",
@@ -215,7 +220,7 @@ class ModuleIndex:
 
     def split(self, dotted: str) -> tuple[str, list[str]] | None:
         """(longest first-party module prefix, remaining attribute segments), or None."""
-        module = self.resolve_prefix(dotted, PATCH_TOPS)
+        module = self.resolve_prefix(dotted, CODE_TOPS)
         if module is None:
             return None
         return module, dotted[len(module) :].split(".")[1:]

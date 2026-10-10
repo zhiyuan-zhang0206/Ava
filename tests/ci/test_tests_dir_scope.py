@@ -214,30 +214,26 @@ def _time_bomb_root(root: Path) -> None:
 
 
 def test_time_bomb_lint_default_scan_reaches_a_package_tests_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Rules 2 and 3 read test files: the default scan must find the ones inside packages."""
     lint = importlib.import_module("scripts.lint.diagnostics.time_bomb")
-    monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _time_bomb_root(tmp_path)
     _write(tmp_path, "tests/test_window.py", 'since = "2026-09-06"\n')
-    assert lint.main([]) == 1
+    assert lint.main([], repo_root=tmp_path) == 1
     assert "time-bomb fixture date" in capsys.readouterr().err
 
     (tmp_path / "tests/test_window.py").unlink()
     _write(tmp_path, "base/packages/tests/test_window.py", 'since = "2026-09-06"\n')
-    assert lint.main([]) == 1
+    assert lint.main([], repo_root=tmp_path) == 1
     assert "base/packages/tests/test_window.py" in capsys.readouterr().err
 
 
-def test_time_bomb_lint_rule_3_does_not_govern_production_modules(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_time_bomb_lint_rule_3_does_not_govern_production_modules(tmp_path: Path) -> None:
     lint = importlib.import_module("scripts.lint.diagnostics.time_bomb")
-    monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _time_bomb_root(tmp_path)
     _write(tmp_path, "base/packages/window.py", 'since = "2026-09-06"\n')
-    assert lint.main([]) == 0
+    assert lint.main([], repo_root=tmp_path) == 0
 
 
 @pytest.mark.parametrize("host", ["cli", "ops", "ava_builtins/plugins/p"])

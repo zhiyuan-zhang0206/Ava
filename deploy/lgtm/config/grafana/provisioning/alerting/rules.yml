@@ -3680,7 +3680,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-service-start-unready: replaces cli/commands/_probe.py start-readiness alerts rows (upsert_alert source=start-readiness, fingerprint reuse, resolved edge) ──
+      # ── ava-ops-service-start-unready: replaces cli/commands/probe.py start-readiness alerts rows (upsert_alert source=start-readiness, fingerprint reuse, resolved edge) ──
       - uid: ava-ops-service-start-unready
         title: "Non-critical service not ready after start"
         condition: D
@@ -3816,7 +3816,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-agent-continuation-lost: replaces cli/commands/lifecycle/_failed_receipts.py _notify_owner (a direct alerts row plus IM push through cli/commands/_probe.py) ──
+      # ── ava-ops-agent-continuation-lost: replaces cli/commands/lifecycle/_failed_receipts.py _notify_owner (a direct alerts row plus IM push through cli/commands/probe.py) ──
       - uid: ava-ops-agent-continuation-lost
         title: "Agent continuation lost at ava start"
         condition: D

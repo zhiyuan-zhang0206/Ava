@@ -16,11 +16,12 @@ from typing import cast
 
 import pytest
 
-from cli.main import _build_parser, main
+from cli.main import main
+from cli.parsers import build_parser
 
 
 def _top_choices() -> set[str]:
-    p = _build_parser()
+    p = build_parser()
     actions = [a for a in p._actions if a.dest == "cmd"]
     assert actions, "no 'cmd' subparser action found"
     choices = actions[0].choices
@@ -31,7 +32,7 @@ def _top_choices() -> set[str]:
 def _cluster_choices() -> set[str]:
     # argparse types `.choices` as `Iterable[str] | None`, but a subparsers action
     # holds a name -> parser dict at runtime; cast so the subscript type-checks.
-    p = _build_parser()
+    p = build_parser()
     cmd = next(a for a in p._actions if a.dest == "cmd")
     cluster_p = cast("dict[str, argparse.ArgumentParser]", cmd.choices)["cluster"]
     sub = next(a for a in cluster_p._actions if a.dest == "cluster_cmd")
@@ -64,7 +65,7 @@ def test_cluster_group_has_destroy_and_no_down_or_listing() -> None:
 def test_start_rejects_retired_identity_flags(tmp_path: Path) -> None:
     """Identity is the home path: `ava start` is a pure bring-up and takes no
     --cluster / --gateway-home (both die as unrecognized arguments)."""
-    p = _build_parser()
+    p = build_parser()
     with pytest.raises(SystemExit):
         p.parse_args(["start", "--cluster", "foo"])
     with pytest.raises(SystemExit):
@@ -72,7 +73,7 @@ def test_start_rejects_retired_identity_flags(tmp_path: Path) -> None:
 
 
 def test_cluster_destroy_acts_on_this_home_and_takes_no_path(tmp_path: Path) -> None:
-    p = _build_parser()
+    p = build_parser()
     assert p.parse_args(["cluster", "destroy"]).drop_db is False
     assert p.parse_args(["cluster", "destroy", "--drop-db"]).drop_db is True
     with pytest.raises(SystemExit):
@@ -82,7 +83,7 @@ def test_cluster_destroy_acts_on_this_home_and_takes_no_path(tmp_path: Path) -> 
 
 
 def test_cluster_destroy_has_no_flag_that_skips_its_confirmation() -> None:
-    p = _build_parser()
+    p = build_parser()
     for flag in ("--yes", "-y", "--force"):
         with pytest.raises(SystemExit):
             p.parse_args(["cluster", "destroy", flag])

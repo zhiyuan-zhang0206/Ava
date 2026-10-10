@@ -305,8 +305,8 @@ def test_memory_init_reports_scaffolded_plugins(capsys: pytest.CaptureFixture[st
 
 
 def test_memory_init_parser_binds_the_explicit_handler() -> None:
-    from cli import main
+    from cli import parsers
     from cli.commands.extensions.parsers import mcp
 
-    args = main._build_parser().parse_args(["memory", "init"])
+    args = parsers.parse_args(["memory", "init"])
     assert args.func is mcp._h_memory_init

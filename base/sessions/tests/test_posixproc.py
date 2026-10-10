@@ -786,6 +786,6 @@ def test_kill_session_group_kill_reaps_detached_descendant(
                 psutil.Process(detached_pid).kill()
 
 
-# Unit-level tests of `_process_is_live` / `_group_empty` (stubbed, no real
+# Tests of `_process_is_live` / public group observation (stubbed and real
 # subprocess) live in test_posixproc_liveness.py, split out to stay under the
 # structure-lint's per-file line budget.

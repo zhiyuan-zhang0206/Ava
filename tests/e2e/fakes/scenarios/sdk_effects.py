@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.e2e.fakes._recording import RecordingModel, exec_call, say, scratch_root
+from tests.e2e.fakes.scenario_recording import RecordingModel, exec_call, say, scratch_root
 
 BOOM = "BOOM-MARK"
 ALIVE = "STILL-ALIVE"
