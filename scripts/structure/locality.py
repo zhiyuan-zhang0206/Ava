@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import cast
 
 from scripts.structure import ambient_state, baseline_shards, imports, path_imports
+from scripts.structure.imports import bindings
 
 SECTIONS = ("private_imports", "owner_bypasses")
 STRICT_SECTIONS = ("private_imports", "owner_bypasses", path_imports.SECTION)
@@ -124,31 +125,58 @@ def private_imports(
     """Imports of, or attribute reach-ins to, a `_`-prefixed module or name from
     outside the package that owns it."""
     reach = _Reach(rel_path, ".".join(imports.package_of(rel_path)), roots, repo_root)
-    aliases: dict[str, str] = {}
-    rebound: set[str] = set()
-    attributes: list[ast.Attribute] = []
-    inner: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute):
-            attributes.append(node)
-            inner.add(id(node.value))
-        elif isinstance(node, ast.Import | ast.ImportFrom):
-            clause = imports.normalize(node, rel_path)
-            aliases.update(clause.module_aliases(lambda target: _is_module(target, repo_root)))
-            reach.record(node.lineno, clause.candidates)
-        elif isinstance(node, ast.arg) or (
-            isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
-        ):
-            rebound.add(node.arg if isinstance(node, ast.arg) else node.id)
-    # Scope-free: a name rebound anywhere in the module (a parameter such as
-    # `self`, a local, a loop target) may shadow the import, so it is skipped.
-    aliases = {name: dotted for name, dotted in aliases.items() if name not in rebound}
-    for node in attributes:
-        if id(node) not in inner:  # outermost link of each chain only
-            target = _attribute_target(node, aliases, repo_root)
-            if target is not None:
-                reach.record(node.lineno, [target])
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            reach.record(node.lineno, imports.normalize(node, rel_path).candidates)
+    visitor = _PrivateReach(tree, reach)
+    visitor.visit(tree)
     return reach.sites
+
+
+class _PrivateReach(ast.NodeVisitor):
+    def __init__(self, tree: ast.Module, reach: _Reach) -> None:
+        self.reach = reach
+        self.scope = bindings.Scope(tree, reach.rel_path)
+
+    def _nested(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
+    ) -> None:
+        parent = self.scope
+        self.scope = bindings.Scope(node, self.reach.rel_path, parent.nested_parent())
+        self.generic_visit(node)
+        self.scope = parent
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._nested(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._nested(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._nested(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._nested(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        pass
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        pass
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        root: ast.expr = node
+        while isinstance(root, ast.Attribute):
+            root = root.value
+        if isinstance(root, ast.Name):
+            origin = self.scope.origin(root)
+            if origin and _is_module(origin, self.reach.repo_root):
+                target = _attribute_target(node, {root.id: origin}, self.reach.repo_root)
+                if target is not None:
+                    self.reach.record(node.lineno, [target])
+        # One outermost attribute chain is one reach-in site.
+        if not isinstance(node.value, ast.Attribute):
+            self.visit(node.value)
 
 
 @dataclass
