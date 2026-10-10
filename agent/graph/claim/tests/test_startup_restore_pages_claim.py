@@ -6,6 +6,9 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from agent.state import AgentState
+from base.clock import Clock
+from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 
 async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -27,6 +30,14 @@ async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) ->
 
         def require_db(self) -> object:
             return object()
+
+        def require_agent(self) -> AgentSlices:
+            return AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            )
+
+        def require_clock(self) -> Clock:
+            return Clock.from_settings()
 
         def require_bus(self) -> object:
             return object()

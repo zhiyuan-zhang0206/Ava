@@ -23,6 +23,7 @@ from base.agents import GatewayUnavailable
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
@@ -34,10 +35,15 @@ OPEN = inherit.INHERITABLE_OPEN
 CLOSE = inherit.INHERITABLE_CLOSE
 
 
+def _default_reader(domain: str, field: str) -> Any:
+    return getattr(getattr(settings, domain), field)
+
+
 def _context(agent_id: int | None = 1) -> AvaContext:
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=_default_reader),
+        clock_factory=Clock.from_settings,
     )
 
 

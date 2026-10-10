@@ -15,6 +15,7 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
+from base.config import ConfigBoot
 from base.telemetry.lgtm_local import service_argv
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native, observatory_urls
@@ -72,6 +73,7 @@ def _ctx(tmp_path: Path) -> ConvergeCtx:
         ava_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         services=frozenset(lgtm_native.BACKENDS),
+        config=ConfigBoot(),
     )
 
 
@@ -519,6 +521,7 @@ def _station_ctx(tmp_path: Path) -> ConvergeCtx:
         ava_home=tmp_path / "station-home",
         roles=frozenset({"observability-station"}),
         services=frozenset(lgtm_native.BACKENDS),
+        config=ConfigBoot(),
     )
 
 

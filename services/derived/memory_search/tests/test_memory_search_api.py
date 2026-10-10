@@ -31,7 +31,7 @@ def _store(tmp_path: Path) -> MemoryStore:
 
 
 def _client(tmp_path: Path) -> TestClient:
-    return TestClient(build_app(_store(tmp_path), _MAX_BATCH_ROWS))
+    return TestClient(build_app(_store(tmp_path), _MAX_BATCH_ROWS, embedding_dim=_DIM))
 
 
 def _upsert_body(path: str, seed: int, *, mtime: float = 1.0) -> dict[str, object]:
@@ -198,7 +198,7 @@ def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
 
     monkeypatch.setattr(store, "save", _save)
     rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(5)]
-    with TestClient(build_app(store, _MAX_BATCH_ROWS)) as client:
+    with TestClient(build_app(store, _MAX_BATCH_ROWS, embedding_dim=_DIM)) as client:
         assert client.post("/upsert_batch", json={"rows": rows}).status_code == 200
         assert len(save_calls) == 1
         for row in rows:
@@ -211,10 +211,10 @@ def test_batch_rows_cap_is_the_one_the_app_was_built_with(tmp_path: Path) -> Non
     #3696): a shorter cap rejects a batch the default cap accepts, on both batch endpoints."""
     rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(3)]
     entries = [{"path": row["path"], "kind_limits": {}} for row in rows]
-    with TestClient(build_app(_store(tmp_path), 2)) as small:
+    with TestClient(build_app(_store(tmp_path), 2, embedding_dim=_DIM)) as small:
         assert small.post("/upsert_batch", json={"rows": rows}).status_code == 422
         assert small.post("/delete_stale_batch", json={"entries": entries}).status_code == 422
-    with TestClient(build_app(_store(tmp_path), 3)) as exact:
+    with TestClient(build_app(_store(tmp_path), 3, embedding_dim=_DIM)) as exact:
         assert exact.post("/upsert_batch", json={"rows": rows}).status_code == 200
         assert exact.post("/delete_stale_batch", json={"entries": entries}).status_code == 200
 

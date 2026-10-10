@@ -6,11 +6,15 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from types import SimpleNamespace
+from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -20,9 +24,12 @@ from psycopg import sql
 
 from base.agents.history.checkpoint import CheckpointReadError, FullHistory
 from base.agents.history.hierarchy import build as build_domain
-from base.config import settings
+from base.config import ConfigBoot, Settings
+from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from gateway.agents.history import understanding as module
+from gateway.agents.history.configuration import understanding_policy
+from gateway.agents.history.read_inputs import UnderstandingReadPolicy
 from gateway.app import app
 
 _T0 = datetime(2026, 10, 5, tzinfo=UTC)
@@ -97,11 +104,15 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     # Keep real catalog/tier pricing while isolating its recurring UTC price windows.
     monkeypatch.setattr(build_domain, "quote", partial(build_domain.quote, at=_T0))
 
-    def build_model(_db: object, _agent: int, *, catalog: ModelCatalog) -> str:
+    def build_model(
+        _db: object, _agent: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
+    ) -> str:
         assert catalog is app.state.catalog
         return _MODEL
 
-    def chunk_size(_db: object, _agent: int, *, catalog: ModelCatalog) -> int:
+    def chunk_size(
+        _db: object, _agent: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
+    ) -> int:
         assert catalog is app.state.catalog
         return 1000
 
@@ -110,8 +121,10 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return state
 
 
-def _client() -> TestClient:
-    return TestClient(app)
+@contextmanager
+def _client() -> Generator[TestClient, None, None]:
+    with patch.dict(os.environ), TestClient(app) as client:
+        yield client
 
 
 def _build(client: TestClient, agent_id: int, **body: Any) -> dict[str, Any]:
@@ -340,7 +353,7 @@ def test_the_switch_does_not_change_a_dry_run_and_a_build_is_queued_either_way(
     agent = _seed_agent(db_conn)
     with _client() as client:
         off = _build(client, agent, sessions=[2], dry_run=True)
-        monkeypatch.setattr(settings.agent, "understanding_enabled", True)
+        monkeypatch.setattr(app.state.config_authority.runtime.agent, "understanding_enabled", True)
         on = _build(client, agent, sessions=[2], dry_run=True)
     assert (off["understanding_enabled"], on["understanding_enabled"]) == (False, True)
     assert off["jobs"] == on["jobs"] and off["estimate"] == on["estimate"]
@@ -456,19 +469,69 @@ def test_the_close_endpoint_is_gone(db_conn: psycopg.Connection) -> None:
 
 
 def test_a_process_without_the_agent_domain_reads_the_switch_and_chunk_size_from_the_env_file(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The gateway profile does not construct the agent config domain: the cluster's values are
     read from the unit's `.env`, the field defaults when it does not set them."""
     agent = _seed_agent(db_conn)
-    monkeypatch.setattr(module, "settings", SimpleNamespace(has_domain=lambda _name: False))
-    file_values = {"AVA_UNDERSTANDING_ENABLED": "true", "AVA_UNDERSTANDING_CHUNK_RATIO": "0.25"}
-    monkeypatch.setattr(module, "read_env_aliases", lambda: file_values)
+    path = tmp_path / ".env"
+    path.write_text("AVA_UNDERSTANDING_ENABLED=true\nAVA_UNDERSTANDING_CHUNK_RATIO=0.25\n")
     with _client() as client:
+        monkeypatch.setenv("AVA_PROCESS_PROFILE", "gateway")
+        config = ConfigBoot()
+        authority = ConfigAuthority(config.view, Settings(profile=None), path)
+        policy = understanding_policy(config, authority)
+        monkeypatch.setattr(app.state, "understanding_policy", policy)
         body = _build(client, agent, sessions=[1], dry_run=True)
-    assert body["understanding_enabled"] is True
-    assert module.chunk_ratio() == 0.25
+        assert body["understanding_enabled"] is True
+        assert policy.chunk_ratio() == 0.25
+        path.write_text("")
+        assert policy.enabled() is False
+        assert policy.chunk_ratio() == 0.5
 
-    file_values.clear()
-    assert module.feature_enabled() is False
-    assert module.chunk_ratio() == 0.5
+
+@patch.dict(os.environ)
+def test_history_policies_keep_two_real_config_owners_and_live_overlays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Policy construction is cold; operations read only their captured live owner."""
+    from gateway.agents.history.configuration import timeline_policy
+
+    monkeypatch.delenv("AVA_PROCESS_PROFILE", raising=False)
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("timeline_default_limit", 11)
+    second.set_field("timeline_default_limit", 29)
+    first.set_field("message_timestamps", False)
+    second.set_field("message_timestamps", True)
+    first.set_field("llm_model", "first-model")
+    second.set_field("llm_model", "second-model")
+    first_authority = ConfigAuthority(first.view, first.view, tmp_path / "first.env")
+    second_authority = ConfigAuthority(second.view, second.view, tmp_path / "second.env")
+    reads: list[str] = []
+    original = ConfigBoot.get_field
+
+    def read(owner: ConfigBoot, name: str) -> Any:
+        reads.append(name)
+        return original(owner, name)
+
+    monkeypatch.setattr(ConfigBoot, "get_field", read)
+    first_timeline, second_timeline = timeline_policy(first), timeline_policy(second)
+    first_understanding = understanding_policy(first, first_authority)
+    second_understanding = understanding_policy(second, second_authority)
+    assert reads == []
+    assert (first_timeline.default_limit(), second_timeline.default_limit()) == (11, 29)
+    assert (
+        first_timeline.rendering.timestamps_enabled(),
+        second_timeline.rendering.timestamps_enabled(),
+    ) == (False, True)
+    assert (first_understanding.default_model(), second_understanding.default_model()) == (
+        "first-model",
+        "second-model",
+    )
+    first.set_field("timeline_default_limit", 17)
+    first.set_field("llm_model", "first-updated")
+    assert (first_timeline.default_limit(), second_timeline.default_limit()) == (17, 29)
+    assert (first_understanding.default_model(), second_understanding.default_model()) == (
+        "first-updated",
+        "second-model",
+    )

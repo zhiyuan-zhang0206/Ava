@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, Human
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_llm
 from base.agents.observation.turn_progress import TurnProgress
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 
@@ -129,7 +130,9 @@ async def test_stream_llm_stamps_decode_ms(monkeypatch: pytest.MonkeyPatch) -> N
         [],
         chunks=chunks,
         handler=handler,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         catalog=build_model_catalog(),
     )
 
@@ -159,7 +162,9 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
         [],
         chunks=[],
         handler=handler,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         catalog=build_model_catalog(),
     )
     assert handler.llm_decode_ms is None
@@ -193,7 +198,9 @@ async def test_non_streaming_fallback_decode_ms_none(monkeypatch: pytest.MonkeyP
         [],
         chunks=chunks,
         handler=handler,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         catalog=build_model_catalog(),
     )
 
@@ -231,7 +238,9 @@ async def test_stream_preserves_prefix_and_does_not_recover_cache_403() -> None:
             messages,
             chunks=chunks,
             handler=handler,
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
             catalog=build_model_catalog(),
         )
     assert caught.value is failure

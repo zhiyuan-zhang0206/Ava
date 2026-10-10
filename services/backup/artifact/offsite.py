@@ -31,7 +31,7 @@ import base64
 import hashlib
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +40,6 @@ from typing import Protocol, cast
 import oss2
 from oss2.models import PartInfo
 
-from base.config import settings
 from services.backup.artifact.names import REMOTE_ROOT
 
 _log = logging.getLogger(__name__)
@@ -122,20 +121,24 @@ class OssTarget:
     credentials_file: Path
 
 
-def configured_target() -> OssTarget | None:
+def configured_target(
+    *,
+    endpoint_reader: Callable[[], str],
+    bucket_reader: Callable[[], str],
+    credentials_file_reader: Callable[[], Path | None],
+) -> OssTarget | None:
     """The configured OSS destination, or None (one INFO line says why)."""
-    config = settings.services
     keys = {
-        "AVA_BACKUP_OFFSITE_ENDPOINT": config.backup_offsite_endpoint,
-        "AVA_BACKUP_OFFSITE_BUCKET": config.backup_offsite_bucket,
-        "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE": config.backup_offsite_credentials_file,
+        "AVA_BACKUP_OFFSITE_ENDPOINT": endpoint_reader(),
+        "AVA_BACKUP_OFFSITE_BUCKET": bucket_reader(),
+        "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE": credentials_file_reader(),
     }
     unset = [key for key, value in keys.items() if not value]
-    credentials_file = config.backup_offsite_credentials_file
+    credentials_file = credentials_file_reader()
     if unset or credentials_file is None:
         _log.info("[backup] off-site publish skipped: %s unset", ", ".join(unset))
         return None
-    return OssTarget(config.backup_offsite_endpoint, config.backup_offsite_bucket, credentials_file)
+    return OssTarget(endpoint_reader(), bucket_reader(), credentials_file)
 
 
 def open_bucket(target: OssTarget) -> OssBucket:
@@ -162,7 +165,13 @@ def open_bucket(target: OssTarget) -> OssBucket:
 
 
 def publish(
-    artifact: Path, *, root: str = REMOTE_ROOT, bucket: OssBucket | None = None
+    artifact: Path,
+    *,
+    endpoint_reader: Callable[[], str],
+    bucket_reader: Callable[[], str],
+    credentials_file_reader: Callable[[], Path | None],
+    root: str = REMOTE_ROOT,
+    bucket: OssBucket | None = None,
 ) -> str | None:
     """Best-effort publish of `artifact` as ``<root>/<name>``; the object name or None.
 
@@ -172,7 +181,11 @@ def publish(
     stays good. `bucket` replaces the configured destination (tests).
     """
     if bucket is None:
-        target = configured_target()
+        target = configured_target(
+            endpoint_reader=endpoint_reader,
+            bucket_reader=bucket_reader,
+            credentials_file_reader=credentials_file_reader,
+        )
         if target is None:
             return None
         try:

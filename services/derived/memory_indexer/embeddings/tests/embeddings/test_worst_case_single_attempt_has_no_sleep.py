@@ -33,6 +33,15 @@ from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
 )
 
 
+def _timeout_reader() -> float:
+    return settings.services.memory_embed_timeout_seconds
+
+
+def _api_key_reader() -> str | None:
+    value = settings.lm.gemini_api_key
+    return None if value is None else value.get_secret_value()
+
+
 def test_worst_case_single_attempt_has_no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     from dataclasses import replace
     from unittest.mock import Mock
@@ -44,7 +53,10 @@ def test_worst_case_single_attempt_has_no_sleep(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         gemini, "_EMBED_POLICY", replace(gemini._EMBED_POLICY, max_attempts=1, backoff=backoff)
     )
-    assert gemini.worst_case_batch_seconds() == settings.services.memory_embed_timeout_seconds
+    assert (
+        gemini.worst_case_batch_seconds(settings.services.memory_embed_timeout_seconds)
+        == settings.services.memory_embed_timeout_seconds
+    )
     backoff.assert_not_called()
 
 
@@ -53,7 +65,15 @@ def test_factory_default_is_gemini(model_catalog: ModelCatalog) -> None:
     from base.config import settings
 
     assert settings.services.embedding_backend == "gemini"
-    assert isinstance(factory.get_provider(catalog=model_catalog), GeminiEmbeddingProvider)
+    assert isinstance(
+        factory.get_provider(
+            settings.services.embedding_backend,
+            catalog=model_catalog,
+            timeout_reader=_timeout_reader,
+            api_key_reader=_api_key_reader,
+        ),
+        GeminiEmbeddingProvider,
+    )
 
 
 def test_factory_unknown_backend_fails_fast(
@@ -66,7 +86,12 @@ def test_factory_unknown_backend_fails_fast(
 
     monkeypatch.setattr(settings.services, "embedding_backend", "openai")
     with pytest.raises(ValueError, match="unknown embedding provider"):
-        factory.get_provider(catalog=model_catalog)
+        factory.get_provider(
+            settings.services.embedding_backend,
+            catalog=model_catalog,
+            timeout_reader=_timeout_reader,
+            api_key_reader=_api_key_reader,
+        )
 
 
 def test_factory_provider_named_dispatch(
@@ -77,7 +102,13 @@ def test_factory_provider_named_dispatch(
 
     monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
     assert isinstance(
-        factory.get_provider_named("gemini", catalog=model_catalog), GeminiEmbeddingProvider
+        factory.get_provider_named(
+            "gemini",
+            catalog=model_catalog,
+            timeout_reader=_timeout_reader,
+            api_key_reader=_api_key_reader,
+        ),
+        GeminiEmbeddingProvider,
     )
 
 
@@ -107,11 +138,23 @@ def test_embed_trickle_total_deadline(
     started = time.monotonic()
     with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
         if mode == "sync":
-            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", catalog=model_catalog, policy=policy)
+            gemini._embed(
+                ["hello"],
+                "RETRIEVAL_DOCUMENT",
+                catalog=model_catalog,
+                policy=policy,
+                timeout_reader=_timeout_reader,
+                api_key_reader=_api_key_reader,
+            )
         else:
             asyncio.run(
                 gemini._embed_async(
-                    ["hello"], "RETRIEVAL_QUERY", catalog=model_catalog, policy=policy
+                    ["hello"],
+                    "RETRIEVAL_QUERY",
+                    catalog=model_catalog,
+                    policy=policy,
+                    timeout_reader=_timeout_reader,
+                    api_key_reader=_api_key_reader,
                 )
             )
     elapsed = time.monotonic() - started
@@ -147,11 +190,23 @@ def test_embed_compressed_trickle_deadline(
         started = time.monotonic()
         with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
             if mode == "sync":
-                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", catalog=model_catalog, policy=policy)
+                gemini._embed(
+                    ["hello"],
+                    "RETRIEVAL_DOCUMENT",
+                    catalog=model_catalog,
+                    policy=policy,
+                    timeout_reader=_timeout_reader,
+                    api_key_reader=_api_key_reader,
+                )
             else:
                 asyncio.run(
                     gemini._embed_async(
-                        ["hello"], "RETRIEVAL_QUERY", catalog=model_catalog, policy=policy
+                        ["hello"],
+                        "RETRIEVAL_QUERY",
+                        catalog=model_catalog,
+                        policy=policy,
+                        timeout_reader=_timeout_reader,
+                        api_key_reader=_api_key_reader,
                     )
                 )
         elapsed = time.monotonic() - started
@@ -189,11 +244,23 @@ def test_embed_framing_drip_deadline(
         started = time.monotonic()
         with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
             if mode == "sync":
-                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", catalog=model_catalog, policy=policy)
+                gemini._embed(
+                    ["hello"],
+                    "RETRIEVAL_DOCUMENT",
+                    catalog=model_catalog,
+                    policy=policy,
+                    timeout_reader=_timeout_reader,
+                    api_key_reader=_api_key_reader,
+                )
             else:
                 asyncio.run(
                     gemini._embed_async(
-                        ["hello"], "RETRIEVAL_QUERY", catalog=model_catalog, policy=policy
+                        ["hello"],
+                        "RETRIEVAL_QUERY",
+                        catalog=model_catalog,
+                        policy=policy,
+                        timeout_reader=_timeout_reader,
+                        api_key_reader=_api_key_reader,
                     )
                 )
         elapsed = time.monotonic() - started
@@ -244,11 +311,21 @@ def test_embed_slow_error_body_preserves_status(
         def invoke() -> np.ndarray:
             if mode == "sync":
                 return gemini._embed(
-                    ["hello"], "RETRIEVAL_DOCUMENT", catalog=model_catalog, policy=policy
+                    ["hello"],
+                    "RETRIEVAL_DOCUMENT",
+                    catalog=model_catalog,
+                    policy=policy,
+                    timeout_reader=_timeout_reader,
+                    api_key_reader=_api_key_reader,
                 )
             return asyncio.run(
                 gemini._embed_async(
-                    ["hello"], "RETRIEVAL_QUERY", catalog=model_catalog, policy=policy
+                    ["hello"],
+                    "RETRIEVAL_QUERY",
+                    catalog=model_catalog,
+                    policy=policy,
+                    timeout_reader=_timeout_reader,
+                    api_key_reader=_api_key_reader,
                 )
             )
 
@@ -303,6 +380,8 @@ def test_sync_embed_slow_resolver_deadline(
                     "RETRIEVAL_DOCUMENT",
                     catalog=model_catalog,
                     policy=Policy(max_attempts=1),
+                    timeout_reader=_timeout_reader,
+                    api_key_reader=_api_key_reader,
                 )
             elapsed = time.monotonic() - started
             assert isinstance(error.value.__cause__, httpx.ReadTimeout)
@@ -321,7 +400,7 @@ def test_metadata_descriptor_does_not_construct_provider(monkeypatch: pytest.Mon
     _, budget, descriptor = factory._PROVIDERS["gemini"]
     constructor = Mock(side_effect=AssertionError("metadata must not construct a provider"))
     monkeypatch.setitem(factory._PROVIDERS, "gemini", (constructor, budget, descriptor))
-    assert factory.get_descriptor() is descriptor
+    assert factory.get_descriptor(settings.services.embedding_backend) is descriptor
     assert descriptor.dim == GeminiEmbeddingProvider.dim
     assert descriptor.fingerprint == GeminiEmbeddingProvider.fingerprint
     constructor.assert_not_called()
@@ -330,4 +409,4 @@ def test_metadata_descriptor_does_not_construct_provider(monkeypatch: pytest.Mon
 def test_unknown_metadata_provider_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.services, "embedding_backend", "unknown-provider")
     with pytest.raises(ValueError, match="unknown embedding provider"):
-        factory.get_descriptor()
+        factory.get_descriptor(settings.services.embedding_backend)

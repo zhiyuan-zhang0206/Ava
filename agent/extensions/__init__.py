@@ -33,10 +33,13 @@ reach) keeps resolving to it.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from base import paths
+from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import enable_config as plugins_cfg
@@ -123,6 +126,8 @@ def load_extensions(
     report: load_report.Reporter | None = None,
     catalog: ModelCatalog | None = None,
     authority: ConfigAuthority | None = None,
+    clock_factory: Callable[[], Clock] | None = None,
+    producer: Callable[[], Any] | None = None,
 ) -> LoadedExtensions:
     """Read plugins_config.json, import the enabled plugins' faces, install what they declare.
 
@@ -160,6 +165,14 @@ def load_extensions(
         else None
     )
 
+    sampling = None
+    if previous is not None:
+        sampling = previous.sampling
+        if producer is None:
+            producer = previous.producer
+        if clock_factory is None:
+            clock_factory = previous.clock_factory
+
     discovered, config = _discovered_and_config(report)
 
     for name in sorted(config.plugins):
@@ -189,7 +202,9 @@ def load_extensions(
             catalog=catalog,
             authority=authority,
             delivery_sender=sender,
-            sampling=None if previous is None else previous.sampling,
+            producer=producer,
+            sampling=sampling,
+            clock_factory=clock_factory,
         ),
     )
 

@@ -21,9 +21,13 @@ Coverage:
 
 from langchain_core.messages import HumanMessage
 
-from base.agents.history.timeline import (
-    TimelineItem,
-    build_timeline_items,
+from base.agents.history.timeline import TimelineItem, build_timeline_items
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
 )
 
 # Side effect: get_timeline's _log should have had a warning trace (operators can grep)
@@ -47,7 +51,7 @@ class TestBuildTimelineItemsStartOffset:
             AIMessage(content="first"),
             AIMessage(content="second"),
         ]
-        items, msg_count = build_timeline_items(messages, [], start=2)
+        items, msg_count = build_timeline_items(messages, [], start=2, inputs=_TIMELINE_INPUTS)
         assert msg_count == 3  # full length, never the window length
         assert [it.item_id for it in items] == ["2.0"]
         assert items[0].payload == "second"
@@ -56,8 +60,8 @@ class TestBuildTimelineItemsStartOffset:
         from langchain_core.messages import AIMessage, SystemMessage
 
         messages = [SystemMessage(content="prompt"), AIMessage(content="first")]
-        full, full_count = build_timeline_items(messages, [])
-        sliced, sliced_count = build_timeline_items(messages, [], start=0)
+        full, full_count = build_timeline_items(messages, [], inputs=_TIMELINE_INPUTS)
+        sliced, sliced_count = build_timeline_items(messages, [], start=0, inputs=_TIMELINE_INPUTS)
         assert full_count == sliced_count
         assert [it.item_id for it in full] == [it.item_id for it in sliced]
         assert [it.payload for it in full] == [it.payload for it in sliced]
@@ -76,7 +80,9 @@ class TestBuildTimelineItemsStartOffset:
                 "ava_created_at": "2026-01-01T00:00:00+00:00",
             },
         )
-        items, msg_count = build_timeline_items([SystemMessage(content="p"), msg], [], start=1)
+        items, msg_count = build_timeline_items(
+            [SystemMessage(content="p"), msg], [], start=1, inputs=_TIMELINE_INPUTS
+        )
         assert msg_count == 2
         assert items[0].item_id == "1.0"
         assert items[0].created_at == "2026-01-01T00:00:00+00:00"
@@ -95,7 +101,9 @@ class TestBuildTimelineItemsStartOffset:
             },
         )
 
-        items, msg_count = build_timeline_items([SystemMessage(content="p"), msg], [], start=1)
+        items, msg_count = build_timeline_items(
+            [SystemMessage(content="p"), msg], [], start=1, inputs=_TIMELINE_INPUTS
+        )
 
         assert msg_count == 2
         assert items[0].item_id == "1.0"
@@ -116,6 +124,7 @@ class TestBuildTimelineItemsStartOffset:
             ],
             [],
             segment_prefix="s2.1f0b9b12-0000-6000-8000-000000000000",
+            inputs=_TIMELINE_INPUTS,
         )
 
         assert msg_count == 2
@@ -145,5 +154,5 @@ def test_inbound_item_ts_is_read_time_not_arrival() -> None:
             },
         ),
     ]
-    items, _ = build_timeline_items(messages, [])
+    items, _ = build_timeline_items(messages, [], inputs=_TIMELINE_INPUTS)
     assert items[0].created_at == "2026-01-01T00:00:20+00:00"

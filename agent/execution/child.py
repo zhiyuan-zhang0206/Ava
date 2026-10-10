@@ -53,6 +53,7 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
@@ -96,7 +97,14 @@ class _Sdk(Protocol):
     state: Any
     state_update: dict[str, Any] | None
 
-    def ensure_plugins_loaded(self, *, surface: bool = True) -> None: ...
+    def ensure_plugins_loaded(
+        self,
+        *,
+        surface: bool = True,
+        config: Any = None,
+        clock_factory: Callable[[], Any] | None = None,
+        producer: Callable[[], Any] | None = None,
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -200,6 +208,7 @@ def _apply_overlay_scope(
     overlay: dict[str, object] | None,
     *,
     scope: Literal["framework", "plugin"],
+    set_framework_field: Callable[[str, object], None] | None = None,
 ) -> bool:
     """Apply both maps at one scope — birth first, overlay on top (the same
     precedence the host uses when it resolves stored configuration).
@@ -210,7 +219,7 @@ def _apply_overlay_scope(
             if scope == "framework":
                 from base.packages.plugins.config_registration import apply_config_overlay
 
-                apply_config_overlay(value, scope=scope)
+                apply_config_overlay(value, scope=scope, set_framework_field=set_framework_field)
             else:
                 from ava.sdk_surface import install
 
@@ -219,7 +228,12 @@ def _apply_overlay_scope(
     return applied
 
 
-def _init_logger(agent_id: int | None) -> None:
+def _init_logger(
+    agent_id: int | None,
+    *,
+    producer: Callable[[], Any],
+    machine_reader: Callable[[], str],
+) -> None:
     """File sink only, plus a best-effort event-pipeline sink for sdk_call
     events. The pipeline open is best-effort here — a DB outage must not stop
     agent code from running (unlike the agent process, which fails loud at
@@ -235,7 +249,12 @@ def _init_logger(agent_id: int | None) -> None:
     try:
         from base.log import add_postgres_sink
 
-        add_postgres_sink(process="agent-exec", agent_id=agent_id)
+        add_postgres_sink(
+            process="agent-exec",
+            agent_id=agent_id,
+            producer=producer,
+            machine_reader=machine_reader,
+        )
     except Exception:
         logger.warning(
             "[exec-child] event pipeline sink unavailable — sdk_call events "
@@ -429,8 +448,17 @@ def _finalize_telemetry() -> None:
     """
     if "base.telemetry" not in sys.modules:
         return
+    import ava
     from base import telemetry
 
+    context = getattr(ava, "context", None)
+    if context is not None:
+        owned_result = context.clients.sync_events()
+        if owned_result.status is telemetry.DrainStatus.UNFINISHED:
+            logger.warning(
+                "exec child: owned telemetry delivery is unfinished; "
+                "queued records may be lost or land later"
+            )
     result = telemetry.sync()
     if result.status is telemetry.DrainStatus.UNFINISHED:
         logger.warning(
@@ -483,20 +511,16 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
             _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
-def _bind_identity(request: RequestPayload) -> None:
-    """Bind this child's `AvaContext`, built from the host's description, and the logger and
-    incarnation of the agent it acts as."""
+def _bind_identity(request: RequestPayload, *, config: Any) -> None:
+    """Bind this child's `AvaContext` and the incarnation from its validated request."""
     import ava
     from ava.sdk_surface import process_context
 
     ava.bind_context(
         process_context.context_from_description(
-            request.context, original_incarnation=request.incarnation
+            request.context, original_incarnation=request.incarnation, config=config
         )
     )
-    if request.agent_id is None:
-        return
-    _init_logger(request.agent_id)
     # No eager OTLP warmup: the backend comes up lazily on the first export
     # (`_ensure()` in base/telemetry/otlp/telemetry_otlp.py), so a zero-record
     # child never imports the OTel SDK at all (task #3816 M3).
@@ -510,43 +534,69 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
 
     _line_buffered_output()
     _install_signal_handlers()
-    if "AVA_AGENT_ID" in os.environ:
-        _init_logger(int(os.environ["AVA_AGENT_ID"]))
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
 
     birth, overlay = _pop_overlay_env()
-    _bind_identity(request)
+    from base.clock import Clock, clock_config_from_boot
+    from base.config import ConfigBoot
+
+    config = ConfigBoot()
+    config.boot()
+    _bind_identity(request, config=config)
+
+    def clock_factory() -> Clock:
+        return Clock(clock_config_from_boot(config))
+
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
     # plugins load (the SDK installation owns the bound plugin config image).
-    framework_overlay_applied = _apply_overlay_scope(birth, overlay, scope="framework")
+    framework_overlay_applied = _apply_overlay_scope(
+        birth, overlay, scope="framework", set_framework_field=config.set_field
+    )
+    import ava
+    from base.cluster.machine import validate_machine_name
+
+    _init_logger(
+        request.agent_id,
+        producer=ava.context.clients.event_pipeline,
+        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+    )
     # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
     # same explicit load a watcher child runs. Idempotent, surface-only: a
     # request carrying a state snapshot arms a lazy slot whose first use
     # upgrades to the agent-runtime faces (state fields feed the state schema)
     # — the child start stays off the agent runtime either way (task #3633).
     # The install applies the env baseline AVA_SDK_DISABLE as part of the load.
-    child.ava.ensure_plugins_loaded()
+    child.ava.ensure_plugins_loaded(
+        config=config,
+        clock_factory=clock_factory,
+        producer=ava.context.clients.event_pipeline,
+    )
     from dataclasses import replace
 
-    import ava
     from ava.sdk_surface import settings as sdk_settings
 
-    ava.bind_context(replace(ava.context, catalog=sdk_settings.model_catalog()))
+    ava.bind_context(
+        replace(ava.context, catalog=sdk_settings.model_catalog(), clock_factory=clock_factory)
+    )
     _apply_overlay_scope(birth, overlay, scope="plugin")
+
+    def read_agent_default(_domain: str, field: str) -> Any:
+        return sdk_settings.config_authority().service_field_value(field)
+
     if framework_overlay_applied:
         # Per-agent sdk_disable additions ride the overlay; they apply additively
         # on top of the installed surface (delta — only new entries take effect).
         from agent.process_boot import _apply_per_agent_sdk_disable
 
-        _apply_per_agent_sdk_disable()
+        _apply_per_agent_sdk_disable(default_reader=read_agent_default)
     # A text-only agent gets no attach contract anywhere in its SDK docs,
     # including interactive `ava.help(ava.self)` (user ruling 2026-08-28): the
     # renderer computes the child's media gating itself, per call.
     from agent.process_boot import _apply_per_agent_eval_isolation
 
-    _apply_per_agent_eval_isolation()
+    _apply_per_agent_eval_isolation(default_reader=read_agent_default)
     _build_state_slot(child, request)
 
     if request.timeout_s > 0:

@@ -1,51 +1,10 @@
-"""Boot-lite runtime — resolve the boot-path config fields without pydantic.
+"""Boot-lite configuration owned by a ConfigBoot instance.
 
-`import base.config` no longer constructs `Settings`. It *prepares* the
-boot-lite state — loads the unit's `.env`, runs the config-source decision, and
-validates the boot-path fields fail-fast — then serves reads from the generated
-static index (`base/host/env/config_lite_table.py`) through the `settings` view
-defined here. The eager config chain (15 sub-model imports, pydantic_settings,
-the flat field registry, the `Settings` singleton) is pulled in on first touch
-of anything outside the boot-path surface, exactly once, by `upgrade()`:
-
-    LITE -- upgrade(reason) --> FULL
-
-The transition is single-shot, single-directional, and serialized by one RLock.
-While a build is in flight, a read from another thread waits for it (bounded;
-expiry raises the retryable `ConfigBuildWaitTimeoutError`), and a re-entrant read on
-the building thread itself serves the lite value rather than recursing into the
-build. Overlay writes that landed before
-the upgrade (pending) are replayed onto the constructed singleton in insertion
-order, then cleared.
-
-Lite surface (no upgrade):
-
-- `settings.<domain>` — a domain view; `<field>` reads resolve pending >
-  env (`.env` loaded) > default, for the fields in `LITE_FIELDS`. Anything
-  else (a field outside the table, a non-field attribute) upgrades.
-- `get_field` / `set_field` — table fields resolve/pend; everything else
-  upgrades. An unknown name is a KeyError (as ever); a domain outside the
-  process profile is the same fail-fast AttributeError without upgrading.
-- `field_alias` / `field_domain` / `field_names` / `per_agent_field_names`
-  (facade) — served by the index; `cluster_tz_name` and the timestamp helpers
-  read through the view.
-
-Everything heavy is reachable only after an upgrade: the facade's module-level
-`__getattr__` triggers it for names it does not define itself (Settings,
-_FIELDS, FIELD_INFOS, BOOTSTRAP_FIELDS, the metadata/turn-view re-exports).
-
-Escape hatches (all tested): `AVA_CONFIG_BOOT=eager` (upgrade at import),
-`ensure_eager()` (a process entry that must construct every domain),
-the pytest conftest's eager default, and the subprocess lite-path tests.
-
-What prepare preserves from the eager boot: the `.env` load and the
-env-authority pass run at the same moment (import) with the same side effects;
-a configured runner still fetches `GET /api/bootstrap` at import and still
-fails fast (BootstrapFetchError) when the gateway is unreachable; a local unit
-still fails fast when a required data-plane URL is absent (the W1 check,
-`_require_local_fields`); the cluster clock is still applied. A skip-mode
-process (`AVA_CONFIG_FETCH=skip`) keeps its deferred semantics: nothing loads
-until the first config read.
+Owners prepare at their process boundary and build the eager chain on first
+non-lite use. Each owns its lock, pending overlays and stable view. The existing
+module facade remains a temporary adapter during complete consumer migration.
+Lite parsing, environment delivery and the bounded/re-entrant full-build gate
+retain their previous timing.
 """
 
 from __future__ import annotations
@@ -96,53 +55,6 @@ _FULL = "full"
 _BUILD_WAIT_TIMEOUT_SECONDS = 30.0
 
 # The one upgrade lock: prepare, the build, and the install run under it.
-_lock = RLock()
-
-
-class _BootState:
-    """The process's boot-lite state. One mutable container (instead of module
-    globals) so the upgrade path reads as field updates, not `global` juggling."""
-
-    __slots__ = (
-        "env_boot",
-        "mode",
-        "pending",
-        "prepared",
-        "profile",
-        "reason",
-        "settings",
-        "upgrades",
-        "upgrading",
-        "upgrading_thread",
-    )
-
-    def __init__(self) -> None:
-        self.env_boot: EnvBootResult | None = None
-        self.mode = _LITE
-        self.reason: str | None = None
-        self.upgrades = 0
-        self.upgrading = False
-        self.upgrading_thread: int | None = None
-        self.prepared = False
-        self.profile: ProcessProfile | None = None
-        # Overlay writes made in lite mode, in insertion order: name -> raw value.
-        self.pending: dict[str, Any] = {}
-        # The constructed singleton, set by _install().
-        self.settings: Any = None
-
-
-_state = _BootState()
-
-
-def _current_settings() -> Any:
-    """The public `settings` object as bound on `base.config`.
-
-    Resolved per call — the same shape the agent pins use — so a caller (or a
-    test) that replaces the module attribute is honored instead of silently
-    reading a stale handle."""
-    from base.config import settings
-
-    return settings
 
 
 # The never-dialed placeholder for the required redis URL (mirrors the eager
@@ -151,7 +63,6 @@ def _current_settings() -> Any:
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
 
 
-# ── Parsing ────────────────────────────────────────────────────────────────
 #
 # The parse kinds mirror pydantic's non-strict coercion for the field types the
 # table declares (bool strings, int from a trimmed integer literal or an
@@ -254,7 +165,7 @@ def _parse(name: str, alias: str, kind: str, check: str | None, raw: str) -> Any
     return value
 
 
-def _default_value(name: str, default_kind: str, literal: Any) -> Any:
+def _default_value(owner: ConfigBoot, name: str, default_kind: str, literal: Any) -> Any:
     """The field's default, per the named default kind recorded in the table."""
     if default_kind == "literal":
         return literal
@@ -265,91 +176,10 @@ def _default_value(name: str, default_kind: str, literal: Any) -> Any:
     if default_kind == "otel_endpoint_from_port":
         # Mirrors ObservabilitySettings._default_local_otlp_endpoint: when the
         # endpoint itself is not explicitly set, it follows the port.
-        return f"http://127.0.0.1:{resolve('telemetry_otlp_port')}"
+        return f"http://127.0.0.1:{owner.resolve('telemetry_otlp_port')}"
     raise ValueError(
         f"unknown default kind {default_kind!r} for config field {name!r}"
     )  # pragma: no cover
-
-
-# ── The lite read path ─────────────────────────────────────────────────────
-
-
-def resolve(name: str) -> Any:
-    """Resolve one `LITE_FIELDS` entry: pending override > env > default."""
-    prepare()
-    if name in _state.pending:
-        return _state.pending[name]
-    _domain, alias, kind, default_kind, literal, check = LITE_FIELDS[name]
-    raw = os.environ.get(alias)
-    if raw is not None:
-        return _parse(name, alias, kind, check, raw)
-    return _default_value(name, default_kind, literal)
-
-
-def field_explicitly_set(name: str) -> bool:
-    """Whether `name` was explicitly provided to this process rather than
-    defaulted — the lite equivalent of `model_fields_set` for a boot-built
-    singleton: its env alias is present (the `.env` load ran), or an overlay
-    pinned it (`set_field`; pydantic records a post-init setattr in
-    `model_fields_set` too, so both modes agree). `cluster_tz_name` is built
-    on this: the field default alone does not make a value authoritative."""
-    prepare()
-    if _state.mode == _FULL:
-        return name in getattr(_current_settings(), FIELD_DOMAINS[name]).model_fields_set
-    return name in _state.pending or os.environ.get(FIELD_ALIASES[name]) is not None
-
-
-def _check_domain_allowed(domain: str) -> None:
-    """The lite half of the profile fail-fast (the eager half lives in
-    `Settings.__getattr__`; both raise the same message)."""
-    profile = _state.profile
-    if profile is not None and domain not in PROCESS_PROFILES[profile]:
-        raise profile_domain_error(profile, domain)
-
-
-def get_field(name: str) -> Any:
-    """Current value of a leaf field by name, resolved to its owning sub-model.
-
-    The escape hatch for reflective / dynamic access — a flat
-    `getattr(settings, name)` no longer works now that fields live on
-    `settings.<domain>`. Static access should use the nested attribute directly
-    (`settings.lm.llm_state.model`); this is for call sites that hold the field name as a
-    runtime string (health-port map, model-key map, capability probes)."""
-    domain = FIELD_DOMAINS[name]
-    if _state.mode == _FULL:
-        return getattr(getattr(_current_settings(), domain), name)
-    _check_domain_allowed(domain)
-    if name in _state.pending:
-        return _state.pending[name]
-    if name in LITE_FIELDS:
-        return resolve(name)
-    if _state.upgrading and _state.upgrading_thread != get_ident():
-        _wait_for_in_flight_build(f"get_field({name!r})")
-    upgrade(f"get_field({name!r})")
-    return getattr(getattr(_current_settings(), domain), name)
-
-
-def set_field(name: str, value: Any) -> None:
-    """In-place set a field on its owning sub-model of the singleton. Every holder
-    of `from base.config import settings` sees it (same sub-model instance). Used
-    by the per-agent config overlay at process boot.
-
-    In lite mode ANY registered field is recorded as a pending override and
-    replayed onto the constructed singleton at upgrade; reads see it already
-    (pending resolves ahead of the index), so an overlay write never forces the
-    eager chain — the hosted exec child writes the agent's whole frozen set,
-    most of which the boot-path index does not carry (#3621 BLK-1). An unknown
-    name is a KeyError, and a domain outside the profile fails fast, both as in
-    the eager path."""
-    domain = FIELD_DOMAINS[name]
-    if _state.mode == _FULL:
-        setattr(getattr(_current_settings(), domain), name, value)
-        return
-    _check_domain_allowed(domain)
-    _state.pending[name] = value
-
-
-# ── The views ──────────────────────────────────────────────────────────────
 
 
 class _DomainView:
@@ -359,31 +189,35 @@ class _DomainView:
     other attribute is the eager sub-model's business and upgrades. After an
     upgrade the proxy keeps working: it delegates to the real sub-model."""
 
-    __slots__ = ("_domain",)
+    __slots__ = ("_domain", "_owner")
 
-    def __init__(self, domain: str) -> None:
+    _owner: ConfigBoot
+    _domain: str
+
+    def __init__(self, owner: ConfigBoot, domain: str) -> None:
+        object.__setattr__(self, "_owner", owner)
         object.__setattr__(self, "_domain", domain)
 
     def __getattr__(self, name: str) -> Any:
         domain = self._domain
-        if _state.mode == _FULL:
-            return getattr(getattr(_current_settings(), domain), name)
-        if name in _state.pending and FIELD_DOMAINS.get(name) == domain:
-            return _state.pending[name]
+        if self._owner.mode == _FULL:
+            return getattr(getattr(self._owner._current_settings(), domain), name)
+        if name in self._owner.pending and FIELD_DOMAINS.get(name) == domain:
+            return self._owner.pending[name]
         row = LITE_FIELDS.get(name)
         if row is not None and row[0] == domain:
-            return resolve(name)
+            return self._owner.resolve(name)
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
-        if not _maybe_upgrade(f"settings.{domain}.{name}"):
+        if not self._owner._maybe_upgrade(f"settings.{domain}.{name}"):
             raise AttributeError(_build_window_message(f"settings.{domain}.{name}"))
-        return getattr(getattr(_current_settings(), domain), name)
+        return getattr(getattr(self._owner._current_settings(), domain), name)
 
     def __setattr__(self, name: str, value: Any) -> None:
         domain = object.__getattribute__(self, "_domain")
-        if _state.mode != _FULL:
-            upgrade(f"settings.{domain}.{name} assignment")
-        setattr(getattr(_current_settings(), domain), name, value)
+        if self._owner.mode != _FULL:
+            self._owner.upgrade(f"settings.{domain}.{name} assignment")
+        setattr(getattr(self._owner._current_settings(), domain), name, value)
 
 
 class _SettingsView:
@@ -392,16 +226,21 @@ class _SettingsView:
     `from base.config import settings` binding — and every `set_field`
     write — keeps working across the upgrade."""
 
-    __slots__ = ("_domains",)
+    __slots__ = ("_domains", "_owner")
 
-    def __init__(self) -> None:
+    _owner: ConfigBoot
+    _domains: dict[str, _DomainView]
+
+    def __init__(self, owner: ConfigBoot) -> None:
+        object.__setattr__(self, "_owner", owner)
         object.__setattr__(self, "_domains", {})
 
     @property
     def profile(self) -> str | None:
-        if _state.mode == _FULL:
-            return _current_settings().profile
-        return _state.profile
+        if self._owner.mode == _FULL:
+            return self._owner._current_settings().profile
+        self._owner.prepare()
+        return self._owner.profile
 
     def has_domain(self, name: str) -> bool:
         """Whether this process's profile constructs the `name` config domain.
@@ -410,33 +249,34 @@ class _SettingsView:
         reading; static code should simply access `settings.<domain>` and let
         the fail-fast AttributeError point at the fix.
         """
-        if _state.mode == _FULL:
-            return bool(_current_settings().has_domain(name))
-        profile = _state.profile
+        if self._owner.mode == _FULL:
+            return bool(self._owner._current_settings().has_domain(name))
+        self._owner.prepare()
+        profile = self._owner.profile
         if profile is None:
             return True
         return name in PROCESS_PROFILES[profile]
 
     def __getattr__(self, name: str) -> Any:
-        if _state.mode == _FULL:
-            return getattr(_current_settings(), name)
+        if self._owner.mode == _FULL:
+            return getattr(self._owner._current_settings(), name)
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
         if name in DOMAIN_ATTRS:
-            _check_domain_allowed(name)
+            self._owner._check_domain_allowed(name)
             domains: dict[str, _DomainView] = object.__getattribute__(self, "_domains")
             view = domains.get(name)
             if view is None:
-                view = domains[name] = _DomainView(name)
+                view = domains[name] = _DomainView(self._owner, name)
             return view
-        if not _maybe_upgrade(f"settings attribute {name!r}"):
+        if not self._owner._maybe_upgrade(f"settings attribute {name!r}"):
             raise AttributeError(_build_window_message(f"settings.{name}"))
-        return getattr(_current_settings(), name)
+        return getattr(self._owner._current_settings(), name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if _state.mode != _FULL:
-            upgrade(f"settings.{name} assignment")
-        setattr(_current_settings(), name, value)
+        if self._owner.mode != _FULL:
+            self._owner.upgrade(f"settings.{name} assignment")
+        setattr(self._owner._current_settings(), name, value)
 
 
 def _build_window_message(target: str) -> str:
@@ -458,65 +298,6 @@ def _build_wait_timeout_message(target: str) -> str:
         f"config boot-lite: {target} is not readable yet: the in-flight eager config "
         f"build exceeded the {_BUILD_WAIT_TIMEOUT_SECONDS:g}s wait bound; retry shortly"
     )
-
-
-# ── prepare ────────────────────────────────────────────────────────────────
-
-
-def prepare() -> None:
-    """Make the boot-lite state resolvable — once per process.
-
-    Runs at the `base.config` import tail for every non-skip process (the
-    settings-lite maintenance verbs keep their deferred load) and at the first
-    config read for a skip process. Mirrors the eager boot's env work exactly:
-
-    1. `load_ava_env()` — the `.env` load + the env-authority force/drop pass;
-    2. the config-source decision: a local unit must hold its required
-       data-plane values (W1 check), a configured pure runner fetches
-       `GET /api/bootstrap` (the same import-time fetch, and the same
-       BootstrapFetchError when the gateway is unreachable), everything else
-       gets the never-dialed placeholders so a later construction succeeds;
-    3. every boot-path field that is present in the environment parses and
-       validates now — the import-time fail-fast for `LITE_FIELDS`;
-    4. the cluster clock is applied (`apply_cluster_timezone`).
-    """
-    if _state.prepared:
-        return
-    with _lock:
-        if _state.prepared:
-            return
-        # Latched first: a re-entrant read during step 4 (cluster_tz_name reads
-        # through the view) must not prepare again.
-        _state.prepared = True
-        _state.env_boot = load_ava_env()
-        profile = os.environ.get(AVA_PROCESS_PROFILE_ENV)
-        if profile is not None and profile not in PROCESS_PROFILES:
-            raise profile_unknown_error(profile)
-        _state.profile = cast(ProcessProfile, profile)
-        _apply_source_decision()
-        for name, row in LITE_FIELDS.items():
-            raw = os.environ.get(row[1])
-            if raw is not None:
-                _parse(name, row[1], row[2], row[5], raw)
-        _apply_cluster_timezone()
-
-
-def _apply_source_decision() -> None:
-    """The eager boot's source decision, minus the construction it guarded.
-
-    `_plant_placeholders` keeps the eager boot's env side effect (the
-    never-dialed URLs) so a later `Settings()` construction finds the same
-    environment it would have found eagerly."""
-    if config_source_is_local():
-        _require_local_fields()
-    elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
-        _plant_placeholders()
-    elif should_fetch_from_gateway():
-        from base.host.env.bootstrap import inject_config_from_gateway
-
-        _state.env_boot = inject_config_from_gateway()
-    else:
-        _plant_placeholders()
 
 
 def _require_local_fields() -> None:
@@ -549,105 +330,6 @@ def _plant_placeholders() -> None:
     os.environ.setdefault("AVA_REDIS_URL", _LITE_REDIS_URL)
 
 
-def _apply_cluster_timezone() -> None:
-    """The eager boot's clock hook, through the facade's helper (which reads
-    the authoritative timezone off this view)."""
-    from base.config import apply_cluster_timezone
-
-    apply_cluster_timezone()
-
-
-# ── upgrade ────────────────────────────────────────────────────────────────
-
-
-def upgrade(reason: str) -> Any:
-    """Build the eager chain once and switch the process to it.
-
-    Under the upgrade lock: prepare if not yet prepared, build the full state
-    (`_full.build()` — the sub-models, registry and `Settings` singleton from
-    the prepared environment), install it into the facade, replay the pending
-    overlay writes in insertion order, and latch `full`. Idempotent: every later
-    call returns the constructed singleton. The reason (a short caller tag)
-    lands in the debug log and `boot_state()`."""
-    with _lock:
-        if _state.mode == _FULL:
-            return _state.settings
-        prepare()
-        _state.upgrading = True
-        _state.upgrading_thread = get_ident()
-        try:
-            from base.config._full import build
-
-            env_boot = _state.env_boot
-            if env_boot is None:
-                raise RuntimeError("config boot did not produce an environment delivery result")
-            bundle = build(env_boot=env_boot)
-            _install(bundle, reason)
-            for name, value in tuple(_state.pending.items()):
-                setattr(getattr(_state.settings, FIELD_DOMAINS[name]), name, value)
-            _state.pending.clear()
-        finally:
-            _state.upgrading = False
-            _state.upgrading_thread = None
-    _log_upgrade(reason)
-    return _state.settings
-
-
-def _install(bundle: Any, reason: str) -> None:
-    facade = sys.modules["base.config"]
-    facade.__dict__.update(bundle.exports)
-    # Rebind the facade's `settings` name to the constructed singleton. The
-    # module-level binding (and every `from base.config import settings` made
-    # before the upgrade) initially held the boot-lite view; old holders keep
-    # working because the view delegates through this name, fresh imports get
-    # the real object, and `_current_settings()` (the monkeypatch-honoring
-    # reader every full-mode branch goes through) resolves to the singleton
-    # instead of recursing back into the view.
-    facade.__dict__["settings"] = bundle.settings
-    _state.settings = bundle.settings
-    _state.mode = _FULL
-    _state.prepared = True
-    _state.reason = reason
-    _state.upgrades += 1
-
-
-def _wait_for_in_flight_build(reason: str) -> None:
-    """Bounded wait for another thread's in-flight eager build.
-
-    The builder holds `_lock` across the whole upgrade (prepare, build,
-    install, overlay replay), so acquiring it IS the wait. On acquisition the
-    chain is installed and the caller can serve the full value; if the
-    in-flight attempt died before installing, this thread runs the build
-    itself so the real error surfaces. On expiry the read raises the
-    retryable ConfigBuildWaitTimeoutError -- the other thread's build keeps running
-    and installs when it finishes, so a retry is the right move."""
-    if not _lock.acquire(timeout=_BUILD_WAIT_TIMEOUT_SECONDS):
-        raise ConfigBuildWaitTimeoutError(_build_wait_timeout_message(reason))
-    try:
-        if _state.mode != _FULL:
-            upgrade(reason)
-    finally:
-        _lock.release()
-
-
-def _maybe_upgrade(reason: str) -> bool:
-    """Upgrade unless THIS thread is the one already building.
-
-    A read that arrives while another thread's build is in flight waits for it
-    (bounded) and then serves the full chain. Only a read made by the building
-    thread itself -- which must not wait on its own build -- returns False, and
-    the caller serves the lite value or raises the documented window error."""
-    if _state.mode == _FULL:
-        return True
-    if _state.upgrading:
-        if _state.upgrading_thread == get_ident():
-            return False
-        _wait_for_in_flight_build(reason)
-        return True
-    upgrade(reason)
-    return True
-
-
 def _log_upgrade(reason: str) -> None:
     # Debug-only observability (Q6): the event is already visible in
     # `boot_state()` for tests and acceptance runs.
@@ -658,56 +340,379 @@ def _log_upgrade(reason: str) -> None:
     logger.debug("config boot-lite upgraded to the eager config chain (reason={!r})", reason)
 
 
-def ensure_eager() -> None:
-    """Construct the full config chain now, at this point in the process.
+class ConfigBoot:
+    """One composition owner's lazy configuration, overlays and build gate.
 
-    The explicit full-validation entry point for processes that must fail fast
-    on every field at boot (the gateway, the ops daemons, the agent host — the
-    callers whitelisted for #3621): `import base.config` alone no longer
-    constructs every domain."""
-    upgrade("ensure_eager()")
+    Construction performs no environment delivery or full-model build. Call
+    boot() at the existing process entry; pass view or narrow reader closures
+    to consumers. A view always resolves this instance, including after upgrade.
+    """
+
+    __slots__ = (
+        "_lock",
+        "env_boot",
+        "mode",
+        "pending",
+        "prepared",
+        "profile",
+        "reason",
+        "settings",
+        "upgrades",
+        "upgrading",
+        "upgrading_thread",
+        "view",
+    )
+
+    def __init__(self) -> None:
+        self._lock = RLock()
+        self.view = _SettingsView(self)
+        self.env_boot: EnvBootResult | None = None
+        self.mode = _LITE
+        self.reason: str | None = None
+        self.upgrades = 0
+        self.upgrading = False
+        self.upgrading_thread: int | None = None
+        self.prepared = False
+        self.profile: ProcessProfile | None = None
+        # Overlay writes made in lite mode, in insertion order: name -> raw value.
+        self.pending: dict[str, Any] = {}
+        # This owner's constructed model, set by _install().
+        self.settings: Any = None
+
+    def _current_settings(self) -> Any:
+        return self.settings
+
+    def _apply_cluster_timezone(self) -> None:
+        from base.config import _apply_timezone_name
+
+        name = self.get_field("timezone") if self.field_explicitly_set("timezone") else None
+        _apply_timezone_name(name)
+
+    def refresh_data_plane_settings(self) -> None:
+        """Refresh only this owner's data-plane slice at the existing call point."""
+        from base.config._full import refresh_data_plane_settings
+
+        self.upgrade("refresh_data_plane_settings()")
+        refresh_data_plane_settings(self._current_settings())
+
+    def resolve(self, name: str) -> Any:
+        """Resolve one `LITE_FIELDS` entry: pending override > env > default."""
+        self.prepare()
+        if name in self.pending:
+            return self.pending[name]
+        _domain, alias, kind, default_kind, literal, check = LITE_FIELDS[name]
+        raw = os.environ.get(alias)
+        if raw is not None:
+            return _parse(name, alias, kind, check, raw)
+        return _default_value(self, name, default_kind, literal)
+
+    def field_explicitly_set(self, name: str) -> bool:
+        """Whether `name` was explicitly provided to this process rather than
+        defaulted — the lite equivalent of `model_fields_set` for a boot-built
+        singleton: its env alias is present (the `.env` load ran), or an overlay
+        pinned it (`set_field`; pydantic records a post-init setattr in
+        `model_fields_set` too, so both modes agree). `cluster_tz_name` is built
+        on this: the field default alone does not make a value authoritative."""
+        self.prepare()
+        if self.mode == _FULL:
+            return name in getattr(self._current_settings(), FIELD_DOMAINS[name]).model_fields_set
+        return name in self.pending or os.environ.get(FIELD_ALIASES[name]) is not None
+
+    def _check_domain_allowed(self, domain: str) -> None:
+        """The lite half of the profile fail-fast (the eager half lives in
+        `Settings.__getattr__`; both raise the same message)."""
+        profile = self.profile
+        if profile is not None and domain not in PROCESS_PROFILES[profile]:
+            raise profile_domain_error(profile, domain)
+
+    def get_field(self, name: str) -> Any:
+        """Current value of a leaf field by name, resolved to its owning sub-model.
+
+        The escape hatch for reflective / dynamic access — a flat
+        `getattr(settings, name)` no longer works now that fields live on
+        `settings.<domain>`. Static access should use the nested attribute directly
+        (`settings.lm.llm_state.model`); this is for call sites that hold the field name as a
+        runtime string (health-port map, model-key map, capability probes)."""
+        domain = FIELD_DOMAINS[name]
+        if self.mode == _FULL:
+            return getattr(getattr(self._current_settings(), domain), name)
+        self._check_domain_allowed(domain)
+        if name in self.pending:
+            return self.pending[name]
+        if name in LITE_FIELDS:
+            return self.resolve(name)
+        if self.upgrading and self.upgrading_thread != get_ident():
+            self._wait_for_in_flight_build(f"get_field({name!r})")
+        self.upgrade(f"get_field({name!r})")
+        return getattr(getattr(self._current_settings(), domain), name)
+
+    def set_field(self, name: str, value: Any) -> None:
+        """Set a field on this owner; existing views/readers see the same model.
+
+        Used by the per-agent config overlay at process boot.
+
+        In lite mode ANY registered field is recorded as a pending override and
+        replayed onto the constructed singleton at upgrade; reads see it already
+        (pending resolves ahead of the index), so an overlay write never forces the
+        eager chain — the hosted exec child writes the agent's whole frozen set,
+        most of which the boot-path index does not carry (#3621 BLK-1). An unknown
+        name is a KeyError, and a domain outside the profile fails fast, both as in
+        the eager path."""
+        domain = FIELD_DOMAINS[name]
+        if self.mode == _FULL:
+            setattr(getattr(self._current_settings(), domain), name, value)
+            return
+        self._check_domain_allowed(domain)
+        self.pending[name] = value
+
+    def prepare(self) -> None:
+        """Make the boot-lite state resolvable — once per process.
+
+        Runs at the `base.config` import tail for every non-skip process (the
+        settings-lite maintenance verbs keep their deferred load) and at the first
+        config read for a skip process. Mirrors the eager boot's env work exactly:
+
+        1. `load_ava_env()` — the `.env` load + the env-authority force/drop pass;
+        2. the config-source decision: a local unit must hold its required
+           data-plane values (W1 check), a configured pure runner fetches
+           `GET /api/bootstrap` (the same import-time fetch, and the same
+           BootstrapFetchError when the gateway is unreachable), everything else
+           gets the never-dialed placeholders so a later construction succeeds;
+        3. every boot-path field that is present in the environment parses and
+           validates now — the import-time fail-fast for `LITE_FIELDS`;
+        4. the cluster clock is applied (`apply_cluster_timezone`).
+        """
+        if self.prepared:
+            return
+        with self._lock:
+            if self.prepared:
+                return
+            # Latched first: a re-entrant read during step 4 (cluster_tz_name reads
+            # through the view) must not prepare again.
+            self.prepared = True
+            self.env_boot = load_ava_env()
+            profile = os.environ.get(AVA_PROCESS_PROFILE_ENV)
+            if profile is not None and profile not in PROCESS_PROFILES:
+                raise profile_unknown_error(profile)
+            self.profile = cast(ProcessProfile, profile)
+            self._apply_source_decision()
+            for name, row in LITE_FIELDS.items():
+                raw = os.environ.get(row[1])
+                if raw is not None:
+                    _parse(name, row[1], row[2], row[5], raw)
+            self._apply_cluster_timezone()
+
+    def _apply_source_decision(self) -> None:
+        """The eager boot's source decision, minus the construction it guarded.
+
+        `_plant_placeholders` keeps the eager boot's env side effect (the
+        never-dialed URLs) so a later `Settings()` construction finds the same
+        environment it would have found eagerly."""
+        if config_source_is_local():
+            _require_local_fields()
+        elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
+            _plant_placeholders()
+        elif should_fetch_from_gateway():
+            from base.host.env.bootstrap import inject_config_from_gateway
+
+            self.env_boot = inject_config_from_gateway()
+        else:
+            _plant_placeholders()
+
+    def upgrade(self, reason: str) -> Any:
+        """Build this owner's eager chain once.
+
+        Under the upgrade lock: prepare if not yet prepared, build the full state
+        (`_full.build()` — the sub-models, registry and `Settings` singleton from
+        the prepared environment), install it on this owner, replay the pending
+        overlay writes in insertion order, and latch `full`. Idempotent: every later
+        call returns the constructed singleton. The reason (a short caller tag)
+        lands in the debug log and `boot_state()`."""
+        with self._lock:
+            if self.mode == _FULL:
+                return self.settings
+            self.prepare()
+            self.upgrading = True
+            self.upgrading_thread = get_ident()
+            try:
+                from base.config._full import build
+
+                env_boot = self.env_boot
+                if env_boot is None:
+                    raise RuntimeError("config boot did not produce an environment delivery result")
+                bundle = build(env_boot=env_boot)
+                self._install(bundle, reason)
+                for name, value in tuple(self.pending.items()):
+                    setattr(getattr(self.settings, FIELD_DOMAINS[name]), name, value)
+                self.pending.clear()
+            finally:
+                self.upgrading = False
+                self.upgrading_thread = None
+        _log_upgrade(reason)
+        return self.settings
+
+    def _install(self, bundle: Any, reason: str) -> None:
+        self.settings = bundle.settings
+        self.mode = _FULL
+        self.prepared = True
+        self.reason = reason
+        self.upgrades += 1
+
+    def _wait_for_in_flight_build(self, reason: str) -> None:
+        """Bounded wait for another thread's in-flight eager build.
+
+        The builder holds `self._lock` across the whole upgrade (prepare, build,
+        install, overlay replay), so acquiring it IS the wait. On acquisition the
+        chain is installed and the caller can serve the full value; if the
+        in-flight attempt died before installing, this thread runs the build
+        itself so the real error surfaces. On expiry the read raises the
+        retryable ConfigBuildWaitTimeoutError -- the other thread's build keeps running
+        and installs when it finishes, so a retry is the right move."""
+        if not self._lock.acquire(timeout=_BUILD_WAIT_TIMEOUT_SECONDS):
+            raise ConfigBuildWaitTimeoutError(_build_wait_timeout_message(reason))
+        try:
+            if self.mode != _FULL:
+                self.upgrade(reason)
+        finally:
+            self._lock.release()
+
+    def _maybe_upgrade(self, reason: str) -> bool:
+        """Upgrade unless THIS thread is the one already building.
+
+        A read that arrives while another thread's build is in flight waits for it
+        (bounded) and then serves the full chain. Only a read made by the building
+        thread itself -- which must not wait on its own build -- returns False, and
+        the caller serves the lite value or raises the documented window error."""
+        if self.mode == _FULL:
+            return True
+        if self.upgrading:
+            if self.upgrading_thread == get_ident():
+                return False
+            self._wait_for_in_flight_build(reason)
+            return True
+        self.upgrade(reason)
+        return True
+
+    def ensure_eager(self) -> Any:
+        """Construct the full config chain now, at this point in the process.
+
+        The explicit full-validation entry point for processes that must fail fast
+        on every field at boot (the gateway, the ops daemons, the agent host — the
+        callers whitelisted for #3621): `import base.config` alone no longer
+        constructs every domain."""
+        return self.upgrade("ensure_eager()")
+
+    def boot(self) -> None:
+        """The `base.config` import tail: prepare, or go eager now.
+
+        `AVA_CONFIG_BOOT=eager` is the operator's instant rollback to the eager
+        boot (and the pytest conftest's default); any other explicit value is a
+        typo and fails fast rather than silently booting lite."""
+        mode = os.environ.get(BOOT_MODE_ENV)
+        if mode is not None and mode != BOOT_MODE_EAGER:
+            raise ValueError(
+                f"{BOOT_MODE_ENV}={mode!r} is not a known boot mode; must be {BOOT_MODE_EAGER!r} "
+                f"or unset (the unset default is the lazy boot-lite chain)"
+            )
+        if os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
+            # skip wins over eager: a settings-lite maintenance verb must stay
+            # repairable (a broken .env must not be able to block the tool that
+            # fixes it), even when the operator's rollback flag sits in the unit
+            # environment (#3621 / 405 ruling).
+            return
+        if mode == BOOT_MODE_EAGER:
+            self.upgrade(f"{BOOT_MODE_ENV}={BOOT_MODE_EAGER}")
+        else:
+            self.prepare()
+
+    def is_full(self) -> bool:
+        """Whether this process has upgraded to the eager config chain."""
+        return self.mode == _FULL
+
+    def boot_state(self) -> dict[str, Any]:
+        """Private test/acceptance hook: the boot-lite state machine snapshot."""
+        return {
+            "mode": self.mode,
+            "reason": self.reason,
+            "upgrades": self.upgrades,
+            "pending_count": len(self.pending),
+            "prepared": self.prepared,
+        }
+
+
+class _LegacyConfigBoot(ConfigBoot):
+    """Temporary adapter for the unmigrated facade, with its existing bindings."""
+
+    __slots__ = ()
+
+    def _current_settings(self) -> Any:
+        from base.config import settings
+
+        return settings
+
+    def _apply_cluster_timezone(self) -> None:
+        from base.config import apply_cluster_timezone
+
+        apply_cluster_timezone()
+
+    def _install(self, bundle: Any, reason: str) -> None:
+        facade = sys.modules["base.config"]
+        facade.__dict__.update(bundle.exports)
+        facade.__dict__["settings"] = bundle.settings
+        super()._install(bundle, reason)
+
+
+# The existing legacy owner remains until every consumer has an explicit input.
+_state = _LegacyConfigBoot()
+
+
+def resolve(name: str) -> Any:
+    return _state.resolve(name)
+
+
+def field_explicitly_set(name: str) -> bool:
+    return _state.field_explicitly_set(name)
+
+
+def get_field(name: str) -> Any:
+    return _state.get_field(name)
+
+
+def set_field(name: str, value: Any) -> None:
+    _state.set_field(name, value)
+
+
+def prepare() -> None:
+    _state.prepare()
+
+
+def upgrade(reason: str) -> Any:
+    return _state.upgrade(reason)
+
+
+def _maybe_upgrade(reason: str) -> bool:
+    return _state._maybe_upgrade(reason)
+
+
+def ensure_eager() -> None:
+    _state.ensure_eager()
 
 
 def boot() -> None:
-    """The `base.config` import tail: prepare, or go eager now.
-
-    `AVA_CONFIG_BOOT=eager` is the operator's instant rollback to the eager
-    boot (and the pytest conftest's default); any other explicit value is a
-    typo and fails fast rather than silently booting lite."""
-    mode = os.environ.get(BOOT_MODE_ENV)
-    if mode is not None and mode != BOOT_MODE_EAGER:
-        raise ValueError(
-            f"{BOOT_MODE_ENV}={mode!r} is not a known boot mode; must be {BOOT_MODE_EAGER!r} "
-            f"or unset (the unset default is the lazy boot-lite chain)"
-        )
-    if os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
-        # skip wins over eager: a settings-lite maintenance verb must stay
-        # repairable (a broken .env must not be able to block the tool that
-        # fixes it), even when the operator's rollback flag sits in the unit
-        # environment (#3621 / 405 ruling).
-        return
-    if mode == BOOT_MODE_EAGER:
-        upgrade(f"{BOOT_MODE_ENV}={BOOT_MODE_EAGER}")
-    else:
-        prepare()
+    _state.boot()
 
 
 def is_full() -> bool:
-    """Whether this process has upgraded to the eager config chain."""
-    return _state.mode == _FULL
+    return _state.is_full()
 
 
 def boot_state() -> dict[str, Any]:
-    """Private test/acceptance hook: the boot-lite state machine snapshot."""
-    return {
-        "mode": _state.mode,
-        "reason": _state.reason,
-        "upgrades": _state.upgrades,
-        "pending_count": len(_state.pending),
-        "prepared": _state.prepared,
-    }
+    return _state.boot_state()
 
 
 def settings_view() -> _SettingsView:
-    """The stable `settings` object the facade binds."""
-    return _SettingsView()
+    return _state.view
+
+
+def refresh_data_plane_settings() -> None:
+    _state.refresh_data_plane_settings()

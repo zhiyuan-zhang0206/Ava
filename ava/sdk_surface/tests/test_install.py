@@ -9,11 +9,14 @@ recorder sits outermost over plugin wraps, and wrap layers stack in plugin order
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -26,6 +29,7 @@ from ava.sdk_surface.plugins import (
     PluginNamespaceConflictError,
 )
 from ava.sdk_surface.sdk_disable import _DisabledSDKModule
+from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.config.service_read import ConfigAuthority
@@ -39,6 +43,7 @@ from base.packages.plugins.extensions import (
     SdkNamespace,
     SdkWrap,
 )
+from base.telemetry import EventPipeline
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +55,20 @@ def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         return call_policy.SamplingPolicy()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-    yield
-    install.uninstall()
+    prior = ava.context
+    clients = ClientSet(pipeline_factory=lambda: EventPipeline(writer=lambda _events: None))
+    with patch.dict(os.environ):
+        ava.bind_context(replace(prior, clients=clients))
+        try:
+            yield
+        finally:
+            try:
+                install.uninstall()
+            finally:
+                try:
+                    clients.close()
+                finally:
+                    ava.bind_context(prior)
 
 
 @pytest.fixture

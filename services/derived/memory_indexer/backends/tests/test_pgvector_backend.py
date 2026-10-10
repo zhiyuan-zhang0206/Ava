@@ -20,6 +20,7 @@ import psycopg
 import pytest
 from psycopg import sql as pgsql
 
+from base.config import settings
 from base.db import Database
 from base.db.tests.fakes import fake_database
 from services.derived.memory_indexer.backends.pgvector import (
@@ -365,7 +366,9 @@ def test_probe_healthy_when_extension_available(monkeypatch: pytest.MonkeyPatch)
         def fetchone(self) -> tuple[int]:
             return self._rows[0]
 
-    result = probe.probe_backend("pgvector", fake_database(_FakeConn))
+    result = probe.probe_backend(
+        "pgvector", fake_database(_FakeConn), uri_reader=lambda: settings.services.memory_search_uri
+    )
     assert result.message is None
     assert result.fatal is False
 
@@ -389,7 +392,9 @@ def test_probe_fatal_with_actionable_fix_when_extension_missing(
         def fetchone(self) -> tuple[int]:
             return self._rows[0]
 
-    result = probe.probe_backend("pgvector", fake_database(_FakeConn))
+    result = probe.probe_backend(
+        "pgvector", fake_database(_FakeConn), uri_reader=lambda: settings.services.memory_search_uri
+    )
     assert result.fatal is True
     assert result.message is not None
     assert "fallback-only" in result.message
@@ -402,7 +407,9 @@ def test_probe_transient_when_postgres_unreachable(monkeypatch: pytest.MonkeyPat
     def _raise(*_a: object, **_kw: object) -> None:
         raise psycopg.OperationalError("connection refused")
 
-    result = probe.probe_backend("pgvector", fake_database(_raise))
+    result = probe.probe_backend(
+        "pgvector", fake_database(_raise), uri_reader=lambda: settings.services.memory_search_uri
+    )
     assert result.fatal is False
     assert result.message is not None
     assert "not reachable" in result.message

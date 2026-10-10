@@ -78,6 +78,7 @@ def get_run_timeline_context(
             found.idx - start,
         ),
         catalog=request.app.state.catalog,
+        default_model_reader=request.app.state.default_model_reader,
     )
     return RunTimelineContext(
         **breakdown.model_dump(),

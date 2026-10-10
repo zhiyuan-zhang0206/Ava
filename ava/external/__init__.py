@@ -12,19 +12,25 @@ from collections.abc import Mapping
 from contextlib import ExitStack
 from threading import Lock, local
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Self, cast
 from uuid import uuid4
 
 import ava
 from ava.sdk_surface import process_context
 from ava.sdk_surface import settings as sdk_settings
-from ava.sdk_surface.settings import database
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity, ExternalLease
+from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import machine_name
+from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.log import logger
+from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import PluginConfigView, resolve_agent_plugin_pins
 
@@ -46,7 +52,7 @@ def _close_flush_permitted() -> bool:
     return bool(getattr(_close_flush_permission, "allowed", False))
 
 
-def _deliver_telemetry_before_detach() -> None:
+def _deliver_telemetry_before_detach(*, clients: ClientSet) -> None:
     """Ship an external attachment's tail records while its interpreter lives.
 
     An SDK call can be the final operation in `ava impersonate exec`. The normal
@@ -57,9 +63,15 @@ def _deliver_telemetry_before_detach() -> None:
     """
     if "base.telemetry" not in sys.modules:
         return
-    try:
-        from base import telemetry
+    from base import telemetry
 
+    owned = clients.sync_events()
+    if owned.status is telemetry.DrainStatus.UNFINISHED:
+        logger.warning(
+            "external attachment: owned telemetry delivery is unfinished; "
+            "queued records may be lost or land later"
+        )
+    try:
         result = telemetry.sync(bounded=True)
         if result.status is telemetry.DrainStatus.UNFINISHED:
             logger.warning(
@@ -91,6 +103,22 @@ def _refuse_unless_attachable() -> AvaContext | None:
     return bound
 
 
+def _attachment_database(bound: AvaContext | None, *, config: ConfigBoot | None) -> DatabaseFactory:
+    """Borrow an existing owner's factory or create this attachment's fresh gate.
+
+    Independently opened attachments do not share a check timestamp. A factory
+    can refresh its configuration and return many handles without resetting the
+    same attachment's admission gate.
+    """
+    if bound is not None:
+        return bound.clients.database
+    if config is None:
+        raise RuntimeError("an independent attachment needs its configuration owner")
+    version = CodeVersion(ava.loaded_code_image())
+    gate = ProcessDbGate(version=version.get, process="unknown")
+    return lambda: Database(db_config_from_boot(config), gate=gate)
+
+
 class Attachment:
     """One local SDK attachment; use a context manager or explicitly close it.
 
@@ -99,10 +127,14 @@ class Attachment:
     SDK effects happen when called; they are not rolled back by an exception.
     """
 
-    def __init__(self, lease_id: str) -> None:
+    def __init__(
+        self, lease_id: str, *, agent_id: int | None = None, session_id: int | None = None
+    ) -> None:
         import ava
 
         bound = _refuse_unless_attachable()
+        if session_id is not None and agent_id is None:
+            raise ValueError("an integer session requires an agent_id")
         self.lease_id = lease_id
         self._closed = False
         self._closing = False
@@ -114,6 +146,7 @@ class Attachment:
         # The process's own context, put back at detach; `_bound` says this attachment bound one.
         self._prior_context = bound
         self._bound = False
+        self._own_clients: ClientSet | None = None
         # The agent state class the snapshot loaded into (set before the constructor returns).
         self._state_cls: type[Any]
         if ava.in_exec_turn():
@@ -121,32 +154,69 @@ class Attachment:
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
         try:
-            lease = self._lease()
-            self.agent_id = int(lease["agent_id"])
-            self.session_id = int(lease["session_id"])
-            self._version = int(lease["delta_version"])
-            # Native load: load_snapshot below rebuilds the checkpoint state
-            # (build_agent_state().model_validate), which needs the plugins'
-            # state fields registered — the surface-only default would silently
-            # drop them (review finding, #2616).
-            ava.ensure_plugins_loaded(surface=False)
-            self._bind_borrowed_context()
-            state, overlay, birth = load_snapshot(self.agent_id)
-            self._state_cls = type(state)
-            self._resolve_config(overlay, birth)
-            # Native applies journal entries only after the controller releases
-            # the lease. Already applied entries belong to the checkpoint.
-            receipt = state.impersonation_applied
-            checkpoint_version = receipt["version"] if receipt.get("lease_id") == lease_id else 0
-            applied = max(lease["applied_version"], checkpoint_version)
-            for encoded in lease["plugin_delta"][applied:]:
-                apply_plugin_delta(state, decode_plugin_delta(encoded, self._state_cls))
-            self._validate()
-            self._open_event_participant()
-            ava.state, ava.state_update = state, {}
-        except BaseException:
-            self._detach()
+            self._initialize(bound, agent_id=agent_id, session_id=session_id)
+        except BaseException as primary:
+            try:
+                self._detach()
+            except BaseException as secondary:
+                primary.add_note(f"Attachment constructor cleanup also failed: {secondary!r}")
             raise
+
+    def _initialize(
+        self, bound: AvaContext | None, *, agent_id: int | None, session_id: int | None
+    ) -> None:
+        config = None if bound is not None else ConfigBoot()
+        if config is not None:
+            config.boot()
+        self._clock_factory = (
+            bound.require_clock
+            if bound is not None
+            else (lambda: Clock(clock_config_from_boot(cast(ConfigBoot, config))))
+        )
+        self._database = _attachment_database(bound, config=config)
+        if session_id is not None:
+            from base.agents.impersonation.sessions import private_id
+
+            self.lease_id = private_id(self._database(), cast(int, agent_id), session_id)
+        if bound is None:
+            self._own_clients = process_context.process_clients(
+                database=self._database, config=config
+            )
+        lease = self._lease()
+        self.agent_id = int(lease["agent_id"])
+        self.session_id = int(lease["session_id"])
+        self._version = int(lease["delta_version"])
+        # Native load: load_snapshot below rebuilds the checkpoint state
+        # (build_agent_state().model_validate), which needs the plugins'
+        # state fields registered — the surface-only default would silently
+        # drop them (review finding, #2616).
+        self._bind_borrowed_context()
+        ava.ensure_plugins_loaded(surface=False, config=config, clock_factory=self._clock_factory)
+        self._bind_catalog()
+        if config is None:
+            from ava.sdk_surface.settings import config_authority
+
+            authority = config_authority()
+            self._event_seal_wait_reader = lambda: cast(
+                float, authority.service_field_value("impersonation_event_seal_wait_seconds")
+            )
+        else:
+            self._event_seal_wait_reader = lambda: (
+                config.view.general.impersonation_event_seal_wait_seconds
+            )
+        state, overlay, birth = load_snapshot(self.agent_id, database=self._database())
+        self._state_cls = type(state)
+        self._resolve_config(overlay, birth)
+        # Native applies journal entries only after the controller releases
+        # the lease. Already applied entries belong to the checkpoint.
+        receipt = state.impersonation_applied
+        checkpoint_version = receipt["version"] if receipt.get("lease_id") == self.lease_id else 0
+        applied = max(lease["applied_version"], checkpoint_version)
+        for encoded in lease["plugin_delta"][applied:]:
+            apply_plugin_delta(state, decode_plugin_delta(encoded, self._state_cls))
+        self._validate()
+        self._open_event_participant()
+        ava.state, ava.state_update = state, {}
 
     def _resolve_config(
         self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
@@ -175,13 +245,22 @@ class Attachment:
         )
         ava.bind_context(
             dataclasses.replace(
-                bound or AvaContext(clients=process_context.process_clients()),
-                catalog=sdk_settings.model_catalog(),
+                bound or self._new_context(),
                 identity=dataclasses.replace(own, lease=borrowed),
                 sdk_capture=self,
             )
         )
         self._bound = True
+
+    def _new_context(self) -> AvaContext:
+        if self._own_clients is None:
+            raise RuntimeError("an unbound attachment has no owned clients")
+        return AvaContext(clients=self._own_clients, clock_factory=self._clock_factory)
+
+    def _bind_catalog(self) -> None:
+        """Attach the installed catalog after identity and native plugin registration."""
+        context = ava.context
+        ava.bind_context(dataclasses.replace(context, catalog=sdk_settings.model_catalog()))
 
     def admit_sdk_call(self) -> Any:
         """Snapshot this call's original gate before its body can run."""
@@ -205,7 +284,7 @@ class Attachment:
         return capture_local_event(event, gate=self._event_gate)
 
     def _lease(self) -> dict[str, Any]:
-        lease = control.require_active(database(), self.lease_id, process_metadata())
+        lease = control.require_active(self._database(), self.lease_id, process_metadata())
         if lease["machine"] != machine_name():
             raise RuntimeError(f"external SDK must run on agent machine {lease['machine']!r}")
         return lease
@@ -236,7 +315,7 @@ class Attachment:
         if ava.state_update:
             encoded = encode_plugin_delta(ava.state_update, self._state_cls)
             control.merge_plugin_delta(
-                database(),
+                self._database(),
                 self.lease_id,
                 process_metadata(),
                 encoded,
@@ -247,7 +326,10 @@ class Attachment:
 
     def close(self) -> None:
         """Flush plugin changes and remove the borrowed identity even if flushing fails."""
-        if self._closed or self._closing:
+        if self._closed:
+            self._close_owned_clients()
+            return
+        if self._closing:
             return
         primary: BaseException | None = None
         try:
@@ -264,7 +346,7 @@ class Attachment:
         # runs; a later failure cannot replace the exact original close error.
         for cleanup in (
             self._seal_event_participant,
-            _deliver_telemetry_before_detach,
+            self._deliver_telemetry,
             self._detach,
         ):
             try:
@@ -276,6 +358,14 @@ class Attachment:
                     primary.add_note(f"Attachment close cleanup also failed: {secondary!r}")
         if primary is not None:
             raise primary
+
+    def _deliver_telemetry(self) -> None:
+        clients = self._own_clients
+        if self._prior_context is not None:
+            clients = self._prior_context.clients
+        if clients is None:
+            raise RuntimeError("the attachment has no event producer owner")
+        _deliver_telemetry_before_detach(clients=clients)
 
     def _open_event_participant(self) -> None:
         """Register this controller before it can emit a protocol-v1 event."""
@@ -289,7 +379,7 @@ class Attachment:
         if not is_log_native(self._lease()):
             return
         source_key = f"attachment:{process_metadata()['pid']}:{uuid4().hex}"
-        db = database()
+        db = self._database()
         if open_local_participant(db, self.lease_id, agent_id=self.agent_id, source_key=source_key):
             participant = LocalParticipant(
                 lease_id=self.lease_id,
@@ -308,11 +398,10 @@ class Attachment:
             close_local_participant_admission,
             seal_local_participant,
         )
-        from base.config import settings
 
         drained = close_local_participant_admission(
             self._event_gate,
-            timeout=settings.general.impersonation_event_seal_wait_seconds,
+            timeout=self._event_seal_wait_reader(),
         )
         # A call still running after the wait seals its own source when it drains; the
         # wait never turns a live source into an empty or failed receipt. An ended lease
@@ -343,25 +432,44 @@ class Attachment:
         if self._closed:
             return
         self._closed = True
+        primary: BaseException | None = None
         try:
-            if self._bound and self._prior_context is not None:
-                ava.bind_context(self._prior_context)
-            elif self._bound:
-                # The process had no context of its own: the one this attachment made, and the
-                # clients it built, end with the attachment.
-                context = ava.unbind_context()
-                if context is not None:
-                    context.clients.close()
-            ava.unbind_exec_turn()
-            self._stack.close()
+            for cleanup in (
+                self._restore_prior_context,
+                ava.unbind_exec_turn,
+                self._stack.close,
+                self._close_owned_clients,
+            ):
+                try:
+                    cleanup()
+                except BaseException as secondary:
+                    if primary is None:
+                        primary = secondary
+                    else:
+                        primary.add_note(f"Attachment detach cleanup also failed: {secondary!r}")
         finally:
             _attachment_lock.release()
+        if primary is not None:
+            raise primary
+
+    def _restore_prior_context(self) -> None:
+        if self._bound and self._prior_context is not None:
+            ava.bind_context(self._prior_context)
+        elif self._bound:
+            ava.unbind_context()
+
+    def _close_owned_clients(self) -> None:
+        if self._own_clients is not None:
+            self._own_clients.close()
 
     def __enter__(self) -> Self:
         try:
             self._validate()
-        except BaseException:
-            self._detach()
+        except BaseException as primary:
+            try:
+                self._detach()
+            except BaseException as secondary:
+                primary.add_note(f"Attachment entry cleanup also failed: {secondary!r}")
             raise
         return self
 
@@ -389,10 +497,8 @@ def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
     plugin-state operations recheck the lease. Direct reads of loaded Python
     objects do not. Attaching never renews the lease.
     """
-    from base.agents.impersonation.sessions import private_id
-
     if isinstance(session_id, int) and not isinstance(session_id, bool) and agent_id is not None:
-        return Attachment(private_id(database(), agent_id, session_id))
+        return Attachment("", agent_id=agent_id, session_id=session_id)
     if isinstance(session_id, str) and agent_id is None:
         return Attachment(session_id)
     raise ValueError("attach requires an agent_id and an integer session_id")

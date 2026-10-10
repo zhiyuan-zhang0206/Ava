@@ -7,6 +7,7 @@ History uses descending-ID keyset pages; no implicit list-all operation exists.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal
 
@@ -23,7 +24,6 @@ from base.agents.observation.evidence import (
     observation,
 )
 from base.agents.tasks.priority import Priority
-from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import model_supports_vision
 from base.lm.registry import resolve_available_model
@@ -150,9 +150,11 @@ _LIVE_SQL = sql.SQL("""
 """).format(columns=sql.SQL(_CARD_COLUMNS), source=sql.SQL(_CARD_FROM))
 
 
-def _card(data: dict[str, Any], *, catalog: ModelCatalog) -> AgentCard:
+def _card(
+    data: dict[str, Any], *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+) -> AgentCard:
     model = resolve_available_model(
-        data.pop("effective_model") or settings.lm.llm_model, models=catalog.models
+        data.pop("effective_model") or default_model_reader(), models=catalog.models
     )
     data["supports_vision"] = model_supports_vision(model, catalog=catalog)
     probe = data.pop("machine_probe_at")
@@ -179,7 +181,9 @@ def _card(data: dict[str, Any], *, catalog: ModelCatalog) -> AgentCard:
     return AgentCard.model_validate(data)
 
 
-def select_roster(conn: psycopg.Connection[Any], *, catalog: ModelCatalog) -> AgentRoster:
+def select_roster(
+    conn: psycopg.Connection[Any], *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+) -> AgentRoster:
     """Read live cards and their ancestor closure from the same database snapshot."""
     with conn.cursor() as cur:
         cur.execute(_LIVE_SQL)
@@ -187,7 +191,10 @@ def select_roster(conn: psycopg.Connection[Any], *, catalog: ModelCatalog) -> Ag
     if row is None:
         raise RuntimeError("roster aggregate did not return a row")
     return AgentRoster(
-        agents=[_card(data, catalog=catalog) for data in row[0]],
+        agents=[
+            _card(data, catalog=catalog, default_model_reader=default_model_reader)
+            for data in row[0]
+        ],
         ancestors=[AgentLineage.model_validate(data) for data in row[1]],
     )
 
@@ -200,6 +207,7 @@ def list_directory(
     query: str = "",
     before_id: int | None = None,
     limit: int = 100,
+    default_model_reader: Callable[[], str],
 ) -> AgentDirectoryPage:
     """Read one bounded page; search matches a label substring or exact numeric ID."""
     if not 1 <= limit <= 200:
@@ -247,7 +255,10 @@ def list_directory(
     with conn.cursor() as cur:
         cur.execute(statement, params)
         rows = cur.fetchall()
-    agents = [_card(row[0], catalog=catalog) for row in rows[:limit]]
+    agents = [
+        _card(row[0], catalog=catalog, default_model_reader=default_model_reader)
+        for row in rows[:limit]
+    ]
     return AgentDirectoryPage(
         agents=agents,
         next_cursor=agents[-1].agent_id if len(rows) > limit else None,

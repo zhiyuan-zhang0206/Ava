@@ -446,7 +446,9 @@ def wired(
 
     _stub_host_transitions(monkeypatch, _flip_hosted_status)
 
-    monkeypatch.setattr(host_mod, "release_hosted_owner", _noop_reconcile)
+    monkeypatch.setattr(
+        "services.agent_runner.agent_host.host.release_hosted_owner", _noop_reconcile
+    )
 
     async def _apply_lifecycle(_pool: object, _incarnation: object, **_kwargs: object) -> str:
         """Host orchestration fake; real durable effects use the PG contract tests."""
@@ -593,12 +595,22 @@ class TestSettlementReconciles:
             )
 
         async def reconcile(
-            _pool: object, _checkpointer: object, _incarnation: object, *, resources: object
+            _pool: object,
+            _checkpointer: object,
+            _incarnation: object,
+            *,
+            resources: object,
+            inputs: object,
         ) -> None:
             order.append("reconcile")
 
         async def reconcile_turn(
-            _pool: object, _checkpointer: object, _incarnation: object, *, resources: object
+            _pool: object,
+            _checkpointer: object,
+            _incarnation: object,
+            *,
+            resources: object,
+            inputs: object,
         ) -> None:
             order.append("reconcile-turn")
 

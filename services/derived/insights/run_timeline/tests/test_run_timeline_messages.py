@@ -14,10 +14,17 @@ from base.agents.history.checkpoint import single_segment_history
 from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.agents.history.message_tokens import MessageTokens
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import messages as route
 from services.derived.insights.run_timeline.history import HistoryView
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 STAMP = "2026-10-04T12:00:00+00:00"
 
@@ -38,8 +45,10 @@ class Views:
     """The `HistoryViewCache` the app state serves, pinned to one view."""
 
     def __init__(self, messages: list[BaseMessage]) -> None:
-        read = read_times(messages)
-        units = display_blocks(divide_units(messages), messages, read)
+        read = read_times(messages, timeline_inputs=_TIMELINE_INPUTS)
+        units = display_blocks(
+            divide_units(messages, timeline_inputs=_TIMELINE_INPUTS), messages, read
+        )
         self.built = HistoryView.of(
             single_segment_history(messages), units, MessageUsage(messages), read
         )
@@ -52,6 +61,7 @@ def request(messages: list[BaseMessage]) -> Request:
     state = SimpleNamespace(
         db=cast(Database, object()),
         run_timeline_views=Views(messages),
+        timeline_inputs=_TIMELINE_INPUTS,
         config=InsightsConfig(run_timeline_message_text_max=20),
     )
     return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))

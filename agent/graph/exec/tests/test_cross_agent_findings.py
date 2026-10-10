@@ -30,6 +30,7 @@ from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.clock import Clock
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
@@ -74,10 +75,13 @@ class _Turn:
                 ops_pool=pool,
                 llm=MagicMock(),
                 event_publisher=MagicMock(),
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                ),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=build_model_catalog(),
+                clock_factory=Clock.from_settings,
             )
         )
         self.claimed: list[AnyMessage] = []

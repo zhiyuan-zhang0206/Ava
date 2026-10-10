@@ -60,7 +60,7 @@ def test_render_restart_completed_marker_system_update_no_by_clause():
     """source='system:update' → 'updated and restarted' with no trailing 'by ...' noise."""
     from agent.graph.claim.node import _render_restart_completed_marker
 
-    text = _render_restart_completed_marker("system:update")
+    text = _render_restart_completed_marker("system:update", timestamp_prefix=lambda: "")
     assert "updated and restarted" in text
     assert "by " not in text  # no actor suffix for system-driven rollout
 
@@ -69,7 +69,7 @@ def test_render_restart_completed_marker_plain_self_unchanged():
     """source='self' (ordinary restart, not update) → 'restarted by yourself', no 'updated'."""
     from agent.graph.claim.node import _render_restart_completed_marker
 
-    text = _render_restart_completed_marker("self")
+    text = _render_restart_completed_marker("self", timestamp_prefix=lambda: "")
     assert "restarted by yourself" in text
     assert "updated" not in text
 
@@ -78,7 +78,7 @@ def test_render_restart_completed_marker_external_source_unchanged():
     """Non-update sources → plain 'restarted by <source>' wording."""
     from agent.graph.claim.node import _render_restart_completed_marker
 
-    text = _render_restart_completed_marker("user")
+    text = _render_restart_completed_marker("user", timestamp_prefix=lambda: "")
     assert "restarted by user" in text
     assert "updated" not in text
 

@@ -32,6 +32,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from services.agent_runner.agent_host import settlement as settlement_mod
 from services.agent_runner.agent_host.runtime import TurnOutcome
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 def _settlement(*, crashed: bool, recrash: bool, settled: bool) -> TurnSettlement:
@@ -63,11 +64,18 @@ async def _close_captured(
         return settlement
 
     async def reconcile(
-        _pool: object, _checkpointer: object, _incarnation: object, *, resources: object
+        _pool: object,
+        _checkpointer: object,
+        _incarnation: object,
+        *,
+        resources: object,
+        inputs: object,
     ) -> None:
         order.append("reconcile")
 
-    async def reap(_pool: object, _incarnation: object, *, bus: object) -> list[int]:
+    async def reap(
+        _pool: object, _incarnation: object, *, bus: object, wake_enabled: object
+    ) -> list[int]:
         order.append("reap")
         return reap_result if reap_result is not None else []
 
@@ -83,6 +91,9 @@ async def _close_captured(
         RuntimeIncarnation(42, uuid4(), uuid4()),
         outcome,
         resources=None,
+        wake_enabled=configured_policy().recovery_wake_enabled,
+        prompt_reap_enabled=configured_policy().recrash_reap_enabled,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
 
 
@@ -272,6 +283,9 @@ async def _crash_a_fresh_admission(
         incarnation,
         TurnOutcome(exited=False, crashed=True),
         resources=None,
+        wake_enabled=configured_policy().recovery_wake_enabled,
+        prompt_reap_enabled=configured_policy().recrash_reap_enabled,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
 
 
@@ -315,7 +329,16 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     assert row == ("idling", True)
     # The first death is not harvested: it keeps the whole grace window even
     # under an enabled switch.
-    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
+    assert (
+        await reap_crash_corpses(
+            aops_pool,
+            "host-test",
+            owner,
+            bus=event_bus,
+            wake_enabled=configured_policy().recovery_wake_enabled,
+        )
+        == []
+    )
     assert effects.events == [] and effects.published == []
 
     # The retry: a wake admits the zombie again, and this turn dies too.

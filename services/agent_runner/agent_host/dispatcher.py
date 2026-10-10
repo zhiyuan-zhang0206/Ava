@@ -151,6 +151,7 @@ class TurnScheduler:
         self._activity_clock = activity_clock
         self._config_fingerprint = config_fingerprint
         self._tasks: dict[int, asyncio.Task[None]] = {}
+        self._errors: list[BaseException] = []
         self._reaped_successors: dict[int, asyncio.Task[None]] = {}
         self._pending: set[int] = set()
         self._closed = False
@@ -189,7 +190,15 @@ class TurnScheduler:
         self._reaped_successors.pop(agent_id, None)
         task = asyncio.create_task(self._pump(agent_id), name=f"turn-{agent_id}")
         self._tasks[agent_id] = task
+        task.add_done_callback(self._collect_task_error)
         task.add_done_callback(partial(self._reap_unstarted_task, agent_id))
+
+    def _collect_task_error(self, task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                self._errors.append(error)
+                logger.opt(exception=error).error("hosted scheduler task failed outside its turn")
 
     def _reap_unstarted_task(self, agent_id: int, task: asyncio.Task[None]) -> None:
         """Re-arm a wake cancelled before `_pump` could release its task slot.
@@ -246,6 +255,7 @@ class TurnScheduler:
             # that agent: log it, drop the task, and let the next wake start a
             # fresh one. The turn's own state is checkpointed, so the retry
             # resumes rather than restarts.
+            self._errors.append(exc)
             fingerprint = (
                 self._config_fingerprint(agent_id) if self._config_fingerprint is not None else None
             )
@@ -311,9 +321,9 @@ class TurnScheduler:
         record of which agent was stuck. Waiting `CANCEL_UNWIND_TIMEOUT_S` and
         then REPORTING the stragglers turns a silent hang into a named one.
 
-        Returns after the report either way: a turn that will not unwind is not
-        something this process can fix, and the host exiting is what the
-        supervisor is waiting for.
+        Unfinished Tasks keep their original slots after the report. Unknown
+        failures stay isolated during dispatch and retain their identities
+        when raised at this stop/join boundary.
         """
         self._closed = True
         tasks = dict(self._tasks)
@@ -321,9 +331,12 @@ class TurnScheduler:
             task.cancel()
         if tasks:
             await self._await_unwind(tasks)
-        self._tasks.clear()
         self._pending.clear()
         self._reaped_successors.clear()
+        if len(self._errors) == 1:
+            raise self._errors[0]
+        if self._errors:
+            raise BaseExceptionGroup("hosted scheduler turn failures", self._errors)
 
     async def _await_unwind(self, tasks: dict[int, asyncio.Task[None]]) -> None:
         """Wait out the cancellations and name whatever is still running.

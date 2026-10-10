@@ -68,7 +68,10 @@ async def test_blocked_agent_checkpoint_does_not_block_another_agent(
     operation: Literal["read", "write"],
 ) -> None:
     async with _pool(2) as pool:
-        saver = await _build_checkpointer(cast(AsyncConnectionPool[AsyncConnection], pool))
+        saver = await _build_checkpointer(
+            cast(AsyncConnectionPool[AsyncConnection], pool),
+            read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
+        )
         checkpoint = _checkpoint()
         blocked_config = await saver.aput(
             _config("101"), checkpoint, {"source": "input", "step": -1}, {"value": "1"}
@@ -136,7 +139,10 @@ async def test_same_agent_flush_serializes_with_newer_checkpoint(
 ) -> None:
     monkeypatch.setattr(settings.agent, "checkpoint_interval", 4)
     async with _pool(2) as pool:
-        saver = await _build_checkpointer(cast(AsyncConnectionPool[AsyncConnection], pool))
+        saver = await _build_checkpointer(
+            cast(AsyncConnectionPool[AsyncConnection], pool),
+            read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
+        )
         initial = await saver.aput(
             _config("101"), _checkpoint(), {"source": "input", "step": -1}, {"value": "1"}
         )

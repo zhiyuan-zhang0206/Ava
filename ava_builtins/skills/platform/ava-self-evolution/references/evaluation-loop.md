@@ -53,11 +53,19 @@ watcher on them. Each following turn, reload and check:
 
 ```python
 import evaluate
+from ava.sdk_surface.settings import database as sdk_database
+db = sdk_database()
 state = evaluate.latest_state("ava-goal")
-progress = evaluate.poll(state)          # {"done": [...], "pending": [...]}
+progress = evaluate.poll(state, database=db)   # {"done": [...], "pending": [...]}
 # when pending is empty:
-report = evaluate.gather(state)          # {"mean": {...}, "per_task": [...]}
+report = evaluate.gather(state, database=db)   # {"mean": {...}, "per_task": [...]}
 ```
+
+The imported read helpers (`poll`, `gather`, and `debrief`) take an explicit
+`Database`. A caller in an established SDK context can obtain its supplied
+handle with `sdk_database()`; other callers pass their own process-root handle.
+The standalone collection scripts construct one gate at startup and reuse the
+same handle for lifecycle rows and checkpoint transcripts.
 
 Compare `report["mean"]["overall"]` before vs after your edit. `rubric.py`
 scores two dimensions in [0, 1]: **completion** (output produced, no breach,

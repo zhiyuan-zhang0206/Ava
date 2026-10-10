@@ -101,9 +101,9 @@ def _record_finding(source: str, triggers: list[str]) -> None:
     the log (the agent host's claim-side inbound scan uses
     `scan_inbound_content`, whose caller owns the finding).
     """
-    from base.config import settings
+    from ava.sdk_surface.settings import agent_setting
 
-    if not settings.agent.security_scan_enabled:
+    if not agent_setting("security_scan_enabled"):
         return
     import ava
 
@@ -142,17 +142,17 @@ def scan_content(content: str, source: str = "unknown") -> str:
     return content
 
 
-def scan_inbound_content(content: str, source: str) -> SecurityFindingEntry | None:
+def scan_inbound_content(
+    content: str, source: str, *, enabled: bool
+) -> SecurityFindingEntry | None:
     """Scan claimed inbound `content`; return its finding, or None.
 
     None when nothing matched or scanning is disabled. Touches no process
-    state: the caller owns the finding and delivers it as a SECURITY note in
+    state: the caller supplies the scan policy, owns the finding and delivers it as a SECURITY note in
     its own messages delta, so concurrent agent turns in one host process
     cannot see each other's findings. The content itself is never altered.
     """
-    from base.config import settings
-
-    if not settings.agent.security_scan_enabled:
+    if not enabled:
         return None
     hits = _triggers(content)
     return SecurityFindingEntry(source=source, triggers=hits) if hits else None

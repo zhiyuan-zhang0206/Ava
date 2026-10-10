@@ -12,11 +12,13 @@ the state snapshot (parent -> child) and the plugin state-update delta
 from __future__ import annotations
 
 import json
+import os
 import stat
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -37,6 +39,12 @@ from agent.graph.exec.protocol import (
     write_result,
 )
 from tests.fixtures.pin_agent import exec_context
+
+
+@patch.dict(os.environ)
+def _context_description(agent_id: int | None) -> dict[str, Any]:
+    """Snapshot cold test-root delivery without changing later consumers' environment."""
+    return exec_context(agent_id).describe()
 
 
 def _exec_envelope_events() -> list[dict[str, Any]]:
@@ -120,7 +128,7 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
     write_request(
         path,
         code="print('hi')",
-        context=exec_context(7).describe(),
+        context=_context_description(7),
         timeout_s=300.0,
         state=state,
         incarnation=None,
@@ -149,7 +157,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path)
         write_request(
             path,
             code="print('hi')",
-            context=exec_context(7).describe(),
+            context=_context_description(7),
             timeout_s=1.0,
             state=_make_state_dump(),
             incarnation=None,
@@ -181,7 +189,7 @@ def test_request_envelope_without_state(tmp_path: Path) -> None:
     write_request(
         path,
         code="x = 1",
-        context=exec_context(None).describe(),
+        context=_context_description(None),
         timeout_s=0.0,
         state=None,
         incarnation=None,
@@ -199,7 +207,7 @@ def test_request_envelope_rejects_version_drift(tmp_path: Path) -> None:
     write_request(
         path,
         code="x = 1",
-        context=exec_context(7).describe(),
+        context=_context_description(7),
         timeout_s=1.0,
         state=None,
         incarnation=None,
@@ -280,7 +288,7 @@ def test_envelope_files_are_owner_only(tmp_path: Path) -> None:
     write_request(
         request,
         code="x = 1",
-        context=exec_context(7).describe(),
+        context=_context_description(7),
         timeout_s=1.0,
         state=None,
         incarnation=None,
@@ -336,7 +344,7 @@ def test_failed_envelope_write_leaves_nothing_at_the_destination(
         write_request(
             path,
             code="x = 1",
-            context=exec_context(7).describe(),
+            context=_context_description(7),
             timeout_s=1.0,
             state=None,
             incarnation=None,
@@ -385,7 +393,7 @@ def test_envelope_write_commits_the_full_bytes_and_a_second_write_replaces_them(
     write_request(
         path,
         code="x = 1",
-        context=exec_context(7).describe(),
+        context=_context_description(7),
         timeout_s=1.0,
         state=None,
         incarnation=None,
@@ -395,7 +403,7 @@ def test_envelope_write_commits_the_full_bytes_and_a_second_write_replaces_them(
     write_request(
         path,
         code="x = 2",
-        context=exec_context(7).describe(),
+        context=_context_description(7),
         timeout_s=2.0,
         state=None,
         incarnation=None,
@@ -431,7 +439,7 @@ def test_size_ceiling_enforced(tmp_path: Path) -> None:
     write_request(
         path,
         code="x = 1",
-        context=exec_context(7).describe(),
+        context=_context_description(7),
         timeout_s=1.0,
         state=None,
         incarnation=None,

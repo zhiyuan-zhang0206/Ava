@@ -25,6 +25,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -48,7 +50,9 @@ def _describe(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-async def _beat_for_shutdown(events: list[str], failure: str, *_args: object) -> None:
+async def _beat_for_shutdown(
+    events: list[str], failure: str, *_args: object, **_kwargs: object
+) -> None:
     try:
         events.append("beat_started")
         if failure in {"heartbeat", "heartbeat_boot"}:
@@ -73,6 +77,19 @@ async def _dispatch_for_shutdown(events: list[str], failure: str) -> None:
     except asyncio.CancelledError:
         events.append("dispatcher_cancelled")
         raise
+
+
+def _shutdown_config() -> ConfigBoot:
+    config = ConfigBoot()
+    config.boot()
+    return config
+
+
+def _assert_boot_primary(exc: BaseException, failure: str) -> None:
+    if failure == "heartbeat_boot":
+        assert isinstance(exc, ValueError)
+        assert str(exc) == "boot settlement stopped independently"
+        assert any("heartbeat defect" in note for note in exc.__notes__)
 
 
 def _exercise_shutdown(failure: str) -> None:
@@ -116,9 +133,9 @@ def _exercise_shutdown(failure: str) -> None:
 
     original_loops = daemon._background_loops
 
-    def loops(*args: Any, catalog: ModelCatalog) -> dict[str, Any]:
+    def loops(*args: Any, catalog: ModelCatalog, config: ConfigBoot) -> dict[str, Any]:
         if failure == "plugin":
-            return original_loops(*args, catalog=catalog)
+            return original_loops(*args, catalog=catalog, config=config)
         failing = {} if failure in {"dispatcher_returns", "heartbeat"} else {"failed": fail()}
         return {**failing, "sibling": background()}
 
@@ -169,8 +186,25 @@ def _exercise_shutdown(failure: str) -> None:
     ):
         daemon.install_graceful_shutdown("agent_host_test")
         try:
-            asyncio.run(daemon.run())
-        except (KeyboardInterrupt, asyncio.CancelledError, ExceptionGroup, RuntimeError) as exc:
+            machine = MachineIdentity(
+                name=lambda: "shutdown-test",
+                role=lambda: frozenset({"agent-runner"}),
+                host=lambda: "localhost",
+                description=lambda: None,
+            )
+            asyncio.run(
+                daemon.run(
+                    config=_shutdown_config(), database=Database.from_settings, machine=machine
+                )
+            )
+        except (
+            KeyboardInterrupt,
+            asyncio.CancelledError,
+            ExceptionGroup,
+            RuntimeError,
+            ValueError,
+        ) as exc:
+            _assert_boot_primary(exc, failure)
             events.append(_describe(exc))
     print(json.dumps(events))  # noqa: T201 -- child result protocol
 
@@ -329,5 +363,5 @@ def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile() -> None:
         "sampling_stopped",
         "pools_closed",
         "pidfile_removed",
-        "RuntimeError",
+        "ValueError",
     ]

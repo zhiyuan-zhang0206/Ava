@@ -58,7 +58,7 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from base.config import settings
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -69,6 +69,7 @@ from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
 from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import gateway_memory_dir
+from services.derived.memory_indexer import config as indexer_config
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.backends.factory import get_backend
 from services.derived.memory_indexer.backends.probe import probe_backend
@@ -85,7 +86,7 @@ from services.derived.memory_indexer.chunking import (
 from services.derived.memory_indexer.chunking import (
     _split_note as _split_note,
 )
-from services.derived.memory_indexer.embeddings import factory
+from services.derived.memory_indexer.config import MemoryIndexerInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.derived.memory_indexer.embeddings.factory import get_provider
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -107,16 +108,6 @@ def _pidfile() -> Path:
 
 
 _LOOP_INTERVAL_S = 1.0
-# Derive the ceiling from one provider batch's full retry budget: a single
-# legitimate call can exceed 180s, and several shorter calls can compound.
-# _process_paths beats before each provider/backend call, including commits
-# and deletes, so calls cannot compound in one gap (default batch budget 606s).
-# A false kill costs a rebuild; later true-wedge detection costs staleness
-# only, since search keeps reading the existing index.
-_LIVENESS_TIMEOUT_FLOOR_S = 180.0  # Historic ceiling; preserve other loop branches' slack.
-# Covers executor scheduling, local processing, and loop resumption. Commit
-# calls beat separately; NumPy's 300s upsert allowance fits the default 636s.
-_LIVENESS_SAFETY_MARGIN_S = 30.0
 # Startup and follow-up reconciles beat before and after file-granular chunks:
 # a full rebuild can outlive the liveness ceiling. Chunks bound preparation and
 # local work; _process_paths also beats before external calls within each chunk.
@@ -129,13 +120,6 @@ _BATCH_SIZE = 32
 """Gemini embed_content accepts multiple inputs per call; batching amortizes round-trips."""
 
 _MD_SUFFIX = ".md"
-
-
-def _liveness_timeout_s() -> float:
-    return max(
-        _LIVENESS_TIMEOUT_FLOOR_S,
-        factory.worst_case_batch_seconds() + _LIVENESS_SAFETY_MARGIN_S,
-    )
 
 
 class _MarkdownEventHandler(FileSystemEventHandler):
@@ -616,6 +600,8 @@ async def _connect_backend_with_retry(
     provider: EmbeddingProvider,
     deadline_s: float = 30.0,
     *,
+    name: str,
+    uri_reader: Callable[[], str],
     probe_message: str | None = None,
 ) -> MemorySearchBackend:
     """Connect to the configured backend at daemon startup — `ava start`
@@ -632,7 +618,13 @@ async def _connect_backend_with_retry(
     and exits, the healthcheck spawns a fresh process that goes through
     this retry).
     """
-    backend = get_backend(database, dim=provider.dim, fingerprint=provider.fingerprint)
+    backend = get_backend(
+        database,
+        dim=provider.dim,
+        fingerprint=provider.fingerprint,
+        name=name,
+        uri_reader=uri_reader,
+    )
     start = time.time()
     last_exc: Exception | None = None
     while time.time() - start < deadline_s:
@@ -662,7 +654,7 @@ def _close_backend(backend: MemorySearchBackend) -> None:
         _log.warning("[indexer] backend close failed during shutdown", exc_info=True)
 
 
-async def run() -> None:
+async def run(*, config: ConfigBoot) -> None:
     """Write pidfile -> start healthz server -> cold-start -> drain loop.
 
     Both before cold-start — cold-start may take tens of seconds
@@ -670,6 +662,7 @@ async def run() -> None:
     watchdog misjudge death and spawn races (PR #254 fixed this).
     Publish the pidfile before binding healthz so identity-aware probes can verify it.
     """
+    inputs = MemoryIndexerInputs.from_boot(config)
     if _is_running():
         _log.info("[indexer] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
@@ -680,16 +673,26 @@ async def run() -> None:
     # Fail fast before deriving liveness or binding healthz: an unknown
     # AVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
     try:
-        provider = get_provider(catalog=build_model_catalog())
+        catalog = build_model_catalog()
+        provider = get_provider(
+            inputs.embedding_name(),
+            catalog=catalog,
+            timeout_reader=inputs.embed_timeout,
+            api_key_reader=inputs.api_key,
+        )
     except ValueError as exc:
         _log.critical("[indexer] embedding provider config invalid: %s", exc)
         sys.stderr.write(f"[memory_indexer] FATAL: {exc}\n")
         sys.exit(1)
 
-    liveness = Liveness(_liveness_timeout_s())
+    liveness = Liveness(
+        indexer_config.liveness_timeout_seconds(
+            inputs.embedding_name(), timeout_seconds=inputs.embed_timeout()
+        )
+    )
     retry = _ReconcileRetrySchedule(
-        base_s=settings.services.memory_indexer_reconcile_retry_backoff_seconds,
-        cap_s=settings.services.memory_indexer_reconcile_retry_backoff_cap_seconds,
+        base_s=inputs.retry_base(),
+        cap_s=inputs.retry_cap(),
     )
     endpoint = _endpoint()
     health = await start_health_server(
@@ -707,11 +710,11 @@ async def run() -> None:
     # retry storm; a merely-unreachable one rides into the retry loop with its
     # message attached to the terminal error (CTO ruling 2026-08-30 direction ②).
     database = Database.from_settings()
-    preflight = probe_backend(settings.services.memory_search_backend, database)
+    preflight = probe_backend(inputs.backend_name(), database, uri_reader=inputs.search_uri)
     if preflight.fatal:
         _log.critical(
             "[indexer] %s backend preflight FAILED: %s",
-            settings.services.memory_search_backend,
+            inputs.backend_name(),
             preflight.message,
         )
         sys.stderr.write(f"[memory_indexer] FATAL: {preflight.message}\n")
@@ -719,10 +722,16 @@ async def run() -> None:
     if preflight.message:
         _log.warning(
             "[indexer] %s backend preflight: %s",
-            settings.services.memory_search_backend,
+            inputs.backend_name(),
             preflight.message,
         )
-    backend = await _connect_backend_with_retry(database, provider, probe_message=preflight.message)
+    backend = await _connect_backend_with_retry(
+        database,
+        provider,
+        name=inputs.backend_name(),
+        uri_reader=inputs.search_uri,
+        probe_message=preflight.message,
+    )
     _log.info("[indexer] connected to %s backend", backend.name)
     dirty_queue: queue.Queue[Path] = queue.Queue()
     handler = _MarkdownEventHandler(dirty_queue)
@@ -752,6 +761,8 @@ def main() -> None:
     read the main DB (only via the search backend); there is no main-DB
     schema-drift surface.
     """
+    config = ConfigBoot()
+    config.boot()
     init_gateway_process(name="memory_indexer")
     install_graceful_shutdown("memory_indexer")
     code = 0
@@ -763,7 +774,7 @@ def main() -> None:
     # skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(config=config))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[indexer] received interrupt, shutting down")

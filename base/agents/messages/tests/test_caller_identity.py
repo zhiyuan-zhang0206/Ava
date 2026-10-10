@@ -4,7 +4,18 @@ import pytest
 from pydantic import ValidationError
 
 from base.agents.messages.caller_identity import CallerIdentity, caller_payload
-from base.agents.messages.envelope import validate_source, validate_writable_source, wrap_inbound
+from base.agents.messages.envelope import (
+    EnvelopeReadInputs,
+    validate_source,
+    validate_writable_source,
+    wrap_inbound,
+)
+from base.clock import Clock
+from base.config import settings
+
+_ENVELOPE_INPUTS = EnvelopeReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 
 @pytest.mark.parametrize("subject", ["codex", "claude_code", "mcp"])
@@ -12,7 +23,7 @@ def test_external_identity_round_trip(subject: str) -> None:
     caller = CallerIdentity(kind="external_agent", subject=subject, instance="run-42")
     assert CallerIdentity.from_source(caller.source()) == caller
     validate_source(caller.source())
-    rendered = wrap_inbound("hello", caller.source())
+    rendered = wrap_inbound("hello", caller.source(), inputs=_ENVELOPE_INPUTS)
     assert rendered == f"External agent ({subject} / run-42; asserted provenance):\n\nhello"
     # Not confusable with other source families: agent's "Agent N:" label, or
     # the bracketed headers — the bare "[ts]" (user / ui:page) and "[system]".
@@ -27,7 +38,9 @@ def test_database_bigserial_client_id_fits_instance_and_wire_limit() -> None:
 
 def test_unknown_is_not_human() -> None:
     source = CallerIdentity(kind="unknown", subject="legacy").source()
-    assert wrap_inbound("hello", source).startswith("Unknown caller (legacy;")
+    assert wrap_inbound("hello", source, inputs=_ENVELOPE_INPUTS).startswith(
+        "Unknown caller (legacy;"
+    )
 
 
 @pytest.mark.parametrize(
@@ -47,7 +60,7 @@ def test_malformed_identity_rejected_by_boundary_and_reader(source: str) -> None
     with pytest.raises(ValueError):
         validate_source(source)
     with pytest.raises(ValueError):
-        wrap_inbound("hello", source)
+        wrap_inbound("hello", source, inputs=_ENVELOPE_INPUTS)
 
 
 def test_caller_cannot_carry_authentication_or_capabilities() -> None:

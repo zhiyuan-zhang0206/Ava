@@ -30,7 +30,6 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import AvaContext
-from base.config import settings
 from base.log import logger
 from base.paths import memory_dir, workspace_dir
 
@@ -59,7 +58,7 @@ def memory_index_note(ctx: AvaContext) -> HumanMessage | None:
     """The shared `MEMORY.md` pointer index, or `None` when there is nothing to
     inject (the layer is off, or the pool has no index yet)."""
     slices = ctx.require_agent()
-    if slices.sandbox.eval_isolation or not settings.agent.memory_index_inject_enabled:
+    if slices.sandbox.eval_isolation or not slices.read("agent", "memory_index_inject_enabled"):
         return None
     path = memory_dir() / _MEMORY_INDEX_FILE
     if not path.is_file():
@@ -121,12 +120,11 @@ _OVER_CAP_NOTE = (
 )
 
 
-def _per_agent_maintenance_suffix(lines: int) -> str:
+def _per_agent_maintenance_suffix(lines: int, *, cap: int) -> str:
     """The over-cap maintenance nudge for a per-agent memory index of `lines`
     lines, or "" when it is within the soft cap. The cap is
     `settings.agent.memory_per_agent_index_max_lines`; a cap of 0 (or less)
     disables the check."""
-    cap = settings.agent.memory_per_agent_index_max_lines
     if cap <= 0 or lines <= cap:
         return ""
     return _OVER_CAP_NOTE.format(lines=lines, cap=cap)
@@ -147,7 +145,7 @@ def per_agent_memory_note(ctx: AvaContext) -> HumanMessage | None:
 
     Returns ``None`` only when the layer is disabled or the agent id is not yet
     established."""
-    if not settings.agent.memory_per_agent_inject_enabled:
+    if not ctx.require_agent().read("agent", "memory_per_agent_inject_enabled"):
         logger.debug("[per-agent-memory] disabled by settings")
         return None
     from ava.sdk_surface.agent_identity import agent_id
@@ -167,7 +165,10 @@ def per_agent_memory_note(ctx: AvaContext) -> HumanMessage | None:
         path.write_text("", encoding="utf-8")
     text = path.read_text(encoding="utf-8").strip()
     body = text if text else _NO_CONTENT
-    suffix = _per_agent_maintenance_suffix(len(text.splitlines()))
+    suffix = _per_agent_maintenance_suffix(
+        len(text.splitlines()),
+        cap=ctx.require_agent().read("agent", "memory_per_agent_index_max_lines"),
+    )
     logger.info(
         "[per-agent-memory] agent={} path={} lines={} {} over_cap={}",
         aid,

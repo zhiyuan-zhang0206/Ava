@@ -34,7 +34,6 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import AvaContext
-from base.config import settings
 from base.log import logger
 from base.paths import workspace_dir_readonly
 
@@ -287,8 +286,8 @@ def inherited_memory_note(ctx: AvaContext) -> HumanMessage | None:
     if not blocks:
         return None
 
-    block_cap = settings.agent.memory_inherit_max_block_chars
-    total_cap = settings.agent.memory_inherit_max_total_chars
+    block_cap = slices.read("agent", "memory_inherit_max_block_chars")
+    total_cap = slices.read("agent", "memory_inherit_max_total_chars")
 
     grouped = _group_blocks(blocks, block_cap)
     sections, cutoff = _fit_sections(grouped, total_cap)

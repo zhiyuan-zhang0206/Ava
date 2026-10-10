@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
 from typing import Any
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -179,3 +182,10 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agents_meta")
         assert cur.fetchone() == before
+
+
+@pytest.fixture(autouse=True)
+def _restore_cold_gateway_delivery() -> Iterator[None]:
+    """This module owns every environment mutation made by its real gateway lifespan."""
+    with patch.dict(os.environ):
+        yield

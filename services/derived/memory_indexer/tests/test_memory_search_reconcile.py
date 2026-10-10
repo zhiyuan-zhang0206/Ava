@@ -3,15 +3,31 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
+from collections.abc import Callable, Iterator
+from unittest.mock import patch
 
 import pytest
 
 from services.derived.memory_indexer import memory_search_reconcile as reconcile
 
 
+@pytest.fixture(autouse=True)
+def _restore_boot_environment() -> Iterator[None]:
+    with patch.dict(os.environ):
+        yield
+
+
 class _FakeProvider:
-    def __init__(self, *, catalog: object) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        catalog: object,
+        timeout_reader: Callable[[], float],
+        api_key_reader: Callable[[], str | None],
+    ) -> None:
         self.catalog = catalog
 
     dim = 8
@@ -69,7 +85,13 @@ def _patch_reconcile_dependencies(
     monkeypatch.setattr(reconcile, "get_provider", _FakeProvider)
 
     def _get_backend_named(
-        name: str, *, database: object, dim: int, fingerprint: str, readonly: bool
+        name: str,
+        *,
+        database: object,
+        dim: int,
+        fingerprint: str,
+        readonly: bool,
+        uri_reader: Callable[[], str],
     ) -> _FakeBackend:
         calls.append((name, dim, fingerprint, readonly))
         return backends.pop(0)

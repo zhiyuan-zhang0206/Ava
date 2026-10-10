@@ -27,6 +27,7 @@ from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_plan import segment_requests
 from base.agents.history.hierarchy.chunks import segment_head_len, sendable_len, uncovered
 from base.agents.history.hierarchy.units import divide_units
+from base.agents.history.timeline_inputs import TimelineReadInputs
 
 CoverageStatus = Literal["none", "partial", "full"]
 
@@ -120,24 +121,35 @@ def _peak_input_tokens(messages: Sequence[BaseMessage]) -> int:
     )
 
 
-def has_matter(messages: Sequence[BaseMessage]) -> bool:
+def has_matter(messages: Sequence[BaseMessage], *, timeline_inputs: TimelineReadInputs) -> bool:
     """Whether a run holds anything to describe: something besides framework-injected notes."""
-    return any(unit.kind != "note" for unit in divide_units(list(messages)))
+    return any(
+        unit.kind != "note"
+        for unit in divide_units(list(messages), timeline_inputs=timeline_inputs)
+    )
 
 
 def missing_runs(
-    history: FullHistory, material: tuple[int, int], covered: Sequence[tuple[int, int]]
+    history: FullHistory,
+    material: tuple[int, int],
+    covered: Sequence[tuple[int, int]],
+    *,
+    timeline_inputs: TimelineReadInputs,
 ) -> list[tuple[int, int]]:
     """The inclusive runs of `material` no level-1 node covers and that have something to describe."""
     return [
         run
         for run in uncovered(material, covered)
-        if has_matter(history.messages[run[0] : run[1] + 1])
+        if has_matter(history.messages[run[0] : run[1] + 1], timeline_inputs=timeline_inputs)
     ]
 
 
 def coverage_of(
-    history: FullHistory, session: Session, covered: Sequence[tuple[int, int]]
+    history: FullHistory,
+    session: Session,
+    covered: Sequence[tuple[int, int]],
+    *,
+    timeline_inputs: TimelineReadInputs,
 ) -> Coverage:
     """The session's coverage by the sorted level-1 spans `covered`.
 
@@ -146,7 +158,12 @@ def coverage_of(
     if session.material is None:
         return Coverage("full", 1.0, 0, 0)
     total = session.material[1] - session.material[0] + 1
-    missing = sum(b - a + 1 for a, b in missing_runs(history, session.material, covered))
+    missing = sum(
+        b - a + 1
+        for a, b in missing_runs(
+            history, session.material, covered, timeline_inputs=timeline_inputs
+        )
+    )
     if missing == 0:
         return Coverage("full", 1.0, total, total)
     if not _touches(session.material, covered):

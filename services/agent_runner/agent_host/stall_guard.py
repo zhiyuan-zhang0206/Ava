@@ -85,6 +85,9 @@ async def run_invocation_with_stall_guard(
     the graph task WAS the turn task.
     """
     ctx.turn_progress.reset(agent_id)
+    if ctx.hosted_resources is None:
+        raise RuntimeError("a hosted invocation requires its original resource scope")
+    service = ctx.hosted_resources.require_service()
     invoke_task = asyncio.create_task(
         graph.ainvoke(  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
             input_update,  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
@@ -93,6 +96,7 @@ async def run_invocation_with_stall_guard(
         ),
         name=f"turn-ainvoke-{agent_id}",
     )
+    service.retain_task(ctx.hosted_resources, invoke_task)
     try:
         # quiesce-exempt: polls one turn's in-memory progress clock; no database
         while True:

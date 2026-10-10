@@ -50,6 +50,7 @@ proves it are [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]].
   leaves nothing behind. `archive_mode` is read only at Postgres launch: a retained
   postmaster keeps its previous arguments, so enabling or disabling needs
   `ava stop` + `ava start`; start warns when the running Postgres differs.
+- **Configuration ownership**: each operation requires a `path_reader` bound by its root to that root's `ConfigBoot`. Configuration, runner, archive/restore commands, check, probe, tick, drill and retention forward the reader and consume it at the original read points; no constructor caches the configured path.
 - **One runner** (`runner.py`): `wal-g --config <file> ...` with the daemon
   environment subset (no `AVA_*` value, no storage credential) and bounded time;
   `run_walg_logged` also returns stderr, where `delete` prints what it would remove.

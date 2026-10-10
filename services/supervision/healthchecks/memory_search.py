@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from base.config import settings
+from collections.abc import Callable
+
+from base.config import ConfigBoot
 from base.daemon.health import DaemonProbe
 
 _TIMEOUT_S = 3.0
 
 
-def _post_search(uri: str) -> dict[str, object] | DaemonProbe:
+def _post_search(
+    uri: str, *, embedding_name_reader: Callable[[], str]
+) -> dict[str, object] | DaemonProbe:
     """One POST /search with a zero vector — the body dict when it
     answered, or the not-alive verdict that trying produced (fail
     closed: any failure means "not alive", per the module docstring)."""
@@ -16,7 +20,7 @@ def _post_search(uri: str) -> dict[str, object] | DaemonProbe:
 
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
-    dim = get_descriptor().dim
+    dim = get_descriptor(embedding_name_reader()).dim
     try:
         resp = httpx.post(
             f"{uri}/search",
@@ -31,7 +35,12 @@ def _post_search(uri: str) -> dict[str, object] | DaemonProbe:
 
 def _probe() -> DaemonProbe:
     """Alive when the service answers a real search with a paths payload."""
-    payload = _post_search(settings.services.memory_search_uri)
+    config = ConfigBoot()
+    config.boot()
+    payload = _post_search(
+        config.view.services.memory_search_uri,
+        embedding_name_reader=lambda: config.view.services.embedding_backend,
+    )
     if isinstance(payload, DaemonProbe):
         return payload
     if "paths" in payload:

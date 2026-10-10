@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import ConfigBoot
 from cli.commands.converge import _ownership_preflight as _ownership
 from cli.commands.converge import host as converge_host
 from cli.commands.converge.spec import ConvergeCtx
@@ -20,7 +21,9 @@ def _ctx(tmp_path: Path) -> ConvergeCtx:
             path.touch()
         else:
             path.mkdir()
-    return ConvergeCtx(repo=tmp_path / "repo", ava_home=home, roles=frozenset({"gateway"}))
+    return ConvergeCtx(
+        repo=tmp_path / "repo", ava_home=home, roles=frozenset({"gateway"}), config=ConfigBoot()
+    )
 
 
 def test_collect_ownership_warnings_names_only_non_user_owned_key_paths(

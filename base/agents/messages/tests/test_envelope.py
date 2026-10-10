@@ -20,9 +20,19 @@ from datetime import UTC, datetime
 
 import pytest
 
-from base.agents.messages.envelope import inbound_head, validate_source, wrap_inbound
+from base.agents.messages.envelope import (
+    EnvelopeReadInputs,
+    inbound_head,
+    validate_source,
+    wrap_inbound,
+)
 from base.clock import Clock
 from base.clock.tests.fakes import fix_now_timestamp
+from base.config import settings
+
+_ENVELOPE_INPUTS = EnvelopeReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 _REAL_NOW_TIMESTAMP = Clock.now_timestamp
 _TIMESTAMP = "[2026-05-06 14:32:05]"
@@ -39,14 +49,14 @@ class TestUserSource:
     """`source='user'` —— the human user (the UI). Wraps as a bare "[ts]" header."""
 
     def test_user(self) -> None:
-        assert wrap_inbound("hi", "user") == f"{_TS}\n\nhi"
+        assert wrap_inbound("hi", "user", inputs=_ENVELOPE_INPUTS) == f"{_TS}\n\nhi"
 
     def test_user_preserves_multiline(self) -> None:
         content = "line 1\nline 2\n\nline 4"
-        assert wrap_inbound(content, "user") == f"{_TS}\n\n{content}"
+        assert wrap_inbound(content, "user", inputs=_ENVELOPE_INPUTS) == f"{_TS}\n\n{content}"
 
     def test_user_empty_content(self) -> None:
-        assert wrap_inbound("", "user") == f"{_TS}\n\n"
+        assert wrap_inbound("", "user", inputs=_ENVELOPE_INPUTS) == f"{_TS}\n\n"
 
     def test_legacy_ui_prefix_now_rejected(self) -> None:
         """The old `ui:X` channel namespace is gone — `user` is the only plain
@@ -54,7 +64,7 @@ class TestUserSource:
         a user message. The one surviving `ui:` form is `ui:page:<name>` (page callback)."""
         for bad in ("ui:web", "ui:telegram", "ui:cli", "ui:slack"):
             with pytest.raises(ValueError, match="Unrecognized inbound source"):
-                wrap_inbound("hi", bad)
+                wrap_inbound("hi", bad, inputs=_ENVELOPE_INPUTS)
 
 
 class TestPageCallback:
@@ -63,7 +73,10 @@ class TestPageCallback:
     page from <name>."""
 
     def test_page_callback_wraps_same_as_user(self) -> None:
-        assert wrap_inbound("chose B", "ui:page:compare") == f"{_TS}\n\nchose B"
+        assert (
+            wrap_inbound("chose B", "ui:page:compare", inputs=_ENVELOPE_INPUTS)
+            == f"{_TS}\n\nchose B"
+        )
 
     def test_page_callback_validates(self) -> None:
         validate_source("ui:page:compare")  # no raise
@@ -73,7 +86,9 @@ class TestSystemSource:
     def test_system_not_wrapped(self) -> None:
         """source='system' is a framework internal insert, gets [system] prefix, no timestamp."""
         assert (
-            wrap_inbound("\u8bf7\u68b3\u7406\u5e76\u8c03 ava.compact", "system")
+            wrap_inbound(
+                "\u8bf7\u68b3\u7406\u5e76\u8c03 ava.compact", "system", inputs=_ENVELOPE_INPUTS
+            )
             == "[system] \u8bf7\u68b3\u7406\u5e76\u8c03 ava.compact"
         )
 
@@ -83,7 +98,7 @@ class TestSystemSource:
     )
     def test_system_subtype_not_wrapped(self, source: str) -> None:
         """source='system:<subtype>' treated same as 'system' — [system] prefix, no timestamp."""
-        assert wrap_inbound("raw msg", source) == "[system] raw msg"
+        assert wrap_inbound("raw msg", source, inputs=_ENVELOPE_INPUTS) == "[system] raw msg"
 
     @pytest.mark.parametrize(
         "source",
@@ -99,15 +114,18 @@ class TestAgentPrefix:
     receiver knows which peer is talking to it (telling apart multiple children)."""
 
     def test_agent_prefix_includes_sender_id(self) -> None:
-        assert wrap_inbound("hi", "agent:42") == f"Agent 42 {_TS}:\n\nhi"
+        assert wrap_inbound("hi", "agent:42", inputs=_ENVELOPE_INPUTS) == f"Agent 42 {_TS}:\n\nhi"
 
     def test_agent_prefix_with_multiline_content(self) -> None:
         content = "line 1\nline 2"
-        assert wrap_inbound(content, "agent:7") == f"Agent 7 {_TS}:\n\n{content}"
+        assert (
+            wrap_inbound(content, "agent:7", inputs=_ENVELOPE_INPUTS)
+            == f"Agent 7 {_TS}:\n\n{content}"
+        )
 
     def test_agent_prefix_not_user_format(self) -> None:
         """agent source must not produce the user envelope's bare "[ts]" header."""
-        out = wrap_inbound("x", "agent:1")
+        out = wrap_inbound("x", "agent:1", inputs=_ENVELOPE_INPUTS)
         assert not out.startswith("[")
         assert out.startswith(f"Agent 1 {_TS}:")
 
@@ -120,11 +138,17 @@ class TestWatcherPrefix:
     scheduled fire or its exit notice), N is the watcher's session id."""
 
     def test_watcher_wrap_includes_id(self) -> None:
-        assert wrap_inbound("disk 90%", "watcher:42") == f"Watcher (id 42) {_TS}:\n\ndisk 90%"
+        assert (
+            wrap_inbound("disk 90%", "watcher:42", inputs=_ENVELOPE_INPUTS)
+            == f"Watcher (id 42) {_TS}:\n\ndisk 90%"
+        )
 
     def test_watcher_wrap_multiline(self) -> None:
         content = "line 1\nline 2"
-        assert wrap_inbound(content, "watcher:7") == f"Watcher (id 7) {_TS}:\n\n{content}"
+        assert (
+            wrap_inbound(content, "watcher:7", inputs=_ENVELOPE_INPUTS)
+            == f"Watcher (id 7) {_TS}:\n\n{content}"
+        )
 
     def test_watcher_validate_ok(self) -> None:
         validate_source("watcher:0")  # no raise
@@ -137,7 +161,7 @@ class TestWatcherPrefix:
 
     def test_schedule_source_is_valid(self) -> None:
         validate_source("schedule:7")  # no raise
-        assert wrap_inbound("consolidate now", "schedule:7") == (
+        assert wrap_inbound("consolidate now", "schedule:7", inputs=_ENVELOPE_INPUTS) == (
             f"Schedule (id 7) {_TS}:\n\nconsolidate now"
         )
 
@@ -152,7 +176,7 @@ class TestWatcherPrefix:
         # `shell:N` — the completion notice of a background shell command
         # (ava.shell.run_background), N is the shell session id.
         validate_source("shell:5")  # no raise
-        assert wrap_inbound("build exited with code 0", "shell:5") == (
+        assert wrap_inbound("build exited with code 0", "shell:5", inputs=_ENVELOPE_INPUTS) == (
             f"Shell session (id 5) {_TS}:\n\nbuild exited with code 0"
         )
 
@@ -175,14 +199,14 @@ class TestUnknownSource:
     def test_unknown_source_raises(self, source: str) -> None:
         """Old source without prefix / typo / outside the four categories → ValueError (fail-fast)."""
         with pytest.raises(ValueError, match="Unrecognized inbound source"):
-            wrap_inbound("x", source)
+            wrap_inbound("x", source, inputs=_ENVELOPE_INPUTS)
 
     def test_unknown_source_error_lists_valid_options(self) -> None:
         """error message must list legal source forms so the caller sees correct format at a glance.
         mutmut exposed that the help text (must be 'system' / 'agent:N' / ...) could be
         typo'd / case-changed without this test catching it (PR follow-up)."""
         with pytest.raises(ValueError) as exc_info:
-            wrap_inbound("x", "bad")
+            wrap_inbound("x", "bad", inputs=_ENVELOPE_INPUTS)
         msg = str(exc_info.value)
         # Help text format lock
         assert "must be" in msg
@@ -206,21 +230,21 @@ class TestMessageTimestampsOff:
         monkeypatch.setattr(settings.general, "message_timestamps", False)
 
     def test_user_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "user") == "hi"
+        assert wrap_inbound("hi", "user", inputs=_ENVELOPE_INPUTS) == "hi"
 
     def test_page_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "ui:page:compare") == "hi"
+        assert wrap_inbound("hi", "ui:page:compare", inputs=_ENVELOPE_INPUTS) == "hi"
 
     def test_agent_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "agent:5") == "Agent 5:\n\nhi"
+        assert wrap_inbound("hi", "agent:5", inputs=_ENVELOPE_INPUTS) == "Agent 5:\n\nhi"
 
     def test_watcher_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "watcher:7") == "Watcher (id 7):\n\nhi"
+        assert wrap_inbound("hi", "watcher:7", inputs=_ENVELOPE_INPUTS) == "Watcher (id 7):\n\nhi"
 
     def test_system_unchanged(self) -> None:
         # `system` and `system:*` get [system] prefix, no timestamp regardless of flag.
-        assert wrap_inbound("raw", "system") == "[system] raw"
-        assert wrap_inbound("raw", "system:rollback") == "[system] raw"
+        assert wrap_inbound("raw", "system", inputs=_ENVELOPE_INPUTS) == "[system] raw"
+        assert wrap_inbound("raw", "system:rollback", inputs=_ENVELOPE_INPUTS) == "[system] raw"
 
 
 def _local_ts(created: datetime, *, weekday: bool = False) -> str:
@@ -247,7 +271,7 @@ class TestCreatedAtParameter:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        out = wrap_inbound("hi", "user", created_at=created)
+        out = wrap_inbound("hi", "user", created_at=created, inputs=_ENVELOPE_INPUTS)
         expected = f"[{_local_ts(created)}]"
         assert expected in out
         assert out == f"{expected}\n\nhi"
@@ -256,14 +280,14 @@ class TestCreatedAtParameter:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 14, 0, 0, tzinfo=UTC)
-        out = wrap_inbound("hey", "agent:5", created_at=created)
+        out = wrap_inbound("hey", "agent:5", created_at=created, inputs=_ENVELOPE_INPUTS)
         expected = f"[{_local_ts(created)}]"
         assert expected in out
         assert out == f"Agent 5 {expected}:\n\nhey"
 
     def test_without_created_at_uses_now(self) -> None:
         """When created_at is None, fallback to now_timestamp (existing behavior)."""
-        out = wrap_inbound("hi", "user")
+        out = wrap_inbound("hi", "user", inputs=_ENVELOPE_INPUTS)
         assert _TIMESTAMP in out  # frozen by fixture
 
     def test_system_ignores_created_at(self) -> None:
@@ -271,14 +295,20 @@ class TestCreatedAtParameter:
         from datetime import datetime
 
         created = datetime(2026, 1, 1, tzinfo=UTC)
-        assert wrap_inbound("raw", "system", created_at=created) == "[system] raw"
-        assert wrap_inbound("raw", "system:rollback", created_at=created) == "[system] raw"
+        assert (
+            wrap_inbound("raw", "system", created_at=created, inputs=_ENVELOPE_INPUTS)
+            == "[system] raw"
+        )
+        assert (
+            wrap_inbound("raw", "system:rollback", created_at=created, inputs=_ENVELOPE_INPUTS)
+            == "[system] raw"
+        )
 
     def test_watcher_with_created_at(self) -> None:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 20, 0, 0, tzinfo=UTC)
-        out = wrap_inbound("alert", "watcher:7", created_at=created)
+        out = wrap_inbound("alert", "watcher:7", created_at=created, inputs=_ENVELOPE_INPUTS)
         assert f"[{_local_ts(created)}]" in out
 
 
@@ -295,13 +325,16 @@ class TestCreatedAtWithTimestampsOff:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 0, 0, tzinfo=UTC)
-        assert wrap_inbound("hi", "user", created_at=created) == "hi"
+        assert wrap_inbound("hi", "user", created_at=created, inputs=_ENVELOPE_INPUTS) == "hi"
 
     def test_agent_no_ts_even_with_created_at(self) -> None:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 0, 0, tzinfo=UTC)
-        assert wrap_inbound("hi", "agent:5", created_at=created) == "Agent 5:\n\nhi"
+        assert (
+            wrap_inbound("hi", "agent:5", created_at=created, inputs=_ENVELOPE_INPUTS)
+            == "Agent 5:\n\nhi"
+        )
 
 
 class TestWeekdayFlag:
@@ -325,7 +358,7 @@ class TestWeekdayFlag:
         # within +-11h of UTC, so this exercises the %a slot regardless of
         # the configured timezone.
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        return wrap_inbound("hi", "user", created_at=created)
+        return wrap_inbound("hi", "user", created_at=created, inputs=_ENVELOPE_INPUTS)
 
     def test_weekday_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from datetime import datetime
@@ -369,8 +402,8 @@ class TestWeekdayFlag:
             day = r"[A-Z][a-z]{2} " if weekday else ""
             shape = rf"^\[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}}\]$"
             for out in (
-                wrap_inbound("hi", "user"),
-                wrap_inbound("hi", "user", created_at=datetime.now(UTC)),
+                wrap_inbound("hi", "user", inputs=_ENVELOPE_INPUTS),
+                wrap_inbound("hi", "user", created_at=datetime.now(UTC), inputs=_ENVELOPE_INPUTS),
             ):
                 assert re.match(shape, out.split("\n")[0]), out
 
@@ -381,5 +414,5 @@ class TestWeekdayFlag:
 )
 def test_inbound_head_is_exactly_what_precedes_the_content(source: str) -> None:
     at = datetime(2026, 10, 4, 3, 0, 0, tzinfo=UTC)
-    head = inbound_head(source, created_at=at)
-    assert wrap_inbound("BODY", source, created_at=at) == head + "BODY"
+    head = inbound_head(source, created_at=at, inputs=_ENVELOPE_INPUTS)
+    assert wrap_inbound("BODY", source, created_at=at, inputs=_ENVELOPE_INPUTS) == head + "BODY"

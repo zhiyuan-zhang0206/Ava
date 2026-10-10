@@ -71,7 +71,7 @@ from base.agents import AvaAgentError
 from base.cluster.auth import cookie_name
 from base.cluster.authority.api import AcceptanceCache
 from base.cluster.rate_limit import LoginRateLimiter
-from base.config import Settings, settings
+from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -85,6 +85,7 @@ from gateway.agents import state as agents_state_router
 from gateway.agents.history import conversation as conversation_router
 from gateway.agents.history import timeline as timeline_router
 from gateway.agents.history import understanding as agents_understanding_router
+from gateway.agents.history.configuration import timeline_policy, understanding_policy
 from gateway.agents.notice_operations import router as guarded_notices_router
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.alerts import router as alerts_router
@@ -170,7 +171,7 @@ from gateway.upload_delivery.worker import UploadRecovery
 _log = logging.getLogger(__name__)
 
 
-def _build_request_resources(app: FastAPI) -> None:
+def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
     """Build caches, concurrency gates, and event throttles for one gateway lifespan."""
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
@@ -179,10 +180,31 @@ def _build_request_resources(app: FastAPI) -> None:
     app.state.identity_mismatch_log = IdentityMismatchLog()
     app.state.inspect_query_cache = inspect_router.build_query_cache()
     app.state.upload_locks = uploads_router.AgentUploadLocks()
-    app.state.memory_search_gate = memory_router.build_search_gate()
+    app.state.timeline_policy = timeline_policy(config)
+    app.state.understanding_policy = understanding_policy(config, app.state.config_authority)
+    app.state.memory_search_gate = memory_router.build_search_gate(
+        config.view.services.memory_search_max_concurrency
+    )
+
+    def memory_api_key() -> str | None:
+        secret = config.view.lm.gemini_api_key
+        return None if secret is None else secret.get_secret_value()
+
+    app.state.memory_search_inputs = memory_router.MemorySearchInputs(
+        embedding_backend=lambda: config.view.services.embedding_backend,
+        backend=lambda: config.view.services.memory_search_backend,
+        uri=lambda: config.view.services.memory_search_uri,
+        embedding_timeout=lambda: config.view.services.memory_embed_timeout_seconds,
+        api_key=memory_api_key,
+        acquire_timeout=lambda: config.view.services.memory_search_acquire_timeout_seconds,
+        deadline=lambda: config.view.services.memory_search_deadline_seconds,
+    )
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.auth401_log = rejection_log.AuthRejectionLog()
-    app.state.login_limiter = LoginRateLimiter()
+    app.state.login_limiter = LoginRateLimiter(
+        max_failures_reader=lambda: config.view.gateway.login_max_failures,
+        lockout_seconds_reader=lambda: config.view.gateway.login_lockout_seconds,
+    )
     app.state.fleet_graph_stale_emitter = fleet_graph_router.FleetGraphStaleEmitter()
     # The insights service's Unix socket: no connection until the first proxied read.
     app.state.insights_client = insights_router.build_client()
@@ -204,10 +226,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     The agent host handles native lifecycle work. Auto label generation
     runs in the separate services/derived/labeler daemon.
     """
+    config = ConfigBoot()
+    config.boot()
     app.state.catalog = build_model_catalog()
     app.state.config_authority = ConfigAuthority(
-        runtime=settings,
-        all_domains=settings if settings.profile is None else Settings(profile=None),
+        runtime=config.view,
+        all_domains=config.view if config.view.profile is None else Settings(profile=None),
         env_path=paths.ava_home() / ".env",
     )
 
@@ -222,7 +246,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.started_at = time.time()
     app.state.db = Database.from_settings()
     app.state.bus = EventBus.from_settings()
-    _build_request_resources(app)
+    _build_request_resources(app, config)
     app.state.db_pool = app.state.db.pool(max_size=8)
     app.state.sessions = SessionStore(app.state.db_pool)
     app.state.session_keys = SessionKeys()
@@ -248,7 +272,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # refreshes the health probe command on the next gateway restart
     # without relying on the converge phase. Idempotent.
     try:
-        await asyncio.to_thread(register_os_cron)
+        await asyncio.to_thread(
+            register_os_cron, enabled_reader=lambda: config.view.general.os_jobs_enabled
+        )
     except Exception:
         _log.warning("OS health-probe cron registration failed", exc_info=True)
 

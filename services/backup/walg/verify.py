@@ -14,7 +14,9 @@ watches, so it is not a failure here.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from services.backup.walg.backups import QUERY_TIMEOUT_S
@@ -58,7 +60,7 @@ def parse_verdict(text: str) -> ChainVerdict:
     return ChainVerdict(integrity=statuses[0], timeline=statuses[1])
 
 
-def verify_chain(pg_admin_url: str) -> ChainVerdict:
+def verify_chain(pg_admin_url: str, *, path_reader: Callable[[], Path | None]) -> ChainVerdict:
     """Run the check against the bucket (it lists every archived segment).
 
     `wal-verify` also asks Postgres for its current segment and timeline, so like
@@ -69,5 +71,6 @@ def verify_chain(pg_admin_url: str) -> ChainVerdict:
         ["wal-verify", "integrity", "timeline", "--json"],
         timeout_s=QUERY_TIMEOUT_S,
         pg_admin_url=pg_admin_url,
+        path_reader=path_reader,
     )
     return parse_verdict(text)

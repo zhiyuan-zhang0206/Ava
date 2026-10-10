@@ -437,7 +437,7 @@ def _mk_event(category: str, event_name: str) -> telemetry.Event:
 
 def test_regular_events_shed_immediately_when_full() -> None:
     """A telemetry event on a full queue is shed at once (put_nowait)."""
-    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+    pipe = telemetry.EventPipeline.__new__(telemetry.EventPipeline)
     pipe._admission_lock = threading.Lock()
     pipe._stop_requested = threading.Event()
     pipe._finished = threading.Event()
@@ -452,13 +452,13 @@ def test_regular_events_shed_immediately_when_full() -> None:
             raise AssertionError("regular events must not use the blocking put")
 
     pipe._queue = _FullQueue()  # type: ignore[attr-defined]
-    telemetry._EventPipeline.enqueue(pipe, _mk_event("telemetry", "turn_end"))
+    telemetry.EventPipeline.enqueue(pipe, _mk_event("telemetry", "turn_end"))
     assert pipe.dropped == 1
 
 
 def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
     """Their record is `audit_events`, so the projection takes no blocking lane."""
-    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+    pipe = telemetry.EventPipeline.__new__(telemetry.EventPipeline)
     pipe._admission_lock = threading.Lock()
     pipe._stop_requested = threading.Event()
     pipe._finished = threading.Event()
@@ -473,14 +473,14 @@ def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
             raise AssertionError("no event may block its producer")
 
     pipe._queue = _FullQueue()  # type: ignore[attr-defined]
-    telemetry._EventPipeline.enqueue(pipe, _mk_event("audit", "send_message"))
+    telemetry.EventPipeline.enqueue(pipe, _mk_event("audit", "send_message"))
     assert pipe.dropped == 1
 
 
 def test_explicit_capture_precedes_closed_projection_admission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pipe = telemetry._EventPipeline(writer=lambda _batch: None)
+    pipe = telemetry.EventPipeline(writer=lambda _batch: None)
     pipe.stop(timeout=1)
     monkeypatch.setitem(emitter._state, "pipeline", pipe)
     captured: list[telemetry.Event] = []

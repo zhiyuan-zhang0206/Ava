@@ -61,6 +61,7 @@ from agent.ownership.native_cancel import (
     observe_bound_cancel,
 )
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.incarnation.native_work_models import NativeCancelPendingError
 
 from ._decide import decide
@@ -244,6 +245,16 @@ async def claim_node(
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=runtime.context.turn_progress,
+        read_stall_seconds=lambda: runtime.context.require_agent().read(
+            "agent", "node_stall_dump_seconds"
+        ),
         full_window=will_idle,
+        timeline_inputs=TimelineReadInputs(
+            runtime.context.require_clock,
+            lambda: runtime.context.require_agent().read("general", "message_timestamps"),
+        ),
+        limit_reader=lambda: runtime.context.require_agent().read(
+            "display", "timeline_default_limit"
+        ),
     ):
         return await _claim_node_impl(state, runtime, config)

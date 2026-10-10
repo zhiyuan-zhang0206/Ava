@@ -135,7 +135,7 @@ def memory_search(
     resp = post(
         "/api/memory/search",
         {"query": query, "k": k},
-        timeout=httpx.Timeout(timeout) if timeout is not None else _memory_search_timeout(),
+        timeout=httpx.Timeout(timeout) if timeout is not None else _memory_search_timeout(context),
         max_retries=_MEMORY_SEARCH_MAX_RETRIES,
         context=context,
     )

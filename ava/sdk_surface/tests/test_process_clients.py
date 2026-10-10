@@ -1,6 +1,9 @@
 """Process composition supplies lazy, child-local resources to ClientSet."""
 
+import os
 import sys
+from collections.abc import Iterator
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -10,15 +13,25 @@ from ava.sdk_surface.process_context import context_from_description, process_cl
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.config import settings
+from base.config import ConfigBoot
 from base.db import Database
+
+
+@pytest.fixture
+def config_boot() -> Iterator[ConfigBoot]:
+    # An independent boot owns delivery environment mutations in this test scope.
+    with patch.dict(os.environ):
+        owner = ConfigBoot()
+        owner.boot()
+        yield owner
 
 
 def test_default_sql_refuses_a_missing_resource_before_dial(
     monkeypatch: pytest.MonkeyPatch,
+    config_boot: ConfigBoot,
 ) -> None:
-    clients = process_clients()
-    monkeypatch.setattr(settings.data_plane, "db_url", "")
+    clients = process_clients(config=config_boot)
+    config_boot.set_field("db_url", "")
 
     def unexpected_dial(*args: object, **kwargs: object) -> None:
         raise AssertionError("an empty default DSN must never reach libpq")
@@ -33,11 +46,12 @@ def test_default_sql_refuses_a_missing_resource_before_dial(
 
 def test_process_custom_database_is_independent_of_the_default(
     monkeypatch: pytest.MonkeyPatch,
+    config_boot: ConfigBoot,
 ) -> None:
     database = Database.from_settings()
-    custom = process_clients(database=lambda: database)
-    default = process_clients()
-    monkeypatch.setattr(settings.data_plane, "db_url", "")
+    custom = process_clients(database=lambda: database, config=config_boot)
+    default = process_clients(config=config_boot)
+    config_boot.set_field("db_url", "")
     try:
         assert custom.sql.execute("SELECT 44").fetchone() == (44,)
         with pytest.raises(RuntimeError, match="AVA_DB_URL not set"):
@@ -49,13 +63,15 @@ def test_process_custom_database_is_independent_of_the_default(
 
 def test_process_resources_resolve_after_overlay_and_again_after_close(
     monkeypatch: pytest.MonkeyPatch,
+    config_boot: ConfigBoot,
 ) -> None:
-    db_url, redis_url = settings.data_plane.db_url, settings.data_plane.redis_url
-    monkeypatch.setattr(settings.data_plane, "db_url", "")
-    monkeypatch.setattr(settings.data_plane, "redis_url", "")
-    clients = process_clients()
-    monkeypatch.setattr(settings.data_plane, "db_url", db_url)
-    monkeypatch.setattr(settings.data_plane, "redis_url", redis_url)
+    db_url = config_boot.view.data_plane.db_url
+    redis_url = config_boot.view.data_plane.redis_url
+    config_boot.set_field("db_url", "")
+    config_boot.set_field("redis_url", "")
+    clients = process_clients(config=config_boot)
+    config_boot.set_field("db_url", db_url)
+    config_boot.set_field("redis_url", redis_url)
     try:
         assert clients.sql.execute("SELECT 43").fetchone() == (43,)
         assert clients.redis.set("process-clients-overlay", "ready")
@@ -64,8 +80,8 @@ def test_process_resources_resolve_after_overlay_and_again_after_close(
         assert type(native) is redis.Redis
         assert native.connection_pool.connection_kwargs["socket_timeout"] == 10.0
         clients.close()
-        monkeypatch.setattr(settings.data_plane, "db_url", "")
-        monkeypatch.setattr(settings.data_plane, "redis_url", "")
+        config_boot.set_field("db_url", "")
+        config_boot.set_field("redis_url", "")
         with pytest.raises(RuntimeError, match="AVA_DB_URL not set"):
             clients.sql.execute("SELECT 1")
         with pytest.raises(RuntimeError, match="AVA_REDIS_URL not set"):
@@ -76,6 +92,7 @@ def test_process_resources_resolve_after_overlay_and_again_after_close(
 
 def test_child_uses_description_endpoint_and_credentials_at_first_use(
     monkeypatch: pytest.MonkeyPatch,
+    config_boot: ConfigBoot,
 ) -> None:
     host = AvaContext(
         identity=AgentIdentity(17, True),
@@ -85,10 +102,10 @@ def test_child_uses_description_endpoint_and_credentials_at_first_use(
     assert set(description) == {"identity", "gateway_url"}
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
     monkeypatch.setenv("AVA_API_TOKEN", "before-overlay")
-    child = context_from_description(description)
+    child = context_from_description(description, config=config_boot)
     monkeypatch.setenv("AVA_API_TOKEN", "after-overlay")
-    monkeypatch.setattr(settings.gateway, "gateway_client_http_timeout_seconds", 17.0)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://unrelated.test")
+    config_boot.set_field("gateway_client_http_timeout_seconds", 17.0)
+    config_boot.set_field("gateway_url", "http://unrelated.test")
     try:
         client = child.gateway
         assert str(client.base_url).rstrip("/") == description["gateway_url"]
@@ -105,7 +122,15 @@ def test_child_uses_description_endpoint_and_credentials_at_first_use(
 
 def test_process_boot_builds_no_connection_stack(pytester: pytest.Pytester) -> None:
     code = (
-        "import sys\n"
+        "import sys, importlib, threading\n"
+        "import ava\n"
+        "image = ava._LOADED_IMAGE\n"
+        "assert 'base.db' not in sys.modules\n"
+        "assert not getattr(ava, '__plugin_installation__', None)\n"
+        "assert not [t for t in threading.enumerate() if t is not threading.main_thread()]\n"
+        "importlib.reload(ava)\n"
+        "assert ava._LOADED_IMAGE is image\n"
+        "assert 'base.db' not in sys.modules\n"
         "from ava.sdk_surface.process_context import process_clients, context_from_description\n"
         "before = set(sys.modules)\n"
         "process_clients()\n"
@@ -117,3 +142,32 @@ def test_process_boot_builds_no_connection_stack(pytester: pytest.Pytester) -> N
     proc = pytester.run(sys.executable, "-I", "-c", code, timeout=120)
     assert proc.ret == 0, proc.stderr.str()
     proc.stdout.fnmatch_lines(["[]"])
+
+
+def test_gateway_clients_keep_independent_live_config_and_rebuild_credentials(
+    monkeypatch: pytest.MonkeyPatch, config_boot: ConfigBoot
+) -> None:
+    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "gateway")
+    second = ConfigBoot()
+    config_boot.set_field("gateway_url", "http://first.test/")
+    second.set_field("gateway_url", "http://second.test/")
+    config_boot.set_field("cluster_secret", "first-secret")
+    second.set_field("cluster_secret", "second-secret")
+    first_clients = process_clients(config=config_boot)
+    second_clients = process_clients(config=second)
+    try:
+        first_gateway = first_clients.gateway
+        second_gateway = second_clients.gateway
+        assert str(first_gateway.base_url).rstrip("/") == "http://first.test"
+        assert str(second_gateway.base_url).rstrip("/") == "http://second.test"
+        assert first_gateway.headers["Authorization"] == "Bearer first-secret"
+        assert second_gateway.headers["Authorization"] == "Bearer second-secret"
+        first_clients.close()
+        config_boot.set_field("cluster_secret", "first-updated")
+        assert first_clients.gateway.headers["Authorization"] == "Bearer first-updated"
+        assert second_clients.gateway is second_gateway
+        assert second_gateway.headers["Authorization"] == "Bearer second-secret"
+    finally:
+        first_clients.close()
+        second_clients.close()

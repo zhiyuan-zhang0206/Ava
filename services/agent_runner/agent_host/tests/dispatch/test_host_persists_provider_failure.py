@@ -29,10 +29,11 @@ def _breaker_ctx(pool: AsyncConnectionPool) -> AvaContext:
         ops_pool=pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=configured_policy().clock_factory,
     )
 
 

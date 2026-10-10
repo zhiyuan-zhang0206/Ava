@@ -500,7 +500,23 @@ async def test_startup_reconcile_reads_reconstructed_delta_state(
     )
 
     wrap_saver_reads_with_delta_reconstruction(saver)
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent_id, incarnation=None)
+    from base.agents.history.inbound_sideload import ReconcileReadInputs
+    from base.config import settings
+
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent_id,
+        incarnation=None,
+        inputs=ReconcileReadInputs(
+            stale_claimed_seconds=lambda: (
+                settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
+            ),
+            clock_pad_seconds=lambda: settings.daemon.inbound_reconcile_clock_pad_seconds,
+            boundary_scan_limit=lambda: settings.daemon.inbound_reconcile_boundary_scan_limit,
+            window_row_cap=lambda: settings.daemon.inbound_reconcile_window_row_cap,
+        ),
+    )
 
     status = db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id = %s", (inbound,)

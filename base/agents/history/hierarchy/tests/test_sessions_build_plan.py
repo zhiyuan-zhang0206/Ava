@@ -19,8 +19,15 @@ from base.agents.history.hierarchy.sessions import (
     coverage_of,
 )
 from base.agents.history.hierarchy.units import read_times
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.pricing import quote
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 _T0 = datetime(2026, 10, 5, tzinfo=UTC)
 _THRESHOLD = 1000
@@ -69,7 +76,9 @@ def _history(*counts: int) -> FullHistory:
 
 
 def _sessions(history: FullHistory, *boundaries: str):
-    return build_sessions(history, list(boundaries), read_times(history.messages))
+    return build_sessions(
+        history, list(boundaries), read_times(history.messages, timeline_inputs=_TIMELINE_INPUTS)
+    )
 
 
 def test_sessions_are_numbered_from_the_oldest_and_only_the_last_is_in_progress() -> None:
@@ -109,18 +118,23 @@ def test_coverage_is_none_partial_or_full_by_the_level_one_spans() -> None:
     history = _history(6, 3)
     first, live = _sessions(history, "cp-a")
     assert first.material == (0, 11) and live.material == (12, 17)
-    none = coverage_of(history, first, [])
+    none = coverage_of(history, first, [], timeline_inputs=_TIMELINE_INPUTS)
     assert (none.status, none.ratio, none.covered_messages, none.total_messages) == (
         "none",
         0.0,
         0,
         12,
     )
-    part = coverage_of(history, first, [(0, 5)])
+    part = coverage_of(history, first, [(0, 5)], timeline_inputs=_TIMELINE_INPUTS)
     assert (part.status, part.covered_messages) == ("partial", 6) and part.ratio == 0.5
-    assert coverage_of(history, first, [(0, 5), (6, 11)]).status == "full"
+    assert (
+        coverage_of(history, first, [(0, 5), (6, 11)], timeline_inputs=_TIMELINE_INPUTS).status
+        == "full"
+    )
     # Nodes of another session do not touch this one.
-    assert coverage_of(history, first, [(12, 17)]).status == "none"
+    assert (
+        coverage_of(history, first, [(12, 17)], timeline_inputs=_TIMELINE_INPUTS).status == "none"
+    )
 
 
 def test_a_run_of_framework_notes_alone_is_not_missing() -> None:
@@ -129,13 +143,17 @@ def test_a_run_of_framework_notes_alone_is_not_missing() -> None:
     history = FullHistory(messages, (SystemMessage(content="head"),), (0,))
     (session,) = _sessions(history)
     assert session.material == (0, 4)
-    assert coverage_of(history, session, [(0, 3)]).status == "full"
+    assert (
+        coverage_of(history, session, [(0, 3)], timeline_inputs=_TIMELINE_INPUTS).status == "full"
+    )
 
 
 def test_the_jobs_follow_the_live_rule_and_end_in_the_sessions_remainder() -> None:
     history = _history(6, 3)
     first, live = _sessions(history, "cp-a")
-    jobs = plan_jobs(history, [first, live], [], threshold=_THRESHOLD)
+    jobs = plan_jobs(
+        history, [first, live], [], threshold=_THRESHOLD, timeline_inputs=_TIMELINE_INPUTS
+    )
     # Session 1: a chunk when the input has grown by 1000 (turn 3), then the closing remainder.
     # Request indices count the SystemMessage head at 0; stitched = request - 1.
     assert [(j.session, j.start_index, j.end_index) for j in jobs if j.session == 1] == [
@@ -159,14 +177,23 @@ def test_covered_runs_are_skipped_exactly() -> None:
     history = _history(6, 3)
     first, _ = _sessions(history, "cp-a")
     # The first job's stretch (0..6) is described but for its tail; the second's (7..11) is not.
-    jobs = plan_jobs(history, [first], [(0, 4)], threshold=_THRESHOLD)
+    jobs = plan_jobs(
+        history, [first], [(0, 4)], threshold=_THRESHOLD, timeline_inputs=_TIMELINE_INPUTS
+    )
     assert [(j.first_message, j.last_message) for j in jobs] == [(5, 6), (7, 11)]
     # A node in the middle of a chunk cuts it into the runs on both sides, one job each.
-    jobs = plan_jobs(history, [first], [(2, 3)], threshold=_THRESHOLD)
+    jobs = plan_jobs(
+        history, [first], [(2, 3)], threshold=_THRESHOLD, timeline_inputs=_TIMELINE_INPUTS
+    )
     assert [(j.first_message, j.last_message) for j in jobs] == [(0, 1), (4, 6), (7, 11)]
     assert [(j.start_index, j.end_index) for j in jobs] == [(1, 3), (5, 8), (8, 13)]
     # Fully covered: nothing to build.
-    assert plan_jobs(history, [first], [(0, 11)], threshold=_THRESHOLD) == []
+    assert (
+        plan_jobs(
+            history, [first], [(0, 11)], threshold=_THRESHOLD, timeline_inputs=_TIMELINE_INPUTS
+        )
+        == []
+    )
 
 
 def test_the_estimate_prices_a_cold_prefix_plus_cached_rereads(
@@ -174,7 +201,7 @@ def test_the_estimate_prices_a_cold_prefix_plus_cached_rereads(
 ) -> None:
     history = _history(6)
     (session,) = _sessions(history)
-    jobs = plan_jobs(history, [session], [], threshold=_THRESHOLD)
+    jobs = plan_jobs(history, [session], [], threshold=_THRESHOLD, timeline_inputs=_TIMELINE_INPUTS)
     # The first job ends before the AI turn that follows it: that turn's reported input is its prefix.
     assert [j.input_tokens for j in jobs] == [3200, 4000 + 10]
     estimate = estimate_cost("deepseek-v4-flash", jobs, prices=model_catalog.prices)

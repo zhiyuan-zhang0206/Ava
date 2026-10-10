@@ -81,10 +81,11 @@ async def _failed_turn(
     ctx = AvaContext(
         ops_pool=pool,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
 
     async def drive(

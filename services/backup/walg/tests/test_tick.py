@@ -10,6 +10,7 @@ environment handed to wal-g) is the production code.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.config import settings
 from base.db import Database, pg_admin
 from base.native_process.os_platform import file_lock
 from services.backup.walg import state, tick
@@ -89,7 +91,12 @@ def _confirm_log() -> str:
 
 def _run(clock: Clock | None = None) -> tuple[int, list[str]]:
     lines: list[str] = []
-    code = tick.run_tick(Database.from_settings(), lines.append, now=clock or Clock())
+    code = tick.run_tick(
+        Database.from_settings(),
+        lines.append,
+        now=clock or Clock(),
+        path_reader=lambda: settings.walg.walg_config_file,
+    )
     return code, lines
 
 
@@ -229,7 +236,7 @@ def test_a_failing_preflight_stops_before_any_backup(sandbox: Sandbox) -> None:
 def test_a_key_that_is_not_the_pinned_one_fails_preflight(sandbox: Sandbox) -> None:
     from services.backup.walg import config as walg_config
 
-    walg_config.load_walg_config()  # pins the key
+    walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)  # pins the key
     sandbox.key_file.write_text("cd" * 32 + "\n")
 
     code, _ = _run()
@@ -315,7 +322,7 @@ def test_a_retention_invariant_violation_never_confirms(sandbox: Sandbox) -> Non
 def test_an_unexpected_error_is_still_recorded_against_its_step(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def explode(pg_admin_url: str) -> Any:
+    def explode(pg_admin_url: str, *, path_reader: Callable[[], Path | None]) -> Any:
         raise ValueError("surprise")
 
     monkeypatch.setattr(tick, "verify_chain", explode)
@@ -521,6 +528,8 @@ class FakeDrill:
         previous: state.DrillRecord | None,
         _report: Any,
         now: Any,
+        *,
+        path_reader: Callable[[], Path | None],
     ) -> state.DrillRecord:
         self.wal_g_calls_before.append(self.sandbox.calls())
         self.backups.append(backup.name)
@@ -609,7 +618,9 @@ def test_the_drill_is_due_by_the_state_the_tick_read(
 def test_drill_now_runs_the_drill_and_records_it(sandbox: Sandbox, due_drill: FakeDrill) -> None:
     lines: list[str] = []
 
-    code = tick.run_drill_now(lines.append, now=Clock())
+    code = tick.run_drill_now(
+        lines.append, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+    )
 
     assert code == 0
     assert state.read_state().drill is not None
@@ -621,7 +632,12 @@ def test_drill_now_exits_non_zero_when_the_drill_fails(
 ) -> None:
     due_drill.ok = False
 
-    assert tick.run_drill_now(lambda _line: None, now=Clock()) == 1
+    assert (
+        tick.run_drill_now(
+            lambda _line: None, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+        )
+        == 1
+    )
     drill_record = state.read_state().drill
     assert drill_record is not None and not drill_record.ok
 
@@ -630,7 +646,12 @@ def test_drill_now_refuses_without_a_backup(sandbox: Sandbox, due_drill: FakeDri
     sandbox.put("backups.json", "[]")
     lines: list[str] = []
 
-    assert tick.run_drill_now(lines.append, now=Clock()) == 1
+    assert (
+        tick.run_drill_now(
+            lines.append, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+        )
+        == 1
+    )
     assert lines == ["failed: no backup exists yet; run `ava backup walg run` first"]
     assert due_drill.backups == []
 
@@ -640,13 +661,23 @@ def test_drill_now_needs_postgres_and_the_run_lock(
 ) -> None:
     lines: list[str] = []
     monkeypatch.setattr(tick, "postgres_accepts_connections", _refuses)
-    assert tick.run_drill_now(lines.append, now=Clock()) == 1
+    assert (
+        tick.run_drill_now(
+            lines.append, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+        )
+        == 1
+    )
     assert lines == ["failed: postgres is not accepting connections"]
 
     monkeypatch.setattr(tick, "postgres_accepts_connections", _accepts)
     tick.ensure_private_dir(state.walg_dir())
     with file_lock(state.lock_path(), timeout_s=0):
-        assert tick.run_drill_now(lines.append, now=Clock()) == 1
+        assert (
+            tick.run_drill_now(
+                lines.append, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+            )
+            == 1
+        )
     assert lines[-1] == "failed: a WAL-G tick or drill is still running"
     assert due_drill.backups == []
 
@@ -657,5 +688,5 @@ def test_drill_now_while_wal_g_is_off_says_so(
     make_sandbox(tmp_path, monkeypatch, enabled=False)
     lines: list[str] = []
 
-    assert tick.run_drill_now(lines.append) == 1
+    assert tick.run_drill_now(lines.append, path_reader=lambda: settings.walg.walg_config_file) == 1
     assert "WAL-G is off" in lines[0]

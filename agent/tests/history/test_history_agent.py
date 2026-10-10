@@ -7,14 +7,26 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
+from base.agents.impersonation.notes import HandoffNotes
+from base.clock import Clock
 from base.cluster.machine import machine_name
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
+
+
+def _handoff_notes() -> HandoffNotes:
+    return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
 
 
 @pytest.fixture
@@ -99,7 +111,9 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     db_conn.commit()
     leases.inbox(database, str(lease["id"]), attested_caller(lease))
     leases.ack(database, event_bus, str(lease["id"]), attested_caller(lease), [inserted[0]])
-    items, _ = build_timeline_items([start_marker(lease)], [])
+    items, _ = build_timeline_items(
+        [start_marker(lease, notes=_handoff_notes())], [], inputs=_TIMELINE_INPUTS
+    )
     projected = hydrate(database, items, owner.agent_id, limit=5)
     image_item = next(item for item in projected if item.inbound_id == inserted[0])
     assert image_item.images == [valid_url]

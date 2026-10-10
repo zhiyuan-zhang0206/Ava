@@ -227,21 +227,19 @@ def test_credential_blocker_names_each_missing_piece(
 
 def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     skipped: list[str] = []
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: False)
     monkeypatch.setattr(cron, "skip_os_job", skipped.append)
 
     def no_backend():
         raise AssertionError("backend must not be touched with OS jobs off")
 
     monkeypatch.setattr("base.host.system.backend.get_backend", no_backend)
-    job.register_pr_flow_job()
+    job.register_pr_flow_job(enabled_reader=lambda: False)
     assert skipped == ["pr flow"]
 
 
 def test_register_skips_without_credentials(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     monkeypatch.setattr("base.telemetry.observability.production_identity", lambda: True)
     monkeypatch.setattr(job.shutil, "which", _which_missing)  # no gh
 
@@ -249,13 +247,12 @@ def test_register_skips_without_credentials(
         raise AssertionError("backend must not be touched without credentials")
 
     monkeypatch.setattr("base.host.system.backend.get_backend", no_backend)
-    job.register_pr_flow_job()
+    job.register_pr_flow_job(enabled_reader=lambda: True)
 
 
 def test_register_delegates_when_credentials_pass(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     _passing_credentials(monkeypatch, default_home)
     calls: list[str] = []
     fake_backend = types.SimpleNamespace(
@@ -264,7 +261,7 @@ def test_register_delegates_when_credentials_pass(
     )
     monkeypatch.setattr("base.host.system.backend.get_backend", lambda: fake_backend)
 
-    job.register_pr_flow_job()
+    job.register_pr_flow_job(enabled_reader=lambda: True)
     assert calls == ["register"]
 
     job.unregister_pr_flow_job()

@@ -158,7 +158,13 @@ async def _compact_outcome(
     emit_compact_finished(
         ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS
     )
-    await stamp_compact_boundary(ctx.ops_pool, agent_id, state, closing=closing_of(summary_text))
+    await stamp_compact_boundary(
+        ctx.ops_pool,
+        agent_id,
+        state,
+        closing=closing_of(summary_text),
+        read_agent=lambda field: ctx.require_agent().read("agent", field),
+    )
     # Defer any chats co-batched with the compact: they arrived while the
     # turn was in flight and were never part of the summarized history, so
     # they must survive — but as pending inbounds delivered in the fresh

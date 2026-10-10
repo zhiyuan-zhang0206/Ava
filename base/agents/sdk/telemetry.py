@@ -40,6 +40,7 @@ def emit(
     sampling_owner: SamplingPolicyOwner,
     sampling_policy: SamplingPolicy | None = None,
     admission: SdkCaptureAdmission | None = None,
+    producer: Callable[[], Any] | None = None,
 ) -> None:
     """Write one ``sdk_call`` event; invalid input and emitter errors propagate.
     ``detail`` is omitted from the payload when empty, so a plain call stays ``{fn}``;
@@ -64,6 +65,8 @@ def emit(
     from base import telemetry
 
     capture_args: dict[str, Any] = {} if admission is None else {"capture": admission.capture}
+    if producer is not None:
+        capture_args["producer"] = producer
     telemetry.emit(
         "telemetry",
         SDK_CALL_EVENT,
@@ -91,6 +94,7 @@ def _measure(
     tally: SdkCallTally | None,
     capture_owner: SdkCaptureOwner | None,
     sampling_owner: SamplingPolicyOwner,
+    producer: Callable[[], Any] | None,
 ) -> Generator[None, None, None]:
     from base.agents.sdk.call_policy import policy
 
@@ -117,6 +121,7 @@ def _measure(
                     identity=caller_identity,
                     sampling_owner=sampling_owner,
                     sampling_policy=snapshot,
+                    producer=producer,
                     **capture_args,
                 )
             except BaseException as secondary:
@@ -144,9 +149,10 @@ def run_metered(
     sampling_owner: SamplingPolicyOwner,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
+    producer: Callable[[], Any] | None = None,
 ) -> Any:
     """Validate each public entry before execution and retain its call-local snapshots."""
-    with _measure(fn, identity, tally, capture_owner, sampling_owner):
+    with _measure(fn, identity, tally, capture_owner, sampling_owner, producer):
         return original(*args, **kwargs)
 
 
@@ -160,9 +166,10 @@ async def run_metered_async(
     sampling_owner: SamplingPolicyOwner,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
+    producer: Callable[[], Any] | None = None,
 ) -> Any:
     """Validate when awaited, preserving cancellation and the call's own admission."""
-    with _measure(fn, identity, tally, capture_owner, sampling_owner):
+    with _measure(fn, identity, tally, capture_owner, sampling_owner, producer):
         return await original(*args, **kwargs)
 
 

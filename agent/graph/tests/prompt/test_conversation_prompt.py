@@ -15,7 +15,9 @@ def test_initial_human_response_is_present_without_plugins(
     monkeypatch: pytest.MonkeyPatch, style: str
 ) -> None:
     monkeypatch.setattr(settings.agent, "agent_communication_style", style)
-    slices = AgentSlices.resolve()
+    slices = AgentSlices.resolve(
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    )
 
     prompt = build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
 
@@ -37,7 +39,9 @@ def test_reply_routing_and_handoff_policy_survive_every_style(
     monkeypatch: pytest.MonkeyPatch, style: str
 ) -> None:
     monkeypatch.setattr(settings.agent, "agent_communication_style", style)
-    slices = AgentSlices.resolve()
+    slices = AgentSlices.resolve(
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    )
     prompt = build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
 
     assert prompt.count("Reply in ordinary assistant text in this conversation") == 1

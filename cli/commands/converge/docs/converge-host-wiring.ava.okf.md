@@ -12,6 +12,12 @@ Cold start passes its admitted service roster into preparation before publishing
 the desired service file. Service-specific steps require a selected consumer;
 host wiring and private data-plane preparation remain shared dependencies.
 Standalone converge resolves the persisted selection and capability gates.
+Each converge operation creates one lazy `ConfigBoot` and passes it through the
+required `ConvergeCtx.config` field. OS job registrations use live readers from
+that owner's view, including the package refresh cadence and WAL-G schedule.
+The WAL-G preparation and job steps read the same `view.walg.walg_config_file`;
+clearing it still retires the existing job without an OS registration gate.
+Creating the context does not deliver configuration or register an OS job.
 Collector, browser and frontend preparation skip unselected services. Native
 LGTM downloads only selected backends, and invokes Loki's config validator only
 when Loki is selected. Readiness still checks every selected service.

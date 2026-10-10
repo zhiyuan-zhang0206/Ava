@@ -16,6 +16,7 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 
 from agent.hooks.compact import _compact_reminder_update, auto_compact_will_fire
 from agent.state import AgentState, CompactState
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 
@@ -34,7 +35,10 @@ def _state() -> AgentState:
 
 
 def _agent(**pins: float) -> AgentSlices:
-    return AgentSlices.resolve({"llm_model": _MODEL, **pins})
+    return AgentSlices.resolve(
+        {"llm_model": _MODEL, **pins},
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    )
 
 
 def test_an_unpinned_agent_is_below_its_models_thresholds() -> None:

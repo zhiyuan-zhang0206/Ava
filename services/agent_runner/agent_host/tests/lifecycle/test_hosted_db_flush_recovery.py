@@ -60,10 +60,11 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
     # A real closed PostgreSQL connection supplies the I/O failure. Injection
     # selects only the boundary; checkpoint, graph and lifecycle transactions run.

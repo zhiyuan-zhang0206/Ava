@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, patch
 import psutil
 import pytest
 
-from base.config import ensure_eager, settings
+from base.config import ConfigBoot, ensure_eager, settings
 from services.backup.scheduler import daemon, worker
 from services.backup.scheduler.operation.worker_process import CompletedOperation, StopSignal
 
@@ -166,11 +166,11 @@ def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
     def record_success(_now: datetime) -> None:
         (root / "restore-success").touch()
 
-    async def loop(_state: object) -> None:
+    async def loop(_state: object, *, config: ConfigBoot) -> None:
         if restore_mode:
-            await daemon._run_due_local_dump_restore(datetime.now().astimezone())
+            await daemon._run_due_local_dump_restore(datetime.now().astimezone(), config=config)
         else:
-            await daemon._backup_loop(state)
+            await daemon._backup_loop(state, config=config)
 
     with (
         patch.object(daemon, "_is_running", return_value=False),
@@ -203,7 +203,7 @@ def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
 def _run_daemon() -> None:
     daemon.install_graceful_shutdown("backup-shutdown-test")
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(daemon.run())
+        asyncio.run(daemon.run(config=ConfigBoot()))
 
 
 def _wait_file(path: Path, process: subprocess.Popen[str]) -> None:
@@ -314,7 +314,7 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
     monkeypatch.setattr(
         worker, "run_operation", _operation_harness(tmp_path, "roundtrip", postgres_base)
     )
-    await worker.run_job("restore")
+    await worker.run_job("restore", config=ConfigBoot())
     assert not _alive(int((tmp_path / "postgres").read_text()))
     controls = tmp_path / "backups" / "operations" / "restore-drill"
     assert [path.name for path in controls.iterdir()] == [".lock"]

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import ava.skills
+from base.config import ConfigBoot
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills
 from cli.commands.extensions.skills_sync import converge_skills
@@ -98,7 +99,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         (legacy / "SKILL.md").write_text("user customization\n")
         (ledger_root / f"{ledger}.json").write_bytes(legacy_bytes)
 
-    context = ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
+    context = ConvergeCtx(repo=repo, ava_home=ava_home, roles=None, config=ConfigBoot())
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     target = client_home / "skills" / "ava-guide"
     for relative in (

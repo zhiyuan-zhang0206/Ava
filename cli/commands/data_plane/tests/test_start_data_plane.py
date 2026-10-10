@@ -201,7 +201,12 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
         calls.append(f"prepare:{conn}:{dim}")
 
     monkeypatch.setattr(pgvector, "prepare_table", prepare)
-    monkeypatch.setattr(factory, "get_descriptor", lambda: SimpleNamespace(dim=3072))
+
+    def descriptor(name: str) -> SimpleNamespace:
+        calls.append(f"descriptor:{name}")
+        return SimpleNamespace(dim=3072)
+
+    monkeypatch.setattr(factory, "get_descriptor", descriptor)
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
     prepare_memory_vectors()
@@ -209,7 +214,11 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
     prepare_memory_vectors()
-    assert calls == ["owner-session", "prepare:owner-connection:3072"]
+    assert calls == [
+        f"descriptor:{settings.services.embedding_backend}",
+        "owner-session",
+        "prepare:owner-connection:3072",
+    ]
 
 
 def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
@@ -237,7 +246,12 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
     patch_database(monkeypatch, connect=provider)
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: pytest.fail("no local admin"))
     monkeypatch.setattr(pgvector, "prepare_table", prepare)
-    monkeypatch.setattr(factory, "get_descriptor", lambda: SimpleNamespace(dim=768))
+
+    def descriptor(name: str) -> SimpleNamespace:
+        assert name == settings.services.embedding_backend
+        return SimpleNamespace(dim=768)
+
+    monkeypatch.setattr(factory, "get_descriptor", descriptor)
 
     prepare_memory_vectors()
 

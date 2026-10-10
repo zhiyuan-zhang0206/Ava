@@ -31,6 +31,7 @@ separate dataclass.
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
@@ -41,6 +42,7 @@ from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
+from base.clock import Clock
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
@@ -109,6 +111,15 @@ class AvaContext:
 
     db: Database | None = None
     """The cluster Postgres handle, for the code a node calls that opens its own connection."""
+
+    clock_factory: Callable[[], Clock] | None = None
+    """Build the current clock from this process owner's configuration at each use."""
+
+    def require_clock(self) -> Clock:
+        """Read the process owner's current clock; a partial context fails at first use."""
+        if self.clock_factory is None:
+            raise RuntimeError("this AvaContext carries no clock factory")
+        return self.clock_factory()
 
     bus: EventBus | None = None
     """The cluster Redis / live-events handle, for the same."""

@@ -14,20 +14,28 @@ import sys
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.daemon import health
 from base.native_process.os_platform import LockTimeoutError
 from services.backup.scheduler import daemon
+
+
+@pytest.fixture(autouse=True)
+def config_boot_environment() -> Generator[None]:
+    """Restore process delivery from each independent operation's boot."""
+    with patch.dict(os.environ):
+        yield
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:
     return datetime(2026, 8, 25, hour, minute, tzinfo=UTC)
 
 
-def _always_due(_now: datetime) -> bool:
+def _always_due(_now: datetime, **_inputs: object) -> bool:
     return True
 
 
@@ -186,11 +194,18 @@ def test_next_backup_hour_uses_the_cluster_timezone(monkeypatch: pytest.MonkeyPa
     async def fake_sleep(seconds: float) -> None:
         slept.append(seconds)
 
-    monkeypatch.setattr(daemon, "_cluster_tz", lambda: UTC)
+    def utc_zone(**_inputs: object) -> tzinfo:
+        return UTC
+
+    monkeypatch.setattr(daemon, "_cluster_tz", utc_zone)
     monkeypatch.setattr(daemon, "_sleep", fake_sleep)
 
     backup_hour = settings.services.backup_hour
-    asyncio.run(daemon._sleep_until_next_backup_hour(_at(hour=(backup_hour - 1) % 24, minute=30)))
+    asyncio.run(
+        daemon._sleep_until_next_backup_hour(
+            _at(hour=(backup_hour - 1) % 24, minute=30), config=ConfigBoot()
+        )
+    )
 
     assert slept == [30 * 60]
 
@@ -201,19 +216,19 @@ def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(daemon, "is_due", _always_due)
 
-    async def record_run(kind: str, *, now: datetime) -> None:
+    async def record_run(kind: str, *, now: datetime, config: ConfigBoot) -> None:
         assert kind == "dump"
         ran.append(now)
 
     monkeypatch.setattr(daemon, "run_job", record_run)
 
-    async def stop_after_success(_now: datetime) -> None:
+    async def stop_after_success(_now: datetime, *, config: ConfigBoot) -> None:
         raise asyncio.CancelledError
 
     monkeypatch.setattr(daemon, "_sleep_until_next_backup_hour", stop_after_success)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._backup_loop(state))
+        asyncio.run(daemon._backup_loop(state, config=ConfigBoot()))
 
     assert len(ran) == 1
     assert state.running is False
@@ -232,11 +247,11 @@ def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch)
             assert tz is UTC
             return next(times)
 
-    async def run_dump(kind: str, *, now: datetime) -> None:
+    async def run_dump(kind: str, *, now: datetime, config: ConfigBoot) -> None:
         assert kind == "dump"
         assert now == started
 
-    async def skip_restore(_now: datetime) -> None:
+    async def skip_restore(_now: datetime, *, config: ConfigBoot) -> None:
         pass
 
     async def stop_after_sleep(seconds: float) -> None:
@@ -244,14 +259,18 @@ def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch)
         raise asyncio.CancelledError
 
     monkeypatch.setattr(daemon, "datetime", FrozenDatetime)
-    monkeypatch.setattr(daemon, "_cluster_tz", lambda: UTC)
+
+    def utc_zone(**_inputs: object) -> tzinfo:
+        return UTC
+
+    monkeypatch.setattr(daemon, "_cluster_tz", utc_zone)
     monkeypatch.setattr(daemon, "is_due", _always_due)
     monkeypatch.setattr(daemon, "run_job", run_dump)
     monkeypatch.setattr(daemon, "_run_due_local_dump_restore", skip_restore)
     monkeypatch.setattr(daemon, "_sleep", stop_after_sleep)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._backup_loop(daemon._BackupState()))
+        asyncio.run(daemon._backup_loop(daemon._BackupState(), config=ConfigBoot()))
 
     assert sleeps == [24 * 3600 - 53 * 60 - 52]
 
@@ -262,7 +281,7 @@ def test_failed_backup_retries_before_tomorrow(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(daemon, "is_due", _always_due)
 
-    async def fail(_kind: str, *, now: datetime) -> None:
+    async def fail(_kind: str, *, now: datetime, config: ConfigBoot) -> None:
         raise RuntimeError("temporary failure")
 
     async def stop_after_retry(seconds: float) -> None:
@@ -273,7 +292,7 @@ def test_failed_backup_retries_before_tomorrow(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(daemon, "_sleep", stop_after_retry)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._backup_loop(state))
+        asyncio.run(daemon._backup_loop(state, config=ConfigBoot()))
 
     assert sleeps == [daemon.BACKUP_RETRY_INTERVAL_S]
     assert state.running is False
@@ -289,7 +308,7 @@ async def test_due_local_restore_drill_runs_after_a_successful_dump(
 
     monkeypatch.setattr(daemon, "load_local_dump_restore_success", lambda: None)
 
-    def due(current: datetime, *, last_success: datetime | None) -> bool:
+    def due(current: datetime, *, last_success: datetime | None, **_inputs: object) -> bool:
         return current == now and last_success is None
 
     def record_success(current: datetime) -> None:
@@ -301,13 +320,13 @@ async def test_due_local_restore_drill_runs_after_a_successful_dump(
         due,
     )
 
-    async def restore(kind: str) -> None:
+    async def restore(kind: str, *, config: ConfigBoot) -> None:
         calls.append(kind)
 
     monkeypatch.setattr(daemon, "run_job", restore)
     monkeypatch.setattr(daemon, "record_local_dump_restore_success", record_success)
 
-    await daemon._run_due_local_dump_restore(now)
+    await daemon._run_due_local_dump_restore(now, config=ConfigBoot())
 
     assert calls == ["restore", now.isoformat()]
 
@@ -321,10 +340,10 @@ async def test_due_local_restore_drill_reports_failure_without_publishing_succes
 
     monkeypatch.setattr(daemon, "load_local_dump_restore_success", lambda: None)
 
-    def due(_now: datetime, *, last_success: datetime | None) -> bool:
+    def due(_now: datetime, *, last_success: datetime | None, **_inputs: object) -> bool:
         return True
 
-    async def fail_restore(_kind: str) -> None:
+    async def fail_restore(_kind: str, *, config: ConfigBoot) -> None:
         raise RuntimeError("scratch restore failed")
 
     def unexpected_success(_now: datetime) -> None:
@@ -338,7 +357,7 @@ async def test_due_local_restore_drill_reports_failure_without_publishing_succes
     monkeypatch.setattr(daemon, "record_local_dump_restore_success", unexpected_success)
     monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
-    await daemon._run_due_local_dump_restore(now)
+    await daemon._run_due_local_dump_restore(now, config=ConfigBoot())
 
     assert emitted == [
         (
@@ -373,7 +392,7 @@ async def test_invalid_local_restore_marker_reports_failure_without_running_rest
     )
     monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
-    await daemon._run_due_local_dump_restore(now)
+    await daemon._run_due_local_dump_restore(now, config=ConfigBoot())
 
     assert emitted == [
         (
@@ -399,7 +418,7 @@ def _staged_dump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     published = tmp_path / "db"
     monkeypatch.setattr(backup, "backup_dir", lambda: published)
 
-    def keep_all(_directory: Path) -> list[Path]:
+    def keep_all(_directory: Path, **_inputs: object) -> list[Path]:
         return []
 
     monkeypatch.setattr(backup, "_prune", keep_all)
@@ -421,12 +440,12 @@ def test_cross_filesystem_commit_publishes_a_verified_private_copy(
         link(source, target)
 
     monkeypatch.setattr(worker.os, "link", cross_device)
-    target = worker.commit_scheduled_backup(staged, digest)
+    target = worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
     assert target.read_bytes() == b"encrypted" and target.stat().st_mode & 0o777 == 0o600
     assert not staged.exists() and [path.name for path in published.iterdir()] == [target.name]
     staged.write_bytes(b"encrypted")
     with pytest.raises(FileExistsError):  # a prior artifact is never replaced
-        worker.commit_scheduled_backup(staged, digest)
+        worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
     assert staged.exists() and [path.name for path in published.iterdir()] == [target.name]
 
 
@@ -440,7 +459,7 @@ def test_commit_defers_pruning_while_another_backup_holds_the_lock(
     staged, published, digest = _staged_dump(tmp_path, monkeypatch)
     pruned: list[Path] = []
 
-    def prune(directory: Path) -> list[Path]:
+    def prune(directory: Path, **_inputs: object) -> list[Path]:
         pruned.append(directory)
         return []
 
@@ -453,7 +472,7 @@ def test_commit_defers_pruning_while_another_backup_holds_the_lock(
         yield
 
     monkeypatch.setattr(backup, "backup_lock", busy)
-    target = worker.commit_scheduled_backup(staged, digest)
+    target = worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
     assert target.parent == published and target.read_bytes() == b"encrypted"
     assert pruned == []
 
@@ -476,6 +495,25 @@ def test_cross_filesystem_copy_survives_a_concurrent_sweep_until_linked(
         link(source, target)
 
     monkeypatch.setattr(worker.os, "link", cross_device_with_sweep)
-    target = worker.commit_scheduled_backup(staged, digest)
+    target = worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
     assert target.read_bytes() == b"encrypted"
     assert [path.name for path in published.iterdir()] == [target.name]
+
+
+def test_next_backup_hour_reads_its_owner_instead_of_ambient_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ConfigBoot()
+    config.view.general.timezone = "UTC"
+    config.view.services.backup_hour = 7
+    monkeypatch.setattr(settings.services, "backup_hour", 3)
+    slept: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(daemon, "_sleep", record_sleep)
+    asyncio.run(daemon._sleep_until_next_backup_hour(_at(hour=6, minute=30), config=config))
+    config.view.services.backup_hour = 8
+    asyncio.run(daemon._sleep_until_next_backup_hour(_at(hour=6, minute=30), config=config))
+    assert slept == [1800, 5400]

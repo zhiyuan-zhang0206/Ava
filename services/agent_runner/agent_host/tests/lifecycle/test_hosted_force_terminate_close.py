@@ -123,10 +123,11 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
             AvaContext(
                 ops_pool=aops_pool,
                 event_publisher=publisher,
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
+                clock_factory=configured_policy().clock_factory,
             ),
             original_incarnation=incarnation,
             hosted_resources=None,
@@ -150,6 +151,9 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
         incarnation,
         outcome,
         resources=None,
+        wake_enabled=configured_policy().recovery_wake_enabled,
+        prompt_reap_enabled=configured_policy().recrash_reap_enabled,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
     assert db_conn.execute(
         "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)
@@ -184,10 +188,11 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
         replace(
             AvaContext(
                 ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
+                clock_factory=configured_policy().clock_factory,
             ),
             original_incarnation=incarnation,
             hosted_resources=None,
@@ -214,10 +219,11 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
         replace(
             AvaContext(
                 ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
+                clock_factory=configured_policy().clock_factory,
             ),
             original_incarnation=incarnation,
             hosted_resources=None,
@@ -244,10 +250,11 @@ async def test_a_cli_style_user_force_closes_quietly_too(
         replace(
             AvaContext(
                 ops_pool=aops_pool,
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
+                clock_factory=configured_policy().clock_factory,
             ),
             original_incarnation=incarnation,
             hosted_resources=None,
@@ -301,9 +308,10 @@ async def test_an_observed_force_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -331,9 +339,10 @@ async def test_a_foreign_incarnation_force_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -362,9 +371,10 @@ async def test_a_detached_pointer_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -396,9 +406,10 @@ async def test_a_non_impersonation_exception_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -441,9 +452,10 @@ async def test_a_superseded_older_force_cannot_classify(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,
@@ -474,9 +486,10 @@ async def test_a_lapsed_lease_still_crashes(
                 AvaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=incarnation,
                 hosted_resources=None,

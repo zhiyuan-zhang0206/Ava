@@ -18,6 +18,7 @@ import psycopg
 import pytest
 
 from base.cluster.dataplane.pg_tools import pg_tool
+from base.config import settings
 from services.backup.walg import restore
 from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_instance
 from services.backup.walg.tests.support import (
@@ -126,6 +127,7 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
             report=reports.append,
             user="ava",
             keep_data=True,
+            path_reader=lambda: settings.walg.walg_config_file,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b"]
             _assert_scratch_posture(instance, max_connections="150")
@@ -148,6 +150,7 @@ def test_recovers_to_a_target_time(tmp_path: Path, monkeypatch: pytest.MonkeyPat
             report=lambda _line: None,
             user="ava",
             keep_data=False,
+            path_reader=lambda: settings.walg.walg_config_file,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b"]
 
@@ -165,6 +168,7 @@ def test_without_a_target_recovery_replays_all_archived_wal(
             report=lambda _line: None,
             user="ava",
             keep_data=False,
+            path_reader=lambda: settings.walg.walg_config_file,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b", "B2"]
 
@@ -190,6 +194,7 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
                 report=lambda _line: None,
                 user="ava",
                 keep_data=False,
+                path_reader=lambda: settings.walg.walg_config_file,
             ) as instance,
             psycopg.connect(
                 host=str(instance.socket_dir), port=instance.port, user="ava", dbname="postgres"
@@ -218,6 +223,7 @@ def test_a_missing_segment_between_backup_and_target_fails_recovery(
                 report=lambda _line: None,
                 user="ava",
                 keep_data=False,
+                path_reader=lambda: settings.walg.walg_config_file,
             ),
         ):
             pytest.fail("recovery must not reach a target behind a gap")
@@ -240,6 +246,7 @@ def test_refuses_a_directory_that_is_not_empty(
             target=RecoveryTarget(),
             report=lambda _line: None,
             keep_data=True,
+            path_reader=lambda: settings.walg.walg_config_file,
         ),
     ):
         pytest.fail("must not fetch into an occupied directory")
@@ -257,6 +264,7 @@ def test_refuses_the_live_data_directory(tmp_path: Path, monkeypatch: pytest.Mon
                 target=RecoveryTarget(),
                 report=lambda _line: None,
                 keep_data=True,
+                path_reader=lambda: settings.walg.walg_config_file,
             ),
         ):
             pytest.fail("must refuse")
@@ -275,6 +283,7 @@ def test_a_failed_fetch_is_a_restore_error(tmp_path: Path, monkeypatch: pytest.M
             target=RecoveryTarget(),
             report=lambda _line: None,
             keep_data=True,
+            path_reader=lambda: settings.walg.walg_config_file,
         ),
     ):
         pytest.fail("must not start Postgres after a failed fetch")
@@ -308,9 +317,10 @@ def test_the_postmaster_command_line_holds_every_safety_setting_and_no_secret(
         socket_dir=tmp_path / "sock",
         port=54329,
         target=RecoveryTarget(lsn="0/3000060"),
+        path_reader=lambda: settings.walg.walg_config_file,
     )
-    settings = [argv[i + 1] for i, arg in enumerate(argv) if arg == "-c"]
-    command = next(s for s in settings if s.startswith("restore_command="))
+    pg_settings = [argv[i + 1] for i, arg in enumerate(argv) if arg == "-c"]
+    command = next(s for s in pg_settings if s.startswith("restore_command="))
     wanted = {
         "archive_mode=off",
         "listen_addresses=",
@@ -321,7 +331,7 @@ def test_the_postmaster_command_line_holds_every_safety_setting_and_no_secret(
         "max_worker_processes=8",
         f"unix_socket_directories={tmp_path / 'sock'}",
     }
-    assert wanted <= set(settings)
+    assert wanted <= set(pg_settings)
     # the home path of the sandbox holds a literal "%p": Postgres must see "%%p"
     assert command.endswith("wal-fetch %f %p")
     assert "ava home%%p" in command
@@ -379,6 +389,7 @@ def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
                 report=lambda _line: None,
                 user="not_the_superuser",
                 keep_data=False,
+                path_reader=lambda: settings.walg.walg_config_file,
             ),
         ):
             pytest.fail("a restore as a missing role must not yield an instance")

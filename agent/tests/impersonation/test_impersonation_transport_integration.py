@@ -16,7 +16,10 @@ from agent import impersonation
 from agent.impersonation import flush_checkpoint, settle_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.tests.impersonation.test_impersonation_integration import (
+    _assert_resume_note_delivery_contract,
     _deliver_peers_and_ack_first,
+    _end_external_session,
+    _notes,
     _prepare_graph,
     _relay_ready,
 )
@@ -25,7 +28,7 @@ from base.agents.impersonation import _store, delivery
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
-from base.db import Database
+from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller
@@ -125,6 +128,7 @@ async def _resume_native(
         ctx.relays,
         incarnation=owner,
         resources=ctx.hosted_resources,
+        notes=_notes(),
     )
     assert wakes == [(owner.agent_id, "impersonation")]
     resumed = await graph.ainvoke(reset, config, context=ctx)
@@ -171,7 +175,14 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
-        graph, database, event_bus, owner.agent_id, ctx.relays, incarnation=owner, resources=None
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        resources=None,
+        notes=_notes(),
     )
     assert not model_calls
     if cause == "relay_death":
@@ -244,7 +255,14 @@ async def test_unreadable_executor_preserves_authority_across_native_wakes(
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
-        graph, database, event_bus, owner.agent_id, ctx.relays, incarnation=owner, resources=None
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        resources=None,
+        notes=_notes(),
     )
     pending = _deliver_peers_and_ack_first(db_conn, database, event_bus, requested, owner.agent_id)
     expiry = leases.require_active(database, requested["id"], attested_caller(requested))[
@@ -325,7 +343,14 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
-        graph, database, event_bus, owner.agent_id, ctx.relays, incarnation=owner, resources=None
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        resources=None,
+        notes=_notes(),
     )
     pending = _deliver_peers_and_ack_first(db_conn, database, event_bus, requested, owner.agent_id)
     expiry = leases.require_active(database, requested["id"], attested_caller(requested))[
@@ -377,6 +402,7 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
         replacement_ctx.relays,
         incarnation=successor,
         resources=None,
+        notes=_notes(),
     )
     resumed = await graph.ainvoke(
         reset,
@@ -416,7 +442,14 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
-        graph, database, event_bus, owner.agent_id, ctx.relays, incarnation=owner, resources=None
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        resources=None,
+        notes=_notes(),
     )
     pending = _deliver_peers_and_ack_first(db_conn, database, event_bus, requested, owner.agent_id)
     token = str(uuid4())
@@ -460,3 +493,175 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
         context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
     )
     assert not model_calls
+
+
+async def test_end_note_resumes_an_empty_queue(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+) -> None:
+    """A release with nothing queued must still run the end note's first turn.
+
+    Regression: the end-of-session note is a system note, so a window that never
+    carried a real exchange reports has_conversation() == False and the claim
+    idled out with the note unprocessed. The note is the resumed input: the claim
+    runs before_llm with an empty queue, and delivery publishes a wake.
+    """
+    from base.agents.impersonation import history as history
+
+    graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+    )
+    monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
+
+    def workspace_for_agent(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    wakes: list[tuple[int, str]] = []
+
+    def record_wake(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
+        wakes.append((agent_id, payload))
+        return True
+
+    monkeypatch.setattr("agent.impersonation_handoff.publish_inbound_wake", record_wake)
+    await graph.ainvoke(
+        reset,
+        config,
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+    )
+    assert not model_calls  # No native model acceptance turn.
+    await flush_checkpoint(saver, owner.agent_id)
+    assert await settle_checkpoint(
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        resources=None,
+        notes=_notes(),
+    )
+    leases.release(
+        database,
+        event_bus,
+        requested["id"],
+        attested_caller(requested),
+        "External work complete",
+    )
+    assert not await settle_checkpoint(
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        resources=None,
+        notes=_notes(),
+    )
+    assert not model_calls
+    assert wakes == [(owner.agent_id, "impersonation")]
+
+    resumed = await graph.ainvoke(
+        reset,
+        config,
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+    )
+    await flush_checkpoint(saver, owner.agent_id)
+    assert len(model_calls) == 1
+    note = model_calls[0].messages[-1]
+    assert note.id == f"impersonation-handoff:{owner.agent_id}:0"
+    assert note.additional_kwargs["ava_note_tag"] == "impersonation"
+    _assert_resume_note_delivery_contract(note.content)
+    # The note is consumed once: another pass finds an idle agent, not a resume.
+    await graph.ainvoke(
+        reset,
+        config,
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+    )
+    assert len(model_calls) == 1
+    assert resumed["impersonation_handoff_id"] == f"{owner.agent_id}:0"
+
+
+async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+) -> None:
+    """Task #5010: an ACK acknowledges the message, not the work — input the executor
+    received and never finished survives expiry into the record and the resume note."""
+    from base.agents.impersonation import history as history
+
+    graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+    )
+    monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
+    monkeypatch.setattr(history, "workspace_dir", Mock(return_value=tmp_path))
+    await graph.ainvoke(
+        reset,
+        config,
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+    )
+    await flush_checkpoint(saver, owner.agent_id)
+    assert await settle_checkpoint(
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        resources=None,
+        notes=_notes(),
+    )
+    inbound_id = insert_inbound_message(
+        db_conn,
+        owner.agent_id,
+        "Rebuild the report; resume from the failing case",
+        source="user",
+        bus=event_bus,
+        database=database,
+    )
+    db_conn.commit()
+    leases.inbox(database, requested["id"], attested_caller(requested))
+    leases.ack(database, event_bus, requested["id"], attested_caller(requested), [inbound_id])
+    # Receipt is recorded; the executor dies before finishing the work.
+    _end_external_session(db_conn, database, event_bus, requested, "expire")
+    await graph.ainvoke(
+        reset,
+        config,
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+    )
+    await flush_checkpoint(saver, owner.agent_id)
+    assert not await settle_checkpoint(
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        resources=None,
+        notes=_notes(),
+    )
+    await graph.ainvoke(
+        reset,
+        config,
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+    )
+    await flush_checkpoint(saver, owner.agent_id)
+    assert len(model_calls) == 1
+    note = model_calls[0].messages[-1]
+    assert "Review the summary and incoming requests" in note.content
+    assert "Continue any requests whose completion is not established" in note.content
+    document = json.loads((tmp_path / "impersonation" / "0.json").read_text())
+    message = next(m for m in document["messages"] if m["payload"]["content"].startswith("Rebuild"))
+    assert message["acknowledged"] is True

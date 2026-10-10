@@ -18,6 +18,7 @@ from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
+from base.agents.impersonation.notes import HandoffNotes
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_restart import original_guarded_restart_id
 from base.agents.observation.relay_supervision import RelaySupervision
@@ -56,6 +57,7 @@ async def finish_pending_failure(
     config: RunnableConfig,
     pending: PendingTurnFailure,
     *,
+    notes: HandoffNotes,
     recovering: bool = False,
     native_work: NativeWorkTarget | None = None,
 ) -> TurnOutcome:
@@ -71,6 +73,7 @@ async def finish_pending_failure(
                 activate_accepted=False,
                 incarnation=ctx.original_incarnation,
                 resources=ctx.hosted_resources,
+                notes=notes,
             )
         await settle_turn_failure(graph, checkpointer, config, ctx, agent_id, pending)
         if native_work is not None:
@@ -157,6 +160,7 @@ async def finish_completed_invocation(
     db: Database,
     bus: EventBus,
     relays: RelaySupervision,
+    notes: HandoffNotes,
 ) -> TurnOutcome | None:
     """Settle the original completed work through its admission's checkpoint view."""
     # Correlate the original trace only after its checkpoint is durable.
@@ -216,6 +220,7 @@ async def finish_completed_invocation(
                 relays,
                 incarnation=ctx.original_incarnation,
                 resources=ctx.hosted_resources,
+                notes=notes,
             )
         return TurnOutcome(exited=False, crashed=False)
     return None

@@ -263,7 +263,7 @@ def prepare_memory_vectors() -> None:
     from services.derived.memory_indexer.backends.pgvector import prepare_table
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
-    dim = get_descriptor().dim
+    dim = get_descriptor(settings.services.embedding_backend).dim
     if settings.data_plane.is_remote:
         with Database.from_settings().connect(direct=True) as conn:
             prepare_table(conn, dim)

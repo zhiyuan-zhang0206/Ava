@@ -27,7 +27,7 @@ Semantic indexing daemon for the memory pool — monitors `**/*.md` file changes
 - [[gateway-cli.ava.okf.md]] — Gateway hosts this service
 
 ## Entry Points
-- `services/derived/memory_indexer/daemon.py` — main loop entry
+- `services/derived/memory_indexer/daemon.py` — main loop; `ConfigBoot` binds live inputs via `config.py`
 - `services/derived/memory_indexer/embeddings/factory.py:get_provider()` — provider switch (`AVA_EMBEDDING_BACKEND`)
 - `services/derived/memory_indexer/embeddings/gemini.py:GeminiEmbeddingProvider` — Gemini Embedding 2 adapter (batch + query embeds)
 - `services/derived/memory_indexer/backends/factory.py:get_backend()` — backend switch (`AVA_MEMORY_SEARCH_BACKEND`)
@@ -41,7 +41,7 @@ Semantic indexing daemon for the memory pool — monitors `**/*.md` file changes
 - `search_topk` retrieves top-200 raw chunk hits, aggregates per path (best cosine wins), returns top-k paths — caller-facing semantics unchanged
 - A vector width other than the configured provider's dim is detected at connect/boot: the numpy store starts empty, and the pgvector table is rebuilt by `ava start`; the cold-start reconcile then refills the index
 - **Backend provisioning and availability**: [[services/docs/gateway_side/memory_indexer/backend-provisioning.ava.okf.md]]
-- Providers hold their root's `ModelCatalog` (indexer/reconcile boot; gateway `app.state.catalog`). Pure `factory.get_descriptor()` serves metadata. Only `httpx.HTTPError` is wrapped; unknown setup/request/accounting failures propagate without replaying a successful HTTP call. Billing-span sink policy is unchanged.
+- Roots pass provider/backend names, catalog and narrow readers. Construction and empty batches read no key/timeout; each embedding operation captures both before retries. NumPy reads URI at connect/async search; pgvector ignores it. Gateway concurrency is fixed at gate creation; acquire/deadline budgets stay live. Metadata uses `factory.get_descriptor(name)` without constructing a provider. Unknown setup/request/accounting failures propagate without replaying successful HTTP calls; billing sink policy is unchanged.
 - Gemini uses a fresh `httpx.AsyncClient` per sync attempt; loop shutdown leaves stalled DNS threads in the background. Sync/async calls classify error headers before reading bodies, preserving status and Retry-After. Cancellation covers headers, compressed bodies and framing.
 - **Two retry policies, split by call site** (`embeddings/gemini.py`): `_EMBED_POLICY` (4 attempts, 1→2→4→8s) for the daemon's document embeds — no caller deadline, resilience = the retry; `_QUERY_EMBED_POLICY` (2 attempts, 1s) for search query embeds, which run inside the gateway endpoint's own deadline and are retried by the caller, not the embed
 - The gateway search endpoint sizes its query-embed concurrency gate from `AVA_MEMORY_SEARCH_MAX_CONCURRENCY` and fails a request fast (503, `indexer_unavailable`) when a gate permit is not free within `AVA_MEMORY_SEARCH_ACQUIRE_TIMEOUT_SECONDS` (~1s) — a congested gate degrades instead of queueing requests until the search deadline

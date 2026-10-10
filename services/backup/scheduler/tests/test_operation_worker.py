@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import ConfigBoot
 from services.backup.scheduler.operation import worker_process as workers
 from services.backup.scheduler.tests.operation_support import operation_kind, stub_worker, until
 
@@ -140,7 +141,7 @@ async def test_scheduled_commit_runs_off_the_event_loop(
     ticks = 0
     during: list[int] = []
 
-    def slow_commit(staged: Path, _digest: str) -> Path:
+    def slow_commit(staged: Path, _digest: str, **_inputs: object) -> Path:
         started = ticks
         time.sleep(0.2)
         during.append(ticks - started)
@@ -156,7 +157,7 @@ async def test_scheduled_commit_runs_off_the_event_loop(
 
     ticker = asyncio.create_task(tick())
     try:
-        await worker.run_job("dump", now=datetime(2026, 9, 26, tzinfo=UTC))
+        await worker.run_job("dump", now=datetime(2026, 9, 26, tzinfo=UTC), config=ConfigBoot())
     finally:
         ticker.cancel()
         with pytest.raises(asyncio.CancelledError):

@@ -85,3 +85,5 @@ This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and
 - Memory notes are shared cross-agent — a note written by one agent can be searched by another
 - Passive recall is "on-demand" rather than "full" — only triggers when tail has non-agent inbound, avoiding search on every turn
 - The mutual exclusion with auto-compact is carefully designed — `messages` have a reducer that merges, but compact's REMOVE_ALL full replacement swallows same-turn appended notes, memory recall yields priority to compaction
+
+Memory note builders read live gates and caps through their owning AgentSlices at the existing use points.

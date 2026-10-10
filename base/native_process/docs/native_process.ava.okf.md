@@ -27,6 +27,11 @@ stop/join without cancelling another agent. The existing cancellation-diagnostic
 budget bounds join by an absolute deadline. Unfinished tasks keep their actual
 handles, clients and pools until the daemon's existing hard exit; expiry is not
 resource settlement. Successful join precedes client and database pool closure.
+Hosted work, invocation and settlement register their original child Tasks in
+this same service span. Registration keeps each result and exception intact;
+it neither wraps the Task nor makes a failed invocation quiescent. A retained
+turn may register its necessary settlement after service stop starts, and the
+same remaining join deadline still applies.
 Direct graph embedders with a database interrupt pool must create this service,
 obtain a turn scope, pass it as `AvaContext.hosted_resources`, and join the service
 before closing their clients. `pool=None` subscriptions need no watcher owner.
@@ -50,3 +55,13 @@ process-generation contract.
 
 - [[base/native_process/docs/group-closure.ava.okf.md]] — Process-group closure core.
 - [[base/native_process/root_control/docs/root_control.ava.okf.md]] — Root control contract — protocol and Unix-socket client.
+
+## Captured code as an entry-owned value
+
+`loaded_commit.LoadedCommit.capture()` returns the source image captured at an
+explicit process entry. Its `sha` is also the health response's fact: reading it
+never invokes Git. `code_version.CodeVersion` retains that image and lazily
+counts its first-parent commits, even if the checkout moves before the first
+version read. An unknown capture stays unknown and raises `CodeVersionError`
+when a gated database needs a version; a later checkout cannot stand in for the
+image the process loaded.

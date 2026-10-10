@@ -13,10 +13,10 @@ from unittest.mock import MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.history.checkpoint import CheckpointReadError, FullHistory
+from base.agents.history.checkpoint import CheckpointReadError
 from base.agents.history.hierarchy import chunk_consumer as loop
 from base.agents.history.hierarchy.chunk_generate import ChunkResult
 from base.agents.history.hierarchy.chunks import (
@@ -28,42 +28,28 @@ from base.agents.history.hierarchy.chunks import (
 )
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
+from base.agents.history.hierarchy.tests.consumer_helpers import read_inputs
+from base.agents.history.hierarchy.tests.consumer_history import (
+    inbound_history,
+    job_spans,
+    notes_history,
+)
 from base.agents.history.hierarchy.units import divide_units
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-
-
-def _history() -> FullHistory:
-    body: list[BaseMessage] = [
-        HumanMessage(
-            content=f"m{i}",
-            id=f"m{i}",
-            additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_source": "user",
-                "ava_created_at": f"2026-10-05T0{i}:00:00+00:00",
-            },
-        )
-        for i in range(4)
-    ]
-    return FullHistory(body, (SystemMessage(content="head"),), (0,))
-
-
-def _notes_history() -> FullHistory:
-    """The same four messages, but framework notes."""
-    body: list[BaseMessage] = [
-        HumanMessage(content=f"m{i}", id=f"m{i}", additional_kwargs={"ava_msg_type": "system_note"})
-        for i in range(4)
-    ]
-    return FullHistory(body, (SystemMessage(content="head"),), (0,))
 
 
 def _result(
     located: LocatedChunk, *groups: UnitGroup, summary: str = "what happened"
 ) -> ChunkResult:
     """A model's answer over `located`'s units: the given groups, else one group of everything."""
-    units = divide_units(list(located.messages))
+    inputs = read_inputs()
+    units = divide_units(
+        list(located.messages),
+        timeline_inputs=TimelineReadInputs(inputs.clock_factory, inputs.timestamps_enabled),
+    )
     return ChunkResult(units, list(groups) or [UnitGroup(0, len(units) - 1, summary)])
 
 
@@ -78,7 +64,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(
         loop,
         "_load_segments",
-        lambda _db, _agent_id, _boundary: (seen.get("history", _history()), None),
+        lambda _db, _agent_id, _boundary: (seen.get("history", inbound_history()), None),
     )
 
     def describe(
@@ -89,7 +75,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
         _tools: object,
         _calls: list,
         _agent_id: int,
-        **kw: bool,
+        **kw: object,
     ) -> ChunkResult:
         seen["described"].append(located)
         seen["kw"] = kw
@@ -264,7 +250,9 @@ async def test_a_cancelled_job_is_put_back_without_spending_an_attempt(
 
     monkeypatch.setattr(loop, "_run_job", hang)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    consumer = loop._Consumer(aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="")
+    consumer = loop._Consumer(
+        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+    )
     task = asyncio.create_task(consumer.run_until_idle())
     await asyncio.wait_for(started.wait(), 10)
     task.cancel()
@@ -330,7 +318,7 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
     monkeypatch.setattr(
         loop.telemetry, "emit", lambda _k, name, attributes=None: events.append((name, attributes))
     )
-    monkeypatch.setattr(loop, "_load_segments", lambda *_a: (_history(), 0))
+    monkeypatch.setattr(loop, "_load_segments", lambda *_a: (inbound_history(), 0))
     await enqueue_chunk(
         aops_pool,
         5,
@@ -410,7 +398,7 @@ async def test_loop_is_idle_when_the_feature_is_off(
 ) -> None:
     monkeypatch.setattr(settings.agent, "understanding_enabled", False)
     await loop.understanding_loop_forever(
-        MagicMock(), MagicMock(), [], catalog=model_catalog, llm_override=""
+        MagicMock(), MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     )  # returns at once
 
 
@@ -542,14 +530,6 @@ async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
     assert await _nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
 
 
-async def _jobs(pool: AsyncConnectionPool) -> list[tuple]:
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT status, start_index, end_index FROM understanding_chunk_jobs ORDER BY id"
-        )
-        return await cur.fetchall()
-
-
 async def _run_rounds(
     pool: AsyncConnectionPool, count: int, *, model_catalog: ModelCatalog
 ) -> None:
@@ -557,7 +537,7 @@ async def _run_rounds(
     for _ in range(count):
         async with asyncio.TaskGroup() as tg:
             await loop._Consumer(
-                pool, MagicMock(), [], catalog=model_catalog, llm_override=""
+                pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
             ).claim(tg)
 
 
@@ -575,8 +555,9 @@ async def test_each_group_is_a_node_covering_the_chunk_to_its_end(
         (5, 1, 1, 2, "second"),
         (5, 1, 3, 3, "third"),
     ]
-    assert await _jobs(aops_pool) == [("done", 1, 5)]
-    assert _seams["kw"] == {}  # the call takes no open / closing arguments
+    assert await job_spans(aops_pool) == [("done", 1, 5)]
+    assert set(_seams["kw"]) == {"inputs"}  # no open / closing arguments
+    assert isinstance(_seams["kw"]["inputs"], loop.UnderstandingReadInputs)
 
 
 async def test_each_chunk_starts_at_its_own_start_whatever_the_previous_one_did(
@@ -661,7 +642,7 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
     await _enqueue_ends(aops_pool, 1, "m1", "m3")  # agent 1: a1 then a2
     await _enqueue_ends(aops_pool, 2, "m2")  # agent 2: b
     await loop._Consumer(
-        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override=""
+        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     ).run_until_idle()
     assert [s for s, *_ in await _status(aops_pool)] == ["done"] * 3
     assert log.index(("start", "b")) < log.index(("end", "a1"))  # overlapped
@@ -680,7 +661,9 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
     _seams["answer"] = answer
     for agent in range(1, 6):
         await _enqueue_ends(aops_pool, agent, "m1")
-    consumer = loop._Consumer(aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="")
+    consumer = loop._Consumer(
+        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+    )
     await consumer.run_until_idle()
     assert [s for s, *_ in await _status(aops_pool)] == ["done"] * 5
     assert consumer.in_flight == 0
@@ -698,7 +681,7 @@ async def test_one_jobs_failure_touches_no_other_job(
     for agent, end in ((1, "m1"), (2, "m2"), (3, "m1")):
         await _enqueue_ends(aops_pool, agent, end)
     await loop._Consumer(
-        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override=""
+        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     ).run_until_idle()
     status = [(s, e) for s, _, e in await _status(aops_pool)]
     assert [s for s, _ in status] == ["done", "failed", "done"]
@@ -718,7 +701,9 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
     monkeypatch.setattr(loop, "_settle", settle)
     for agent in (1, 2):
         await _enqueue_ends(aops_pool, agent, "m1")
-    consumer = loop._Consumer(aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="")
+    consumer = loop._Consumer(
+        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+    )
     await consumer.run_until_idle()  # does not raise
     assert [s for s, *_ in await _status(aops_pool)] == ["running", "done"]
     assert consumer.in_flight == 0
@@ -732,7 +717,9 @@ async def test_the_backlog_event_carries_in_flight(
         loop.telemetry, "emit", lambda _k, _name, attributes=None: seen.append(attributes or {})
     )
     await _enqueue_ends(aops_pool, 1, "m1")
-    consumer = loop._Consumer(aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="")
+    consumer = loop._Consumer(
+        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+    )
     consumer.in_flight = 1
     await consumer.emit_backlog()
     assert seen[-1]["pending"] == 1 and seen[-1]["in_flight"] == 1
@@ -747,7 +734,7 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
         await _enqueue_ends(aops_pool, agent, "m1")
     task = asyncio.create_task(
         loop.understanding_loop_forever(
-            aops_pool, MagicMock(), [], catalog=model_catalog, llm_override=""
+            aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
         )
     )
     for _ in range(100):
@@ -784,7 +771,9 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
             aops_pool, 1, compact_version=segment, chunk=Chunk(1, 3), end_msg_id="m1"
         )
     await enqueue_chunk(aops_pool, 2, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await loop.replay_jobs(aops_pool, MagicMock(), [], 1, catalog=model_catalog, llm_override="")
+    await loop.replay_jobs(
+        aops_pool, MagicMock(), [], 1, catalog=model_catalog, llm_override="", inputs=read_inputs()
+    )
     assert [s for s, *_ in await _status(aops_pool)] == ["done", "done", "pending"]
     assert asked == []
 
@@ -792,7 +781,7 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
 async def test_a_chunk_of_only_framework_notes_is_skipped_without_a_call(
     model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
-    _seams["history"] = _notes_history()
+    _seams["history"] = notes_history()
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await _status(aops_pool)

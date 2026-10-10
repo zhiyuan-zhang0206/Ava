@@ -32,6 +32,8 @@ from agent.tests.test_compact import (
 )
 from agent.tests.test_compact import _ava_compact_loaded as _ava_compact_loaded
 from base.agents.context import AvaContext
+from base.clock import Clock
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -177,7 +179,12 @@ async def test_compact_contract_reaches_request_without_resident_self(
         assert section in contract, f"section {section!r} missing from the compact contract"
 
     system_prompt = build_system_prompt(
-        EMPTY, AgentSlices.resolve(), agent_id=1, catalog=build_model_catalog()
+        EMPTY,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
+        agent_id=1,
+        catalog=build_model_catalog(),
     )
     assert "## ava.self\n" not in system_prompt
     head = SystemMessage(content=system_prompt)
@@ -185,7 +192,9 @@ async def test_compact_contract_reaches_request_without_resident_self(
     await generate_summary(
         [head, HumanMessage(content="Keep my work")],
         llm,
-        AgentSlices.resolve(),
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         catalog=build_model_catalog(),
     )
     [call] = _compaction_ainvoke(llm).call_args_list
@@ -282,10 +291,13 @@ async def test_compact_summary_emits_compact_done(
         ops_pool=aops_pool,
         llm=AsyncMock(),
         event_publisher=publisher,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     runtime = Runtime(context=ctx)
 

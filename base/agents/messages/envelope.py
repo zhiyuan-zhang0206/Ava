@@ -31,12 +31,22 @@ from N.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 from base.agents.messages.caller_identity import PREFIXES as _CALLER_PREFIXES
 from base.agents.messages.caller_identity import CallerIdentity
 from base.clock import Clock
-from base.config import settings
+
+__all__ = [
+    "EnvelopeReadInputs",
+    "inbound_head",
+    "reject_unnegotiated_caller",
+    "validate_source",
+    "validate_writable_source",
+    "wrap_inbound",
+]
 
 _AGENT_PREFIX = "agent:"
 _PAGE_PREFIX = "ui:page:"
@@ -126,22 +136,32 @@ def _caller_head(source: str) -> str:
     return f"{label} ({caller.subject}{instance}; asserted provenance):\n\n"
 
 
-def _timestamp(created_at: datetime | None) -> tuple[str, str]:
+@dataclass(frozen=True)
+class EnvelopeReadInputs:
+    """Live timestamp policy supplied by the inbound producer, without constructor reads."""
+
+    clock_factory: Callable[[], Clock]
+    timestamps_enabled: Callable[[], bool]
+
+
+def _timestamp(created_at: datetime | None, inputs: EnvelopeReadInputs) -> tuple[str, str]:
     """`(bare timestamp, header form with its leading space)`; both empty when timestamps are off.
 
     The header form carries its own leading space so the off-state leaves no
-    stray space before the colon (gated by settings.general.message_timestamps).
+    stray space before the colon (gated by the supplied timestamp policy).
     """
-    if not settings.general.message_timestamps:
+    if not inputs.timestamps_enabled():
         return "", ""
-    clock = Clock.from_settings()
+    clock = inputs.clock_factory()
     formatted = (
         clock.format_timestamp(created_at) if created_at is not None else clock.now_timestamp()
     )
     return formatted, f" {formatted}"
 
 
-def inbound_head(source: str, *, created_at: datetime | None = None) -> str:
+def inbound_head(
+    source: str, *, inputs: EnvelopeReadInputs, created_at: datetime | None = None
+) -> str:
     """The envelope header the agent reads before an inbound's content, naming the sender
     and time as `source` and the timestamp setting dictate; empty when there is none.
 
@@ -154,7 +174,7 @@ def inbound_head(source: str, *, created_at: datetime | None = None) -> str:
         return _caller_head(source)
     if source == "system" or source.startswith(_SYSTEM_PREFIX):
         return "[system] "
-    formatted, ts = _timestamp(created_at)
+    formatted, ts = _timestamp(created_at, inputs)
     if source == "user" or source.startswith(_PAGE_PREFIX):
         # Bare "[ts]" header for both human sources (user ruling 2026-09-18):
         # no label, no colon; with timestamps off there is no header at all.
@@ -174,7 +194,9 @@ def inbound_head(source: str, *, created_at: datetime | None = None) -> str:
     )
 
 
-def wrap_inbound(content: str, source: str, *, created_at: datetime | None = None) -> str:
+def wrap_inbound(
+    content: str, source: str, *, inputs: EnvelopeReadInputs, created_at: datetime | None = None
+) -> str:
     """The inbound's content behind its `inbound_head`. The body begins at
     `len(inbound_head(...))`, which callers record as `ava_inbound_body_start`."""
-    return inbound_head(source, created_at=created_at) + content
+    return inbound_head(source, inputs=inputs, created_at=created_at) + content

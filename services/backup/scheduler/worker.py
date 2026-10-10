@@ -8,10 +8,12 @@ import os
 import shutil
 import sys
 import tempfile
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from base.config import ConfigBoot
 from base.native_process.child_env import inherited_process_env
 from base.paths import ava_home
 from services.backup.artifact.names import DUMP_NAME_RE
@@ -89,7 +91,7 @@ def _sha256(path: Path) -> str:
         return hashlib.file_digest(artifact, "sha256").hexdigest()
 
 
-async def run_job(kind: Job, *, now: datetime | None = None) -> None:
+async def run_job(kind: Job, *, config: ConfigBoot, now: datetime | None = None) -> None:
     """Validate and publish a zero-exit worker result."""
     completed = await run_operation(
         "services.backup.scheduler.worker",
@@ -100,19 +102,23 @@ async def run_job(kind: Job, *, now: datetime | None = None) -> None:
     if kind == "dump":
         # Hashing and linking a multi-GiB artifact is bounded local I/O; the
         # scheduler's health server shares this loop.
-        await completed.commit(lambda: _commit_dump(completed))
+        await completed.commit(
+            lambda: _commit_dump(completed, keep_reader=lambda: config.view.services.backup_keep)
+        )
     else:
         await completed.commit(lambda: _accept_restore(completed))
 
 
-def _commit_dump(completed: CompletedOperation) -> Path:
+def _commit_dump(completed: CompletedOperation, *, keep_reader: Callable[[], int]) -> Path:
     result = completed.result
     if set(result) != {"artifact", "sha256"}:
         raise RuntimeError("logical backup returned an invalid result")
     name, digest = result["artifact"], result["sha256"]
     if not isinstance(name, str) or Path(name).name != name or not isinstance(digest, str):
         raise RuntimeError("logical backup result escaped its controls")
-    return commit_scheduled_backup(completed.work / "artifact" / name, digest)
+    return commit_scheduled_backup(
+        completed.work / "artifact" / name, digest, keep_reader=keep_reader
+    )
 
 
 def _accept_restore(completed: CompletedOperation) -> None:
@@ -120,7 +126,7 @@ def _accept_restore(completed: CompletedOperation) -> None:
         raise RuntimeError("logical restore returned an invalid result")
 
 
-def commit_scheduled_backup(staged: Path, digest: str) -> Path:
+def commit_scheduled_backup(staged: Path, digest: str, *, keep_reader: Callable[[], int]) -> Path:
     """Publish only the exact completed worker artifact; never overwrite one.
 
     The caller invokes this only after the worker returned a zero
@@ -145,7 +151,7 @@ def commit_scheduled_backup(staged: Path, digest: str) -> Path:
         _publish_copy(staged, target, digest)
     ensure_private_file(target)
     staged.unlink()
-    prune_after_publish(target)
+    prune_after_publish(target, keep_reader=keep_reader)
     return target
 
 
@@ -180,7 +186,7 @@ def _publish_copy(staged: Path, target: Path, digest: str) -> None:
         copy.unlink(missing_ok=True)
 
 
-def _execute(request: dict[str, object], work: Path) -> dict[str, object]:
+def _execute(request: dict[str, object], work: Path, *, config: ConfigBoot) -> dict[str, object]:
     if set(request) != {"kind", "now"}:
         raise ValueError("invalid logical backup request")
     if request["kind"] == "dump":
@@ -191,7 +197,14 @@ def _execute(request: dict[str, object], work: Path) -> dict[str, object]:
         if not isinstance(stamp, str):
             raise TypeError("logical dump requires its captured timestamp")
         artifact = run_backup(
-            datetime.fromisoformat(stamp), db=Database.from_settings(), staging=work / "artifact"
+            datetime.fromisoformat(stamp),
+            db=Database.from_settings(),
+            staging=work / "artifact",
+            is_remote_reader=lambda: config.view.data_plane.is_remote,
+            keep_reader=lambda: config.view.services.backup_keep,
+            endpoint_reader=lambda: config.view.services.backup_offsite_endpoint,
+            bucket_reader=lambda: config.view.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: config.view.services.backup_offsite_credentials_file,
         )
         return {"artifact": artifact.name, "sha256": _sha256(artifact)}
     if request == {"kind": "restore", "now": None}:
@@ -209,8 +222,9 @@ def main() -> None:
     from base.log import init_gateway_process
 
     # The store-verified publish ACK is an INFO record: route it to the log sinks.
+    config = ConfigBoot()
     init_gateway_process(name="pg-backup-worker")
-    publish_result(output, _execute(request, output.parent))
+    publish_result(output, _execute(request, output.parent, config=config))
 
 
 if __name__ == "__main__":

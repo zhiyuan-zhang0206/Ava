@@ -3,7 +3,7 @@
 One protocol (`embeddings.base.EmbeddingProvider`), N implementations
 (Gemini today — the pre-abstraction `embedder` logic moved to
 `embeddings.gemini` unchanged), one switch
-(`embeddings.factory.get_provider()` reading `AVA_EMBEDDING_BACKEND`).
+(`embeddings.factory.get_provider()` receiving `AVA_EMBEDDING_BACKEND`).
 The indexer daemon (write path) and the gateway search endpoint (read
 path) both take their provider from the factory; neither imports a
 concrete provider directly.

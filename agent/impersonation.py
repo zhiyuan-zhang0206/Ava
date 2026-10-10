@@ -29,9 +29,10 @@ from psycopg_pool import AsyncConnectionPool
 from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.relay import stamp_relay_failure as _stamp_relay_failure
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
-from base.agents.messages.envelope import inbound_head
+from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
 from base.agents.observation.relay_supervision import terminate_relay as _terminate_relay
@@ -95,7 +96,14 @@ async def claim_gate(
         await asyncio.to_thread(accept, db, bus, session["id"], agent_id, incarnation, brief)
         return Command(
             update={
-                **start_update(session, introduced=state.impersonation_introduced),
+                **start_update(
+                    session,
+                    introduced=state.impersonation_introduced,
+                    notes=HandoffNotes(
+                        ctx.require_clock,
+                        lambda: ctx.require_agent().read("general", "message_timestamps"),
+                    ),
+                ),
                 "turn_active": False,
                 "turn_idle": True,
             },
@@ -118,7 +126,12 @@ async def claim_gate(
             f"To decline, call ava.impersonation.reject({request_id!r}, reason=...). "
             "Acceptance pauses your native loop until release or lease expiry."
         )
-        head = inbound_head(session["source"])
+        head = inbound_head(
+            session["source"],
+            inputs=EnvelopeReadInputs(
+                ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
+            ),
+        )
         message = HumanMessage(
             id=f"impersonation-request:{request_receipt}",
             content=head + content,
@@ -183,6 +196,7 @@ async def _activate_accepted(
     relays: RelaySupervision,
     *,
     resources: HostedTurnResources | None,
+    notes: HandoffNotes,
 ) -> dict[str, Any] | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
     from base.agents.impersonation import activate
@@ -192,7 +206,7 @@ async def _activate_accepted(
         raise RuntimeError("cannot activate impersonation with unresolved native exec resources")
     from agent.impersonation_handoff import ensure_start_marker
 
-    await ensure_start_marker(graph, session)
+    await ensure_start_marker(graph, session, notes=notes)
     # The bound relay must be live before the takeover stands. On failure
     # the lease is rolled back to 'rejected' with a loud reason and the
     # native agent resumes — no silent half-takeover.
@@ -244,6 +258,7 @@ async def settle_checkpoint(
     activate_accepted: bool = True,
     incarnation: RuntimeIncarnation | None,
     resources: HostedTurnResources | None,
+    notes: HandoffNotes,
 ) -> bool:
     """After invocation+flush, activate; apply terminal deltas exactly once."""
     session = await native_status(db, bus, agent_id, incarnation=incarnation)
@@ -254,7 +269,7 @@ async def settle_checkpoint(
         if not activate_accepted:
             return False
         activated = await _activate_accepted(
-            graph, db, bus, session, incarnation, relays, resources=resources
+            graph, db, bus, session, incarnation, relays, resources=resources, notes=notes
         )
         if activated is None:
             return False
@@ -274,6 +289,7 @@ async def settle_checkpoint(
             bus,
             session,
             incarnation,
+            notes=notes,
             reason=aborted_detail(session.get("rejection_reason")),
         )
     return False

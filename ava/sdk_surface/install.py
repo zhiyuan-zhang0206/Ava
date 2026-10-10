@@ -49,6 +49,7 @@ from pydantic import BaseModel
 
 from base.agents.messages.delivery_outbox import DeliverySenderConfig
 from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import load_report
@@ -83,6 +84,8 @@ class Installation:
     catalog: ModelCatalog | None = None
     authority: ConfigAuthority | None = None
     delivery_sender: DeliverySenderConfig | None = None
+    clock_factory: Callable[[], Clock] | None = None
+    producer: Callable[[], Any] | None = None
 
     def require_catalog(self) -> ModelCatalog:
         """Return this installation's explicit model facts or refuse a non-model installation."""
@@ -318,6 +321,8 @@ def install(
     authority: ConfigAuthority | None = None,
     delivery_sender: DeliverySenderConfig | None = None,
     sampling: SamplingPolicyOwner | None = None,
+    clock_factory: Callable[[], Clock] | None = None,
+    producer: Callable[[], Any] | None = None,
 ) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `ava`; return the registry of the plugins admitted.
 
@@ -367,7 +372,7 @@ def install(
             build.namespaces = claimed
             build.expansions.extend(paths)
             admitted.append((plugin, contributions))
-        metered = metering.install(sampling_owner)
+        metered = metering.install(sampling_owner, producer=producer)
     except BaseException as exc:
         _run(build.undo, exc)
         setattr(ava_module(), _SLOT, prior)
@@ -387,6 +392,8 @@ def install(
         configs=MappingProxyType(dict(build.configs)),
         catalog=catalog,
         authority=authority,
+        clock_factory=clock_factory,
+        producer=producer,
         delivery_sender=delivery_sender
         or (DeliverySenderConfig(authority) if authority is not None else None),
     )

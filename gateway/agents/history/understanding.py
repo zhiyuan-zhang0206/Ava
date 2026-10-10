@@ -51,42 +51,12 @@ from base.agents.history.hierarchy.sessions import (
 from base.agents.history.hierarchy.units import read_times
 from base.agents.history.message_tokens import summarize_segments
 from base.agents.observation.snapshot import agent_model_target
-from base.config import settings
-from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.db import Database, agent_exists
-from base.host.env.runtime_config import read_env_aliases
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError
+from gateway.agents.history.read_inputs import UnderstandingReadPolicy
 
 router = APIRouter()
-
-_ENABLED_ALIAS = "AVA_UNDERSTANDING_ENABLED"
-_CHUNK_RATIO_ALIAS = "AVA_UNDERSTANDING_CHUNK_RATIO"
-
-
-def chunk_ratio() -> float:
-    """`AVA_UNDERSTANDING_CHUNK_RATIO`, as the agent host that consumes the jobs reads it.
-
-    The gateway profile does not construct the `agent` config domain (the cluster's value lives in
-    the unit's `.env`, which the gateway pops from its environment), so outside a process that has
-    the domain the value is read from that file, else the field's default.
-    """
-    if settings.has_domain("agent"):
-        return settings.agent.understanding_chunk_ratio
-    raw = read_env_aliases().get(_CHUNK_RATIO_ALIAS)
-    if raw:
-        return float(raw)
-    return AgentRuntimeSettings.model_fields["understanding_chunk_ratio"].default
-
-
-def feature_enabled() -> bool:
-    """`AVA_UNDERSTANDING_ENABLED`, read like `chunk_ratio` (the field's default when unset)."""
-    if settings.has_domain("agent"):
-        return settings.agent.understanding_enabled
-    raw = read_env_aliases().get(_ENABLED_ALIAS)
-    if raw is None:
-        return AgentRuntimeSettings.model_fields["understanding_enabled"].default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class SessionCoverage(BaseModel):
@@ -309,45 +279,63 @@ def _require_agent(request: Request, agent_id: int) -> None:
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
 
 
-def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[Session]]:
+def _load(
+    db: Database, agent_id: int, *, policy: UnderstandingReadPolicy
+) -> tuple[FullHistory, list[Session]]:
     """The stored history and its sessions (blocking)."""
     history = load_checkpoint_history_full(db, agent_id)
     boundaries = list(reversed(list_compact_boundary_checkpoint_ids(db, agent_id)))
-    return history, build_sessions(history, boundaries, read_times(history.messages))
+    return history, build_sessions(
+        history, boundaries, read_times(history.messages, timeline_inputs=policy.rendering)
+    )
 
 
-def build_model(db: Database, agent_id: int, *, catalog: ModelCatalog) -> str:
-    return agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model, catalog=catalog)[
-        0
-    ]
+def build_model(
+    db: Database, agent_id: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
+) -> str:
+    return agent_model_target(
+        db,
+        agent_id,
+        fallback=policy.hierarchy_model(),
+        catalog=catalog,
+        default_model_reader=policy.default_model,
+    )[0]
 
 
-def chunk_size(db: Database, agent_id: int, *, catalog: ModelCatalog) -> int:
+def chunk_size(
+    db: Database, agent_id: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
+) -> int:
     """The agent's chunk size in tokens: the ratio of its own model's soft compaction threshold,
     with its own overrides (the rule of the live hook)."""
     model, overrides = agent_model_target(
-        db, agent_id, fallback=settings.lm.hierarchy_model, catalog=catalog
+        db,
+        agent_id,
+        fallback=policy.hierarchy_model(),
+        catalog=catalog,
+        default_model_reader=policy.default_model,
     )
-    return chunk_threshold(model, overrides, chunk_ratio(), catalog=catalog)
+    return chunk_threshold(model, overrides, policy.chunk_ratio(), catalog=catalog)
 
 
 def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
     _require_agent(request, agent_id)
     db: Database = request.app.state.db
-    history, sessions = _load(db, agent_id)
+    policy: UnderstandingReadPolicy = request.app.state.understanding_policy
+    history, sessions = _load(db, agent_id, policy=policy)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
-    model = build_model(db, agent_id, catalog=request.app.state.catalog)
+    model = build_model(db, agent_id, catalog=request.app.state.catalog, policy=policy)
     jobs = plan_jobs(
         history,
         sessions,
         covered,
-        threshold=chunk_size(db, agent_id, catalog=request.app.state.catalog),
+        threshold=chunk_size(db, agent_id, catalog=request.app.state.catalog, policy=policy),
+        timeline_inputs=policy.rendering,
     )
     totals = summarize_segments(history)
     return SessionsResponse(
         agent_id=agent_id,
         model=model,
-        understanding_enabled=feature_enabled(),
+        understanding_enabled=policy.enabled(),
         cost_basis=COST_BASIS,
         sessions=[
             SessionOut(
@@ -361,7 +349,9 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
                 generation_tokens=totals[s.segment].generation_tokens,
                 estimated=totals[s.segment].estimated,
                 exact_fraction=totals[s.segment].exact_fraction,
-                coverage=SessionCoverage(**asdict(coverage_of(history, s, covered))),
+                coverage=SessionCoverage(
+                    **asdict(coverage_of(history, s, covered, timeline_inputs=policy.rendering))
+                ),
                 estimate=_estimate_out(
                     estimate_cost(
                         model,
@@ -411,24 +401,26 @@ def _select(sessions: list[Session], body: BuildRequest) -> list[Session]:
 def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> BuildResponse:
     _require_agent(request, agent_id)
     db: Database = request.app.state.db
-    history, sessions = _load(db, agent_id)
+    policy: UnderstandingReadPolicy = request.app.state.understanding_policy
+    history, sessions = _load(db, agent_id, policy=policy)
     chosen = _select(sessions, body)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
     planned = plan_jobs(
         history,
         chosen,
         covered,
-        threshold=chunk_size(db, agent_id, catalog=request.app.state.catalog),
+        threshold=chunk_size(db, agent_id, catalog=request.app.state.catalog, policy=policy),
+        timeline_inputs=policy.rendering,
     )
     estimate = _estimate_out(
         estimate_cost(
-            build_model(db, agent_id, catalog=request.app.state.catalog),
+            build_model(db, agent_id, catalog=request.app.state.catalog, policy=policy),
             planned,
             prices=request.app.state.catalog.prices,
         )
     )
     numbers = [s.number for s in chosen]
-    enabled = feature_enabled()
+    enabled = policy.enabled()
     if body.dry_run:
         return BuildResponse(
             agent_id=agent_id,

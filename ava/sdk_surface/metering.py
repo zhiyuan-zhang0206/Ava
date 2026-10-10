@@ -68,7 +68,9 @@ def _check_sampling(fn: object, sampling: SamplingPolicyOwner) -> None:
         raise ValueError("SDK recorders already belong to another sampling owner")
 
 
-def _caller() -> tuple[dict[str, Any], SdkCallTally | None, SdkCaptureOwner | None]:
+def _caller(
+    producer: Callable[[], Any] | None,
+) -> tuple[dict[str, Any], SdkCallTally | None, SdkCaptureOwner | None, Callable[[], Any] | None]:
     """Snapshot this call's provenance; invalid identity rejects admission."""
     from base.agents.messages.external_caller import external_caller
 
@@ -87,11 +89,15 @@ def _caller() -> tuple[dict[str, Any], SdkCallTally | None, SdkCaptureOwner | No
         {"agent_id": agent_id, "source": source},
         None if bound is None else bound.sdk_calls,
         None if bound is None else bound.sdk_capture,
+        producer if bound is None else bound.clients.event_pipeline,
     )
 
 
 def _make_recorder(
-    original: Callable[..., Any], fq: str, sampling: SamplingPolicyOwner
+    original: Callable[..., Any],
+    fq: str,
+    sampling: SamplingPolicyOwner,
+    producer: Callable[[], Any] | None = None,
 ) -> Callable[..., Any]:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the call /
     tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
@@ -100,7 +106,7 @@ def _make_recorder(
     def recorder(*args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        identity, tally, capture_owner = _caller()
+        identity, tally, capture_owner, call_producer = _caller(producer)
         return run_metered(
             fq,
             original,
@@ -110,6 +116,7 @@ def _make_recorder(
             tally=tally,
             capture_owner=capture_owner,
             sampling_owner=sampling,
+            producer=call_producer,
         )
 
     if inspect.iscoroutinefunction(original):
@@ -118,7 +125,7 @@ def _make_recorder(
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
             from base.agents.sdk import telemetry as sdk_usage_telemetry
 
-            identity, tally, capture_owner = _caller()
+            identity, tally, capture_owner, call_producer = _caller(producer)
             return await sdk_usage_telemetry.run_metered_async(
                 fq,
                 original,
@@ -128,6 +135,7 @@ def _make_recorder(
                 tally=tally,
                 capture_owner=capture_owner,
                 sampling_owner=sampling,
+                producer=call_producer,
             )
 
         return _recorder(async_recorder, sampling)
@@ -143,7 +151,9 @@ _MCP_CALL_FUNNEL = "_call_raw"
 
 
 def _make_mcp_recorder(
-    original: Callable[..., Any], sampling: SamplingPolicyOwner
+    original: Callable[..., Any],
+    sampling: SamplingPolicyOwner,
+    producer: Callable[[], Any] | None = None,
 ) -> Callable[..., Any]:
     """Recorder for the MCP call funnel — derives the fq from the runtime args."""
 
@@ -151,7 +161,7 @@ def _make_mcp_recorder(
     def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        identity, tally, capture_owner = _caller()
+        identity, tally, capture_owner, call_producer = _caller(producer)
         return run_metered(
             f"mcps.{server}.{tool}",
             original,
@@ -161,6 +171,7 @@ def _make_mcp_recorder(
             tally=tally,
             capture_owner=capture_owner,
             sampling_owner=sampling,
+            producer=call_producer,
         )
 
     return _recorder(recorder, sampling)
@@ -205,7 +216,9 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
     return targets
 
 
-def install(sampling: SamplingPolicyOwner) -> tuple[tuple[Any, str], ...]:
+def install(
+    sampling: SamplingPolicyOwner, *, producer: Callable[[], Any] | None = None
+) -> tuple[tuple[Any, str], ...]:
     """Wrap every public ``ava.*`` callable with the recording proxy. Idempotent.
 
     Called by ``ava.sdk_surface.install`` after plugins load, so plugin namespaces /
@@ -228,11 +241,11 @@ def install(sampling: SamplingPolicyOwner) -> tuple[tuple[Any, str], ...]:
         current = getattr(parent, attr, None)
         if current is None or is_recorder(current):
             continue
-        setattr(parent, attr, _make_recorder(current, fq, sampling))
+        setattr(parent, attr, _make_recorder(current, fq, sampling, producer))
         wrapped.append((parent, attr))
 
     if mcps_mod is not None and callable(funnel) and not is_recorder(funnel):
-        setattr(mcps_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel, sampling))
+        setattr(mcps_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel, sampling, producer))
         wrapped.append((mcps_mod, _MCP_CALL_FUNNEL))
     return tuple(wrapped)
 

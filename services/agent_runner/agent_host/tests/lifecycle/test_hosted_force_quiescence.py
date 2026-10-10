@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import psycopg
@@ -35,9 +35,9 @@ from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
-from services.agent_runner.agent_host.daemon import _cancel_turn_route
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.scheduling.health_routes import cancel_turn_route
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.pin_agent import exec_context as ctx_of
 
@@ -176,7 +176,7 @@ async def _prove_successor_ignores_old_cancel(
     scheduler.wake(agent_id)
     try:
         await asyncio.wait_for(entered.wait(), 3)
-        route = _cancel_turn_route(scheduler, replacement)
+        route = cancel_turn_route(scheduler, replacement)
         _, response, _ = await route(payload)
         assert json.loads(response) == {"cancelled": False}
         assert agent_id in scheduler.active_agents
@@ -201,6 +201,14 @@ def _exec_context(hosted: AvaContext) -> AvaContext:
     return context
 
 
+@pytest.fixture
+def _exec_delivery_environment() -> Iterator[None]:
+    """Restore delivery from the real cold SDK owner throughout its exec lifetime."""
+    with patch.dict(os.environ):
+        yield
+
+
+@pytest.mark.usefixtures("_exec_delivery_environment")
 @pytest.mark.parametrize("work_kind", ["thread", "exec", "reader"])
 async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor(
     db_conn: psycopg.Connection,
@@ -262,7 +270,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
             )
         chat = _insert(db_conn, agent_id)
         payload = json.dumps({"agent_id": agent_id, "command_id": command}).encode()
-        status, response, _ = await _cancel_turn_route(scheduler, host)(payload)
+        status, response, _ = await cancel_turn_route(scheduler, host)(payload)
         assert status == 200 and json.loads(response) == {"cancelled": False}
         assert agent_id in scheduler.active_agents
         await _assert_pending_force(db_conn, aops_pool, agent_id, command, chat)

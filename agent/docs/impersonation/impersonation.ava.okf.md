@@ -83,7 +83,13 @@ then appends the impersonator summary and path as the first new system note.
 The introduction, takeover, and closing notes include their creation time in
 the agent-visible text when message timestamps are enabled, using the same
 instant as their timeline metadata. Existing receipts retain their original
-notes and timestamps across retries.
+notes and timestamps across retries. The process owner supplies `HandoffNotes`
+from `base.agents.impersonation.notes`, the shared input contract for controllers
+and native graph execution, with a clock factory and a live timestamp-policy
+reader. Message construction stays in the agent layer. Constructing the inputs reads
+neither input; each new note obtains its clock, captures the creation instant,
+then reads the display flag. Native graph notes use their explicit agent context;
+invocation settlement carries the same narrow inputs from the host owner.
 The stable note id and `impersonation_handoff_id` channel survive retries.
 Checkpoint flush is unconditional before setting `handoff_applied_at`; only
 that receipt consumes captured pending input and opens the normal claim gate.

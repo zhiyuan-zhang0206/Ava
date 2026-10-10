@@ -175,7 +175,13 @@ def _verify(instance_url: str, reached: int | None) -> str:
 
 
 def _restore_and_verify(
-    target: PgTarget, backup: Backup, facts: SourceFacts, reached: int | None, report: Report
+    target: PgTarget,
+    backup: Backup,
+    facts: SourceFacts,
+    reached: int | None,
+    report: Report,
+    *,
+    path_reader: Callable[[], Path | None],
 ) -> str:
     """Restore `backup` to the newest archived segment and verify it; returns the summary."""
     base = select_throwaway_base(required_bytes(backup, facts))
@@ -192,6 +198,7 @@ def _restore_and_verify(
             report=report,
             user=_admin_user(target),
             keep_data=False,
+            path_reader=path_reader,
         ) as instance:
             summary = _verify(instance.url(target.database), reached)
     finally:
@@ -205,6 +212,8 @@ def run_drill(
     previous: DrillRecord | None,
     report: Report,
     now: Callable[[], datetime],
+    *,
+    path_reader: Callable[[], Path | None],
 ) -> DrillRecord:
     """Run one drill against `backup`; every failure becomes a record with `ok=False`."""
     started = time.monotonic()
@@ -212,7 +221,9 @@ def run_drill(
     try:
         facts = read_source_facts(target, backup)
         reached = target_lsn(backup, facts)
-        detail = _restore_and_verify(target, backup, facts, reached, report)
+        detail = _restore_and_verify(
+            target, backup, facts, reached, report, path_reader=path_reader
+        )
         ok = True
     except _EXPECTED_FAILURES as exc:
         ok, detail = False, str(exc)

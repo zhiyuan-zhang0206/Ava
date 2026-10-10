@@ -13,6 +13,13 @@ from base.agents.history.hierarchy.leaf_groups import (
     resolve_groups,
 )
 from base.agents.history.hierarchy.units import MessageUnit, divide_units
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 
 def ts(second: int) -> dict[str, str]:
@@ -53,7 +60,7 @@ MESSAGES: list[BaseMessage] = [
     ai(7, code="pytest -x tests/b.py"),
     result(8),
 ]
-UNITS = divide_units(MESSAGES)
+UNITS = divide_units(MESSAGES, timeline_inputs=_TIMELINE_INPUTS)
 
 
 CATALOG = [f"line of unit {n}" for n in range(1, 7)]

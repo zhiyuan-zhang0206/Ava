@@ -8,11 +8,19 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from base.agents.history.timeline import build_timeline_items, tail_window
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
 from base.db import Database, create_agent, insert_inbound_message
 from base.events.live.bus import EventBus
 from gateway.agents.history.tests.test_timeline import _items
 from gateway.agents.history.tests.test_timeline import test_client as test_client
 from gateway.agents.history.timeline import _window_before
+from gateway.app import app
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 
 def test_timeline_skips_inbound_without_langgraph_state(
@@ -89,7 +97,7 @@ def test_timeline_anchor_filter_only_includes_chat_inbounds(
     resp = test_client.get(f"/api/agents/{tid}/timeline")
     assert resp.status_code == 200
     # No messages → render empty list, msg_count=0 — render does not raise
-    assert build_timeline_items([], inbound_anchors) == ([], 0)
+    assert build_timeline_items([], inbound_anchors, inputs=_TIMELINE_INPUTS) == ([], 0)
 
 
 def test_item_created_at_prefers_real_ava_created_at_over_synthetic() -> None:
@@ -106,7 +114,7 @@ def test_item_created_at_prefers_real_ava_created_at_over_synthetic() -> None:
             "ava_created_at": "2026-06-19T12:00:00+00:00",
         },
     )
-    items, _ = build_timeline_items([msg], [])
+    items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
     assert items[0].created_at == "2026-06-19T12:00:00+00:00"
 
 
@@ -139,7 +147,7 @@ def test_inbound_with_real_ts_still_advances_anchor_for_legacy_siblings() -> Non
         content="out", tool_call_id="t1", additional_kwargs={"ava_msg_type": "exec_output"}
     )
     anchors = [InboundRow(7, "hi", "chat", "ui:web", "claimed", anchor_dt)]
-    items, _ = build_timeline_items([inbound, legacy_exec], anchors)
+    items, _ = build_timeline_items([inbound, legacy_exec], anchors, inputs=_TIMELINE_INPUTS)
     assert items[0].created_at == "2026-06-19T15:30:00+00:00"  # inbound shows its own real ts
     sibling_ts = items[1].created_at
     assert sibling_ts is not None
@@ -191,7 +199,9 @@ def test_compacted_inbound_uses_its_embedded_id_instead_of_oldest_anchor() -> No
         additional_kwargs={"ava_msg_type": "exec_output"},
     )
 
-    items, _ = build_timeline_items([inbound, legacy_sibling], [stale_anchor, matching_anchor])
+    items, _ = build_timeline_items(
+        [inbound, legacy_sibling], [stale_anchor, matching_anchor], inputs=_TIMELINE_INPUTS
+    )
 
     assert items[0].inbound_id == 70598
     assert items[1].created_at is not None
@@ -214,7 +224,7 @@ def test_inbound_rejects_malformed_embedded_id(malformed_id: object) -> None:
     )
 
     with pytest.raises(ValueError, match="ava_inbound_id"):
-        build_timeline_items([inbound], [])
+        build_timeline_items([inbound], [], inputs=_TIMELINE_INPUTS)
 
 
 def test_missing_embedded_anchor_does_not_consume_legacy_fallback() -> None:
@@ -253,7 +263,7 @@ def test_missing_embedded_anchor_does_not_consume_legacy_fallback() -> None:
     )
 
     items, _ = build_timeline_items(
-        [missing_modern, legacy_inbound, legacy_output], [legacy_anchor]
+        [missing_modern, legacy_inbound, legacy_output], [legacy_anchor], inputs=_TIMELINE_INPUTS
     )
 
     assert [item.inbound_id for item in items[:2]] == [99, 10]
@@ -296,7 +306,9 @@ def test_out_of_order_and_duplicate_embedded_ids_preserve_anchor_cursor() -> Non
         for inbound_id, minute in [(10, 10), (20, 20), (30, 30)]
     ]
 
-    items, _ = build_timeline_items([modern(20), modern(10), modern(20), legacy], anchors)
+    items, _ = build_timeline_items(
+        [modern(20), modern(10), modern(20), legacy], anchors, inputs=_TIMELINE_INPUTS
+    )
 
     assert [item.inbound_id for item in items] == [20, 10, 20, 30]
 
@@ -314,7 +326,7 @@ def test_aimessage_blocks_share_one_real_ava_created_at() -> None:
         ],
         additional_kwargs={"ava_created_at": "2026-06-19T12:00:00+00:00"},
     )
-    items, _ = build_timeline_items([msg], [])
+    items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
     assert [it.created_at for it in items] == [
         "2026-06-19T12:00:00+00:00",
         "2026-06-19T12:00:00+00:00",
@@ -378,7 +390,7 @@ class TestMultimodalInbound:
 
     def test_renders_text_and_images_not_base64(self) -> None:
 
-        items, _ = build_timeline_items([self._msg()], [])
+        items, _ = build_timeline_items([self._msg()], [], inputs=_TIMELINE_INPUTS)
         (item,) = items
         assert item.kind == "inbound_chat"
         assert item.payload == "User:\n\nwhat is this?"
@@ -403,7 +415,7 @@ class TestMultimodalInbound:
                 "ava_image_urls": ["/api/agents/7/uploads/a.png"],
             },
         )
-        items, _ = build_timeline_items([msg], [])
+        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
         assert items[0].images == ["/api/agents/7/uploads/a.png"]
         assert "QUJD" not in items[0].payload
 
@@ -497,9 +509,7 @@ class TestSystemPromptInColdLoad:
         (``AVA_TIMELINE_DEFAULT_LIMIT``); 50 is only that field's default."""
         from langchain_core.messages import HumanMessage
 
-        from base.config import settings
-
-        monkeypatch.setattr(settings.display, "timeline_default_limit", 5)
+        monkeypatch.setattr(app.state.config_authority.runtime.display, "timeline_default_limit", 5)
 
         tid = create_agent(db_conn)
         self._put_checkpoint(  # pyright: ignore[reportUnknownMemberType]

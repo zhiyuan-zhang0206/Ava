@@ -10,8 +10,10 @@ newest backup.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast
 
 from services.backup.walg.runner import run_walg
@@ -81,9 +83,11 @@ def parse_backups(text: str) -> list[Backup]:
     return sorted(backups, key=lambda backup: backup.start_time)
 
 
-def list_backups() -> list[Backup]:
+def list_backups(*, path_reader: Callable[[], Path | None]) -> list[Backup]:
     """Every backup under the configured prefix, oldest first."""
-    text = run_walg(["backup-list", "--detail", "--json"], timeout_s=QUERY_TIMEOUT_S)
+    text = run_walg(
+        ["backup-list", "--detail", "--json"], timeout_s=QUERY_TIMEOUT_S, path_reader=path_reader
+    )
     return parse_backups(text)
 
 

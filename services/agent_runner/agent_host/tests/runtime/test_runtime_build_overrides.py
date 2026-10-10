@@ -46,7 +46,9 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
         catalog=model_catalog,
     )
     pins = {"reasoning_effort": "low", "claude_thinking_budget_tokens": 777} if pinned else {}
-    slices = AgentSlices.resolve({"llm_model": "pinned-model", **pins})
+    slices = AgentSlices.resolve(
+        {"llm_model": "pinned-model", **pins}, default_reader=configured_policy().default_reader
+    )
 
     await host._build_runtime(1, "fingerprint", slices, incarnation=None)
 
@@ -57,4 +59,7 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
         assert overrides.reasoning_effort == "low"
         assert overrides.claude_thinking_budget_tokens == 777
     else:
-        assert overrides == AgentSlices.resolve().overrides
+        assert (
+            overrides
+            == AgentSlices.resolve(default_reader=configured_policy().default_reader).overrides
+        )

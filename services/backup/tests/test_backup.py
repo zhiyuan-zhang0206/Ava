@@ -24,6 +24,7 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
+from base.clock import Clock
 from base.config import settings
 from base.db import Database
 from services.backup import dump as backup
@@ -102,34 +103,62 @@ def _await_backup_lock_holder(ready: Path, proc: subprocess.Popen[bytes]) -> Non
 
 
 def test_not_due_before_backup_hour(bdir: Path) -> None:
-    assert not backup.is_due(_dt(2026, 6, 10, settings.services.backup_hour - 1, 59))
+    assert not backup.is_due(
+        _dt(2026, 6, 10, settings.services.backup_hour - 1, 59),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )
 
 
 def test_due_at_hour_with_no_dumps(bdir: Path) -> None:
-    assert backup.is_due(_dt(2026, 6, 10, settings.services.backup_hour, 0))
+    assert backup.is_due(
+        _dt(2026, 6, 10, settings.services.backup_hour, 0),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )
 
 
 def test_not_due_again_after_todays_dump(bdir: Path) -> None:
     _touch(bdir, "ava-20260610T100001Z.dump")
-    assert not backup.is_due(_dt(2026, 6, 10, 9, 0))
+    assert not backup.is_due(
+        _dt(2026, 6, 10, 9, 0),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )
 
 
 def test_due_again_the_next_day(bdir: Path) -> None:
     _touch(bdir, "ava-20260609T100001Z.dump")
-    assert backup.is_due(_dt(2026, 6, 10, settings.services.backup_hour, 0))
+    assert backup.is_due(
+        _dt(2026, 6, 10, settings.services.backup_hour, 0),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )
 
 
 def test_catchup_after_downtime(bdir: Path) -> None:
     """Host down at 03:00 -> the first tick later that day is still due."""
     _touch(bdir, "ava-20260609T100001Z.dump")
-    assert backup.is_due(_dt(2026, 6, 10, 14, 30))
+    assert backup.is_due(
+        _dt(2026, 6, 10, 14, 30),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )
 
 
 def test_due_hour_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The due hour resolves from ``services.backup_hour`` at call time."""
     monkeypatch.setattr(settings.services, "backup_hour", 2)
-    assert not backup.is_due(_dt(2026, 6, 10, 1, 59))
-    assert backup.is_due(_dt(2026, 6, 10, 2, 0))
+    assert not backup.is_due(
+        _dt(2026, 6, 10, 1, 59),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )
+    assert backup.is_due(
+        _dt(2026, 6, 10, 2, 0),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )
 
 
 # ─── the clock the schedule is read on ───
@@ -140,7 +169,11 @@ def test_naive_now_is_rejected(bdir: Path) -> None:
     host clock is exactly the failure the cluster-time pin removes."""
     _ = bdir
     with pytest.raises(ValueError, match="TZ-aware"):
-        backup.is_due(datetime(2026, 6, 10, 3, 0))  # noqa: DTZ001 — the value under test
+        backup.is_due(
+            datetime(2026, 6, 10, 3, 0),  # noqa: DTZ001 — boundary rejects naive input
+            clock_factory=Clock.from_settings,
+            hour_reader=lambda: settings.services.backup_hour,
+        )
 
 
 def test_day_boundary_is_cluster_time_not_host_time(
@@ -158,18 +191,34 @@ def test_day_boundary_is_cluster_time_not_host_time(
 
     today = datetime(2026, 6, 9, 20, 0, tzinfo=UTC)  # 04:00 Jun-10 Shanghai
     for host_tz in ("Asia/Shanghai", "America/Los_Angeles", "Pacific/Kiritimati"):
-        assert not backup.is_due(today.astimezone(ZoneInfo(host_tz))), host_tz
+        assert not backup.is_due(
+            today.astimezone(ZoneInfo(host_tz)),
+            clock_factory=Clock.from_settings,
+            hour_reader=lambda: settings.services.backup_hour,
+        ), host_tz
 
     tomorrow = datetime(2026, 6, 10, 20, 0, tzinfo=UTC)  # 04:00 Jun-11 Shanghai
     for host_tz in ("Asia/Shanghai", "America/Los_Angeles", "Pacific/Kiritimati"):
-        assert backup.is_due(tomorrow.astimezone(ZoneInfo(host_tz))), host_tz
+        assert backup.is_due(
+            tomorrow.astimezone(ZoneInfo(host_tz)),
+            clock_factory=Clock.from_settings,
+            hour_reader=lambda: settings.services.backup_hour,
+        ), host_tz
 
 
 def test_backup_hour_is_cluster_time(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The backup hour defaults to 03:00 on the cluster's clock, whatever the host's says."""
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    assert not backup.is_due(datetime(2026, 6, 9, 18, 59, tzinfo=UTC))  # 02:59 Shanghai
-    assert backup.is_due(datetime(2026, 6, 9, 19, 0, tzinfo=UTC))  # 03:00 Shanghai
+    assert not backup.is_due(
+        datetime(2026, 6, 9, 18, 59, tzinfo=UTC),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )  # 02:59 Shanghai
+    assert backup.is_due(
+        datetime(2026, 6, 9, 19, 0, tzinfo=UTC),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )  # 03:00 Shanghai
 
 
 # ─── the clock dumps are named on ───
@@ -199,6 +248,11 @@ def test_dump_name_is_utc_stamped(
         datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
         db_url="dbname=ava",
         db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
     assert path.name == "ava-20260609T190000Z.dump.enc"
 
@@ -224,7 +278,15 @@ def test_run_backup_can_defer_offsite_publish(
     monkeypatch.setattr(offsite, "publish", published.append)
 
     artifact = backup.run_backup(
-        _dt(2026, 6, 10, 3, 0), db_url="dbname=ava", publish=False, db=database
+        _dt(2026, 6, 10, 3, 0),
+        db_url="dbname=ava",
+        publish=False,
+        db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
 
     assert artifact.exists()
@@ -345,7 +407,16 @@ def test_run_backup_repairs_storage_permissions(
         return _Ok()
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    target = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=ava", db=database)
+    target = backup.run_backup(
+        _dt(2026, 6, 10, 3, 0),
+        db_url="dbname=ava",
+        db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     assert bdir.stat().st_mode & 0o777 == 0o700
     assert target.stat().st_mode & 0o777 == 0o600
@@ -367,7 +438,9 @@ def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
 
     for i in range(2, settings.services.backup_keep + 1):
         _touch(bdir, f"ava-202611{i:02d}T090000Z.dump")
-    assert backup._prune(bdir) == [pdt]  # the earlier half of the fold, deterministically
+    assert backup._prune(bdir, keep_reader=lambda: settings.services.backup_keep) == [
+        pdt
+    ]  # the earlier half of the fold, deterministically
     assert pst.exists()
 
 
@@ -387,8 +460,12 @@ def test_foreign_files_ignored(bdir: Path) -> None:
             "ava-20260610T100001Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
         ),
     ]
-    assert backup.is_due(_dt(2026, 6, 10, 9, 0))
-    assert backup._prune(bdir) == []
+    assert backup.is_due(
+        _dt(2026, 6, 10, 9, 0),
+        clock_factory=Clock.from_settings,
+        hour_reader=lambda: settings.services.backup_hour,
+    )
+    assert backup._prune(bdir, keep_reader=lambda: settings.services.backup_keep) == []
     assert all(p.exists() for p in foreign)
 
 
@@ -396,7 +473,7 @@ def test_prune_keeps_newest(bdir: Path) -> None:
     names = [f"ava-202606{i:02d}T100000Z.dump" for i in range(1, 11)]  # 10 days, oldest first
     for name in names:
         _touch(bdir, name)
-    removed = backup._prune(bdir)
+    removed = backup._prune(bdir, keep_reader=lambda: settings.services.backup_keep)
     keep = settings.services.backup_keep
     assert [p.name for p in removed] == names[: len(names) - keep]
     assert sorted(p.name for p in bdir.glob("*.dump")) == names[len(names) - keep :]
@@ -407,7 +484,7 @@ def test_prune_keep_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(settings.services, "backup_keep", 3)
     for day in range(1, 6):
         _touch(bdir, f"ava-2026060{day}T100000Z.dump")
-    removed = backup._prune(bdir)
+    removed = backup._prune(bdir, keep_reader=lambda: settings.services.backup_keep)
     assert len(removed) == 2
     assert len(backup._managed_dumps(bdir)) == 3
 
@@ -425,7 +502,16 @@ def test_run_backup_failure_leaves_no_plaintext(
 
     monkeypatch.setattr(backup.subprocess, "run", fail)
     with pytest.raises(RuntimeError, match="pg_dump exited 1"):
-        backup.run_backup(_dt(2026, 8, 2, 3, 0), db_url="dbname=whatever", db=database)
+        backup.run_backup(
+            _dt(2026, 8, 2, 3, 0),
+            db_url="dbname=whatever",
+            db=database,
+            is_remote_reader=lambda: settings.data_plane.is_remote,
+            keep_reader=lambda: settings.services.backup_keep,
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+        )
     assert not list(bdir.glob("*.partial")) and not list(bdir.glob(".backup-key-*"))
     assert not list(bdir.glob("*.dump.enc"))
 
@@ -440,7 +526,16 @@ def test_run_backup_real_dump_and_prune(
         _touch(bdir, f"test-2026060{i}T100000Z.dump")
 
     _disable_offsite(monkeypatch)
-    path = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url=settings.data_plane.db_url, db=database)
+    path = backup.run_backup(
+        _dt(2026, 6, 10, 3, 0),
+        db_url=settings.data_plane.db_url,
+        db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     assert path.parent == bdir
     assert names.DUMP_NAME_RE.match(path.name)
@@ -524,6 +619,11 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
         _dt(2026, 8, 8, 3, 0),
         db_url=f"postgresql://backup:{password}@db.example:5432/whatever",
         db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
 
     # The final artifact must be encrypted and private rather than the plaintext
@@ -565,6 +665,11 @@ def test_run_backup_keeps_database_password_out_of_argv(
         _dt(2026, 8, 8, 3, 0),
         db_url=f"postgresql://ava:{password}@127.0.0.1:5433/ava",
         db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
 
     cmd = cast(list[str], captured["cmd"])
@@ -597,7 +702,16 @@ def test_encrypted_artifact_decrypts_to_original_dump(
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_pg_dump)
     _disable_offsite(monkeypatch)
-    artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", db=database)
+    artifact = backup.run_backup(
+        _dt(2026, 8, 8, 3, 0),
+        db_url="dbname=whatever",
+        db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     assert artifact.name.endswith(".dump.enc")
     key_file = bdir / "decrypt.key"
@@ -666,6 +780,16 @@ def test_run_backup_forwards_requested_timeout(
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
 
-    backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", timeout_s=123.0, db=database)
+    backup.run_backup(
+        _dt(2026, 8, 8, 3, 0),
+        db_url="dbname=whatever",
+        timeout_s=123.0,
+        db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     assert timeouts == [123.0, 123.0]  # pg_dump + encryption — the gzip stage is gone

@@ -88,10 +88,13 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                 replace(
                     AvaContext(
                         ops_pool=aops_pool,
-                        agent=AgentSlices.resolve(),
+                        agent=AgentSlices.resolve(
+                            default_reader=configured_policy().default_reader
+                        ),
                         db=Database.from_settings(),
                         bus=EventBus.from_settings(),
                         catalog=model_catalog,
+                        clock_factory=configured_policy().clock_factory,
                     ),
                     original_incarnation=incarnation,
                     hosted_resources=None,

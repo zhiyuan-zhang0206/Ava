@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.config import ConfigBoot
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
@@ -35,7 +36,7 @@ def _source(repo: Path, body: str = "operator v1\n") -> Path:
 def _context(repo: Path, tmp_path: Path) -> ConvergeCtx:
     ava_home = tmp_path / "ava-home"
     (ava_home / "configs").mkdir(parents=True)
-    return ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
+    return ConvergeCtx(repo=repo, ava_home=ava_home, roles=None, config=ConfigBoot())
 
 
 def _client_home(tmp_path: Path, name: str = ".codex") -> Path:

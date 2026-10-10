@@ -20,12 +20,18 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.graph.claim._chat_inbound import build_chat_inbound
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.agents.messages.envelope import EnvelopeReadInputs
+from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
+
+_ENVELOPE_INPUTS = EnvelopeReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
@@ -115,7 +121,11 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     item = claimed[0]
     assert item.source == _SOURCE
     assert item.payload == {"caller_identity": _CALLER}
-    message, _ = build_chat_inbound(item)
+    message, _ = build_chat_inbound(
+        item,
+        read_security_enabled=lambda: settings.agent.security_scan_enabled,
+        envelope_inputs=_ENVELOPE_INPUTS,
+    )
     content = message.model_dump()["content"]
     assert isinstance(content, str)
     assert "External agent" in content and "codex" in content

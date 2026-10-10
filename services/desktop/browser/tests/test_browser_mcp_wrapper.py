@@ -6,13 +6,13 @@ Tests cover both _Link (request/response framing) and _ReconnectingLink
 
 import asyncio
 import json
+from collections.abc import Callable
 from importlib import import_module
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
-from base.config import settings
 from services.desktop.browser.mcp_socket_bridge import NotDeliveredError
 from services.desktop.browser.mcp_wrapper import _Link, _ReconnectingLink
 
@@ -54,7 +54,7 @@ def _line(obj: dict[str, Any]) -> bytes:
 def _ok_link(result: object = "ok") -> _Link:
     """Return a _Link whose first request returns *result*."""
     reader = FakeReader([_line({"id": 1, "ok": True, "result": result})])
-    return _Link(reader, FakeWriter())  # type: ignore[arg-type]
+    return _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def _ok_link(result: object = "ok") -> _Link:
 async def test_request_returns_result_on_ok() -> None:
     reader = FakeReader([_line({"id": 1, "ok": True, "result": {"x": 1}})])
     writer = FakeWriter()
-    link = _Link(reader, writer)  # type: ignore[arg-type]
+    link = _Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     assert await link.request({"method": "list_tools"}) == {"x": 1}
     assert "agent_id" not in json.loads(writer.written[0])
 
@@ -75,7 +75,7 @@ async def test_request_ids_are_monotonic() -> None:
         [_line({"id": 1, "ok": True, "result": None}), _line({"id": 2, "ok": True, "result": None})]
     )
     writer = FakeWriter()
-    link = _Link(reader, writer)  # type: ignore[arg-type]
+    link = _Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     await link.request({"method": "list_tools"})
     await link.request({"method": "list_tools"})
     sent = [json.loads(b) for b in writer.written]
@@ -84,13 +84,13 @@ async def test_request_ids_are_monotonic() -> None:
 
 async def test_request_raises_on_error_response() -> None:
     reader = FakeReader([_line({"id": 1, "ok": False, "error": "boom"})])
-    link = _Link(reader, FakeWriter())  # type: ignore[arg-type]
+    link = _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     with pytest.raises(RuntimeError, match="boom"):
         await link.request({"method": "call_tool", "tool": "x", "args": {}})
 
 
 async def test_request_raises_on_closed_connection() -> None:
-    link = _Link(FakeReader([]), FakeWriter())  # type: ignore[arg-type]
+    link = _Link(FakeReader([]), FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     with pytest.raises(ConnectionError, match="closed"):
         await link.request({"method": "list_tools"})
 
@@ -99,7 +99,7 @@ async def test_request_raises_on_id_mismatch() -> None:
     """A response carrying the wrong id (stream desync) fails loud, never returns
     another call's result."""
     reader = FakeReader([_line({"id": 99, "ok": True, "result": "wrong"})])
-    link = _Link(reader, FakeWriter())  # type: ignore[arg-type]
+    link = _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     with pytest.raises(RuntimeError, match="!= request"):
         await link.request({"method": "list_tools"})
 
@@ -115,8 +115,7 @@ class HangingReader(FakeReader):
 async def test_request_times_out_on_wedged_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     """A daemon that accepts the request but never answers must surface as a
     TimeoutError instead of hanging the calling agent forever."""
-    monkeypatch.setattr(settings.sandbox, "mcp_connect_timeout_seconds", 0.05)
-    link = _Link(HangingReader([]), FakeWriter())  # type: ignore[arg-type]
+    link = _Link(HangingReader([]), FakeWriter(), timeout_reader=lambda: 0.01)  # type: ignore[arg-type]
     with pytest.raises(TimeoutError):
         await link.request({"method": "list_tools"})
 
@@ -129,17 +128,16 @@ async def test_reconnecting_link_surfaces_timeout_without_retry(
     retrying a browser write would double-execute it. The wrapper must
     surface the timeout and close the dead link (so the NEXT call
     reconnects), not retry."""
-    monkeypatch.setattr(settings.sandbox, "mcp_connect_timeout_seconds", 0.05)
     connect_calls = 0
 
     async def _fake_connect():
         nonlocal connect_calls
         connect_calls += 1
         if connect_calls == 1:
-            return _Link(HangingReader([]), FakeWriter())  # type: ignore[arg-type]
+            return _Link(HangingReader([]), FakeWriter(), timeout_reader=lambda: 0.01)  # type: ignore[arg-type]
         return _ok_link("recovered")
 
-    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0)
+    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 0.01)
     reconnecting._connect_once = _fake_connect  # type: ignore[assignment]
 
     with pytest.raises(TimeoutError):
@@ -159,7 +157,7 @@ async def test_reconnecting_link_surfaces_timeout_without_retry(
 
 async def test_reconnecting_link_success_first_try() -> None:
     """Happy path: connect succeeds, request returns."""
-    link = _ReconnectingLink(max_retries=1, base_delay=0.0)
+    link = _ReconnectingLink(max_retries=1, base_delay=0.0, timeout_reader=lambda: 1.0)
     connect_calls = 0
 
     async def _fake_connect():
@@ -176,7 +174,7 @@ async def test_reconnecting_link_success_first_try() -> None:
 
 async def test_reconnecting_link_retries_on_connect_failure() -> None:
     """Connect raises ConnectionRefusedError on first attempt, succeeds on retry."""
-    link = _ReconnectingLink(max_retries=2, base_delay=0.0)
+    link = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0)
     connect_calls = 0
 
     async def _fake_connect():
@@ -212,7 +210,7 @@ async def test_reconnecting_link_retries_on_not_delivered() -> None:
             return link_
         return _ok_link("recovered")
 
-    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0)
+    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0)
     reconnecting._connect_once = _fake_connect  # type: ignore[assignment]
 
     result = await reconnecting.request({"method": "call_tool", "tool": "x", "args": {}})
@@ -223,14 +221,14 @@ async def test_reconnecting_link_retries_on_not_delivered() -> None:
 async def test_reconnecting_link_exhausts_retries() -> None:
     """All requests fail before delivery; the retry budget is exhausted and
     the last error propagates."""
-    link = _ReconnectingLink(max_retries=2, base_delay=0.0)
+    link = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0)
     failure = NotDeliveredError("always broken")
     writers: list[FakeWriter] = []
 
     async def _always_broken():
         writer = FakeWriter()
         writers.append(writer)
-        link_ = _Link(FakeReader([]), writer)  # type: ignore[arg-type]
+        link_ = _Link(FakeReader([]), writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
 
         async def always_raise(payload: dict[str, Any]) -> Any:
             raise failure
@@ -251,10 +249,10 @@ async def test_reconnecting_link_exhausts_retries() -> None:
 async def test_reconnecting_link_does_not_retry_non_transport_error() -> None:
     """RuntimeError from daemon (e.g. bad tool name) is NOT retried."""
     reader = FakeReader([_line({"id": 1, "ok": False, "error": "unknown tool: bad_tool"})])
-    link = _ReconnectingLink(max_retries=3, base_delay=0.0)
+    link = _ReconnectingLink(max_retries=3, base_delay=0.0, timeout_reader=lambda: 1.0)
 
     async def _fake_connect():
-        return _Link(reader, FakeWriter())  # type: ignore[arg-type]
+        return _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
 
     link._connect_once = _fake_connect  # type: ignore[assignment]
 
@@ -283,7 +281,7 @@ async def test_reconnecting_link_closes_old_link_on_reconnect() -> None:
             return link_
         return _ok_link("recovered")
 
-    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0)
+    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0)
     reconnecting._connect_once = _fake_connect  # type: ignore[assignment]
 
     result = await reconnecting.request({"method": "list_tools"})
@@ -303,9 +301,9 @@ async def test_reconnecting_link_serializes_requests() -> None:
     )
 
     async def _fake_connect():
-        return _Link(reader, FakeWriter())  # type: ignore[arg-type]
+        return _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
 
-    link = _ReconnectingLink(max_retries=1, base_delay=0.0)
+    link = _ReconnectingLink(max_retries=1, base_delay=0.0, timeout_reader=lambda: 1.0)
     link._connect_once = _fake_connect  # type: ignore[assignment]
 
     async def req(payload: dict[str, Any]) -> None:
@@ -336,7 +334,7 @@ async def test_reconnecting_link_does_not_retry_after_delivery_loss() -> None:
         link_.request = reset_request  # type: ignore[assignment]
         return link_
 
-    reconnecting = _ReconnectingLink(max_retries=3, base_delay=0.0)
+    reconnecting = _ReconnectingLink(max_retries=3, base_delay=0.0, timeout_reader=lambda: 1.0)
     reconnecting._connect_once = _fake_connect  # type: ignore[assignment]
 
     with pytest.raises(ConnectionResetError):
@@ -352,7 +350,7 @@ async def test_link_drain_reset_preserves_unknown_delivery_error() -> None:
             raise ConnectionResetError("peer gone")
 
     writer = DeadWriter()
-    link = _Link(FakeReader([]), writer)  # type: ignore[arg-type]
+    link = _Link(FakeReader([]), writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     with pytest.raises(ConnectionResetError, match="peer gone"):
         await link.request({"method": "list_tools"})
     assert len(writer.written) == 1
@@ -409,7 +407,7 @@ async def test_shared_socket_bridge_passes_through_unclassified_error(
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_wrapper_retry_budget_and_backoff(retry_waits: list[float], side: str) -> None:
     wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
-    reconnecting = wrapper._ReconnectingLink()
+    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
     failure = RuntimeError("offline")
     connect = AsyncMock(side_effect=failure)
     reconnecting._connect_once = connect
@@ -445,8 +443,10 @@ async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
         writer = FakeWriter()
         closed: list[bool] = []
         writer.close = lambda closed=closed: closed.append(True)
-        reconnecting = wrapper._ReconnectingLink()
-        connect = AsyncMock(return_value=wrapper._Link(FakeReader([line]), writer))
+        reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
+        connect = AsyncMock(
+            return_value=wrapper._Link(FakeReader([line]), writer, timeout_reader=lambda: 1.0)
+        )
         reconnecting._connect_once = connect
         with pytest.raises(error_type) as error:
             await reconnecting.request({"method": "call_tool", "tool": "x", "args": {}})
@@ -466,11 +466,19 @@ async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side
     for index, writer in enumerate(writers):
         writer.close = lambda index=index: closed.append(index)
     links = [
-        wrapper._Link(FakeReader([_line({"id": 1, "ok": False, "error": rejection})]), writers[0]),
-        wrapper._Link(FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]), writers[1]),
+        wrapper._Link(
+            FakeReader([_line({"id": 1, "ok": False, "error": rejection})]),
+            writers[0],
+            timeout_reader=lambda: 1.0,
+        ),
+        wrapper._Link(
+            FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]),
+            writers[1],
+            timeout_reader=lambda: 1.0,
+        ),
     ]
     connect = AsyncMock(side_effect=links)
-    reconnecting = wrapper._ReconnectingLink()
+    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
     reconnecting._connect_once = connect
     if side == "browser":
         assert await reconnecting.request({"method": "call_tool", "tool": "x"}) == "ok"
@@ -491,7 +499,6 @@ async def test_stalled_drain_is_unknown_delivery_without_retry(
     monkeypatch: pytest.MonkeyPatch, side: str
 ) -> None:
     wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
-    monkeypatch.setattr(settings.sandbox, "mcp_connect_timeout_seconds", 0.01)
 
     class StalledWriter(FakeWriter):
         def __init__(self) -> None:
@@ -505,8 +512,10 @@ async def test_stalled_drain_is_unknown_delivery_without_retry(
             self.closed = True
 
     writer = StalledWriter()
-    connect = AsyncMock(return_value=wrapper._Link(FakeReader([]), writer))
-    reconnecting = wrapper._ReconnectingLink()
+    connect = AsyncMock(
+        return_value=wrapper._Link(FakeReader([]), writer, timeout_reader=lambda: 0.01)
+    )
+    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 0.01)
     reconnecting._connect_once = connect
     with pytest.raises(TimeoutError):
         await reconnecting.request({"method": "call_tool", "tool": "x"})
@@ -538,13 +547,15 @@ async def test_write_or_drain_failure_is_not_retried(
     failed_writer.close = lambda: closed.append(True)
     connect = AsyncMock(
         side_effect=[
-            wrapper._Link(FakeReader([]), failed_writer),
+            wrapper._Link(FakeReader([]), failed_writer, timeout_reader=lambda: 1.0),
             wrapper._Link(
-                FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]), success_writer
+                FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]),
+                success_writer,
+                timeout_reader=lambda: 1.0,
             ),
         ]
     )
-    reconnecting = wrapper._ReconnectingLink()
+    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
     reconnecting._connect_once = connect
     with pytest.raises(BrokenPipeError, match="socket broke"):
         await reconnecting.request({"method": "call_tool", "tool": "x"})
@@ -569,11 +580,15 @@ async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) ->
     fresh = FakeWriter()
     connect = AsyncMock(
         side_effect=[
-            wrapper._Link(FakeReader([]), failed),
-            wrapper._Link(FakeReader([_line({"id": 1, "ok": True, "result": "next"})]), fresh),
+            wrapper._Link(FakeReader([]), failed, timeout_reader=lambda: 1.0),
+            wrapper._Link(
+                FakeReader([_line({"id": 1, "ok": True, "result": "next"})]),
+                fresh,
+                timeout_reader=lambda: 1.0,
+            ),
         ]
     )
-    reconnecting = wrapper._ReconnectingLink()
+    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
     reconnecting._connect_once = connect
     with pytest.raises(ConnectionResetError, match="reset during drain"):
         await reconnecting.request({"method": "call_tool", "tool": "click"})
@@ -594,13 +609,88 @@ async def test_closed_before_write_retries_without_sending(
     fresh = FakeWriter()
     connect = AsyncMock(
         side_effect=[
-            wrapper._Link(FakeReader([]), closed),
-            wrapper._Link(FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]), fresh),
+            wrapper._Link(FakeReader([]), closed, timeout_reader=lambda: 1.0),
+            wrapper._Link(
+                FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]),
+                fresh,
+                timeout_reader=lambda: 1.0,
+            ),
         ]
     )
-    reconnecting = wrapper._ReconnectingLink()
+    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
     reconnecting._connect_once = connect
     assert await reconnecting.request({"method": "call_tool", "tool": "click"}) == "ok"
     assert connect.await_count == 2
     assert [len(closed.written), len(fresh.written)] == [0, 1]
     assert retry_waits == [1.0 if side == "browser" else 0.5]
+
+
+@pytest.mark.parametrize("side", ["browser", "computer"])
+async def test_bridge_timeout_readers_are_dynamic_and_isolated(side: str) -> None:
+    from base.config import ConfigBoot
+
+    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("mcp_connect_timeout_seconds", 0.01)
+    second.set_field("mcp_connect_timeout_seconds", 1.0)
+    reads: list[str] = []
+
+    def first_timeout() -> float:
+        reads.append("first")
+        return first.view.sandbox.mcp_connect_timeout_seconds
+
+    def second_timeout() -> float:
+        reads.append("second")
+        return second.view.sandbox.mcp_connect_timeout_seconds
+
+    class InitiallyBlockedReader(FakeReader):
+        async def readline(self) -> bytes:
+            if len(self._lines) == 1:
+                self._lines.append(b"")
+                await asyncio.Event().wait()
+            return self._lines[0]
+
+    first_link = wrapper._Link(
+        InitiallyBlockedReader([_line({"id": 2, "ok": True, "result": "updated"})]),
+        FakeWriter(),
+        timeout_reader=first_timeout,
+    )
+    second_link = wrapper._Link(
+        FakeReader([_line({"id": 1, "ok": True, "result": "independent"})]),
+        FakeWriter(),
+        timeout_reader=second_timeout,
+    )
+    assert reads == []
+    with pytest.raises(TimeoutError):
+        await first_link.request({"method": "list_tools"})
+    assert await second_link.request({"method": "list_tools"}) == "independent"
+    first.set_field("mcp_connect_timeout_seconds", 1.0)
+    assert await first_link.request({"method": "list_tools"}) == "updated"
+    assert second.view.sandbox.mcp_connect_timeout_seconds == 1.0
+    assert reads == ["first", "second", "first"]
+
+
+@pytest.mark.parametrize("side", ["browser", "computer"])
+def test_wrapper_main_keeps_its_own_boot_bound_reader(
+    monkeypatch: pytest.MonkeyPatch, side: str
+) -> None:
+    from base.config import ConfigBoot
+
+    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("mcp_connect_timeout_seconds", 0.25)
+    second.set_field("mcp_connect_timeout_seconds", 0.75)
+    owners = iter([first, second])
+    monkeypatch.setattr(wrapper, "ConfigBoot", lambda: next(owners))
+    seen: list[tuple[float, float]] = []
+
+    async def serve(*, timeout_reader: Callable[[], float]) -> None:
+        before = timeout_reader()
+        owner = first if not seen else second
+        owner.set_field("mcp_connect_timeout_seconds", before + 1.0)
+        seen.append((before, timeout_reader()))
+
+    monkeypatch.setattr(wrapper, "_serve", serve)
+    wrapper.main()
+    wrapper.main()
+    assert seen == [(0.25, 1.25), (0.75, 1.75)]

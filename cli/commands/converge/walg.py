@@ -23,7 +23,7 @@ def converge_walg(ctx: ConvergeCtx) -> None:
             wal-g, the download failed its checksum, or the configuration is unusable
             (`WalgConfigError` names the file and the setting, never a value).
     """
-    if not walg_config.enabled():
+    if not walg_config.enabled(path_reader=lambda: ctx.config.view.walg.walg_config_file):
         return
     if settings.data_plane.is_remote:
         raise RuntimeError(
@@ -31,5 +31,5 @@ def converge_walg(ctx: ConvergeCtx) -> None:
             "WAL archiving needs the locally launched Postgres (unset the key)"
         )
     ensure_walg_binary()
-    walg_config.load_walg_config()
+    walg_config.load_walg_config(path_reader=lambda: ctx.config.view.walg.walg_config_file)
     ensure_private_dir(ctx.ava_home / "backups" / "walg")

@@ -2,8 +2,10 @@
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import uuid4
 
 import psycopg
@@ -12,20 +14,27 @@ from langchain_core.messages import HumanMessage
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from agent import impersonation
+from agent.tests.impersonation.test_impersonation import _notes
 from base.agents.context import AvaContext
 from base.agents.incarnation.resources import ResourceProcess
+from base.agents.observation.relay_supervision import RelaySupervision
+from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from tests.impersonation_support import recorded_tree
 
 
 @pytest.fixture
 def gate_ctx(database: Database, event_bus: EventBus) -> AvaContext:
-    return AvaContext(db=database, bus=event_bus, catalog=build_model_catalog())
+    return AvaContext(
+        db=database, bus=event_bus, catalog=build_model_catalog(), clock_factory=Clock.from_settings
+    )
 
 
 @pytest.fixture
@@ -141,3 +150,47 @@ def test_resume_note_pending_tracks_the_trailing_end_note() -> None:
     state.impersonation_handoff_id = None
     assert not resume_note_pending(state)
     assert not resume_note_pending(SimpleNamespace(impersonation_handoff_id="9:0", messages=[]))
+
+
+@pytest.fixture
+def relays() -> RelaySupervision:
+    return RelaySupervision()
+
+
+async def test_activation_waits_for_resource_closure(
+    monkeypatch: pytest.MonkeyPatch,
+    incarnation: RuntimeIncarnation,
+    database: Database,
+    event_bus: EventBus,
+    relays: RelaySupervision,
+) -> None:
+    monkeypatch.setattr(
+        impersonation, "native_status", AsyncMock(return_value=_session("accepted"))
+    )
+    activate = Mock(return_value=_session())
+    monkeypatch.setattr("base.agents.impersonation.activate", activate)
+    resources = HostedTurnResources(unresolved={Path("request"): object()})
+    with pytest.raises(RuntimeError, match="unresolved native exec"):
+        await impersonation.settle_checkpoint(
+            MagicMock(),
+            database,
+            event_bus,
+            42,
+            relays,
+            incarnation=incarnation,
+            resources=resources,
+            notes=_notes(),
+        )
+    activate.assert_not_called()
+    assert not await impersonation.settle_checkpoint(
+        MagicMock(),
+        database,
+        event_bus,
+        42,
+        relays,
+        activate_accepted=False,
+        incarnation=incarnation,
+        resources=resources,
+        notes=_notes(),
+    )
+    activate.assert_not_called()

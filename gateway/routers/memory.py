@@ -22,15 +22,15 @@ import asyncio
 import subprocess
 import threading
 from collections import OrderedDict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from base.agents import IndexerUnavailable
-from base.config import settings
 from base.db import Database
 from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
 from base.paths import gateway_memory_dir
@@ -66,16 +66,29 @@ router = APIRouter()
 # recall wedged with it.
 
 
-def build_search_gate() -> asyncio.Semaphore:
+@dataclass(frozen=True)
+class MemorySearchInputs:
+    """Live configuration readers owned by the gateway composition root."""
+
+    embedding_backend: Callable[[], str]
+    backend: Callable[[], str]
+    uri: Callable[[], str]
+    embedding_timeout: Callable[[], float]
+    api_key: Callable[[], str | None]
+    acquire_timeout: Callable[[], float]
+    deadline: Callable[[], float]
+
+
+def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
     """The query-embed concurrency gate, built once per process by the app lifespan from
     the `memory_search_max_concurrency` setting — a knob, not a hardcoded
     constant, so a deployment can widen or narrow it without a code change
     (config panel or env; takes effect on gateway restart)."""
-    return asyncio.Semaphore(settings.services.memory_search_max_concurrency)
+    return asyncio.Semaphore(max_concurrency)
 
 
 @asynccontextmanager
-async def _bounded_semaphore(semaphore: asyncio.Semaphore) -> AsyncGenerator[None]:
+async def _bounded_semaphore(semaphore: asyncio.Semaphore, budget: float) -> AsyncGenerator[None]:
     """Acquire a search-gate permit with a short queue budget.
 
     The overall search deadline already covers the acquire, but a deep queue
@@ -87,7 +100,6 @@ async def _bounded_semaphore(semaphore: asyncio.Semaphore) -> AsyncGenerator[Non
     deadline degrades in ~1s instead of ~5s and an explicit search learns
     immediately instead of queueing.
     """
-    budget = settings.services.memory_search_acquire_timeout_seconds
     try:
         await asyncio.wait_for(semaphore.acquire(), timeout=budget)
     except TimeoutError as exc:
@@ -270,7 +282,13 @@ def _extract_meta(path: Path) -> tuple[str, list[str]]:
 
 
 async def _backend_topk(
-    database: Database, query_vector: Any, k: int, deadline: float, dim: int, fingerprint: str
+    database: Database,
+    query_vector: Any,
+    k: int,
+    deadline: float,
+    dim: int,
+    fingerprint: str,
+    inputs: MemorySearchInputs,
 ) -> list[str]:
     """The storage half of a search: ask the configured backend for top-k
     paths, every step handed an explicit deadline. `dim` + `fingerprint` are
@@ -284,9 +302,9 @@ async def _backend_topk(
     """
     from services.derived.memory_indexer.backends import factory
 
-    return await factory.get_backend(database, dim=dim, fingerprint=fingerprint).search_topk_async(
-        query_vector, k, timeout=deadline
-    )
+    return await factory.get_backend(
+        database, dim=dim, fingerprint=fingerprint, name=inputs.backend(), uri_reader=inputs.uri
+    ).search_topk_async(query_vector, k, timeout=deadline)
 
 
 @router.post(
@@ -316,7 +334,13 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
     from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
-    provider = _embedding_factory.get_provider(catalog=request.app.state.catalog)
+    inputs: MemorySearchInputs = request.app.state.memory_search_inputs
+    provider = _embedding_factory.get_provider(
+        inputs.embedding_backend(),
+        catalog=request.app.state.catalog,
+        timeout_reader=inputs.embedding_timeout,
+        api_key_reader=inputs.api_key,
+    )
 
     # Both phases are native async I/O — httpx.AsyncClient for the embed,
     # the backend's async client for the search — so a slow backend
@@ -333,11 +357,13 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     # the overall deadline. On expiry the CancelledError unwinds through
     # `async with`, whose release is synchronous — so the permit is returned
     # even though the cleanup awaits below never get to run.
-    deadline = settings.services.memory_search_deadline_seconds
+    deadline = inputs.deadline()
     try:
         async with asyncio.timeout(deadline):
             try:
-                async with _bounded_semaphore(request.app.state.memory_search_gate):
+                async with _bounded_semaphore(
+                    request.app.state.memory_search_gate, inputs.acquire_timeout()
+                ):
                     query_vector = await provider.embed_query_async(body.query)
             except IndexerUnavailable:
                 # The gate was busy (`_bounded_semaphore`'s fast-fail) — a
@@ -347,7 +373,9 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
                 raise IndexerUnavailable(f"embed query failed: {exc}") from exc
 
             try:
-                async with _bounded_semaphore(request.app.state.memory_search_gate):
+                async with _bounded_semaphore(
+                    request.app.state.memory_search_gate, inputs.acquire_timeout()
+                ):
                     abs_paths = await _backend_topk(
                         request.app.state.db,
                         query_vector,
@@ -355,6 +383,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
                         deadline,
                         provider.dim,
                         provider.fingerprint,
+                        inputs,
                     )
             except IndexerUnavailable:
                 raise

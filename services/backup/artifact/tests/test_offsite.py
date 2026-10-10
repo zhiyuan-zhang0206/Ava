@@ -50,7 +50,13 @@ def test_publish_streams_a_multipart_object_and_verifies_it(
     artifact, bucket = _artifact(tmp_path), FakeOssBucket()
     caplog.set_level(logging.INFO, logger=offsite.__name__)
 
-    published = offsite.publish(artifact, bucket=bucket)
+    published = offsite.publish(
+        artifact,
+        bucket=bucket,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     assert published == f"{REMOTE_ROOT}/{_NAME}"
     stored = bucket.files[f"{REMOTE_ROOT}/{_NAME}"]
@@ -69,7 +75,13 @@ def test_forbid_overwrite_rides_only_on_complete(tmp_path: Path) -> None:
     """On init it would fail an occupied name at once and kill adopt-after-crash."""
     bucket = FakeOssBucket()
 
-    offsite.publish(_artifact(tmp_path), bucket=bucket)
+    offsite.publish(
+        _artifact(tmp_path),
+        bucket=bucket,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     headers = dict(bucket.calls)
     assert "x-oss-forbid-overwrite" not in headers["init"]
@@ -111,7 +123,16 @@ def test_adopt_after_crash_returns_the_existing_object(
     assert first.created and not second.created
     assert second.pin_token == first.pin_token and second.md5 == first.md5
     assert bucket.aborted == ["up2"], "the losing upload must not linger as a fragment"
-    assert offsite.publish(artifact, bucket=bucket) == f"{REMOTE_ROOT}/{_NAME}"
+    assert (
+        offsite.publish(
+            artifact,
+            bucket=bucket,
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+        )
+        == f"{REMOTE_ROOT}/{_NAME}"
+    )
     assert any("off-site published" in r.getMessage() for r in caplog.records)
 
 
@@ -128,7 +149,16 @@ def test_an_occupied_name_with_a_different_etag_chain_is_not_adopted(
 
     assert bucket.files[f"{REMOTE_ROOT}/{_NAME}"]["data"] == b"eNcrypted artifact"
     caplog.set_level(logging.INFO, logger=offsite.__name__)
-    assert offsite.publish(artifact, bucket=bucket) is None
+    assert (
+        offsite.publish(
+            artifact,
+            bucket=bucket,
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+        )
+        is None
+    )
     assert any(
         "off-site publish of" in r.getMessage() and "failed" in r.getMessage()
         for r in caplog.records
@@ -179,7 +209,16 @@ def test_a_rejected_init_keeps_the_local_artifact_and_does_not_raise(
     bucket.fail_init = (403, "AccessDenied")
     artifact = _artifact(tmp_path)
 
-    assert offsite.publish(artifact, bucket=bucket) is None
+    assert (
+        offsite.publish(
+            artifact,
+            bucket=bucket,
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+        )
+        is None
+    )
 
     assert artifact.read_bytes() == b"encrypted artifact"
     assert any(r.exc_info is not None for r in caplog.records), "the failure must carry its cause"
@@ -189,7 +228,14 @@ def test_the_root_is_a_parameter(tmp_path: Path) -> None:
     """A smoke run publishes under a scratch prefix and never touches `ava-logical/`."""
     bucket = FakeOssBucket()
 
-    published = offsite.publish(_artifact(tmp_path), root="ava-pitr-scratch/t1", bucket=bucket)
+    published = offsite.publish(
+        _artifact(tmp_path),
+        root="ava-pitr-scratch/t1",
+        bucket=bucket,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     assert published == f"ava-pitr-scratch/t1/{_NAME}"
     assert list(bucket.files) == [published]
@@ -212,7 +258,15 @@ def test_unconfigured_publish_skips_with_one_info_line(
     monkeypatch.setattr(offsite, "open_bucket", _never_opened)
     caplog.set_level(logging.INFO, logger=offsite.__name__)
 
-    assert offsite.publish(_artifact(tmp_path)) is None
+    assert (
+        offsite.publish(
+            _artifact(tmp_path),
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+        )
+        is None
+    )
 
     [record] = caplog.records
     assert (record.levelno, record.exc_info) == (logging.INFO, None)
@@ -228,7 +282,15 @@ def test_a_partly_configured_destination_skips_naming_the_unset_keys(
     monkeypatch.setattr(settings.services, "backup_offsite_credentials_file", None)
     caplog.set_level(logging.INFO, logger=offsite.__name__)
 
-    assert offsite.publish(_artifact(tmp_path)) is None
+    assert (
+        offsite.publish(
+            _artifact(tmp_path),
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+        )
+        is None
+    )
 
     [record] = caplog.records
     assert record.levelno == logging.INFO
@@ -250,7 +312,12 @@ def test_a_configured_destination_publishes_to_the_opened_bucket(
 
     monkeypatch.setattr(offsite, "open_bucket", _open)
 
-    published = offsite.publish(_artifact(tmp_path))
+    published = offsite.publish(
+        _artifact(tmp_path),
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    )
 
     assert published == f"{REMOTE_ROOT}/{_NAME}" and published in bucket.files
     assert opened == [
@@ -277,7 +344,15 @@ def test_an_unusable_credentials_file_keeps_the_local_artifact(
     (tmp_path / "oss.json").write_bytes(payload)
     artifact = _artifact(tmp_path)
 
-    assert offsite.publish(artifact) is None
+    assert (
+        offsite.publish(
+            artifact,
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+        )
+        is None
+    )
 
     assert artifact.read_bytes() == b"encrypted artifact"
     assert any(
@@ -321,7 +396,7 @@ def _entry(
         from services.backup.artifact.tests.oss_fake import FakeOssBucket
 
         if {configured!r}:
-            offsite.configured_target = lambda: offsite.OssTarget("https://oss.example", "b", None)
+            offsite.configured_target = lambda **_readers: offsite.OssTarget("https://oss.example", "b", None)
         {textwrap.indent(textwrap.dedent(body), "        ").lstrip()}
         raise SystemExit(_main({["--publish-offsite", str(tmp_path / _NAME), *args]!r}))
     """)
@@ -373,3 +448,21 @@ def test_standalone_publish_failure_keeps_exit_and_artifact(tmp_path: Path) -> N
     assert proc.returncode == 0, proc.stderr
     assert f"[backup] off-site publish of {REMOTE_ROOT}/{_NAME} failed" in proc.stderr
     assert artifact.read_bytes() == b"encrypted artifact"
+
+
+def test_explicit_bucket_does_not_read_configuration(tmp_path: Path) -> None:
+    def unexpected() -> Any:
+        raise AssertionError("an explicit bucket must not read configuration")
+
+    bucket = FakeOssBucket()
+    assert (
+        offsite.publish(
+            _artifact(tmp_path),
+            bucket=bucket,
+            endpoint_reader=unexpected,
+            bucket_reader=unexpected,
+            credentials_file_reader=unexpected,
+        )
+        == f"{REMOTE_ROOT}/{_NAME}"
+    )
+    assert f"{REMOTE_ROOT}/{_NAME}" in bucket.files

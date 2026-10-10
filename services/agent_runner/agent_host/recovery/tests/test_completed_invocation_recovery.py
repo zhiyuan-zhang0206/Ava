@@ -51,10 +51,11 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
     original_invoke = host_module.run_invocation_with_stall_guard
     original_flush = invocation_owner.flush_checkpoint
@@ -135,10 +136,11 @@ async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
     host._runtimes[agent] = MagicMock()
     # A forced or superseded lifecycle return can carry its graph flag while
@@ -160,6 +162,7 @@ async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
         db=ctx.require_db(),
         bus=ctx.require_bus(),
         relays=host.relays,
+        notes=configured_policy().handoff_notes,
     )
     assert outcome is not None and not outcome.exited
     assert agent not in host._runtimes

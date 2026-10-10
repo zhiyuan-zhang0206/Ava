@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
@@ -20,11 +21,18 @@ from base.agents.history.hierarchy.units import (
     read_times,
 )
 from base.agents.history.hierarchy.usage import MessageUsage
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.run_timeline import context
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts, block_tokens
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -57,8 +65,8 @@ def two_sessions() -> HistoryView:
         human("ask two", 10),
         ai("reply two", 40, 11),
     ]
-    read = read_times(messages)
-    units = display_blocks(divide_units(messages), messages, read)
+    read = read_times(messages, timeline_inputs=_TIMELINE_INPUTS)
+    units = display_blocks(divide_units(messages, timeline_inputs=_TIMELINE_INPUTS), messages, read)
     history = FullHistory(
         messages,
         (messages[0], SystemMessage(content="second prompt")),  # type: ignore[arg-type]
@@ -99,8 +107,8 @@ def three_requests_then_a_session() -> HistoryView:
         human("ask five", 10),
         ai("reply four", 40, 11),
     ]
-    read = read_times(messages)
-    units = display_blocks(divide_units(messages), messages, read)
+    read = read_times(messages, timeline_inputs=_TIMELINE_INPUTS)
+    units = display_blocks(divide_units(messages, timeline_inputs=_TIMELINE_INPUTS), messages, read)
     history = FullHistory(
         messages,
         (messages[0], SystemMessage(content="second prompt")),  # type: ignore[arg-type]
@@ -177,9 +185,15 @@ class Views:
 def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch, catalog: ModelCatalog):
 
     def breakdown(
-        _pool: object, _agent: int, found: RequestBreakdown, *, catalog: ModelCatalog
+        _pool: object,
+        _agent: int,
+        found: RequestBreakdown,
+        *,
+        catalog: ModelCatalog,
+        default_model_reader: Callable[[], str],
     ) -> ContextBreakdownResponse:
         assert catalog is app_state.catalog
+        assert default_model_reader is app_state.default_model_reader
         # The window and thresholds come from the model registry; the bucketing is the real one.
         return ContextBreakdownResponse(
             total_input_tokens=found.total.tokens,
@@ -203,6 +217,7 @@ def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch, catalog: M
         db_pool=object(),
         run_timeline_views=Views(view),
         catalog=catalog,
+        default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
     )
     request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=app_state)))
     return context.get_run_timeline_context(request, 7, at)
@@ -228,7 +243,7 @@ def test_an_agent_with_no_request_has_no_context(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     messages: list[BaseMessage] = [human("hello", 0)]
-    read = read_times(messages)
+    read = read_times(messages, timeline_inputs=_TIMELINE_INPUTS)
     view = HistoryView.of(FullHistory(messages, (None,), (0,)), [], MessageUsage(messages), read)
     with pytest.raises(HTTPException) as caught:
         call(view, 0, monkeypatch, model_catalog)

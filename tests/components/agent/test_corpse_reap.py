@@ -120,7 +120,12 @@ async def test_the_reap_records_its_audit_fact_in_the_reaping_transaction(
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
 
-    await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus)
+    await reap_recrashed_corpse(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+    )
 
     rows = db_conn.execute(
         "SELECT source, attributes FROM audit_events "
@@ -189,7 +194,12 @@ async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
     published.clear()
 
-    reaped = await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus)
+    reaped = await reap_recrashed_corpse(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+    )
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
 
     _assert_row_terminated_by_the_reaper_with_mark_kept(db_conn, agent_id)
@@ -211,7 +221,15 @@ async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
     assert [r["extra"]["crash_count"] for r in reaped_records] == [RECRASH_CONFIRMED_CRASHES]
 
     # Already terminated: a second prompt reap has no subject.
-    assert await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus) == []
+    assert (
+        await reap_recrashed_corpse(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+        )
+        == []
+    )
     assert len(events) == 1
 
 
@@ -228,7 +246,15 @@ async def test_prompt_reap_refuses_rows_that_are_not_its_marked_idling_own(
     # A running row (a live turn or claim park) is never touched.
     db_conn.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (agent_id,))
     db_conn.commit()
-    assert await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus) == []
+    assert (
+        await reap_recrashed_corpse(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+        )
+        == []
+    )
 
     # Nor is an unmarked live row.
     db_conn.execute(
@@ -236,7 +262,15 @@ async def test_prompt_reap_refuses_rows_that_are_not_its_marked_idling_own(
         (agent_id,),
     )
     db_conn.commit()
-    assert await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus) == []
+    assert (
+        await reap_recrashed_corpse(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+        )
+        == []
+    )
 
     # Nor a marked row owned by a different incarnation (concurrent replacement).
     db_conn.execute(
@@ -245,7 +279,15 @@ async def test_prompt_reap_refuses_rows_that_are_not_its_marked_idling_own(
         (uuid4(), uuid4(), agent_id),
     )
     db_conn.commit()
-    assert await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus) == []
+    assert (
+        await reap_recrashed_corpse(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+        )
+        == []
+    )
 
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id = %s", (agent_id,)
@@ -269,7 +311,12 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
     for _ in range(4):
         agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
         reaped, admitted = await asyncio.gather(
-            reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus),
+            reap_recrashed_corpse(
+                aops_pool,
+                incarnation,
+                bus=event_bus,
+                wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+            ),
             admit_hosted_runtime(
                 aops_pool,
                 agent_id,
@@ -292,7 +339,12 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
 
     # Serialized both ways: whichever transition runs second refuses.
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
-    reaped = await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus)
+    reaped = await reap_recrashed_corpse(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+    )
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     assert (
         await admit_hosted_runtime(
@@ -313,7 +365,15 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
         )
         is not None
     )
-    assert await reap_recrashed_corpse(aops_pool, incarnation2, bus=event_bus) == []
+    assert (
+        await reap_recrashed_corpse(
+            aops_pool,
+            incarnation2,
+            bus=event_bus,
+            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+        )
+        == []
+    )
 
 
 async def test_prompt_reap_then_resurrect_composes_without_tearing(
@@ -341,11 +401,21 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
     monkeypatch.setattr(wake, "publish_inbound_wake", _wake)
 
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
-    reaped = await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus)
+    reaped = await reap_recrashed_corpse(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+    )
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
 
     second_reap, resurrected = await asyncio.gather(
-        reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus),
+        reap_recrashed_corpse(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+        ),
         asyncio.to_thread(
             wake.resurrect_agent, database, event_bus, agent_id, resurrected_by="user"
         ),
@@ -392,7 +462,13 @@ async def test_grace_reap_commits_a_marked_wake_that_passes_the_notice_gate(
     )
     db_conn.commit()
 
-    reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
+    reaped = await reap_crash_corpses(
+        aops_pool,
+        "host-test",
+        owner,
+        bus=event_bus,
+        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+    )
 
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     wake_id = reaped[0].recovery_wake_id
@@ -409,7 +485,12 @@ async def test_recovery_wake_switch_off_commits_nothing(
     monkeypatch.setattr(settings.daemon, "hosted_crash_recovery_wake_enabled", False)
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
 
-    reaped = await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus)
+    reaped = await reap_recrashed_corpse(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
+    )
 
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     assert reaped[0].recovery_wake_id is None

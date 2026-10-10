@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import ConfigBoot
 from cli.commands.converge import _steps
 from cli.commands.converge import host as converge_host
 
@@ -31,7 +32,7 @@ def test_cli_link_step_skips_hosts_without_the_symlink_model(
     monkeypatch.setattr(_steps, "get_backend", _NoSymlink)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     ctx = converge_host.ConvergeCtx(
-        repo=tmp_path / "repo", ava_home=tmp_path / "cluster-home", roles=None
+        repo=tmp_path / "repo", ava_home=tmp_path / "cluster-home", roles=None, config=ConfigBoot()
     )
     for step in _CLI_LINK_STEPS:
         step.apply(ctx)

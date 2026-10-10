@@ -64,7 +64,7 @@ from base.cluster.dataplane.pg_tools import (
     pg_tool,
     pg_tz_args,
 )
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.db.pg_admin import pg_socket_dir
@@ -339,6 +339,11 @@ def _start_pg(
 ) -> int:
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
+    config = ConfigBoot()
+
+    def path_reader() -> Path | None:
+        return config.view.walg.walg_config_file
+
     owner = ownership.require_postgres(_pg_data_dir(), pg_port, required=False)
     data = _ensure_pg_data()
     (data / "pg_ident.conf").write_text(_pg_ident_body())
@@ -381,7 +386,7 @@ def _start_pg(
             f"max_connections={_PG_MAX_CONNECTIONS}",
             *shlex.split(pg_tz_args()),
             *shlex.split(pg_shm_args()),
-            *archive_pg_args(),
+            *archive_pg_args(path_reader=path_reader),
         ],
         pg_start_env(),
         ready=lambda: _pg_running(pg_port, dial_host),
@@ -392,7 +397,7 @@ def _start_pg(
     ownership.require_postgres(data, pg_port)
     require_authenticated_hba(pg_port, dial_host)
     print(f"  ✓ postgres ready ({dial_host}:{pg_port}, password authentication enforced)")
-    warn_archive_inactive()
+    warn_archive_inactive(path_reader=path_reader)
     return 0
 
 

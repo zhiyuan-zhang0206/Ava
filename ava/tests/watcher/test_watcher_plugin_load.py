@@ -108,6 +108,8 @@ def test_bare_shell_child_eager_loads_plugins(tmp_path: Path) -> None:
         "AVA_HOME": str(home),
         "AVA_AGENT_ID": "123",
         "AVA_CONFIG_FETCH": "skip",
+        # A stray envelope variable cannot make a bare script an exec entry.
+        "AVA_EXEC_REQUEST_FILE": str(home / "missing-request.json"),
     }
     result = subprocess.run(  # noqa: S603
         [sys.executable, str(script)],

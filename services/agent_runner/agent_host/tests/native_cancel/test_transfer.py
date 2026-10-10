@@ -256,10 +256,11 @@ async def _assert_successor_turns(
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
     outcome = await host._invoke_until_done(
         target.agent_id,

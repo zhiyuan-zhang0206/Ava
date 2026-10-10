@@ -178,7 +178,6 @@ def _facade_exports() -> dict[str, Any]:
         "FIELD_INFOS": {name: ref.info for name, ref in fields.items()},
         "BOOTSTRAP_FIELDS": _bootstrap_fields(),
         "flat_dump": flat_dump,
-        "refresh_data_plane_settings": refresh_data_plane_settings,
         "get_config_metadata": _metadata.get_config_metadata,
         "env_override_values": _metadata.env_override_values,
         "ConfigFieldMeta": _metadata.ConfigFieldMeta,
@@ -226,7 +225,7 @@ def flat_dump(authority: Any, mode: str = "python") -> dict[str, Any]:
     return authority.flat_dump(mode=mode)
 
 
-def refresh_data_plane_settings() -> None:
+def refresh_data_plane_settings(settings: Any) -> None:
     """Re-read the unit's `.env` and rebuild `settings.data_plane` in place.
 
     A long-lived process (the rollout orchestrator) builds its Settings
@@ -246,7 +245,6 @@ def refresh_data_plane_settings() -> None:
     Other domains are left untouched: the rotation is a data-plane fact, and a
     full singleton swap would surprise subsystems that cache a sub-model.
     """
-    from base.config import settings
     from base.host.env.dotenv_boot import load_ava_env
 
     result = load_ava_env()

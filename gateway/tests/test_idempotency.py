@@ -16,8 +16,10 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import os
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 from typing import Any, cast
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -36,7 +38,9 @@ from gateway.http.middleware import idempotency
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    with TestClient(app) as c:
+    # A real lifespan boots its own delivered environment; restore that root's
+    # projection as well as closing its HTTP/database resources.
+    with patch.dict(os.environ), TestClient(app) as c:
         yield c
 
 

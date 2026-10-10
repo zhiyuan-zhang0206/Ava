@@ -34,6 +34,7 @@ from base.agents.history.hierarchy.rebuild import (
     release_rebuild,
     run_rebuild,
 )
+from base.agents.history.hierarchy.tests.consumer_helpers import read_inputs
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -129,7 +130,12 @@ async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_le
         aops_pool, "UPDATE understanding_nodes SET parent_id = %s WHERE id = %s", stale, leaves[0]
     )
 
-    assert await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT) == 12
+    assert (
+        await run_rebuild(
+            aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+        )
+        == 12
+    )
 
     # Each check saw only the leaves that had "landed" by then (the replay horizon), though all
     # twelve exist: the first five; then, with two left open and five more arrived, seven.
@@ -155,9 +161,13 @@ async def test_rebuilding_twice_gives_the_same_tree(
 ) -> None:
     for i in range(12):
         await _leaf(aops_pool, i)
-    await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
+    await run_rebuild(
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+    )
     once = await _tree(aops_pool)
-    await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
+    await run_rebuild(
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+    )
     assert await _tree(aops_pool) == once and len(once) == 2
 
 
@@ -173,7 +183,9 @@ async def test_a_rebuild_touches_only_its_own_agent(
         " prompt_version, schema_version) VALUES (8, 2, 0, 5, now(), now(), 'k', 't', 'h', 'i', 0,"
         " 'm', 'group-0.1', 'p', 1) RETURNING id",
     )
-    await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
+    await run_rebuild(
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+    )
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_nodes WHERE id = %s", other[0][0])
 
 
@@ -252,6 +264,7 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
         [],
         catalog=model_catalog,
         llm_override=config_authority.runtime.lm.llm_override,
+        inputs=read_inputs(),
     ).run_until_idle()
     assert ran == [AGENT]
     assert await _rows(
@@ -278,6 +291,7 @@ async def test_a_failing_rebuild_is_retried_then_failed(
         [],
         catalog=model_catalog,
         llm_override=config_authority.runtime.lm.llm_override,
+        inputs=read_inputs(),
     )
     for attempt in (1, 2, 3):
         await _rows(
@@ -322,7 +336,9 @@ async def test_a_leaf_landing_before_a_grouped_one_queues_one_rebuild_that_close
     """The later segment lands first and is grouped; the earlier one arrives afterwards."""
     for i in range(5, 10):
         await _land(aops_pool, i)
-    await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
+    await gc.run_group_checks(
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+    )
     assert not await rebuild_pending(aops_pool, AGENT)  # in order so far: nothing queued
 
     for i in range(5):
@@ -331,7 +347,9 @@ async def test_a_leaf_landing_before_a_grouped_one_queues_one_rebuild_that_close
     assert len(await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds")) == 1
     assert await _open_before_parented(aops_pool)  # the gap exists until the rebuild runs
 
-    await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
+    await run_rebuild(
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+    )
     assert await _open_before_parented(aops_pool) == []
 
 
@@ -340,7 +358,9 @@ async def test_leaves_landing_in_order_queue_no_rebuild(
 ) -> None:
     for i in range(10):
         await _land(aops_pool, i)
-        await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
+        await gc.run_group_checks(
+            aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+        )
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
     await _land(aops_pool, 9)  # a rewrite of an existing, grouped span is not out of order
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []

@@ -55,7 +55,6 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from base.clock import Clock
 from base.cluster.dataplane.pg_tools import pg_tool
-from base.config import settings
 from base.db import Database, connect_url
 from base.db.pg_admin import local_owner_authority
 from base.host.private_storage import ensure_private_dir, ensure_private_file
@@ -83,9 +82,9 @@ _backup_lock_guard = threading.RLock()
 _backup_lock_state = threading.local()
 
 
-def _cluster_tz() -> ZoneInfo:
+def _cluster_tz(*, clock_factory: Callable[[], Clock]) -> ZoneInfo:
     """The cluster wall clock every scheduling decision here is made in."""
-    return Clock.from_settings().explicit_zone()
+    return clock_factory().explicit_zone()
 
 
 def _require_aware(now: datetime) -> datetime:
@@ -142,21 +141,23 @@ def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
     return sorted(dumps)
 
 
-def is_due(now: datetime) -> bool:
+def is_due(
+    now: datetime, *, clock_factory: Callable[[], Clock], hour_reader: Callable[[], int]
+) -> bool:
     """True once the cluster clock has passed ``backup_hour`` with no dump for the
     current cluster day. `now` must be TZ-aware."""
-    local_now = _require_aware(now).astimezone(_cluster_tz())
-    if local_now.hour < settings.services.backup_hour:
+    local_now = _require_aware(now).astimezone(_cluster_tz(clock_factory=clock_factory))
+    if local_now.hour < hour_reader():
         return False
     dumps = _managed_dumps(backup_dir())
-    tz = _cluster_tz()
+    tz = _cluster_tz(clock_factory=clock_factory)
     return not dumps or dumps[-1][0].astimezone(tz).date() < local_now.date()
 
 
-def _prune(directory: Path) -> list[Path]:
+def _prune(directory: Path, *, keep_reader: Callable[[], int]) -> list[Path]:
     """Delete managed dumps beyond retention: all but the newest ``backup_keep``."""
     dumps = _managed_dumps(directory)
-    keep = set(dumps[-settings.services.backup_keep :])
+    keep = set(dumps[-keep_reader() :])
     removed: list[Path] = []
     for item in dumps:
         if item not in keep:
@@ -165,7 +166,7 @@ def _prune(directory: Path) -> list[Path]:
     return removed
 
 
-def dump_source(db: Database) -> str:
+def dump_source(db: Database, *, is_remote_reader: Callable[[], bool]) -> str:
     """The dial `pg_dump` reads this cluster's whole database through.
 
     A locally owned plane dumps as the administrator acting as the schema owner
@@ -177,7 +178,7 @@ def dump_source(db: Database) -> str:
     password off argv. Both bypass PgBouncer: pg_dump holds one snapshot across
     many statements, which a transaction pooler cannot keep.
     """
-    if settings.data_plane.is_remote:
+    if is_remote_reader():
         return db.direct_url()
     return local_owner_authority().verified_conninfo()
 
@@ -363,11 +364,16 @@ def run_backup(
     now: datetime | None = None,
     *,
     db: Database,
+    is_remote_reader: Callable[[], bool],
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
     publish: bool = True,
     progress: _ProgressSink | None = None,
     staging: Path | None = None,
+    keep_reader: Callable[[], int],
+    endpoint_reader: Callable[[], str],
+    bucket_reader: Callable[[], str],
+    credentials_file_reader: Callable[[], Path | None],
 ) -> Path:
     """Dump the cluster DB into backup_dir() and prune; return the dump path.
 
@@ -394,6 +400,7 @@ def run_backup(
         target = _run_backup(
             now,
             db=db,
+            is_remote_reader=is_remote_reader,
             directory=directory,
             db_url=db_url,
             timeout_s=timeout_s,
@@ -405,13 +412,18 @@ def run_backup(
             # reaches this line, loads it.
             from services.backup.artifact import offsite
 
-            offsite.publish(target)
+            offsite.publish(
+                target,
+                endpoint_reader=endpoint_reader,
+                bucket_reader=bucket_reader,
+                credentials_file_reader=credentials_file_reader,
+            )
         if staging is None:
-            _log_written(target, _prune(target.parent))
+            _log_written(target, _prune(target.parent, keep_reader=keep_reader))
         return target
 
 
-def prune_after_publish(target: Path) -> None:
+def prune_after_publish(target: Path, *, keep_reader: Callable[[], int]) -> None:
     """Prune around a newly linked scheduled dump without waiting on the lock.
 
     Linking never replaces a managed name, so it needs no lock; pruning does.
@@ -420,7 +432,7 @@ def prune_after_publish(target: Path) -> None:
     """
     try:
         with backup_lock(timeout_s=0):
-            removed = _prune(target.parent)
+            removed = _prune(target.parent, keep_reader=keep_reader)
     except LockTimeoutError:
         _log.info("[backup] prune deferred while another backup owns the lock")
         removed = []
@@ -478,6 +490,7 @@ def _run_backup(
     now: datetime | None = None,
     *,
     db: Database,
+    is_remote_reader: Callable[[], bool],
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
     directory: Path,
@@ -493,7 +506,7 @@ def _run_backup(
     anything: `pg_dump` and the encryption pass (see `_run_with_progress`).
     """
     now = _require_aware(now) if now is not None else datetime.now(UTC)
-    db_url = db_url if db_url is not None else dump_source(db)
+    db_url = db_url if db_url is not None else dump_source(db, is_remote_reader=is_remote_reader)
     directory = ensure_private_dir(directory)
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
@@ -611,9 +624,18 @@ def _main(argv: list[str] | None = None) -> int:
         parser.error("--publish-offsite ARTIFACT must be an absolute path")
     if not args.offsite_root or args.offsite_root != args.offsite_root.strip("/"):
         parser.error("--offsite-root must be a non-empty prefix without surrounding slashes")
+    from base.config import ConfigBoot
     from services.backup.artifact import offsite  # the SDK loads only on this entry
 
-    offsite.publish(artifact, root=args.offsite_root)
+    config = ConfigBoot()
+    config.boot()
+    offsite.publish(
+        artifact,
+        root=args.offsite_root,
+        endpoint_reader=lambda: config.view.services.backup_offsite_endpoint,
+        bucket_reader=lambda: config.view.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: config.view.services.backup_offsite_credentials_file,
+    )
     return 0
 
 

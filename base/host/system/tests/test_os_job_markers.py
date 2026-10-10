@@ -38,9 +38,9 @@ _MARKERS = (
 _WALG_MARKER = "# ava-walg"
 _REGISTERS = (
     logs_job._register_linux,
-    packages_job._register_linux,
+    lambda: packages_job._register_linux(tick_reader=lambda: 900),
     pr_flow_job._register_linux,
-    walg_job._register_linux,
+    lambda: walg_job._register_linux(backup_hour_reader=lambda: 3),
 )
 _UNREGISTERS = (
     logs_job._unregister_linux,

@@ -34,6 +34,7 @@ from agent.graph.llm_errors import LlmLedger, LLMRetryBudgetExceededError, LLMSt
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.clock import Clock
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -76,10 +77,13 @@ def _make_runtime(
         ops_pool=make_fake_ops_pool(),
         llm=llm,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
 
@@ -240,7 +244,9 @@ async def test_total_timeout_falls_back_while_chunks_keep_arriving(
         [],
         chunks=chunks,
         handler=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         catalog=model_catalog,
     )
 
@@ -538,9 +544,20 @@ async def _stream_bounds(
 async def test_an_agents_stream_bound_is_the_one_the_stream_runs_under(
     setting: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pinned = await _stream_bounds(monkeypatch, AgentSlices.resolve({setting: 4.25}))
+    pinned = await _stream_bounds(
+        monkeypatch,
+        AgentSlices.resolve(
+            {setting: 4.25},
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ),
+    )
     assert pinned[_STREAM_BOUNDS[setting]] == 4.25
-    unpinned = await _stream_bounds(monkeypatch, AgentSlices.resolve())
+    unpinned = await _stream_bounds(
+        monkeypatch,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
+    )
     for other in _STREAM_BOUNDS.values():
         if other != _STREAM_BOUNDS[setting]:
             assert pinned[other] == unpinned[other]

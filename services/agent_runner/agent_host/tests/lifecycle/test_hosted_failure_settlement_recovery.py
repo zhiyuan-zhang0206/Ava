@@ -164,10 +164,11 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         ops_pool=aops_pool,
         event_publisher=publisher,
         llm=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
     assert not (
         await host._invoke_until_done(
@@ -212,10 +213,11 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
         ops_pool=aops_pool,
         event_publisher=publisher,
         llm=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=configured_policy().clock_factory,
     )
     pending = PendingTurnFailure(failure)
     with pytest.raises(FatalProviderError):

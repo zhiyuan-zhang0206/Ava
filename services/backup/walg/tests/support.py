@@ -211,7 +211,7 @@ def archiving_postgres(*extra_args: str) -> Generator[PgInstance]:
             "synchronous_commit=off",
             *shlex.split(pg_tz_args()),
             *shlex.split(pg_shm_args()),
-            *archive_pg_args(),
+            *archive_pg_args(path_reader=lambda: settings.walg.walg_config_file),
             *extra_args,
         ]
         with (root / "pg.log").open("wb") as log:

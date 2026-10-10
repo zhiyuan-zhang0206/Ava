@@ -239,7 +239,9 @@ def test_retry_calls_inner_twice(probe: tuple[Any, Any], apply: Probe):
 
 
 @pytest.fixture
-def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]]:
+def activations(
+    monkeypatch: pytest.MonkeyPatch, sdk_model_owner: None
+) -> list[tuple[str, str, str, str]]:
     """Capture (plugin, surface, identifier, detail) per recorded activation.
 
     Keeps the real `record`'s attribution gate — an unattributed firing is

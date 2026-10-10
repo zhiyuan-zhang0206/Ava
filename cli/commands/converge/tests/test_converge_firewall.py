@@ -23,12 +23,13 @@ import pytest
 import cli.commands.converge.firewall as cfw
 import cli.commands.converge.firewall_command as firewall_cmd
 import cli.commands.converge.host as cv
+from base.config import ConfigBoot
 from base.host import macos_firewall as fw
 from base.host.macos_firewall import FirewallAudit, FirewallVerdict
 
 
 def _ctx(home: Path, roles: frozenset[str] | None) -> cv.ConvergeCtx:
-    return cv.ConvergeCtx(repo=Path("/repo"), ava_home=home, roles=roles)  # type: ignore[arg-type]
+    return cv.ConvergeCtx(repo=Path("/repo"), ava_home=home, roles=roles, config=ConfigBoot())  # type: ignore[arg-type]
 
 
 def test_step_is_registered_in_converge_for_both_capabilities() -> None:

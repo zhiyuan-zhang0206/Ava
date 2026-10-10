@@ -28,13 +28,17 @@ bootstraps.
 
 Read-only: nothing here writes — a storage read that sits beside the checkpoint
 read-compat layer (`base/agents/history/delta_read_compat.py`); the reconcile's
-status transitions stay in `agent/db/__init__.py`.
+status transitions stay in `agent/db/__init__.py`. The process owner supplies
+`ReconcileReadInputs`; construction reads no policy. The claimed-row guard
+reads its stale cutoff first, and only a fresh claim reaches the side-load
+clock pad, boundary scan and row-cap readers in their existing order.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import aclosing
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -43,12 +47,21 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.sql import SQL
 from psycopg_pool import AsyncConnectionPool
 
-from base.config import settings
 from base.log import logger
 
 
+@dataclass(frozen=True)
+class ReconcileReadInputs:
+    """The native owner's live bounds for committed inbound evidence reads."""
+
+    stale_claimed_seconds: Callable[[], float]
+    clock_pad_seconds: Callable[[], float]
+    boundary_scan_limit: Callable[[], int]
+    window_row_cap: Callable[[], int]
+
+
 async def claimed_reconcile_scope(
-    pool: AsyncConnectionPool, agent_id: int
+    pool: AsyncConnectionPool, agent_id: int, *, inputs: ReconcileReadInputs
 ) -> tuple[bool, datetime | None, set[int]]:
     """(any claimed chats?, earliest fresh creation?, fresh claimed ids).
 
@@ -63,7 +76,7 @@ async def claimed_reconcile_scope(
       claim. A row reset and re-claimed has a new ``claimed_at`` but an older
       commit may belong to its first claim.
     """
-    stale_cutoff_s = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
+    stale_cutoff_s = inputs.stale_claimed_seconds()
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT count(*), min(LEAST(created_at, COALESCE(claimed_at, created_at))) FILTER ("
@@ -87,6 +100,7 @@ async def sideload_committed_ids(
     agent_id: int,
     *,
     since: datetime,
+    inputs: ReconcileReadInputs,
 ) -> set[int] | None:
     """Committed ``ava_inbound_id``s provable from the claim-window writes.
 
@@ -94,9 +108,9 @@ async def sideload_committed_ids(
     undecodable write). An empty set means the bounded window proved no ids.
     Either case triggers an all-ancestor scan for unproven fresh claims.
     """
-    pad_s = settings.daemon.inbound_reconcile_clock_pad_seconds
-    scan_limit = settings.daemon.inbound_reconcile_boundary_scan_limit
-    row_cap = settings.daemon.inbound_reconcile_window_row_cap
+    pad_s = inputs.clock_pad_seconds()
+    scan_limit = inputs.boundary_scan_limit()
+    row_cap = inputs.window_row_cap()
 
     cutoff = since - timedelta(seconds=pad_s)
     resolved, boundary = await _claim_window_start(pool, agent_id, cutoff, scan_limit=scan_limit)
@@ -139,6 +153,8 @@ async def committed_ids_for_reconcile(
     pool: AsyncConnectionPool,
     checkpointer: AsyncPostgresSaver,
     agent_id: int,
+    *,
+    inputs: ReconcileReadInputs,
 ) -> set[int]:
     """The committed ``ava_inbound_id`` set the reconcile finalizes against.
 
@@ -149,10 +165,14 @@ async def committed_ids_for_reconcile(
     remaining ids that may live in materialized state. Union all positive
     proofs so a committed-then-removed message still finalizes.
     """
-    any_claimed, window_since, fresh_ids = await claimed_reconcile_scope(pool, agent_id)
+    any_claimed, window_since, fresh_ids = await claimed_reconcile_scope(
+        pool, agent_id, inputs=inputs
+    )
     if not any_claimed or window_since is None:
         return set()
-    sideloaded = await sideload_committed_ids(pool, checkpointer, agent_id, since=window_since)
+    sideloaded = await sideload_committed_ids(
+        pool, checkpointer, agent_id, since=window_since, inputs=inputs
+    )
     if sideloaded is not None and fresh_ids <= sideloaded:
         return sideloaded
     historical = await _committed_ids_from_all_settled_writes(

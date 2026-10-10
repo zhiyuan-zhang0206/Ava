@@ -9,6 +9,7 @@ Routing guards select lifecycle and compaction winners; unknown kinds fail fast.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -32,10 +33,9 @@ from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import SecurityFindingEntry, scan_inbound_content
 from base.agents.context import AvaContext
+from base.agents.messages.envelope import EnvelopeReadInputs
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.clock import Clock
-from base.config import settings
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
@@ -101,11 +101,13 @@ def _by_who(source: str) -> str:
     return source
 
 
-def _ts_prefix() -> str:
+def _ts_prefix(ctx: AvaContext) -> str:
     """Leading `[ts] ` for lifecycle markers, or `` when agent-facing message
     timestamps are off (`settings.general.message_timestamps`)."""
     return (
-        f"{Clock.from_settings().now_timestamp()} " if settings.general.message_timestamps else ""
+        f"{ctx.require_clock().now_timestamp()} "
+        if ctx.require_agent().read("general", "message_timestamps")
+        else ""
     )
 
 
@@ -122,7 +124,9 @@ def _is_sensitive_overlay_key(key: str) -> bool:
     return any(fragment in normalized for fragment in _SENSITIVE_OVERLAY_KEY_FRAGMENTS)
 
 
-def _render_restart_completed_marker(source: str, payload: dict[str, object] | None = None) -> str:
+def _render_restart_completed_marker(
+    source: str, payload: dict[str, object] | None = None, *, timestamp_prefix: Callable[[], str]
+) -> str:
     """Lifecycle marker text for restart_completed inbound.
 
     Update sources (`system:update`) get distinct wording so the agent can tell
@@ -140,7 +144,7 @@ def _render_restart_completed_marker(source: str, payload: dict[str, object] | N
     ``<redacted>`` — the marker is a new plaintext copy of the overlay that lands
     in the checkpoint / timeline / LLM context.
     """
-    ts = _ts_prefix()
+    ts = timestamp_prefix()
     if source == "system:update":
         base = f"{ts}You have been updated and restarted"
     else:
@@ -159,11 +163,22 @@ def _render_restart_completed_marker(source: str, payload: dict[str, object] | N
 
 
 async def _handle_chat(
+    ctx: AvaContext,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
     """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
-    st.append_scanned(*build_chat_inbound(item))
+    st.append_scanned(
+        *build_chat_inbound(
+            item,
+            read_security_enabled=lambda: ctx.require_agent().read(
+                "agent", "security_scan_enabled"
+            ),
+            envelope_inputs=EnvelopeReadInputs(
+                ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
+            ),
+        )
+    )
     st.committed_chat_ids.append(item.id)
 
 
@@ -198,6 +213,7 @@ def _task_id_from_system_note(payload: dict[str, object] | None, tag: NoteTag) -
 
 
 async def _handle_system_note(
+    ctx: AvaContext,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
@@ -207,11 +223,15 @@ async def _handle_system_note(
     summary written by another agent), so it passes through the same
     injection scan as inbound chat before entering the conversation.
     """
-    finding = scan_inbound_content(item.content, source=f"inbound.system_note:{item.source}")
+    finding = scan_inbound_content(
+        item.content,
+        source=f"inbound.system_note:{item.source}",
+        enabled=ctx.require_agent().read("agent", "security_scan_enabled"),
+    )
     task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
     st.append_scanned(
         system_note_message(
-            content=f"{_ts_prefix()}{item.content}",
+            content=f"{_ts_prefix(ctx)}{item.content}",
             tag=_system_note_tag(item.payload),
             task_id=task_id,
             created_at=item.created_at,
@@ -382,7 +402,7 @@ async def _handle_heartbeat(
         return
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix()}{item.content}",
+            content=f"{_ts_prefix(ctx)}{item.content}",
             tag=NoteTag.HEARTBEAT,
             created_at=datetime.now(UTC),
         )
@@ -390,7 +410,7 @@ async def _handle_heartbeat(
 
 
 async def _handle_terminate(
-    _ctx: AvaContext,
+    ctx: AvaContext,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
@@ -401,7 +421,7 @@ async def _handle_terminate(
     """
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix()}Termination was accepted from {_by_who(item.source)}",
+            content=f"{_ts_prefix(ctx)}Termination was accepted from {_by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_TERMINATE,
             created_at=datetime.now(UTC),
         )
@@ -410,7 +430,7 @@ async def _handle_terminate(
 
 
 async def _handle_restart(
-    _ctx: AvaContext,
+    ctx: AvaContext,
     _agent_id: int,
     item: ClaimedInbound,
     st: _BatchState,
@@ -418,7 +438,7 @@ async def _handle_restart(
     """Render restart acceptance and end this invocation. The host applies the durable command after the graph returns and the checkpoint flushes."""
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix()}Restart was accepted from {_by_who(item.source)}",
+            content=f"{_ts_prefix(ctx)}Restart was accepted from {_by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_RESTART,
             created_at=datetime.now(UTC),
         )
@@ -447,6 +467,7 @@ async def _handle_restart_stateful(
 
 
 async def _handle_restart_completed(
+    ctx: AvaContext,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
@@ -457,7 +478,9 @@ async def _handle_restart_completed(
     """
     st.new_msgs.append(
         system_note_message(
-            content=_render_restart_completed_marker(item.source, item.payload),
+            content=_render_restart_completed_marker(
+                item.source, item.payload, timestamp_prefix=lambda: _ts_prefix(ctx)
+            ),
             tag=NoteTag.LIFECYCLE_RESTART,
             created_at=datetime.now(UTC),
         )
@@ -467,6 +490,7 @@ async def _handle_restart_completed(
 
 
 async def _handle_resurrect(
+    ctx: AvaContext,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
@@ -478,7 +502,7 @@ async def _handle_resurrect(
     """
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix()}You have been resurrected by {_by_who(item.source)}",
+            content=f"{_ts_prefix(ctx)}You have been resurrected by {_by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_RESURRECT,
             created_at=datetime.now(UTC),
         )
@@ -556,7 +580,7 @@ async def _handle_fork(
     st.new_msgs.append(
         system_note_message(
             content=(
-                f"{_ts_prefix()}You have been forked from {item.source}. "
+                f"{_ts_prefix(ctx)}You have been forked from {item.source}. "
                 f"You are now a new, independent agent with id {agent_id} — the "
                 f"conversation above is inherited from {item.source}, not your own "
                 f"history. Continue as agent {agent_id}."
@@ -594,9 +618,9 @@ async def _dispatch_item(
     """Route one claimed inbound to its handler by kind."""
     kind = item.kind
     if kind == InboundKind.CHAT:
-        await _handle_chat(item, st)
+        await _handle_chat(ctx, item, st)
     elif kind == InboundKind.SYSTEM_NOTE:
-        await _handle_system_note(item, st)
+        await _handle_system_note(ctx, item, st)
     elif kind == InboundKind.COMPACT_SUMMARY:
         await _handle_compact_summary(ctx, agent_id, item, st)
     elif kind == InboundKind.COMPACT_REQUEST:
@@ -611,10 +635,10 @@ async def _dispatch_item(
         await _handle_restart(ctx, agent_id, item, st)
         await _handle_restart_stateful(state, item, st)
     elif kind == InboundKind.RESTART_COMPLETED:
-        await _handle_restart_completed(item, st)
+        await _handle_restart_completed(ctx, item, st)
     elif kind == InboundKind.RESURRECT:
         if item.id == latest_resurrect_id:
-            await _handle_resurrect(item, st)
+            await _handle_resurrect(ctx, item, st)
     elif kind == InboundKind.FORK:
         await _handle_fork(
             agent_id, item, st, state, ctx.require_agent(), ctx.plugin_registry(), ctx
@@ -626,7 +650,7 @@ async def _dispatch_item(
         # failing the batch: the content is harmless ("lease N expires
         # at ..."), and a ValueError here would wedge the claim loop on a
         # stale row.
-        await _handle_chat(item, st)
+        await _handle_chat(ctx, item, st)
     else:
         raise ValueError(f"Unknown inbound kind: {kind!r} (id={item.id})")
 

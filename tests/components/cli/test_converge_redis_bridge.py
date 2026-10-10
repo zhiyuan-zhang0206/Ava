@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import ConfigBoot
 from cli.commands.converge import host as converge_host
 from cli.commands.converge import redis_bridge as bridge
 from cli.commands.converge.spec import ConvergeCtx
@@ -137,7 +138,6 @@ def test_converge_installs_source_and_loads_changed_job(
     calls: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
-    monkeypatch.setattr("base.host.system.cron.os_jobs_enabled", lambda: True)
 
     def _launchctl(*args: str) -> object:
         calls.append(args)
@@ -145,7 +145,9 @@ def test_converge_installs_source_and_loads_changed_job(
 
     monkeypatch.setattr(bridge, "_launchctl", _launchctl)
 
-    bridge._ensure_launchd(home, repo, bridge.RedisBridgeConfig("10.64.0.7", 16380))
+    bridge._ensure_launchd(
+        home, repo, bridge.RedisBridgeConfig("10.64.0.7", 16380), enabled_reader=lambda: True
+    )
 
     assert (home / "redis-bridge" / "relay.py").read_bytes() == source.read_bytes()
     assert (home / "redis-bridge" / "relay.py").stat().st_mode & 0o111
@@ -171,7 +173,6 @@ def test_unchanged_loaded_job_is_not_restarted(
     calls: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
-    monkeypatch.setattr("base.host.system.cron.os_jobs_enabled", lambda: True)
 
     def _launchctl(*args: str) -> object:
         calls.append(args)
@@ -179,7 +180,7 @@ def test_unchanged_loaded_job_is_not_restarted(
 
     monkeypatch.setattr(bridge, "_launchctl", _launchctl)
 
-    bridge._ensure_launchd(home, repo, config)
+    bridge._ensure_launchd(home, repo, config, enabled_reader=lambda: True)
 
     assert calls == [("print", f"gui/{bridge.os.getuid()}/{bridge._LABEL}")]
 
@@ -212,7 +213,7 @@ def test_converge_retires_stale_bridge_when_it_is_no_longer_required(
     monkeypatch.setattr(bridge, "_bridge_config", _not_required)
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
     monkeypatch.setattr(bridge, "_launchctl", _launchctl)
-    ctx = ConvergeCtx(repo=tmp_path / "repo", ava_home=home, roles=None)
+    ctx = ConvergeCtx(repo=tmp_path / "repo", ava_home=home, roles=None, config=ConfigBoot())
 
     bridge.ensure_redis_bridge(ctx)
 
@@ -366,14 +367,18 @@ def test_ensure_bridge_uses_resolved_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    ctx = ConvergeCtx(repo=tmp_path / "repo", ava_home=tmp_path / "home", roles=None)
+    ctx = ConvergeCtx(
+        repo=tmp_path / "repo", ava_home=tmp_path / "home", roles=None, config=ConfigBoot()
+    )
     config = bridge.RedisBridgeConfig("10.64.0.7", 16380)
     calls: list[tuple[Path, Path, bridge.RedisBridgeConfig]] = []
 
     def _config(_home: Path) -> bridge.RedisBridgeConfig:
         return config
 
-    def _ensure(home: Path, repo: Path, value: bridge.RedisBridgeConfig) -> None:
+    def _ensure(
+        home: Path, repo: Path, value: bridge.RedisBridgeConfig, *, enabled_reader: object
+    ) -> None:
         calls.append((home, repo, value))
 
     monkeypatch.setattr(bridge, "_bridge_config", _config)

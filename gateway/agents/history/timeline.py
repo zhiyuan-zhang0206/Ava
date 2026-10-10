@@ -36,9 +36,9 @@ from base.agents.history.timeline import (
     timeline_default_limit,
 )
 from base.agents.impersonation.timeline import hydrate
-from base.config import settings
 from base.db import ChatAnchor, Database, agent_exists, list_chat_anchors
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.agents.history.read_inputs import TimelineReadPolicy
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -264,11 +264,15 @@ def _load_history_tail(
     rank: int,
     limit: int,
     depth: int,
+    *,
+    policy: TimelineReadPolicy,
 ) -> tuple[list[TimelineItem], bool]:
     """Load and window one exact older segment."""
     if rank > len(boundary_ids) or not _depth_allows(rank, depth):
         return [], False
-    items = _load_history_segment(db, agent_id, boundary_ids[rank - 1], rank, limit=limit)
+    items = _load_history_segment(
+        db, agent_id, boundary_ids[rank - 1], rank, policy=policy, limit=limit
+    )
     if not items:
         return [], False
     window, segment_has_more = tail_window(items, limit)
@@ -281,12 +285,13 @@ def _load_history_segment(
     checkpoint_id: str,
     rank: int,
     *,
+    policy: TimelineReadPolicy,
     limit: int | None = None,
     before: str | None = None,
 ) -> list[TimelineItem] | None:
     """Load and render one persisted segment; read/render failures stay visible."""
     if limit is None:
-        limit = timeline_default_limit()
+        limit = timeline_default_limit(limit_reader=policy.default_limit)
     try:
         messages = load_checkpoint_messages_segment(db, agent_id, checkpoint_id)
     except CheckpointReadError as exc:
@@ -294,7 +299,7 @@ def _load_history_segment(
     if not messages:
         return None
     prefix = f"s{rank}.{checkpoint_id}"
-    items, _ = build_timeline_items(messages, [], segment_prefix=prefix)
+    items, _ = build_timeline_items(messages, [], inputs=policy.rendering, segment_prefix=prefix)
     return hydrate(db, items, agent_id, limit=limit, before=before)
 
 
@@ -325,6 +330,8 @@ def _historical_window(
     limit: int,
     boundary_ids: list[str],
     depth: int,
+    *,
+    policy: TimelineReadPolicy,
 ) -> tuple[list[TimelineItem], bool]:
     """Page one exact boundary; a stale display rank never selects content."""
     checkpoint_id = cursor.checkpoint_id
@@ -337,7 +344,7 @@ def _historical_window(
     if not _depth_allows(rank, depth):
         return [], False
     segment_items = _load_history_segment(
-        db, agent_id, checkpoint_id, rank, limit=limit, before=cursor.item_id()
+        db, agent_id, checkpoint_id, rank, policy=policy, limit=limit, before=cursor.item_id()
     )
     if not segment_items:
         return [], False
@@ -366,6 +373,7 @@ def _historical_window(
         older_rank,
         limit,
         depth,
+        policy=policy,
     )
     return [*head, *older_window], older_has_more
 
@@ -482,7 +490,10 @@ def _current_items(
 ) -> tuple[list[TimelineItem], int]:
     """The current segment's rendered, hydrated items in item-id order + msg_count."""
     db: Database = request.app.state.db
-    items, msg_count = build_timeline_items(messages, _chat_anchors(request, agent_id, messages))
+    policy: TimelineReadPolicy = request.app.state.timeline_policy
+    items, msg_count = build_timeline_items(
+        messages, _chat_anchors(request, agent_id, messages), inputs=policy.rendering
+    )
     items = hydrate(db, items, agent_id, limit=limit, before=before)
     items.sort(key=lambda it: _item_sort_key(it.item_id))
     return items, msg_count
@@ -514,9 +525,16 @@ def head_timeline(
     (``load_current_messages``) so it deserializes the checkpoint once.
     """
     _require_agent(request, agent_id)
-    depth = settings.gateway.timeline_compact_history
+    policy: TimelineReadPolicy = request.app.state.timeline_policy
+    depth = policy.compact_history()
     boundary_ids = _load_boundary_ids(request.app.state.db, agent_id, depth)
-    return _head_response(request, agent_id, messages, timeline_default_limit(), boundary_ids)
+    return _head_response(
+        request,
+        agent_id,
+        messages,
+        timeline_default_limit(limit_reader=policy.default_limit),
+        boundary_ids,
+    )
 
 
 def _current_page_before(
@@ -559,6 +577,8 @@ def _historical_response(
     limit: int,
     boundary_ids: list[str],
     depth: int,
+    *,
+    policy: TimelineReadPolicy,
 ) -> TimelineResponse | None:
     """The page of a historical or malformed `before=` request; None for a live-checkpoint read."""
     # Historical pages do not deserialize the live checkpoint. Its exact
@@ -570,7 +590,9 @@ def _historical_response(
             has_more=False,
         )
     if cursor is not None and cursor.checkpoint_id is not None:
-        window, has_more = _historical_window(db, agent_id, cursor, limit, boundary_ids, depth)
+        window, has_more = _historical_window(
+            db, agent_id, cursor, limit, boundary_ids, depth, policy=policy
+        )
         return TimelineResponse(
             items=window,
             msg_count=_load_current_message_count(db, agent_id),
@@ -602,15 +624,18 @@ def get_timeline(
     the frontend render. A checkpoint read failure returns 503. Retained
     compact boundaries remain independently readable via /timeline/retained.
     """
+    policy: TimelineReadPolicy = request.app.state.timeline_policy
     if limit is None:
-        limit = timeline_default_limit()
+        limit = timeline_default_limit(limit_reader=policy.default_limit)
     cursor = _parse_cursor(before) if before is not None else None
     _require_agent(request, agent_id)
-    depth = settings.gateway.timeline_compact_history
+    depth = policy.compact_history()
     db: Database = request.app.state.db
     boundary_ids = _load_boundary_ids(db, agent_id, depth)
 
-    early = _historical_response(db, agent_id, before, cursor, limit, boundary_ids, depth)
+    early = _historical_response(
+        db, agent_id, before, cursor, limit, boundary_ids, depth, policy=policy
+    )
     if early is not None:
         return early
 
@@ -622,7 +647,9 @@ def get_timeline(
     if isinstance(paged, TimelineResponse):
         return paged
     del messages, items
-    older_window, has_more = _load_history_tail(db, agent_id, boundary_ids, 1, limit, depth)
+    older_window, has_more = _load_history_tail(
+        db, agent_id, boundary_ids, 1, limit, depth, policy=policy
+    )
     return TimelineResponse(items=[*paged, *older_window], msg_count=msg_count, has_more=has_more)
 
 
@@ -657,7 +684,8 @@ def get_retained_timeline(
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
     db: Database = request.app.state.db
-    depth = settings.gateway.timeline_compact_history
+    policy: TimelineReadPolicy = request.app.state.timeline_policy
+    depth = policy.compact_history()
     boundary_ids = _load_boundary_ids(db, agent_id, depth)
     cursor = _retained_cursor(before, checkpoint_id)
     selected = cursor.checkpoint_id if cursor is not None else checkpoint_id
@@ -667,10 +695,14 @@ def get_retained_timeline(
     if selected not in boundary_ids:
         raise HTTPException(status_code=404, detail="Retained compact boundary not found")
     if limit is None:
-        limit = timeline_default_limit()
+        limit = timeline_default_limit(limit_reader=policy.default_limit)
     if cursor is not None:
-        items, has_more = _historical_window(db, agent_id, cursor, limit, boundary_ids, depth)
+        items, has_more = _historical_window(
+            db, agent_id, cursor, limit, boundary_ids, depth, policy=policy
+        )
     else:
         rank = boundary_ids.index(selected) + 1
-        items, has_more = _load_history_tail(db, agent_id, boundary_ids, rank, limit, depth)
+        items, has_more = _load_history_tail(
+            db, agent_id, boundary_ids, rank, limit, depth, policy=policy
+        )
     return RetainedTimelineResponse(boundary_checkpoint_id=selected, items=items, has_more=has_more)

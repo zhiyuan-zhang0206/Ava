@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
+import os
 import re
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import psycopg
 import pytest
 
-from base.config import settings
+from base.config import ConfigBoot, settings
 from cli.commands.data_plane import walg as walg_cmd
 from cli.parsers import build_parser
 from services.backup.walg import config as walg_config
 from services.backup.walg import probe, state
+from services.backup.walg.check import Step
 from services.backup.walg.tests.support import (
     SECRETS,
     PgInstance,
@@ -24,6 +27,20 @@ from services.backup.walg.tests.support import (
     archiving_postgres,
     make_sandbox,
 )
+
+
+@pytest.fixture(autouse=True)
+def config_boot_environment(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
+    """Restore process delivery from each independent operation's boot."""
+
+    def build_owner() -> ConfigBoot:
+        config = ConfigBoot()
+        config.view.walg.walg_config_file = settings.walg.walg_config_file
+        return config
+
+    monkeypatch.setattr(walg_cmd, "ConfigBoot", build_owner)
+    with patch.dict(os.environ):
+        yield
 
 
 @pytest.fixture
@@ -68,7 +85,7 @@ def test_the_parser_reaches_every_verb() -> None:
 def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def fake_tick(_db: object, report: Any) -> int:
+    def fake_tick(_db: object, report: Any, **_inputs: object) -> int:
         report("skipped: postgres is not accepting connections")
         return 1
 
@@ -212,7 +229,7 @@ def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
         _dial(pg, monkeypatch)
         monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.config_file)
 
-        walg_cmd.warn_archive_inactive()
+        walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
 
     err = capsys.readouterr().err
     assert "this Postgres is not running with the configured archive settings" in err
@@ -226,7 +243,7 @@ def test_a_postgres_launched_with_the_arguments_is_not_flagged(
     with archiving_postgres() as pg:
         _dial(pg, monkeypatch)
 
-        walg_cmd.warn_archive_inactive()
+        walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
 
     assert capsys.readouterr().err == ""
 
@@ -241,7 +258,7 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 
     monkeypatch.setattr(probe, "admin_connection", explode)
 
-    walg_cmd.warn_archive_inactive()
+    walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
 
     assert capsys.readouterr().err == ""
 
@@ -249,7 +266,7 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 def test_an_unreadable_postgres_is_a_warning_not_a_failure(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    walg_cmd.warn_archive_inactive()
+    walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
 
     assert "WAL archiving state not read (OperationalError" in capsys.readouterr().err
 
@@ -346,7 +363,7 @@ def test_restore_while_wal_g_is_off_says_so(
 def test_drill_hands_the_tick_module_a_timestamping_reporter_and_returns_its_exit_code(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def fake_drill(report: Any) -> int:
+    def fake_drill(report: Any, **_inputs: object) -> int:
         report("drill: FAILED after 3s: recovery failed")
         return 1
 
@@ -386,3 +403,32 @@ def test_status_shows_the_last_drill_and_the_last_success(
         in out
     )
     assert "last successful drill: never" in out
+
+
+def test_check_uses_one_lazy_owner_and_keeps_its_reader_live(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    owner = ConfigBoot()
+    first, second = tmp_path / "first.json", tmp_path / "second.json"
+    owner.view.walg.walg_config_file = first
+    owners: list[ConfigBoot] = []
+
+    def build_owner() -> ConfigBoot:
+        owners.append(owner)
+        return owner
+
+    def check_reader(*, path_reader: Callable[[], Path | None]) -> list[Step]:
+        assert path_reader() == first
+        owner.view.walg.walg_config_file = second
+        assert path_reader() == second
+        return []
+
+    def no_boot(_owner: ConfigBoot) -> None:
+        pytest.fail("a CLI root must not eagerly boot its reader")
+
+    monkeypatch.setattr(walg_cmd, "ConfigBoot", build_owner)
+    monkeypatch.setattr(ConfigBoot, "boot", no_boot)
+    monkeypatch.setattr(walg_cmd.check, "run_check", check_reader)
+    monkeypatch.setattr(settings.walg, "walg_config_file", tmp_path / "ambient.json")
+    assert walg_cmd.cmd_walg_check() == 0
+    assert owners == [owner]

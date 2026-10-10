@@ -28,7 +28,9 @@ from pathlib import Path
 
 import uvicorn
 
-from base.config import settings
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock, clock_config_from_boot
+from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
@@ -47,10 +49,10 @@ _MODULE = "services.derived.insights.daemon"
 _POOL_MAX_SIZE = 4
 
 
-def insights_config() -> InsightsConfig:
-    """The composition root: the one place this package reads `settings`."""
+def insights_config(*, config: ConfigBoot) -> InsightsConfig:
+    """The display slice from this daemon's configuration owner."""
     return InsightsConfig(
-        run_timeline_message_text_max=settings.display.run_timeline_message_text_max
+        run_timeline_message_text_max=config.view.display.run_timeline_message_text_max
     )
 
 
@@ -74,7 +76,7 @@ def bind_socket(path: Path) -> socket.socket:
     return sock
 
 
-async def run() -> None:
+async def run(*, config: ConfigBoot) -> None:
     """Start the daemon: pidfile -> database -> socket -> serve until stopped."""
     pidfile = insights_pidfile()
     if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
@@ -86,7 +88,17 @@ async def run() -> None:
     try:
         server = uvicorn.Server(
             uvicorn.Config(
-                build_app(db, pool, insights_config(), catalog=build_model_catalog()),
+                build_app(
+                    db,
+                    pool,
+                    insights_config(config=config),
+                    catalog=build_model_catalog(),
+                    default_model_reader=lambda: config.view.lm.llm_model,
+                    timeline_inputs=TimelineReadInputs(
+                        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+                        timestamps_enabled=lambda: config.view.general.message_timestamps,
+                    ),
+                ),
                 log_level="warning",
                 access_log=False,
                 log_config=None,
@@ -107,7 +119,9 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
-    assert_schema_current(settings.data_plane.db_url)
+    config = ConfigBoot()
+    config.boot()
+    assert_schema_current(config.view.data_plane.db_url)
     init_gateway_process(name="insights")
     install_graceful_shutdown("insights")
     code = 0
@@ -117,7 +131,7 @@ def main() -> None:
     # signal path uvicorn re-raises the signal after its own graceful stop, landing here.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(config=config))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[insights] interrupted, shutting down")

@@ -21,6 +21,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.units import spawn_agent
 
 
@@ -49,10 +50,11 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
+            clock_factory=configured_policy().clock_factory,
         ),
         agent_id=agent_id,
     )
@@ -93,10 +95,11 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
+            clock_factory=configured_policy().clock_factory,
         ),
         agent_id=agent_id,
     )

@@ -16,13 +16,99 @@ import pytest
 
 from base.cluster import machine as _machine
 from base.cluster.machine import (
+    MachineIdentity,
+    MachineNameMissing,
     MachineRoleInvalid,
     MachineRoleMissing,
     format_capabilities,
     gateway_auth_headers,
     machine_role,
+    roles_from_flags,
 )
 from base.config import settings
+
+
+def test_owned_identity_reads_fields_independently_and_caches_absence() -> None:
+    reads: list[str] = []
+
+    def name() -> str:
+        reads.append("name")
+        raise MachineNameMissing("not configured")
+
+    def role() -> frozenset[str]:
+        reads.append("role")
+        return roles_from_flags(
+            serve_gateway=False,
+            serve_agent_runner=True,
+            serve_observability_station=False,
+        )
+
+    def host() -> str:
+        reads.append("host")
+        return "  "
+
+    def description() -> None:
+        reads.append("description")
+
+    owner = MachineIdentity(name=name, role=role, host=host, description=description)
+    assert reads == []
+    assert owner.role() == owner.role() == frozenset({"agent-runner"})
+    assert owner.description() is owner.description() is None
+    assert owner.host() == owner.host() == "localhost"
+    assert reads == ["role", "description", "host"]
+    with pytest.raises(MachineNameMissing):
+        owner.name()
+    assert reads[-1] == "name"
+
+
+def test_owned_identity_reset_reloads_only_its_own_readers() -> None:
+    names = [" initial-a ", "initial-b"]
+    first = MachineIdentity(
+        name=lambda: names[0],
+        role=lambda: frozenset({"gateway"}),
+        host=lambda: " host-a ",
+        description=lambda: " details ",
+    )
+    second = MachineIdentity(
+        name=lambda: names[1],
+        role=lambda: frozenset({"agent-runner"}),
+        host=lambda: "host-b",
+        description=lambda: None,
+    )
+    assert first.name() == "initial-a"
+    assert second.name() == "initial-b"
+    assert first.host() == "host-a"
+    assert first.description() == "details"
+    names[:] = ["changed-a", "changed-b"]
+    first.set(role="observability-station", description=None)
+    assert first.role() == frozenset({"observability-station"})
+    assert first.description() is None
+    assert first.name() == "initial-a"
+    first.reset()
+    assert first.name() == "changed-a"
+    assert first.role() == frozenset({"gateway"})
+    assert first.description() == "details"
+    assert second.name() == "initial-b"
+    assert second.role() == frozenset({"agent-runner"})
+
+
+def test_owned_identity_rejects_invalid_supplied_facts() -> None:
+    owner = MachineIdentity(
+        name=lambda: " ",
+        role=lambda: frozenset({"typo"}),
+        host=lambda: "",
+        description=lambda: None,
+    )
+    with pytest.raises(MachineNameMissing):
+        owner.name()
+    with pytest.raises(MachineRoleInvalid):
+        owner.role()
+    with pytest.raises(MachineRoleMissing):
+        roles_from_flags(
+            serve_gateway=False,
+            serve_agent_runner=False,
+            serve_observability_station=False,
+        )
 
 
 @pytest.fixture(autouse=True)

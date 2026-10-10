@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from base.config import settings
+from base.clock import Clock
 from base.host.private_storage import write_private_bytes
 from services.backup.dump import _cluster_tz, backup_dir
 
@@ -15,11 +16,19 @@ _WEEKLY_RESTORE_WEEKDAY = 6
 _SUCCESS_MARKER = ".logical-restore-drill.json"
 
 
-def local_dump_restore_due(now: datetime, *, last_success: datetime | None) -> bool:
+def local_dump_restore_due(
+    now: datetime,
+    *,
+    last_success: datetime | None,
+    clock_factory: Callable[[], Clock],
+    hour_reader: Callable[[], int],
+) -> bool:
     """Whether this week's post-backup restore window lacks a success record."""
     if now.tzinfo is None:
         raise ValueError("recovery drill needs a TZ-aware current time")
-    scheduled = _weekly_window(now, _cluster_tz())
+    scheduled = _weekly_window(
+        now, _cluster_tz(clock_factory=clock_factory), hour_reader=hour_reader
+    )
     if now < scheduled:
         return False
     return last_success is None or last_success < scheduled
@@ -58,13 +67,15 @@ def _parse_success_marker(value: str) -> datetime:
     return stamp.astimezone(UTC)
 
 
-def _weekly_window(now: datetime, timezone: ZoneInfo) -> datetime:
+def _weekly_window(
+    now: datetime, timezone: ZoneInfo, *, hour_reader: Callable[[], int]
+) -> datetime:
     local_now = now.astimezone(timezone)
     days_since_sunday = (local_now.weekday() - _WEEKLY_RESTORE_WEEKDAY) % 7
     scheduled_day = local_now.date() - timedelta(days=days_since_sunday)
     scheduled = datetime.combine(
         scheduled_day,
-        time(hour=settings.services.backup_hour),
+        time(hour=hour_reader()),
         tzinfo=timezone,
     )
     if scheduled > local_now:

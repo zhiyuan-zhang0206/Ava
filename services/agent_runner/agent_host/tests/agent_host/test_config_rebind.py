@@ -94,7 +94,9 @@ class TestTurnLoop:
         """The shared host saver must install the interval wrapper at boot."""
         from services.agent_runner.agent_host.daemon import _build_checkpointer
 
-        checkpointer = await _build_checkpointer(cast(AsyncConnectionPool[Any], object()))
+        checkpointer = await _build_checkpointer(
+            cast(AsyncConnectionPool[Any], object()), read_checkpoint_interval=lambda: 1
+        )
 
         assert "_ava_nstep_flush" in checkpointer.__dict__
 
@@ -211,7 +213,7 @@ class TestTurnLoop:
             calls.append("renew")
 
         async def _reap(
-            pool: object, machine: str, owner: UUID, *, bus: object
+            pool: object, machine: str, owner: UUID, *, bus: object, wake_enabled: object
         ) -> list[ReapedCorpse]:
             calls.append("reap")
             return [ReapedCorpse(7, 101), ReapedCorpse(9, None)]
@@ -243,7 +245,9 @@ class TestTurnLoop:
         async def _renew(pool: object, machine: str, owner: UUID) -> None:
             renewed.append("renew")
 
-        async def _reap(pool: object, machine: str, owner: UUID, *, bus: object) -> list[int]:
+        async def _reap(
+            pool: object, machine: str, owner: UUID, *, bus: object, wake_enabled: object
+        ) -> list[int]:
             raise RuntimeError("reap exploded")
 
         monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)

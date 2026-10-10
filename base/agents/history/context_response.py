@@ -7,6 +7,7 @@ rather than in either of them.
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -14,7 +15,6 @@ from pydantic import BaseModel, Field
 
 from base.agents.history.context_breakdown import RequestBreakdown, SectionNode
 from base.agents.model_overrides import read_agent_overrides
-from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
 from base.lm.registry import resolve_available_model
@@ -75,9 +75,15 @@ class ContextBreakdownResponse(BaseModel):
     categories: list[ContextCategory]
 
 
-def resolve_agent_model(pool: ConnectionPool[Any], agent_id: int, *, catalog: ModelCatalog) -> str:
+def resolve_agent_model(
+    pool: ConnectionPool[Any],
+    agent_id: int,
+    *,
+    catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
+) -> str:
     """The agent's effective LLM model: its per-agent overlay, else the cluster default
-    (`settings.lm.llm_model`), resolved through any withdrawal fallback so callers judge the model
+    (the caller's live default), resolved through any withdrawal fallback so callers judge the model
     that will actually run. Capability gates (image input) must use this resolved id, never the raw
     configured one."""
     with pool.connection() as conn, conn.cursor() as cur:
@@ -85,7 +91,7 @@ def resolve_agent_model(pool: ConnectionPool[Any], agent_id: int, *, catalog: Mo
         row = cur.fetchone()
     overlay = row[0] if row and row[0] else None
     model = overlay.get("llm_model") if overlay else None
-    return resolve_available_model(model or settings.lm.llm_model, models=catalog.models)
+    return resolve_available_model(model or default_model_reader(), models=catalog.models)
 
 
 def _to_context_section(node: SectionNode) -> ContextSection:
@@ -103,10 +109,13 @@ def context_breakdown_response(
     breakdown: RequestBreakdown,
     *,
     catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> ContextBreakdownResponse:
     """`breakdown` (one LLM request's input) with the agent's resolved window and compaction
     thresholds; the thresholds are 0 when the agent's model has no known window."""
-    model = resolve_agent_model(pool, agent_id, catalog=catalog)
+    model = resolve_agent_model(
+        pool, agent_id, catalog=catalog, default_model_reader=default_model_reader
+    )
     overrides = read_agent_overrides(pool, agent_id)
     max_input_tokens = soft_compact_tokens = hard_compact_tokens = 0
     try:

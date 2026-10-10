@@ -134,10 +134,11 @@ async def test_original_invocation_settles_once_after_database_fault(
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=database,
         bus=EventBus.from_settings(),
         catalog=model_catalog,
+        clock_factory=configured_policy().clock_factory,
     )
     faults = _install_faults(monkeypatch, agent, site)
     running = asyncio.create_task(
@@ -175,6 +176,9 @@ async def test_original_invocation_settles_once_after_database_fault(
         incarnation,
         outcome,
         resources=None,
+        wake_enabled=configured_policy().recovery_wake_enabled,
+        prompt_reap_enabled=configured_policy().recrash_reap_enabled,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
     assert faults.injected
     assert faults.invocations == 1

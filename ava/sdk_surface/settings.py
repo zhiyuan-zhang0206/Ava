@@ -11,9 +11,10 @@ process resource; the default database factory refuses it before a connection ca
 from collections.abc import Mapping
 from typing import Any
 
-from base.agents.context.clients import DatabaseHandle
+from base.agents.context.clients import DatabaseFactory, DatabaseHandle
 from base.agents.messages.delivery_outbox import DeliverySenderConfig
-from base.config import settings
+from base.clock import Clock
+from base.config import ConfigBoot, settings
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -47,6 +48,20 @@ def delivery_sender_config() -> DeliverySenderConfig:
     if installation is None or installation.delivery_sender is None:
         raise RuntimeError("the SDK installation carries no DeliverySenderConfig")
     return installation.delivery_sender
+
+
+def clock() -> Clock:
+    """Build an operation's clock from its context or installed SDK root."""
+    import ava
+    from ava.sdk_surface.install import installed
+
+    context = getattr(ava, "context", None)
+    if context is not None:
+        return context.require_clock()
+    installation = installed()
+    if installation is None or installation.clock_factory is None:
+        raise RuntimeError("the SDK installation carries no Clock factory")
+    return installation.clock_factory()
 
 
 def model_overrides() -> ModelOverrides:
@@ -86,13 +101,46 @@ def __getattr__(name: str) -> Any:
 # live-events stacks into every exec child (task #3816).
 
 
-def database() -> DatabaseHandle:
-    """The cluster database, as this process's settings name it."""
-    from base.db import Database
+def database_factory(*, config: ConfigBoot) -> DatabaseFactory:
+    """Retain one lazy database gate on this client set, without importing its dial stack."""
+    from threading import Lock
 
-    if not settings.data_plane.db_url:
-        raise RuntimeError("AVA_DB_URL not set — SQL ops should not be called in container mode")
-    return Database.from_settings()
+    import ava
+    from base.native_process.code_version import CodeVersion
+
+    version = CodeVersion(ava.loaded_code_image())
+    lock = Lock()
+    # The dial stack stays cold until the first database request. The factory,
+    # not a module slot or an independently returned handle, owns this gate.
+    gate: Any = None
+
+    def database() -> Any:
+        nonlocal gate
+        from base.db import Database
+        from base.db.code_version_gate import ProcessDbGate
+        from base.db.config import db_config_from_boot
+
+        if not config.view.data_plane.db_url:
+            raise RuntimeError(
+                "AVA_DB_URL not set — SQL ops should not be called in container mode"
+            )
+        with lock:
+            if gate is None:
+                gate = ProcessDbGate(version=version.get, process="unknown")
+        return Database(
+            db_config_from_boot(config),
+            gate=gate,
+            local_host=lambda: config.view.general.machine_host.strip() or "localhost",
+        )
+
+    return database
+
+
+def database() -> DatabaseHandle:
+    """A fresh handle from this SDK context's original database owner."""
+    import ava
+
+    return ava.context.clients.database()
 
 
 def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
@@ -152,7 +200,11 @@ def agent_setting(name: str) -> Any:
     from base.host.env.agent_slices import agent_setting
 
     attached = _attached()
-    return agent_setting(name, attached[0] if attached else None)
+    return agent_setting(
+        name,
+        attached[0] if attached else None,
+        default_reader=lambda _domain, field: config_authority().service_field_value(field),
+    )
 
 
 # ── Plugin config hierarchical view ──

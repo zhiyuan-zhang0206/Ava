@@ -519,9 +519,9 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
     proc, _request, result = _spawn(
         tmp_path,
         (
-            "from base.config import settings\n"
-            "print(settings.lm.llm_model)\n"
-            "print(settings.lm.llm_stream_ttft_timeout_seconds)\n"
+            "from ava.sdk_surface.settings import agent_setting\n"
+            "print(agent_setting('llm_model'))\n"
+            "print(agent_setting('llm_stream_ttft_timeout_seconds'))\n"
             "import os\nprint(os.environ.get('AVA_AGENT_CONFIG_OVERLAY', 'GONE'))\n"
         ),
         config_overlay={"llm_model": "deepseek-v4-pro"},
@@ -564,10 +564,10 @@ def test_child_overlay_phases_framework_then_plugin(
     def fake_init_logger(_agent_id: int | None) -> None:
         return None
 
-    def fake_eval_isolation() -> None:
+    def fake_eval_isolation(*, default_reader: object) -> None:
         events.append("eval_isolation")
 
-    def fake_sdk_disable() -> None:
+    def fake_sdk_disable(*, default_reader: object) -> None:
         events.append("sdk_disable")
 
     def fake_build_state_slot(_child: exec_child._ChildContext, _payload: RequestPayload) -> None:
@@ -579,7 +579,7 @@ def test_child_overlay_phases_framework_then_plugin(
     def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
         return None
 
-    def fake_plugins_loaded(*, surface: bool = True) -> None:
+    def fake_plugins_loaded(*, surface: bool = True, config: object, clock_factory: object) -> None:
         # Stateless request (fake_read_request: state=None) -> the surface load.
         assert surface is True
         events.append("plugins")
@@ -599,6 +599,7 @@ def test_child_overlay_phases_framework_then_plugin(
         overlay: dict[str, object] | None,
         *,
         scope: str,
+        set_framework_field: object = None,
     ) -> bool:
         events.append(f"apply:{scope}")
         return bool(birth or overlay)

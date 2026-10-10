@@ -10,6 +10,7 @@ from typing import Any
 from agent.db import list_chat_inbound_anchors
 from base.agents.context import AvaContext
 from base.agents.history.timeline import build_timeline_items, tail_window, timeline_default_limit
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
 
 
@@ -51,8 +52,19 @@ async def publish_end_timeline_snapshot(
     )
     combined = list(state.messages) + new_msgs
     anchors = await list_chat_inbound_anchors(ctx.ops_pool, agent_id)
-    items, msg_count = build_timeline_items(combined, anchors)
-    window, _ = tail_window(items, timeline_default_limit())
+    items, msg_count = build_timeline_items(
+        combined,
+        anchors,
+        inputs=TimelineReadInputs(
+            ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
+        ),
+    )
+    window, _ = tail_window(
+        items,
+        timeline_default_limit(
+            limit_reader=lambda: ctx.require_agent().read("display", "timeline_default_limit")
+        ),
+    )
     # No system-prompt special-casing: this end-of-life snapshot is a rare
     # full-window publish, and 0.0 flows through the merge like any item.
     ctx.event_publisher.emit(

@@ -25,6 +25,8 @@ from agent.graph.llm.node import llm_attempt, llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.clock import Clock
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
@@ -40,8 +42,11 @@ def _runtime_with_redis(hosted_resources: HostedTurnResources, catalog: ModelCat
         hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         catalog=catalog,
+        clock_factory=Clock.from_settings,
     )
     return runtime
 

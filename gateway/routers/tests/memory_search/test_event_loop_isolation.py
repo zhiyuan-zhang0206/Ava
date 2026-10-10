@@ -330,7 +330,7 @@ def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_max_concurrency", 7)
-    assert _gw_memory.build_search_gate()._value == 7
+    assert _gw_memory.build_search_gate(settings.services.memory_search_max_concurrency)._value == 7
 
 
 class TestMemoryNoteEndpoint:

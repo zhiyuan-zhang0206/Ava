@@ -189,10 +189,10 @@ def _msg_text(content: Any) -> str:
     return str(content)
 
 
-def _transcript(agent_id: int) -> list[dict[str, str]]:
+def _transcript(agent_id: int, *, database: Database) -> list[dict[str, str]]:
     """Full Task #1125 conversation, or [] if its checkpoint is unreadable."""
     try:
-        messages = load_checkpoint_messages_full(Database.from_settings(), agent_id)
+        messages = load_checkpoint_messages_full(database, agent_id)
     except CheckpointReadError:
         return []
     return [{"type": message.type, "content": _msg_text(message.content)} for message in messages]
@@ -357,6 +357,7 @@ def build_record(
     inbounds: list[dict[str, Any]],
     meta: tuple,
     *,
+    database: Database,
     leak_paths: LeakPaths | None = None,
 ) -> dict[str, Any]:
     """Assemble the stable trace dataset record for one agent run."""
@@ -372,7 +373,7 @@ def build_record(
     compactions = sum(1 for event_type, _ in log_events if event_type == "compact")
     # `report_breached` is retired: only rows written before its producer was removed set this.
     breached = any(event_type == "report_breached" for event_type, _ in log_events)
-    transcript = _transcript(agent_id)
+    transcript = _transcript(agent_id, database=database)
 
     plugins_activated, plugins_activated_skipped = _plugins_activated(events)
     if plugins_activated_skipped:

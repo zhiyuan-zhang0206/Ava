@@ -28,6 +28,7 @@ from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag, read_ava_kwargs
 from base.agents.messages.security_finding import SecurityFindingEntry
+from base.clock import Clock
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -46,7 +47,15 @@ def _scan_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _run_hook(state: AgentState) -> dict[str, Any] | None:
-    return await _deliver_security_findings(state, None, None)  # type: ignore[arg-type]
+    runtime = Runtime(
+        context=AvaContext(
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
+            clock_factory=Clock.from_settings,
+        )
+    )
+    return await _deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
 
 
 def test_the_hook_runs_after_exec() -> None:
@@ -125,12 +134,15 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
         context=AvaContext(
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             clients=process_clients(),
             identity=AgentIdentity(agent_id=1042, owns_loop=True),
             catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
         )
     )
     code = (

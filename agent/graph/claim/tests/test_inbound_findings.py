@@ -28,6 +28,7 @@ from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.clock import Clock
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
@@ -63,10 +64,13 @@ async def _claim(pool: AsyncConnectionPool, agent_id: int) -> Command[Any]:
                 ops_pool=pool,
                 llm=MagicMock(),
                 event_publisher=MagicMock(),
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                ),
                 db=Database.from_settings(),
                 bus=EventBus.from_settings(),
                 catalog=build_model_catalog(),
+                clock_factory=Clock.from_settings,
             )
         ),
         {"configurable": {"thread_id": str(agent_id)}},

@@ -56,6 +56,7 @@ async def source(
         HostedTurnResources(),
         catalog=model_catalog,
         llm_override=config_authority.runtime.lm.llm_override,
+        default_reader=lambda _domain, field: config_authority.service_field_value(field),
     )
     with ConnectionPool[psycopg.Connection](conn.info.dsn) as sync_pool:
         target: CompactTarget = observe(sync_pool, work.agent_id)

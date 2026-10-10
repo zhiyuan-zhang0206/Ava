@@ -65,7 +65,9 @@ sys.path.insert(0, {repo!r})
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
 import services.backup.dump as backup
-from base.config import settings
+from base.config import ConfigBoot
+config = ConfigBoot()
+settings = config.view
 from services.backup.scheduler import worker
 
 before = sorted(m for m in sys.modules if m.split(".")[0] in {roots!r})
@@ -86,7 +88,7 @@ backup._run_backup = _empty_dump
 work = Path({work!r})
 work.mkdir()
 result = worker._execute(
-    {{"kind": "dump", "now": datetime(2026, 10, 2, 3, tzinfo=UTC).isoformat()}}, work
+    {{"kind": "dump", "now": datetime(2026, 10, 2, 3, tzinfo=UTC).isoformat()}}, work, config=config
 )
 print(json.dumps({{
     "before": before,

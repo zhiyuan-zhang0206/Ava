@@ -24,6 +24,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from base.config import settings
 from base.db import pg_admin
 from services.backup.walg import drill, restore
 from services.backup.walg.backups import Backup, parse_backups
@@ -179,7 +180,14 @@ def test_an_expected_failure_is_recorded_with_its_message_and_keeps_the_last_suc
     _fail_reading(RuntimeError("no archiver state"), monkeypatch)
     previous = _record(last_ok_at=T0 - timedelta(days=3))
 
-    record = drill.run_drill(_target(), _backup(), previous, lambda _line: None, lambda: T0)
+    record = drill.run_drill(
+        _target(),
+        _backup(),
+        previous,
+        lambda _line: None,
+        lambda: T0,
+        path_reader=lambda: settings.walg.walg_config_file,
+    )
 
     assert (record.ok, record.detail, record.backup) == (False, "no archiver state", _backup().name)
     assert record.last_ok_at == previous.last_ok_at
@@ -189,7 +197,14 @@ def test_an_expected_failure_is_recorded_with_its_message_and_keeps_the_last_suc
 def test_an_unexpected_failure_names_its_type(monkeypatch: pytest.MonkeyPatch) -> None:
     _fail_reading(KeyError("boom"), monkeypatch)
 
-    record = drill.run_drill(_target(), _backup(), None, lambda _line: None, lambda: T0)
+    record = drill.run_drill(
+        _target(),
+        _backup(),
+        None,
+        lambda _line: None,
+        lambda: T0,
+        path_reader=lambda: settings.walg.walg_config_file,
+    )
 
     assert not record.ok and record.detail == "KeyError: 'boom'"
     assert record.last_ok_at is None
@@ -198,7 +213,14 @@ def test_an_unexpected_failure_names_its_type(monkeypatch: pytest.MonkeyPatch) -
 def test_a_long_failure_message_is_cut_for_the_state_file(monkeypatch: pytest.MonkeyPatch) -> None:
     _fail_reading(RuntimeError("x" * 5000), monkeypatch)
 
-    record = drill.run_drill(_target(), _backup(), None, lambda _line: None, lambda: T0)
+    record = drill.run_drill(
+        _target(),
+        _backup(),
+        None,
+        lambda _line: None,
+        lambda: T0,
+        path_reader=lambda: settings.walg.walg_config_file,
+    )
 
     assert len(record.detail) == drill._DETAIL_CHARS
 
@@ -316,7 +338,12 @@ def _run_drill(
 ) -> tuple[DrillRecord, list[str]]:
     lines: list[str] = []
     record = drill.run_drill(
-        source.target, source.newest_backup(), previous, lines.append, lambda: T0
+        source.target,
+        source.newest_backup(),
+        previous,
+        lines.append,
+        lambda: T0,
+        path_reader=lambda: settings.walg.walg_config_file,
     )
     return record, lines
 

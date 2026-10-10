@@ -18,6 +18,8 @@ from ava.gateway_client import MemorySearchResult
 from base.agents import IndexerUnavailable
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
@@ -76,8 +78,10 @@ async def test_renders_path_and_description(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -102,8 +106,10 @@ async def test_empty_description_renders_path_only_no_synthesis(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -127,8 +133,10 @@ async def test_description_is_not_truncated(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -152,9 +160,11 @@ async def test_skips_already_injected_paths(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -179,8 +189,10 @@ async def test_skips_path_not_synced_to_this_machine(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -197,9 +209,11 @@ async def test_returns_none_when_all_matches_already_injected(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -243,8 +257,10 @@ async def test_http_error_degrades_to_no_recall_and_logs_error(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -266,8 +282,10 @@ async def test_modelled_outage_degrades_without_an_error_log(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -286,8 +304,10 @@ async def test_programming_error_in_search_still_propagates(
     with pytest.raises(TypeError):
         await recall.passive_memory_recall(
             _conversation(),
-            context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-            agent=AgentSlices.resolve(),
+            context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
             log_key=_KEY,
         )
 
@@ -297,8 +317,10 @@ async def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> No
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -319,8 +341,10 @@ async def test_returns_none_when_eval_isolated(monkeypatch: pytest.MonkeyPatch) 
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
     assert result is None
@@ -342,8 +366,10 @@ async def test_returns_none_when_no_query(
 
     result = await recall.passive_memory_recall(
         [],
-        context=AvaContext(catalog=build_model_catalog()),
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -362,8 +388,6 @@ async def test_retrieval_default_is_top_100(
     """Retrieval goes wide by default — the relaxed filter lists rather than
     rejects, so it needs real candidates to judge; the default lives in
     `base/config/domains/agent/settings.py` (memory_recall_retrieve_k = 100)."""
-    from base.config import settings
-
     assert settings.agent.memory_recall_retrieve_k == 100
     asked: dict[str, int] = {}
 
@@ -375,8 +399,10 @@ async def test_retrieval_default_is_top_100(
 
     await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )  # pyright: ignore[reportUnknownArgumentType]
 
@@ -400,8 +426,10 @@ async def test_retrieval_is_wider_than_injection(
 
     await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=build_model_catalog()),
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )  # pyright: ignore[reportUnknownArgumentType]
 
@@ -440,8 +468,10 @@ async def test_only_what_the_filter_kept_is_injected(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=model_catalog),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -476,8 +506,10 @@ async def test_nothing_is_injected_when_the_filter_keeps_nothing(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=model_catalog),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
     assert result is None
@@ -514,8 +546,10 @@ async def test_the_filter_sees_the_type_tag_search_returned(
 
     await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=model_catalog),
-        agent=AgentSlices.resolve(),
+        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )  # pyright: ignore[reportUnknownArgumentType]
 
@@ -561,9 +595,11 @@ async def test_already_injected_notes_still_reach_the_filter_then_dedup(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=model_catalog),  # pyright: ignore[reportUnknownArgumentType]
+        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -610,9 +646,11 @@ async def test_returns_none_when_everything_the_filter_kept_is_already_injected(
 
     result = await recall.passive_memory_recall(
         _conversation(),
-        context=AvaContext(catalog=model_catalog),  # pyright: ignore[reportUnknownArgumentType]
+        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         log_key=_KEY,
     )
 
@@ -625,10 +663,14 @@ async def test_gateway_search_receives_each_explicit_host_context(
     """Two host calls route their client dependencies without binding the shared SDK."""
     contexts = [
         AvaContext(
-            identity=AgentIdentity(agent_id=11, owns_loop=True), catalog=build_model_catalog()
+            identity=AgentIdentity(agent_id=11, owns_loop=True),
+            catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
         ),
         AvaContext(
-            identity=AgentIdentity(agent_id=22, owns_loop=True), catalog=build_model_catalog()
+            identity=AgentIdentity(agent_id=22, owns_loop=True),
+            catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
         ),
     ]
     seen: list[AvaContext] = []
@@ -642,7 +684,9 @@ async def test_gateway_search_receives_each_explicit_host_context(
         assert (
             await recall.passive_memory_recall(
                 _conversation(),
-                agent=AgentSlices.resolve(),
+                agent=AgentSlices.resolve(
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                ),
                 context=context,
                 log_key=_KEY,
             )

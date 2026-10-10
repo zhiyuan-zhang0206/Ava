@@ -39,6 +39,8 @@ from agent.impersonation_handoff import introduction_note
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.impersonation.notes import HandoffNotes
 from base.log import logger
 
 from .node_log import node_lifecycle
@@ -67,6 +69,16 @@ async def init_context_node(
         event_publisher=event_publisher,
         agent_id=agent_id_from_config(config),
         turn_progress=runtime.context.turn_progress,
+        read_stall_seconds=lambda: runtime.context.require_agent().read(
+            "agent", "node_stall_dump_seconds"
+        ),
+        timeline_inputs=TimelineReadInputs(
+            runtime.context.require_clock,
+            lambda: runtime.context.require_agent().read("general", "message_timestamps"),
+        ),
+        limit_reader=lambda: runtime.context.require_agent().read(
+            "display", "timeline_default_limit"
+        ),
     ):
         reset = state.context_reset
         if state.messages:
@@ -96,7 +108,16 @@ async def init_context_node(
             else context_notes(runtime.context.plugin_registry(), runtime.context)
         )
         if state.impersonation_introduced:
-            notes.append(introduction_note())
+            notes.append(
+                introduction_note(
+                    notes=HandoffNotes(
+                        runtime.context.require_clock,
+                        lambda: runtime.context.require_agent().read(
+                            "general", "message_timestamps"
+                        ),
+                    )
+                )
+            )
         logger.info(
             "[init-context] establishing: {} note(s) + {} tail message(s), resume={}",
             len(notes),

@@ -32,7 +32,7 @@ without requiring an independently resident agent process.
 - `agent/ownership/hosted.py` — admission, renewal, settlement and release
 - `agent/ownership/hosted.py:settle_stale_running_rows` — host recovery
 - `agent/ownership/hosted_claim.py` — the admission UPDATE that claims the runtime row
-- `agent/ownership/corpse_reap.py` — crash-dead row termination + recovery wake
+- `agent/ownership/corpse_reap.py` — crash-dead row termination + recovery wake; the host supplies a live wake-enabled reader, called at each original per-row transaction gate
 - `agent/ownership/inbound.py` — the owner lock every inbound queue mutation takes
 - `agent/ownership/lifecycle_intent.py` — the durable lifecycle command pointer
 - `services/agent_runner/agent_host/daemon.py` — owner health beat

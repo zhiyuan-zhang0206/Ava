@@ -18,6 +18,7 @@ __all__ = [
     "fake_video",
     "mock_deepseek",
     "mock_gemini",
+    "understand_clock",
 ]
 
 
@@ -86,3 +87,14 @@ def mock_gemini(monkeypatch: pytest.MonkeyPatch) -> ProviderCapture:
     capture = ProviderCapture()
     monkeypatch.setattr("base.lm.factory.build_chat_model", capture.build)
     return capture
+
+
+@pytest.fixture
+def understand_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give this SDK operation's test context its explicit live clock factory."""
+    from dataclasses import replace
+
+    import ava
+    from base.clock import Clock
+
+    monkeypatch.setattr(ava, "context", replace(ava.context, clock_factory=Clock.from_settings))

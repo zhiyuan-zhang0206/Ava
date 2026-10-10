@@ -29,6 +29,7 @@ module at the 800-line budget ceiling.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any, NamedTuple
 from uuid import UUID
 
@@ -37,7 +38,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
-from base.config import settings
 from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.events.live.announce import publish_agent_updated
@@ -91,6 +91,7 @@ async def reap_crash_corpses(
     owner: UUID,
     *,
     bus: EventBus,
+    wake_enabled: Callable[[], bool],
 ) -> list[ReapedCorpse]:
     """Terminate crash-marked idling corpses whose grace window has elapsed.
 
@@ -136,7 +137,12 @@ async def reap_crash_corpses(
                 payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
             )
             recorded.append(await record_audit_async(conn, event))
-            reaped.append(ReapedCorpse(agent_id, await _queue_wake_if_enabled(conn, agent_id)))
+            reaped.append(
+                ReapedCorpse(
+                    agent_id,
+                    await _queue_wake_if_enabled(conn, agent_id, wake_enabled=wake_enabled),
+                )
+            )
     for event in recorded:
         telemetry.emit_prepared(event)
     if reaped:
@@ -150,8 +156,10 @@ async def reap_crash_corpses(
     return reaped
 
 
-async def _queue_wake_if_enabled(conn: psycopg.AsyncConnection[Any], agent_id: int) -> int | None:
-    if not settings.daemon.hosted_crash_recovery_wake_enabled:
+async def _queue_wake_if_enabled(
+    conn: psycopg.AsyncConnection[Any], agent_id: int, *, wake_enabled: Callable[[], bool]
+) -> int | None:
+    if not wake_enabled():
         return None
     return await _queue_recovery_wake(conn, agent_id)
 
@@ -190,6 +198,7 @@ async def reap_recrashed_corpse(
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
+    wake_enabled: Callable[[], bool],
 ) -> list[ReapedCorpse]:
     """Terminate the corpse this incarnation just re-crashed (task #3616).
 
@@ -236,7 +245,12 @@ async def reap_recrashed_corpse(
                 },
             )
             recorded.append(await record_audit_async(conn, event))
-            reaped.append(ReapedCorpse(agent_id, await _queue_wake_if_enabled(conn, agent_id)))
+            reaped.append(
+                ReapedCorpse(
+                    agent_id,
+                    await _queue_wake_if_enabled(conn, agent_id, wake_enabled=wake_enabled),
+                )
+            )
     for event in recorded:
         telemetry.emit_prepared(event)
     if reaped:

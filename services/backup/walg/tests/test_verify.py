@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from base.config import settings
 from services.backup.walg import verify
 from services.backup.walg.runner import WalgCommandError
 from services.backup.walg.tests.support import Sandbox, fixture_text, make_sandbox
@@ -55,7 +56,7 @@ def test_an_exit_code_of_zero_with_a_failure_status_is_a_failed_chain(sandbox: S
     sandbox.put("wal-verify.json", _report(integrity="FAILURE"))
     sandbox.put("wal-verify.rc", "0")
 
-    verdict = verify.verify_chain(ADMIN_URL)
+    verdict = verify.verify_chain(ADMIN_URL, path_reader=lambda: settings.walg.walg_config_file)
 
     assert verdict.failed is True
     assert sandbox.calls() == ["wal-verify integrity timeline --json"]
@@ -66,7 +67,7 @@ def test_a_non_zero_exit_is_an_error_even_with_an_ok_report(sandbox: Sandbox) ->
     sandbox.put("wal-verify.rc", "1")
 
     with pytest.raises(WalgCommandError):
-        verify.verify_chain(ADMIN_URL)
+        verify.verify_chain(ADMIN_URL, path_reader=lambda: settings.walg.walg_config_file)
 
 
 @pytest.mark.parametrize("status", ["PASSED", "ok", "", None])
@@ -89,6 +90,6 @@ def test_wal_verify_is_handed_the_owner_only_socket(sandbox: Sandbox) -> None:
     default socket, which is not where this home's Postgres listens."""
     sandbox.put("wal-verify.json", _report(integrity="OK"))
 
-    verify.verify_chain(ADMIN_URL)
+    verify.verify_chain(ADMIN_URL, path_reader=lambda: settings.walg.walg_config_file)
 
     assert sandbox.verify_env_log() == ["PGHOST=/sockets/ava-pg-home PGPORT=5433 PGUSER=tester"]

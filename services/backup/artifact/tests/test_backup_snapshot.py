@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import settings
 from base.db import Database
 from services.backup import dump as backup
 
@@ -43,7 +44,17 @@ def test_interrupted_snapshot_dump_leaves_no_plaintext(
 
     monkeypatch.setattr(backup, "_PROGRESS_INTERVAL_S", 0.2)
     with pytest.raises(KeyboardInterrupt):
-        backup.run_backup(db_url="dbname=ava", publish=False, progress=interrupt, db=database)
+        backup.run_backup(
+            db_url="dbname=ava",
+            publish=False,
+            progress=interrupt,
+            db=database,
+            is_remote_reader=lambda: settings.data_plane.is_remote,
+            keep_reader=lambda: settings.services.backup_keep,
+            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+            bucket_reader=lambda: settings.services.backup_offsite_bucket,
+            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+        )
     assert not list(tmp_path.glob("*.partial")) and not list(tmp_path.glob(".backup-key-*"))
 
 
@@ -119,6 +130,11 @@ def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
         publish=False,
         staging=staging,
         db=database,
+        is_remote_reader=lambda: settings.data_plane.is_remote,
+        keep_reader=lambda: settings.services.backup_keep,
+        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
+        bucket_reader=lambda: settings.services.backup_offsite_bucket,
+        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
     assert artifact.parent == staging
     assert [path.name for path in stale if path.exists()] == []

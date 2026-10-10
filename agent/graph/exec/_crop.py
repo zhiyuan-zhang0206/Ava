@@ -7,7 +7,7 @@ are candidates for eviction, and an exhausted budget leaves the output inline.
 
 import re
 import stat
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
@@ -31,12 +31,49 @@ class _CropConfig(Protocol):
     statically at the call site.
     """
 
-    exec_output_crop_after_lines: int
-    exec_output_crop_after_chars: int
-    exec_output_crop_after_bytes: int
-    exec_output_crop_head_lines: int
-    exec_output_crop_tail_lines: int
-    exec_output_crop_archive_max_bytes: int
+    @property
+    def exec_output_crop_after_lines(self) -> int: ...
+    @property
+    def exec_output_crop_after_chars(self) -> int: ...
+    @property
+    def exec_output_crop_after_bytes(self) -> int: ...
+    @property
+    def exec_output_crop_head_lines(self) -> int: ...
+    @property
+    def exec_output_crop_tail_lines(self) -> int: ...
+    @property
+    def exec_output_crop_archive_max_bytes(self) -> int: ...
+
+
+class CropInputs:
+    """Live crop fields supplied by the execution composition owner."""
+
+    def __init__(self, read: Callable[[str], int]) -> None:
+        self._read = read
+
+    @property
+    def exec_output_crop_after_lines(self) -> int:
+        return self._read("exec_output_crop_after_lines")
+
+    @property
+    def exec_output_crop_after_chars(self) -> int:
+        return self._read("exec_output_crop_after_chars")
+
+    @property
+    def exec_output_crop_after_bytes(self) -> int:
+        return self._read("exec_output_crop_after_bytes")
+
+    @property
+    def exec_output_crop_head_lines(self) -> int:
+        return self._read("exec_output_crop_head_lines")
+
+    @property
+    def exec_output_crop_tail_lines(self) -> int:
+        return self._read("exec_output_crop_tail_lines")
+
+    @property
+    def exec_output_crop_archive_max_bytes(self) -> int:
+        return self._read("exec_output_crop_archive_max_bytes")
 
 
 _CROP_NAME = re.compile(r"\bcrop_[0-9a-f]{32}\.txt\b")

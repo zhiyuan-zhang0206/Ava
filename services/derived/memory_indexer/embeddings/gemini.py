@@ -39,13 +39,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, override
 
 import httpx
 import numpy as np
 
-from base.config import settings
 from base.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
     ExponentialBackoff,
@@ -103,7 +103,7 @@ _QUERY_EMBED_POLICY = Policy(
 )
 
 
-def worst_case_batch_seconds() -> float:
+def worst_case_batch_seconds(timeout_seconds: float) -> float:
     """Budget for one embed_batch call under _EMBED_POLICY.
 
     Each sync or async attempt runs under an asyncio cancellation deadline equal
@@ -112,7 +112,7 @@ def worst_case_batch_seconds() -> float:
     and random span).
     """
     attempts = _EMBED_POLICY.max_attempts
-    request_seconds = attempts * settings.services.memory_embed_timeout_seconds
+    request_seconds = attempts * timeout_seconds
     if attempts < 2:
         return request_seconds
     last_backoff = _EMBED_POLICY.backoff(attempts - 2)
@@ -120,14 +120,15 @@ def worst_case_batch_seconds() -> float:
     return request_seconds + (attempts - 1) * per_sleep
 
 
-def _api_key() -> str:
-    if settings.lm.gemini_api_key is None:
+def _api_key(api_key_reader: Callable[[], str | None]) -> str:
+    value = api_key_reader()
+    if value is None:
         raise EmbeddingAPIError(
             "GEMINI_API_KEY not set — add GEMINI_API_KEY=<key> to "
             "`~/.ava/.env`; takes effect after restarting the service "
             "session to reload env."
         )
-    return settings.lm.gemini_api_key.get_secret_value()
+    return value
 
 
 def _payload(texts: list[str], task_type: str) -> dict[str, Any]:
@@ -217,7 +218,13 @@ def _attempt_loop() -> asyncio.AbstractEventLoop:
 
 
 def _embed(
-    texts: list[str], task_type: str, *, catalog: ModelCatalog, policy: Policy = _EMBED_POLICY
+    texts: list[str],
+    task_type: str,
+    *,
+    catalog: ModelCatalog,
+    timeout_reader: Callable[[], float],
+    api_key_reader: Callable[[], str | None],
+    policy: Policy = _EMBED_POLICY,
 ) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
@@ -238,9 +245,9 @@ def _embed(
     """
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
-    headers = {"x-goog-api-key": _api_key()}
+    headers = {"x-goog-api-key": _api_key(api_key_reader)}
     payload = _payload(texts, task_type)
-    timeout_s = settings.services.memory_embed_timeout_seconds
+    timeout_s = timeout_reader()
 
     async def _attempt() -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
@@ -271,7 +278,13 @@ def _embed(
 
 
 async def _embed_async(
-    texts: list[str], task_type: str, *, catalog: ModelCatalog, policy: Policy = _EMBED_POLICY
+    texts: list[str],
+    task_type: str,
+    *,
+    catalog: ModelCatalog,
+    timeout_reader: Callable[[], float],
+    api_key_reader: Callable[[], str | None],
+    policy: Policy = _EMBED_POLICY,
 ) -> np.ndarray:
     """Async twin of ``_embed`` — native non-blocking I/O over
     ``httpx.AsyncClient`` with ``asyncio.sleep`` backoff. Same timeout /
@@ -282,9 +295,9 @@ async def _embed_async(
     as ``_embed``: query embeds pass ``_QUERY_EMBED_POLICY``."""
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
-    headers = {"x-goog-api-key": _api_key()}
+    headers = {"x-goog-api-key": _api_key(api_key_reader)}
     payload = _payload(texts, task_type)
-    timeout_s = settings.services.memory_embed_timeout_seconds
+    timeout_s = timeout_reader()
     try:
         client = httpx.AsyncClient(timeout=timeout_s)
     except httpx.HTTPError as exc:
@@ -325,17 +338,36 @@ class GeminiEmbeddingProvider:
     per-row reconcile — any change (provider, model, dim) re-embeds the
     whole index."""
 
-    def __init__(self, catalog: ModelCatalog) -> None:
+    def __init__(
+        self,
+        catalog: ModelCatalog,
+        *,
+        timeout_reader: Callable[[], float],
+        api_key_reader: Callable[[], str | None],
+    ) -> None:
         self._catalog = catalog
+        self._timeout_reader = timeout_reader
+        self._api_key_reader = api_key_reader
 
     def embed_batch(self, texts: list[str]) -> np.ndarray:
         """Batch embed markdown file contents for indexing. (N, DIM) float32."""
-        return _embed(texts, task_type="RETRIEVAL_DOCUMENT", catalog=self._catalog)
+        return _embed(
+            texts,
+            task_type="RETRIEVAL_DOCUMENT",
+            catalog=self._catalog,
+            timeout_reader=self._timeout_reader,
+            api_key_reader=self._api_key_reader,
+        )
 
     def embed_query(self, text: str) -> np.ndarray:
         """Embed single query for search. (DIM,) float32."""
         return _embed(
-            [text], task_type="RETRIEVAL_QUERY", catalog=self._catalog, policy=_QUERY_EMBED_POLICY
+            [text],
+            task_type="RETRIEVAL_QUERY",
+            catalog=self._catalog,
+            timeout_reader=self._timeout_reader,
+            api_key_reader=self._api_key_reader,
+            policy=_QUERY_EMBED_POLICY,
         )[0]
 
     async def embed_query_async(self, text: str) -> np.ndarray:
@@ -345,6 +377,8 @@ class GeminiEmbeddingProvider:
                 [text],
                 task_type="RETRIEVAL_QUERY",
                 catalog=self._catalog,
+                timeout_reader=self._timeout_reader,
+                api_key_reader=self._api_key_reader,
                 policy=_QUERY_EMBED_POLICY,
             )
         )[0]
