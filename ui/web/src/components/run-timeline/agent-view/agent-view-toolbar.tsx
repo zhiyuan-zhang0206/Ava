@@ -25,6 +25,10 @@ export function AgentViewToolbar({
   onContextSize,
   unitHeights,
   onUnitHeights,
+  showUser,
+  onShowUser,
+  showOther,
+  onShowOther,
 }: {
   agentIds: readonly number[];
   onAdd: (agent: number) => void;
@@ -37,6 +41,12 @@ export function AgentViewToolbar({
   onContextSize: (on: boolean) => void;
   unitHeights: UnitHeights;
   onUnitHeights: (heights: UnitHeights) => void;
+  /** Whether the arrows between agents (and the Other agents group) are shown. */
+  /** The User group and the arrows with the user; the Other agents group and the arrows with agents outside the view. */
+  showUser: boolean;
+  onShowUser: (on: boolean) => void;
+  showOther: boolean;
+  onShowOther: (on: boolean) => void;
 }) {
   const t = useTranslations("runTimeline");
   const [draft, setDraft] = useState("");
@@ -117,6 +127,24 @@ export function AgentViewToolbar({
           data-testid="agent-view-context-size"
         />
         {t("contextSizeLabel")}
+      </label>
+      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground")}>
+        <input
+          type="checkbox"
+          checked={showUser}
+          onChange={(event) => onShowUser(event.target.checked)}
+          data-testid="agent-view-interactions-user"
+        />
+        {t("userInteractionsLabel")}
+      </label>
+      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground")}>
+        <input
+          type="checkbox"
+          checked={showOther}
+          onChange={(event) => onShowOther(event.target.checked)}
+          data-testid="agent-view-interactions-other"
+        />
+        {t("otherInteractionsLabel")}
       </label>
     </div>
   );
