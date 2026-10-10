@@ -10,6 +10,7 @@ no longer exists, and a listed directory that no longer holds a test.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
 import os
@@ -212,4 +213,15 @@ def test_a_scope_file_that_does_not_list_names_is_refused(tmp_path: Path) -> Non
 def test_the_plugin_module_holds_no_central_listing() -> None:
     """The declarations stay next to the tests: nothing in the plugin names a test path."""
     source = (_REPO_ROOT / "tests" / "fixtures" / "path_scopes.py").read_text(encoding="utf-8")
-    assert "tests/" not in source.split("def modules_by_path")[1]
+    reader = (_REPO_ROOT / "scripts/structure/imports/fixture_scopes.py").read_text(
+        encoding="utf-8"
+    )
+    assert "tests/" not in reader.split("def modules_by_path")[1]
+    # Exclude the descriptive module docstring; inspect executable declarations.
+    plugin = ast.parse(source)
+    body = plugin.body[1:] if ast.get_docstring(plugin) is not None else plugin.body
+    declarations = ast.Module(body=body, type_ignores=[])
+    assert not any(
+        isinstance(node, ast.Constant) and isinstance(node.value, str) and "tests/" in node.value
+        for node in ast.walk(declarations)
+    )

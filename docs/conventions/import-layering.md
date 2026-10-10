@@ -103,6 +103,44 @@ The contracts also feed test placement: `scripts/structure/placement.py` reads
 `[tool.importlinter]` to decide which package may legally hold a test, so editing a
 contract can move the answer of the placement checks.
 
+### Shared dependency evidence
+
+`scripts/structure/imports/facts.py` owns direct dependency facts for tooling,
+using normalized import clauses and `placement.ModuleIndex` for exact checkout
+resolution. Absolute and relative imports, local imports and aliases use the
+same resolver. A missing first-party module remains an explicit unknown; it
+cannot silently become an existing parent package. `from pkg import symbol`
+depends on the package door unless the named submodule exists. Following that
+door's own imports belongs to a consumer's dependency closure.
+
+The collector also recognizes literal dynamic imports, imported `unittest.mock.patch`
+string targets, bounded literal pytest
+string parameters and f-strings, actual Python `-m`/`-c` launches, and literal
+paths anchored by `Path(__file__)` inside the checkout. Lexical bindings
+prevent an unrelated parameter or comprehension target from shadowing another
+scope's import or path. Patch target facts retain their callee, so ownership may
+prune patch-only subjects while runtime impact keeps the import dependency.
+It does not execute Python, infer arbitrary builders or prove runtime branch
+coverage. Resource facts describe possible referenced paths; directory facts
+give a conservative subtree, not proof that every child was read. Known paths
+remain facts when the target is absent, including negative existence checks.
+Unsupported recognized import and execution inputs retain their source location,
+kind and reason in `Evidence.unknown`.
+Recognized `Path` or `open` reads whose repository or external anchor cannot be
+proved also retain an unknown, rather than treating a relative working-directory
+path as repository-rooted. Source embedded in Python `-c` uses the same collector;
+it has no implicit relative-import package or source-file resource anchor.
+The lexical fact pass also identifies recognized launchers. Source with none
+skips the second execution-input pass; launcher-bearing source retains the full
+execution grammar and its unknown diagnostics.
+
+These facts do not replace import-linter's graph or enable new placement gates.
+CI reverse impact follows unpruned runtime dependencies; test ownership remains
+a separate query with its existing legacy subject policy. In particular, fixture
+execution dependencies do not automatically define a test's business owner.
+The pure declarative reader in `imports/fixture_scopes.py` is shared by the
+pytest plugin and CI; their execution and selection policies remain separate.
+
 ## `ignore_imports`
 
 Only `services must not import the agent kernel` has an exemption list. The other
