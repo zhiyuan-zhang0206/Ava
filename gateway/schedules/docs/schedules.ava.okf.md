@@ -24,7 +24,7 @@ A **schedule** is a resident process supervised by the `schedule-manager` servic
 - **Alerts on prolonged silence**: an enabled schedule with no live session for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event. `status='error'` remains eligible even though the breaker will not relaunch it. The first sessionless observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the session live again clears both and rearms a later outage; completed and disabled schedules are excluded.
 
 ### ScheduleRunner (`gateway/schedules/runner.py`)
-- The in-session entrypoint `.venv/bin/python -m gateway.schedules.runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.ava.okf.md]].
+- The in-session entrypoint `.venv/bin/python -m services.wake.schedule_manager.runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.ava.okf.md]].
 
 ### Built-in Cron Slot Claims (`schedules/catchup.py`)
 
@@ -61,4 +61,4 @@ Only applies to **crashes** (not clean exits) looping—clean exits go to `compl
 
 - `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`: the service, its two loops and the checkout guard
 - `services/wake/schedule_manager/manager.py:ScheduleManager` — reconcile logic
-- `gateway/schedules/runner.py:run()` — loads and runs a single schedule (the in-session entrypoint of `main()` → `.venv/bin/python -m gateway.schedules.runner <id>`)
+- `services/wake/schedule_manager/runner.py:main()` — the process entrypoint; calls `gateway/schedules/runner.py:run()` with explicit SDK inputs

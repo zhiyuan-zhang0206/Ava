@@ -26,6 +26,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 async def test_host_trace_reads_final_messages_after_nstep_flush(
@@ -72,6 +73,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
         )
         await flush_checkpoint(saver, agent_id)
         host = host_module.AgentHost(
+            policy=configured_policy(),
             pool=aops_pool,
             checkpointer=saver,
             graph=graph,

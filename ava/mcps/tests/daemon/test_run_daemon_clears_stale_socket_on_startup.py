@@ -53,7 +53,9 @@ async def test_run_daemon_clears_stale_socket_on_startup(
     Path(short_socket_path).write_text("leftover")
 
     monkeypatch.setattr(daemon_mod, "_connect_server", AsyncMock())
-    daemon_task = asyncio.create_task(daemon_mod.run_daemon(short_socket_path))
+    daemon_task = asyncio.create_task(
+        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0)
+    )
 
     # being able to connect means bind succeeded = stale was cleaned
     _, writer = await _wait_for_daemon_socket(daemon_task, short_socket_path, timeout=1.5)
@@ -311,7 +313,7 @@ async def test_connect_server_enforces_requires_before_connecting(
 
     monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
     with pytest.raises(_cfg.MCPError, match="requires a display"):
-        await daemon_mod._connect_server("chrome", {})
+        await daemon_mod._connect_server("chrome", {}, timeout_seconds=lambda: 15.0)
     assert called is False
 
 
@@ -570,7 +572,7 @@ async def test_handle_client_retry_reconnects_after_invalidation(
 
     connect_count = 0
 
-    async def _reconnect(server: str, _oauth_locks: dict[str, Any]) -> Any:
+    async def _reconnect(server: str, _oauth_locks: dict[str, Any], **_kwargs: Any) -> Any:
         nonlocal connect_count
         connect_count += 1
         session = _make_session()
@@ -607,7 +609,7 @@ async def test_handle_client_retries_on_mcp_error_connection_closed(
 
     connect_count = 0
 
-    async def _reconnect(server: str, _oauth_locks: dict[str, Any]) -> Any:
+    async def _reconnect(server: str, _oauth_locks: dict[str, Any], **_kwargs: Any) -> Any:
         nonlocal connect_count
         connect_count += 1
         session = _make_session()

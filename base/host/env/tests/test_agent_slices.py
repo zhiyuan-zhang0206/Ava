@@ -11,7 +11,7 @@ import pytest
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env import config_registry
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.host.env.agent_slices import AgentBrain, AgentSlices, ModelOverrides
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
 # The agent's pins and the plugin-config view ride the dataclass beside the slices.
@@ -61,6 +61,19 @@ def test_unpinned_fields_read_the_live_cluster_defaults() -> None:
     slices = AgentSlices.resolve()
     for name in _slice_fields():
         assert _read_slice(slices, name) == _expected(name, {}), name
+
+
+def test_explicit_brain_uses_its_owner_without_changing_other_defaults() -> None:
+    first = AgentBrain("first-owner-model")
+    second = AgentBrain("second-owner-model")
+    first_slices = AgentSlices.resolve(brain=first)
+    second_slices = AgentSlices.resolve(brain=second)
+    assert first_slices.brain is first
+    assert second_slices.brain is second
+    for name in _slice_fields():
+        if name != "llm_model":
+            assert _read_slice(first_slices, name) == _expected(name, {}), name
+            assert _read_slice(second_slices, name) == _expected(name, {}), name
 
 
 def test_every_pinned_field_reads_its_pin() -> None:
