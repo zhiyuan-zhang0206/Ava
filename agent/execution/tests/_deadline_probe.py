@@ -53,9 +53,9 @@ def _parent(context_path: Path) -> None:
     child.wait(timeout=20)
 
 
-def _exit_status(pid: int, watch: select.kqueue | None) -> int:
+def _exit_status(pid: int, watch: object | None) -> int:
     if sys.platform == "darwin":
-        assert watch is not None
+        assert isinstance(watch, select.kqueue)
         events = watch.control(None, 1, 15)
         assert len(events) == 1 and events[0].fflags & select.KQ_NOTE_EXIT
         return os.waitstatus_to_exitcode(events[0].data)
