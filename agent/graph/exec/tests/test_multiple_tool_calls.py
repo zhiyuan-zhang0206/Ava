@@ -22,6 +22,8 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
@@ -42,6 +44,7 @@ async def _run_calls(
 
 
 async def test_calls_execute_separately_without_rewriting_assistant(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ai = AIMessage(
@@ -62,6 +65,7 @@ async def test_calls_execute_separately_without_rewriting_assistant(
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     runtime = Runtime(
         context=AvaContext(
+            hosted_resources=hosted_resources,
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
@@ -98,9 +102,12 @@ def _state(*codes: str) -> AgentState:
     )
 
 
-def _runtime() -> Runtime[AvaContext]:
+def _runtime(
+    hosted_resources: HostedTurnResources,
+) -> Runtime[AvaContext]:
     return Runtime(
         context=AvaContext(
+            hosted_resources=hosted_resources,
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
@@ -113,10 +120,13 @@ def _runtime() -> Runtime[AvaContext]:
     )
 
 
-def _node_runtime() -> Runtime[AvaContext]:
+def _node_runtime(
+    hosted_resources: HostedTurnResources,
+) -> Runtime[AvaContext]:
     """Inputs for graph tests that replace the entire child runner."""
     return Runtime(
         context=AvaContext(
+            hosted_resources=hosted_resources,
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
@@ -126,10 +136,14 @@ def _node_runtime() -> Runtime[AvaContext]:
     )
 
 
-async def test_real_children_do_not_share_globals(fake_cancel_event: InterruptEvent) -> None:
+async def test_real_children_do_not_share_globals(
+    hosted_resources: HostedTurnResources, fake_cancel_event: InterruptEvent
+) -> None:
     result = await _run_calls(
         _state('shared_name = 42; print("first")', 'print("shared_name" in globals())'),
-        _runtime(),
+        _runtime(
+            hosted_resources=hosted_resources,
+        ),
         {"configurable": {"thread_id": "7"}},
     )
     assert result is not None
@@ -140,10 +154,14 @@ async def test_real_children_do_not_share_globals(fake_cancel_event: InterruptEv
     assert "False" in second.content
 
 
-async def test_exception_does_not_skip_later_call(fake_cancel_event: InterruptEvent) -> None:
+async def test_exception_does_not_skip_later_call(
+    hosted_resources: HostedTurnResources, fake_cancel_event: InterruptEvent
+) -> None:
     result = await _run_calls(
         _state('raise ValueError("first failed")', 'print("second ran")'),
-        _runtime(),
+        _runtime(
+            hosted_resources=hosted_resources,
+        ),
         {"configurable": {"thread_id": "7"}},
     )
     assert result is not None
@@ -153,6 +171,7 @@ async def test_exception_does_not_skip_later_call(fake_cancel_event: InterruptEv
 
 
 async def test_plugin_reducers_commit_between_calls(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from operator import add
@@ -169,7 +188,13 @@ async def test_plugin_reducers_commit_between_calls(
         return _ExecDone(output="ok"), {"total": 1}, 0, None, None
 
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
-    result = await _run_calls(state, _node_runtime(), {"configurable": {"thread_id": "7"}})
+    result = await _run_calls(
+        state,
+        _node_runtime(
+            hosted_resources=hosted_resources,
+        ),
+        {"configurable": {"thread_id": "7"}},
+    )
     assert snapshots == [10, 11]
     assert state.total == 10
     assert result is not None
@@ -177,6 +202,7 @@ async def test_plugin_reducers_commit_between_calls(
 
 
 async def test_notes_and_media_follow_all_results_and_stream_ids_match(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import json
@@ -195,7 +221,9 @@ async def test_notes_and_media_follow_all_results_and_stream_ids_match(
     monkeypatch.setattr(
         "agent.graph.exec.node.build_attach_message", MagicMock(side_effect=[media, None])
     )
-    runtime = _node_runtime()
+    runtime = _node_runtime(
+        hosted_resources=hosted_resources,
+    )
     result = await _run_calls(
         _state("first()", "second()"), runtime, {"configurable": {"thread_id": "7"}}
     )
@@ -211,6 +239,7 @@ async def test_notes_and_media_follow_all_results_and_stream_ids_match(
 
 @pytest.mark.parametrize("outcome", ["cancel", "restart", "terminate", "compact", "timeout"])
 async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
     outcome: str,
 ) -> None:
@@ -232,7 +261,11 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
     )
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     result = await _run_calls(
-        _state("first()", "second()"), _node_runtime(), {"configurable": {"thread_id": "7"}}
+        _state("first()", "second()"),
+        _node_runtime(
+            hosted_resources=hosted_resources,
+        ),
+        {"configurable": {"thread_id": "7"}},
     )
     assert result is not None
     if outcome == "compact":
@@ -253,7 +286,9 @@ def _scan(source: str) -> str:
 
 
 async def test_findings_of_every_call_in_a_batch_reach_the_state(
-    fake_cancel_event: InterruptEvent, monkeypatch: pytest.MonkeyPatch
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: InterruptEvent,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each real child commits its own findings delta and the channel's reducer
     concatenates them across the batch's passes; nothing is merged into the messages."""
@@ -263,7 +298,9 @@ async def test_findings_of_every_call_in_a_batch_reach_the_state(
 
     result = await _run_calls(
         _state(_scan("web.fetch") + "print('first')", _scan("shell.run") + "print('second')"),
-        _runtime(),
+        _runtime(
+            hosted_resources=hosted_resources,
+        ),
         _config(),
     )
 
@@ -272,7 +309,9 @@ async def test_findings_of_every_call_in_a_batch_reach_the_state(
 
 
 async def test_a_compacting_call_discards_the_findings_of_its_batch(
-    fake_cancel_event: InterruptEvent, monkeypatch: pytest.MonkeyPatch
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: InterruptEvent,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Claim wipes the history on a compact, so the findings that annotate it go too:
     those committed by earlier calls of the batch and the compacting call's own."""
@@ -285,21 +324,31 @@ async def test_a_compacting_call_discards_the_findings_of_its_batch(
             _scan("web.fetch"),
             _scan("shell.run") + "from base.agents.lifecycle import SystemHalt\nraise SystemHalt()",
         ),
-        _runtime(),
+        _runtime(
+            hosted_resources=hosted_resources,
+        ),
         _config(),
     )
 
     assert result["security_findings"] == []
 
 
-async def test_unknown_tool_does_not_consume_sibling_code(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_unknown_tool_does_not_consume_sibling_code(
+    hosted_resources: HostedTurnResources, monkeypatch: pytest.MonkeyPatch
+) -> None:
     state = _state("print('must not run')", "print('runs')")
     ai = state.messages[-1]
     assert isinstance(ai, AIMessage)
     ai.tool_calls[0]["name"] = "ava.files.edit"
     run = AsyncMock(return_value=(_ExecDone(output="runs"), {}, 0, None, []))
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
-    result = await _run_calls(state, _node_runtime(), {"configurable": {"thread_id": "7"}})
+    result = await _run_calls(
+        state,
+        _node_runtime(
+            hosted_resources=hosted_resources,
+        ),
+        {"configurable": {"thread_id": "7"}},
+    )
     assert result is not None
     _, first, second = result["messages"]
     assert "unknown tool" in first.content
@@ -362,10 +411,17 @@ def test_normalize_recovers_each_content_call_without_merging() -> None:
 
 
 async def test_exec_recovers_missing_content_call_without_syntax_plugin(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: InterruptEvent,
 ) -> None:
     state = AgentState(messages=[_ai_with_two_content_tool_uses()])
-    result = await _run_calls(state, _runtime(), _config())
+    result = await _run_calls(
+        state,
+        _runtime(
+            hosted_resources=hosted_resources,
+        ),
+        _config(),
+    )
     assert result is not None
     fixed_ai, first, second = result["messages"]
     assert len(fixed_ai.tool_calls) == 2
@@ -396,10 +452,18 @@ def _ai_with_hallucinated_tool_name() -> AIMessage:
     )
 
 
-async def test_exec_node_feeds_back_on_unknown_tool_name() -> None:
+async def test_exec_node_feeds_back_on_unknown_tool_name(
+    hosted_resources: HostedTurnResources,
+) -> None:
     state = AgentState(messages=[_ai_with_hallucinated_tool_name()])
 
-    result = await _run_calls(state, _runtime(), _config())
+    result = await _run_calls(
+        state,
+        _runtime(
+            hosted_resources=hosted_resources,
+        ),
+        _config(),
+    )
 
     assert result is not None
     assert result["halted"] is False
@@ -409,7 +473,9 @@ async def test_exec_node_feeds_back_on_unknown_tool_name() -> None:
     assert "execute_code" in tool_msg.content
 
 
-async def test_exec_node_feeds_back_when_code_key_missing() -> None:
+async def test_exec_node_feeds_back_when_code_key_missing(
+    hosted_resources: HostedTurnResources,
+) -> None:
     # execute_code name but malformed args ({} or missing "code" key) — same
     # KeyError path as the unknown-name case, must also feed back not crash.
     ai = AIMessage(
@@ -421,7 +487,13 @@ async def test_exec_node_feeds_back_when_code_key_missing() -> None:
     )
     state = AgentState(messages=[ai])
 
-    result = await _run_calls(state, _runtime(), _config())
+    result = await _run_calls(
+        state,
+        _runtime(
+            hosted_resources=hosted_resources,
+        ),
+        _config(),
+    )
 
     assert result is not None
     _, tool_msg = result["messages"]
@@ -429,7 +501,9 @@ async def test_exec_node_feeds_back_when_code_key_missing() -> None:
     assert "execute_code" in tool_msg.content
 
 
-async def test_langgraph_owns_each_call_state_transition(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_langgraph_owns_each_call_state_transition(
+    hosted_resources: HostedTurnResources, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from typing import Annotated
 
     def append_digit(current: int, digit: int) -> int:
@@ -446,12 +520,19 @@ async def test_langgraph_owns_each_call_state_transition(monkeypatch: pytest.Mon
 
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     state = DecimalState(total=7, messages=_state("first()", "second()").messages)
-    result = await _run_calls(state, _node_runtime(), _config())
+    result = await _run_calls(
+        state,
+        _node_runtime(
+            hosted_resources=hosted_resources,
+        ),
+        _config(),
+    )
     assert snapshots == [7, 71]
     assert result["total"] == 712
 
 
 async def test_checkpoint_resume_keeps_results_and_deferred_notes(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from langchain_core.messages import HumanMessage
@@ -467,7 +548,9 @@ async def test_checkpoint_resume_keeps_results_and_deferred_notes(
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     graph = _graph(AgentState, checkpointer=InMemorySaver(), interrupt_after=["exec"])
     config = _config()
-    runtime = _node_runtime()
+    runtime = _node_runtime(
+        hosted_resources=hosted_resources,
+    )
     await graph.ainvoke(dict(_state("first()", "second()")), config=config, context=runtime.context)
     checkpoint = await graph.aget_state(config)
     assert checkpoint.next == ("exec",)

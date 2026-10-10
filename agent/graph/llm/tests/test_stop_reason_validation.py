@@ -38,6 +38,8 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 build_model_catalog()
 
@@ -261,6 +263,7 @@ def test_gemini_safety_unexpected() -> None:
 
 
 async def test_llm_node_validator_wired(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """Integration smoke: real _llm_node_impl path runs through, stream yields a max_tokens
@@ -298,6 +301,7 @@ async def test_llm_node_validator_wired(
     pub = MagicMock()
     ops_db = make_fake_ops_pool()
     ctx = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=ops_db,
         llm=fake_llm,
         event_publisher=pub,

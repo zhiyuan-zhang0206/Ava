@@ -59,7 +59,11 @@ async def _race_stream_vs_cancel(
         "_race_stream_vs_cancel requires ctx.event_publisher"
     )
     async with subscribe_interrupt(
-        ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
+        ctx.ops_pool,
+        agent_id,
+        incarnation=ctx.original_incarnation,
+        work=ctx.native_work,
+        resources=ctx.hosted_resources,
     ) as cancel_event:
         try:
             await interruptible_model(stream_coro, cancel_event)

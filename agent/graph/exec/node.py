@@ -184,7 +184,11 @@ async def _run_agent_code(
     config_overlay = ctx.require_agent().overlay()
     exec_started = time.monotonic()
     async with subscribe_interrupt(
-        ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
+        ctx.ops_pool,
+        agent_id,
+        incarnation=ctx.original_incarnation,
+        work=ctx.native_work,
+        resources=ctx.hosted_resources,
     ) as cancel_event:
         outcome = await _exec_with_node_shield(
             _run_in_subprocess(
