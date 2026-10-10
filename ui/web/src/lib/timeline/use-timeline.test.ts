@@ -24,7 +24,7 @@ import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "../transport/api";
+import { api, ApiError } from "../transport/api";
 import { noteTurnStart } from "../format/interaction-timing";
 import type {
   BackendTimelineItem,
@@ -57,7 +57,8 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
-vi.mock("../transport/api", () => ({
+vi.mock("../transport/api", async (importOriginal) => ({
+  ...await importOriginal<{ ApiError: typeof ApiError }>(),
   api: {
     getTimeline: vi.fn(),
     getConversationSnapshot: vi.fn(),
@@ -549,6 +550,49 @@ describe("useTimeline mount + initial fetch", () => {
     });
     expect(showError.mock.calls[0][0]).toContain("Failed to load timeline");
     expect(result.current.items).toEqual([]);
+  });
+
+  it("exposes a cold 503 and retries the authoritative timeline without accepting empty success", async () => {
+    const failure = new ApiError(503, "Checkpoint history unavailable for agent 42");
+    vi.mocked(api.getTimeline).mockRejectedValueOnce(failure);
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.error).toBe(failure));
+    expect(result.current.isLoading).toBe(false);
+    expect(queryClient.getQueryData(["timeline", 42])).toBeUndefined();
+    expect(result.current.items).toEqual([]);
+
+    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([
+      snapshotItem({ kind: "agent_chat", payload: "read restored" }),
+    ]));
+    act(() => result.current.retryTimeline());
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("read restored"));
+    expect(result.current.error).toBeNull();
+  });
+
+  it("keeps loaded history when a refresh returns 503 and during its pending manual retry", async () => {
+    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([
+      snapshotItem({ kind: "agent_chat", payload: "retained history" }),
+    ]));
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("retained history"));
+    const failure = new ApiError(503, "Checkpoint history unavailable for agent 42");
+    vi.mocked(api.getTimeline).mockRejectedValueOnce(failure);
+    act(() => result.current.retryTimeline());
+    await waitFor(() => expect(result.current.error).toBe(failure));
+    expect(result.current.items[0]?.payload).toBe("retained history");
+    let complete: ((page: TimelineResponse) => void) | undefined;
+    vi.mocked(api.getTimeline).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    act(() => result.current.retryTimeline());
+    await waitFor(() => expect(result.current.isFetching).toBe(true));
+    expect(result.current.items[0]?.payload).toBe("retained history");
+    await act(async () => {
+      complete?.(tlResp([
+        snapshotItem({ kind: "agent_chat", payload: "fresh history" }),
+      ]));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("fresh history"));
+    expect(result.current.error).toBeNull();
   });
 });
 

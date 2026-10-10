@@ -306,14 +306,18 @@ export const api = {
   // window means the agent's whole lifetime.
   getRunTimeline: (
     agentId: number,
-    options?: { from?: string; to?: string },
+    options?: { from?: string; to?: string; signal?: AbortSignal },
   ): Promise<RunTimelineResponse> => {
     const params = new URLSearchParams();
     if (options?.from != null) params.set("from", options.from);
     if (options?.to != null) params.set("to", options.to);
     const query = params.toString();
-    return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
-      ok<RunTimelineResponse>,
+    return jsonWithTimeout<RunTimelineResponse>(
+      `/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`,
+      {},
+      INSPECT_REQUEST_TIMEOUT_MS,
+      options?.signal,
+      "run timeline",
     );
   },
 
