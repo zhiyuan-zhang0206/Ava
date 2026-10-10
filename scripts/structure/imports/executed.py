@@ -104,11 +104,14 @@ def module_input(call: ast.Call, scope: bindings.Scope) -> tuple[ast.expr | None
 
 
 def _helper_parameter(
-    node: ast.FunctionDef | ast.AsyncFunctionDef, parent: bindings.Scope, path: str
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    parent: bindings.Scope,
+    path: str,
+    scope: bindings.Scope | None = None,
 ) -> str | None:
     if node.decorator_list:
         return None
-    scope = bindings.Scope(node, path, parent.nested_parent())
+    scope = scope if scope is not None else bindings.Scope(node, path, parent.nested_parent())
     launches = [
         call
         for call in bindings.local_nodes(node)
@@ -191,6 +194,22 @@ class _Inputs(ast.NodeVisitor):
         self.result = Inputs()
         self._template_launches: dict[int, tuple[int, ast.Call]] = {}
         self._used_functions: set[int] = set()
+        self._helpers: dict[
+            tuple[ast.FunctionDef | ast.AsyncFunctionDef, bindings.Scope], str | None
+        ] = {}
+
+    def _helper(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+        parent: bindings.Scope,
+        scope: bindings.Scope | None = None,
+    ) -> str | None:
+        """One syntax proof per declaration and lexical parent, within this query only."""
+        parent = parent.nested_parent()
+        key = (node, parent)
+        if key not in self._helpers:
+            self._helpers[key] = _helper_parameter(node, parent, self.path, scope)
+        return self._helpers[key]
 
     def _nested(self, node: bindings.ScopeNode) -> None:
         parent = self.scope
@@ -200,7 +219,7 @@ class _Inputs(ast.NodeVisitor):
         lexical_parent = parent.nested_parent()
         self.scope = bindings.Scope(node, self.path, lexical_parent)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            parameter = _helper_parameter(node, lexical_parent, self.path)
+            parameter = self._helper(node, lexical_parent, self.scope)
             if parameter is not None:
                 self._template_launches.update(
                     (id(call), (id(node), call))
@@ -246,7 +265,7 @@ class _Inputs(ast.NodeVisitor):
             found = self.scope.function(node.func.id)
             if found is not None:
                 function, parent = found
-                parameter = _helper_parameter(function, parent, self.path)
+                parameter = self._helper(function, parent)
                 if parameter is not None:
                     self._used_functions.add(id(function))
                     code = _argument(node, function, parameter)
