@@ -36,8 +36,8 @@ Refresh diagnostics use the existing no-emitter logger path; they do not start
 an event pipeline to report policy failures. The fixed lazy import of local capture
 admission must succeed before the SDK body: import, configuration and code errors propagate to
 the caller instead of permitting an uncaptured operation. An absent participant
-is a normal no-op decided by the manifest gate itself; its receipt/admission
-lifecycle remains unchanged.
+is a normal no-op supplied by the execution's explicit owner; no import-failure
+fallback supplies it.
 
 The SDK recorder snapshots caller identity at entry and explicitly passes it through
 `run_metered` / `run_metered_async` to the final event. The call retains its own copy;
@@ -49,8 +49,12 @@ while agent code runs. Recorders snapshot that owner alongside caller identity a
 pass it explicitly to low-level metering. Ordinary execution threads share the
 same lock-protected counts; concurrent calls carry independent snapshots.
 `AvaContext.describe()` omits this runtime owner. Calls without an execution tally
-still emit events. Capture admission retains each call's original receipt/gate
-until its final event; attachment closure seals only after admitted work drains.
+still emit events. The recorder snapshots `AvaContext.sdk_capture` at the same
+entry and passes it to low-level metering. Capture admission retains each call's
+original receipt/gate until its final event; attachment closure rejects new public
+entries and seals only after admitted work drains. Calls retain raw gate references
+without a current-participant registry or ContextVar. Ordinary SDK/child contexts
+have no attachment capture owner, while external attachment contexts carry theirs.
 The unused implicit `annotate()` channel has been removed; direct `emit()` can
 still receive explicit semantic details.
 
@@ -69,5 +73,6 @@ The original call admission reports capture failure against its own gate, even i
 an attachment has closed or another receipt has become bound. Failure is recorded
 before admission releases and attempts to seal the drained receipt. A lost event
 cannot become an empty complete receipt; a persistence outage retains the existing
-pending-failure fence. Lower emitter pipeline and manifest writer recovery retain
-their existing owners; this SDK boundary does not retry their work.
+pending-failure fence. Manifest capture and admission-release errors propagate
+with the same primary/secondary rule. Observation sink delivery retains its existing
+best-effort owner; this SDK boundary does not retry either operation.

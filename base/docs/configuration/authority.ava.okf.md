@@ -30,7 +30,8 @@ remain fresh on every read and use the path captured by the composition root.
 
 Refresh timing remains consumer-owned: completion policy, outbox limits and
 flush cadence read fresh values where they previously did. Outbox
-`DeliverySenderConfig` belongs to the Installation and caches its send-path tuple
+`DeliverySenderConfig` belongs to the Installation, owns its pending logical-message
+keys, and caches its send-path tuple
 only at that sender's first send. Independent senders do not share a snapshot.
 This ownership change leaves the existing settings facade and lite boot lifecycle
 in place; it does not retire all ambient configuration reads.

@@ -39,6 +39,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
+from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 from base.lm.call import ProviderCallBinding
 from base.lm.catalog import ModelCatalog
@@ -148,6 +149,9 @@ class AvaContext:
 
     sdk_calls: SdkCallTally | None = None
     """This execution's unsampled public-call tally. Never serialized into requests or state."""
+
+    sdk_capture: SdkCaptureOwner | None = None
+    """This exclusive attachment's capture owner; calls retain independent admissions."""
 
     @property
     def sql(self) -> LazyConnection:

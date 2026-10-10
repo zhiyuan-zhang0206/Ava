@@ -54,7 +54,12 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     install.uninstall()
     install.clear_load_attempt()
     if prior is not None:
-        install.install(prior.registry, catalog=prior.catalog, authority=prior.authority)
+        install.install(
+            prior.registry,
+            catalog=prior.catalog,
+            authority=prior.authority,
+            delivery_sender=prior.delivery_sender,
+        )
 
 
 def _installing(

@@ -33,8 +33,8 @@ compared on resolved content, whichever side holds the body.
   operation leaves no row and a committed one needs no emit to survive. Their
   `source_key` is `central`. The same transaction records the tagged event in `audit_events` (`record_audit`), the global record every audit fact has, and the entry points at that row. The audit-root census test classifies every producer.
 - **A controller's SDK events** are appended synchronously by `capture_local_event`
-  at the telemetry seam, before the emit queue, while the controller's receipt is
-  open. The `source_key` is the receipt's key. This is effect-then-write: a hard
+  by the call's explicit admission callback before the emit queue, while the
+  controller's receipt is open. The `source_key` is the receipt's key. This is effect-then-write: a hard
   crash between a call's effect and its row leaves the source unsealed, so the
   lease stays pending.
 
@@ -49,6 +49,24 @@ attaches and seals it with its row count when it detaches. Close first closes lo
 admission and waits up to `AVA_IMPERSONATION_EVENT_SEAL_WAIT_SECONDS` for admitted
 calls; a call still running seals its own source when it drains. The wait never
 marks a source empty or failed.
+
+The Attachment owns its original `LocalCaptureGate`; each public SDK recorder
+snapshots that owner from the process-local `ava.context` entry and retains a
+separate admission until its final event. No participant lookup, process registry
+or task-local current admission participates in capture. Detach and a later
+attachment cannot redirect an old call's event or failure to the new receipt.
+Direct local audit producers pass the attachment's explicit capture callback to
+`emit()` / `emit_prepared()`; `ava.skills` also passes it through its reported audit
+write. Plugins producing eligible local audit events must pass that owner explicitly.
+Events without a capture dependency have no local receipt writer.
+
+Receipt capture executes outside the best-effort observation sink boundary.
+Unknown writer or seal failures propagate; the body is never repeated. When a
+body or capture error is already primary, cleanup and failure-recording errors are
+exception notes on that exact original error. Known database availability loss
+retains the existing failed-receipt recovery. A pending failure stays on its original
+gate until persistence returns; a known failed-receipt refusal or filesystem seal
+failure remains pending and reported instead of being called complete.
 
 The database enforces the log's closure: a trigger accepts a source row only while
 its receipt is open (or, for `central`, while admission is open), and the seal

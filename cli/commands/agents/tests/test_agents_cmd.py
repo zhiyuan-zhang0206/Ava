@@ -95,9 +95,7 @@ def _outbox_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
         )
 
     monkeypatch.setattr(delivery_outbox, "limits", read_limits)
-    delivery_outbox._reset_caches_for_tests()
     yield
-    delivery_outbox._reset_caches_for_tests()
 
 
 def _patch_post(monkeypatch: pytest.MonkeyPatch, payload: object) -> dict[str, object]:
@@ -505,6 +503,7 @@ def test_agents_send_success_retires_the_pending_record(monkeypatch: pytest.Monk
     monkeypatch.setattr("base.agents.messages.delivery_outbox.retire_send", fake_retire)
     seen = _patch_post(monkeypatch, {"status": "delivered"})
     assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
+    assert isinstance(retired[0].pop("sender"), DeliverySenderConfig)
     assert retired == [
         {
             "agent_id": 5,
@@ -541,6 +540,7 @@ def test_agents_send_client_error_records_nothing(
     monkeypatch.setattr(httpx, "post", fake_post)
     with pytest.raises(httpx.HTTPStatusError):
         _agents.cmd_agents_send(5, "msg", "external_agent:codex")
+    assert isinstance(calls[0].pop("sender"), DeliverySenderConfig)
     assert calls == [
         {
             "agent_id": 5,
@@ -602,6 +602,15 @@ def test_agents_send_terminal_response_retires_old_recovery_and_keeps_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from base.agents.messages import delivery_outbox
+    from base.config import settings
+
+    sender = DeliverySenderConfig(
+        ConfigAuthority(
+            runtime=settings,
+            all_domains=settings,
+            env_path=delivery_outbox.journal_dir().parent / ".env",
+        )
+    )
 
     keys: list[str] = []
     stage = "network"
@@ -621,14 +630,14 @@ def test_agents_send_terminal_response_retires_old_recovery_and_keeps_key(
 
     monkeypatch.setattr(httpx, "post", post)
     with pytest.raises(httpx.ConnectError):
-        _agents.cmd_agents_send(5, "notice", "shell:3")
+        _agents.cmd_agents_send(5, "notice", "shell:3", sender=sender)
     assert len(list(delivery_outbox.journal_dir().glob("*.json"))) == 1
     stage = "committed"
     with pytest.raises(httpx.HTTPStatusError):
-        _agents.cmd_agents_send(5, "notice", "shell:3")
+        _agents.cmd_agents_send(5, "notice", "shell:3", sender=sender)
     assert list(delivery_outbox.journal_dir().glob("*.json")) == []
     stage = "explicit_retry"
-    assert _agents.cmd_agents_send(5, "notice", "shell:3") == 0
+    assert _agents.cmd_agents_send(5, "notice", "shell:3", sender=sender) == 0
     assert len(keys) == 3 and len(set(keys)) == 1
 
 

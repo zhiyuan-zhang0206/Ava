@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.agents.sdk.call_policy import SamplingPolicy
+from base.agents.sdk.capture import SdkCaptureAdmission, SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 
 # Event name written to events for each public SDK entry.
@@ -37,6 +38,7 @@ def emit(
     *,
     identity: Mapping[str, Any],
     sampling_policy: SamplingPolicy | None = None,
+    admission: SdkCaptureAdmission | None = None,
 ) -> None:
     """Write one ``sdk_call`` event; invalid input and emitter errors propagate.
     ``detail`` is omitted from the payload when empty, so a plain call stays ``{fn}``;
@@ -60,21 +62,33 @@ def emit(
         extra["duration"] = duration
     from base import telemetry
 
-    telemetry.emit("telemetry", SDK_CALL_EVENT, attributes=extra, **identity)
+    capture_args: dict[str, Any] = {} if admission is None else {"capture": admission.capture}
+    telemetry.emit(
+        "telemetry",
+        SDK_CALL_EVENT,
+        attributes=extra,
+        **identity,
+        **capture_args,
+    )
 
 
 @contextlib.contextmanager
-def _event_capture_admission() -> Generator[Callable[[], None] | None, None, None]:
+def _event_capture_admission(
+    owner: SdkCaptureOwner | None,
+) -> Generator[SdkCaptureAdmission | None, None, None]:
     """Use the optional gate; invalid capture code rejects the SDK call before its body."""
     from base.agents.impersonation.manifest import admitted_local_sdk_call
 
-    with admitted_local_sdk_call() as admission:
-        yield None if admission is None else admission.capture_failed
+    with admitted_local_sdk_call(None if owner is None else owner.admit_sdk_call) as admission:
+        yield admission
 
 
 @contextlib.contextmanager
 def _measure(
-    fn: str, identity: Mapping[str, Any], tally: SdkCallTally | None
+    fn: str,
+    identity: Mapping[str, Any],
+    tally: SdkCallTally | None,
+    capture_owner: SdkCaptureOwner | None,
 ) -> Generator[None, None, None]:
     from base.agents.sdk.call_policy import policy
 
@@ -82,7 +96,7 @@ def _measure(
     caller_identity = dict(identity)
     # Retain this call's original gate until its event is captured. Attachment
     # close can reject new entries but cannot seal this receipt before drain.
-    with _event_capture_admission() as capture_failed:
+    with _event_capture_admission(capture_owner) as admission:
         t0 = time.monotonic()
         primary: BaseException | None = None
         try:
@@ -94,16 +108,18 @@ def _measure(
             if tally is not None:
                 tally.add(fn)
             try:
+                capture_args: dict[str, Any] = {} if admission is None else {"admission": admission}
                 emit(
                     fn,
                     duration=time.monotonic() - t0,
                     identity=caller_identity,
                     sampling_policy=snapshot,
+                    **capture_args,
                 )
             except BaseException as secondary:
-                if capture_failed is not None:
+                if admission is not None:
                     try:
-                        capture_failed()
+                        admission.capture_failed()
                     except BaseException as capture_error:
                         secondary.add_note(
                             f"Receipt failure recording also failed: {capture_error!r}"
@@ -123,9 +139,10 @@ def run_metered(
     *,
     identity: Mapping[str, Any],
     tally: SdkCallTally | None = None,
+    capture_owner: SdkCaptureOwner | None = None,
 ) -> Any:
     """Validate each public entry before execution and retain its call-local snapshots."""
-    with _measure(fn, identity, tally):
+    with _measure(fn, identity, tally, capture_owner):
         return original(*args, **kwargs)
 
 
@@ -137,9 +154,10 @@ async def run_metered_async(
     *,
     identity: Mapping[str, Any],
     tally: SdkCallTally | None = None,
+    capture_owner: SdkCaptureOwner | None = None,
 ) -> Any:
     """Validate when awaited, preserving cancellation and the call's own admission."""
-    with _measure(fn, identity, tally):
+    with _measure(fn, identity, tally, capture_owner):
         return await original(*args, **kwargs)
 
 

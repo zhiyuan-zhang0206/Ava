@@ -43,7 +43,7 @@ branching on a payload's fields; do not model display-only events.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, Literal
 
 import psycopg
@@ -228,7 +228,7 @@ async def record_audit_standalone_async(pool: AsyncConnectionPool, event: teleme
     telemetry.emit_prepared(event)
 
 
-def _report_unrecorded(event: telemetry.Event, exc: Exception) -> None:
+def _report_unrecorded(event: telemetry.Event, exc: Exception, *, emit: bool = True) -> None:
     """Make a failed audit write loud without failing the caller.
 
     An error log with the traceback plus an `audit_write_failed` anomaly event.
@@ -252,21 +252,37 @@ def _report_unrecorded(event: telemetry.Event, exc: Exception) -> None:
             "error": str(exc)[:500],
         },
     )
-    telemetry.emit_prepared(event)
+    if emit:
+        telemetry.emit_prepared(event)
 
 
-def record_audit_reported(db: Database, event: telemetry.Event) -> None:
+def record_audit_reported(
+    db: Database,
+    event: telemetry.Event,
+    *,
+    capture: Callable[[telemetry.Event], telemetry.Event] | None = None,
+) -> None:
     """:func:`record_audit_standalone` for a producer that must not fail its caller.
 
     Used where the operation already succeeded and raising would be wrong:
     an agent-facing tool call (the agent would retry and repeat the side
     effect) or a state transition whose remaining steps must still run. A
     failed write does not raise; it is reported by :func:`_report_unrecorded`.
+    An explicit receipt capture callback runs after that write boundary and
+    propagates its own errors without repeating the producing operation.
     """
+    if capture is None:
+        try:
+            record_audit_standalone(db, event)
+        except Exception as exc:
+            _report_unrecorded(event, exc)
+        return
     try:
-        record_audit_standalone(db, event)
+        with db.write_transaction() as conn:
+            record_audit(conn, event)
     except Exception as exc:
-        _report_unrecorded(event, exc)
+        _report_unrecorded(event, exc, emit=False)
+    telemetry.emit_prepared(event, capture=capture)
 
 
 async def record_audit_reported_async(pool: AsyncConnectionPool, event: telemetry.Event) -> None:

@@ -6,6 +6,7 @@ import hashlib
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,10 +34,8 @@ def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:
 @pytest.fixture()
 def authority(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[ConfigAuthority]:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    outbox._reset_caches_for_tests()
     runtime = Settings(profile=None)
     yield ConfigAuthority(runtime=runtime, all_domains=runtime, env_path=tmp_path / ".env")
-    outbox._reset_caches_for_tests()
 
 
 def _patch_limits(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
@@ -46,7 +45,6 @@ def _patch_limits(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
         return snapshot
 
     monkeypatch.setattr(outbox, "limits", read_limits)
-    outbox._reset_caches_for_tests()
 
 
 def _record(
@@ -149,7 +147,7 @@ def test_logical_key_reuses_until_delivery_then_rotates(
     assert (
         outbox.logical_key(sender=sender, agent_id=7, source="watcher:7", content="check") == first
     )
-    outbox.retire_send(agent_id=7, source="watcher:7", content="check", key=first)
+    outbox.retire_send(sender=sender, agent_id=7, source="watcher:7", content="check", key=first)
     assert (
         outbox.logical_key(sender=sender, agent_id=7, source="watcher:7", content="check") != first
     )
@@ -162,12 +160,15 @@ def test_retire_send_retires_only_the_matching_record(
     authority: ConfigAuthority, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_limits(monkeypatch)
+    sender = outbox.DeliverySenderConfig(authority)
     path = _record(authority, agent_id=7, content="check", key="key-1")
     assert path is not None
     # A different attempt's key must not retire this record.
-    outbox.retire_send(agent_id=7, source="watcher:7", content="check", key="key-other")
+    outbox.retire_send(
+        sender=sender, agent_id=7, source="watcher:7", content="check", key="key-other"
+    )
     assert path.exists()
-    outbox.retire_send(agent_id=7, source="watcher:7", content="check", key="key-1")
+    outbox.retire_send(sender=sender, agent_id=7, source="watcher:7", content="check", key="key-1")
     assert not path.exists()
 
 
@@ -189,3 +190,26 @@ def test_split_content_matches_the_route_normalization() -> None:
         "[image]",
         {"content_blocks": [{"type": "image_url", "image_url": {"url": "u"}}]},
     )
+
+
+def test_sender_keys_are_owned_independently_and_late_success_cannot_retire_new_key(
+    authority: ConfigAuthority,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_limits(monkeypatch, dedup_window_seconds=10)
+    clock = [100.0]
+    monkeypatch.setattr(outbox.time, "monotonic", lambda: clock[0])
+    first_sender = outbox.DeliverySenderConfig(authority)
+    second_sender = outbox.DeliverySenderConfig(authority)
+    message: dict[str, Any] = {"agent_id": 7, "source": "watcher:7", "content": "check"}
+    first = outbox.logical_key(sender=first_sender, **message)
+    independent = outbox.logical_key(sender=second_sender, **message)
+    assert independent != first
+    assert outbox.logical_key(sender=first_sender, **message) == first
+    clock[0] += 11
+    newer = outbox.logical_key(sender=first_sender, **message)
+    assert newer != first
+    outbox.retire_send(sender=first_sender, key=first, **message)
+    assert outbox.logical_key(sender=first_sender, **message) == newer
+    outbox.retire_send(sender=first_sender, key=newer, **message)
+    assert outbox.logical_key(sender=first_sender, **message) != newer

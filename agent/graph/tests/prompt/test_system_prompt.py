@@ -57,7 +57,12 @@ def _no_plugin_expansions() -> Iterator[None]:
     yield
     install.uninstall()
     if prior is not None:
-        install.install(prior.registry, catalog=prior.catalog, authority=prior.authority)
+        install.install(
+            prior.registry,
+            catalog=prior.catalog,
+            authority=prior.authority,
+            delivery_sender=prior.delivery_sender,
+        )
 
 
 @pytest.fixture

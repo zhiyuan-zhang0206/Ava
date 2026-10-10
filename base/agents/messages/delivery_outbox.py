@@ -117,6 +117,28 @@ class DeliverySenderConfig:
         self.authority = authority
         self._snapshot: tuple[bool, float] | None = None
         self._lock = threading.Lock()
+        self._pending: dict[str, tuple[str, float]] = {}
+
+    def key(self, message_fingerprint: str) -> str:
+        """Reuse a pending logical key using this sender's first-send dedup window."""
+        enabled, window = self.settings()
+        if not enabled:
+            return uuid.uuid4().hex
+        now = time.monotonic()
+        with self._lock:
+            for stale in [fp for fp, (_, at) in self._pending.items() if now - at > window]:
+                del self._pending[stale]
+            hit = self._pending.get(message_fingerprint)
+            key = hit[0] if hit is not None else uuid.uuid4().hex
+            self._pending[message_fingerprint] = (key, now)
+            return key
+
+    def retire(self, message_fingerprint: str, key: str) -> None:
+        """Retire only this completed logical message, preserving a newer retry chain."""
+        with self._lock:
+            hit = self._pending.get(message_fingerprint)
+            if hit is not None and hit[0] == key:
+                del self._pending[message_fingerprint]
 
     def settings(self) -> tuple[bool, float]:
         """Read the enabled/dedup pair once, at this owner's first send."""
@@ -130,11 +152,6 @@ class DeliverySenderConfig:
 def send_path_settings(sender: DeliverySenderConfig) -> tuple[bool, float]:
     """The first-send pair owned by the supplied process sender."""
     return sender.settings()
-
-
-def _reset_caches_for_tests() -> None:
-    with _registry_lock:
-        _registry.clear()
 
 
 # ── Journal layout ───────────────────────────────────────────────────────────
@@ -348,10 +365,6 @@ def _matching_paths(agent_id: int, message_fingerprint: str) -> list[Path]:
 
 # ── Sender side (SDK) ────────────────────────────────────────────────────────
 
-_registry_lock = threading.Lock()
-# in-process pending keys: fingerprint -> (idempotency key, last-use monotonic)
-_registry: dict[str, tuple[str, float]] = {}
-
 
 def logical_key(
     *,
@@ -370,27 +383,15 @@ def logical_key(
     successful send, an identical later message is a NEW logical message and
     gets a fresh key.
     """
-    enabled, window = send_path_settings(sender)
-    if not enabled:
-        return uuid.uuid4().hex
     message_fingerprint = fingerprint(
         agent_id, source, content, completion_notice=completion_notice
     )
-    now = time.monotonic()
-    with _registry_lock:
-        for stale in [fp for fp, (_, at) in _registry.items() if now - at > window]:
-            del _registry[stale]
-        hit = _registry.get(message_fingerprint)
-        if hit is not None:
-            _registry[message_fingerprint] = (hit[0], now)
-            return hit[0]
-        key = uuid.uuid4().hex
-        _registry[message_fingerprint] = (key, now)
-        return key
+    return sender.key(message_fingerprint)
 
 
 def retire_send(
     *,
+    sender: DeliverySenderConfig,
     agent_id: int,
     source: str,
     content: Content,
@@ -411,8 +412,7 @@ def retire_send(
             agent_id, source, content, completion_notice=completion_notice
         )
         if completed:
-            with _registry_lock:
-                _registry.pop(message_fingerprint, None)
+            sender.retire(message_fingerprint, key)
         for path in _matching_paths(agent_id, message_fingerprint):
             entry = _read(path)
             if (

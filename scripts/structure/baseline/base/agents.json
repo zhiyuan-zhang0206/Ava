@@ -2,10 +2,6 @@
   "ambient_state": {
     "base/agents/history/delta_read_compat.py::contextvar:_recovery_scope": 1,
     "base/agents/history/delta_read_compat.py::import-time-call:base.agents.history.checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch": 1,
-    "base/agents/impersonation/manifest.py::ambient-container:_capture_gates": 1,
-    "base/agents/impersonation/manifest.py::contextvar:_sdk_capture_admission": 1,
-    "base/agents/impersonation/manifest.py::global-rebind:_active_participant": 2,
-    "base/agents/messages/delivery_outbox.py::ambient-container:_registry": 1,
     "base/agents/sdk/call_policy.py::ambient-instance:_cache": 1,
     "base/agents/sdk/call_policy.py::thread:_PolicyCache.read": 1
   }
