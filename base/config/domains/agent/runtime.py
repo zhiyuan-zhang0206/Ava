@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import Field
 
 from base.config.base import EnvSettings
-from base.daemon.schedules.completion_notices import CompletionNoticePolicy
+from base.daemon.schedules.completion_policy import CompletionNoticePolicy
 
 
 class AgentRuntimeSettings(EnvSettings):

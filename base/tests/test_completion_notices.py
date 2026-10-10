@@ -8,11 +8,11 @@ import psycopg
 
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
-    CompletionNoticePolicy,
     delivery_required_for_agent,
     format_digest,
     immediate_delivery_required,
 )
+from base.daemon.schedules.completion_policy import CompletionNoticePolicy
 
 
 def test_hourly_buffers_every_notice_and_digest_counts_them() -> None:
