@@ -71,15 +71,18 @@ def otlp_receiver() -> Any:
 # The child: arm the pipeline, bring the OTLP providers up while alive
 # (`sync()`), then emit the tail record and return — the exit drain is the
 # only thing left that can carry it.
+# Literal source with data in argv, so test selection can read the probe's imports.
 _CHILD = """
+import sys
+
 from base import telemetry
 
-MARKER = {marker!r}
+MARKER = sys.argv[1]
 
 telemetry.init_telemetry(process="exit-seam-probe")
-telemetry.emit("log", "log", attributes={{"seq": "early", "marker": MARKER}})
+telemetry.emit("log", "log", attributes={"seq": "early", "marker": MARKER})
 telemetry.sync()
-telemetry.emit("log", "log", attributes={{"seq": "tail", "marker": MARKER}})
+telemetry.emit("log", "log", attributes={"seq": "tail", "marker": MARKER})
 """
 
 
@@ -151,7 +154,7 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
     # environment out; `import base` resolves through the checkout's
     # editable install.
     proc = subprocess.run(  # noqa: S603 — fixed argv: our own interpreter, inline program
-        [sys.executable, "-I", "-X", "utf8", "-c", _CHILD.format(marker=marker)],
+        [sys.executable, "-I", "-X", "utf8", "-c", _CHILD, marker],
         capture_output=True,
         text=True,
         env=env,

@@ -56,15 +56,17 @@ def otlp_receiver() -> Any:
     server.server_close()
 
 
+# Literal source with data in argv, so test selection can read the probe's imports.
 _EXTERNAL_CLI_CHILD = """
+import sys
 from pathlib import Path
 import ava
 from ava import external
 from agent.extensions.registry import build_registry
 from agent.state import build_agent_state
 
-SAMPLE = {sample!r}
-LEASE = {{
+SAMPLE = sys.argv[1]
+LEASE = {
     "id": "lease",
     "session_id": 0,
     "agent_id": 424242,
@@ -75,15 +77,15 @@ LEASE = {{
     "plugin_delta": [],
     "automatic": False,
     "event_delivery_protocol_version": None,
-}}
+}
 
 external.control.require_active = lambda _db, _lease_id, _caller: dict(LEASE)
 external.machine_name = lambda: "external-cli-probe"
-external.process_metadata = lambda: {{"pid": 1}}
+external.process_metadata = lambda: {"pid": 1}
 def load_snapshot(_agent_id):
     state = build_agent_state(build_registry())()
     state.ava_code__cwd = str(Path(SAMPLE).parent)
-    return state, {{}}, None
+    return state, {}, None
 
 external.load_snapshot = load_snapshot
 
@@ -183,7 +185,8 @@ def test_external_cli_tail_sdk_call_reaches_receiver_once_before_exit(
             "-X",
             "utf8",
             "-c",
-            _EXTERNAL_CLI_CHILD.format(sample=str(sample)),
+            _EXTERNAL_CLI_CHILD,
+            str(sample),
         ],
         capture_output=True,
         text=True,

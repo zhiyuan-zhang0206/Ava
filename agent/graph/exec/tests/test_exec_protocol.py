@@ -38,6 +38,21 @@ from agent.graph.exec.protocol import (
 )
 from tests.fixtures.pin_agent import exec_context
 
+# Literal source with data in argv, so test selection can read the probe's imports.
+# argv[1] is the envelope path; argv[2] names the ``module.attr`` that kills the writer.
+_KILLED_WRITER_PROBE = """
+import os, sys
+from pathlib import Path
+import agent.graph.exec.protocol as protocol
+def die(*_args, **_kwargs):
+    os._exit(9)
+module_name, _, attr = sys.argv[2].partition(".")
+setattr(sys.modules[module_name], attr, die)
+protocol.write_request(Path(sys.argv[1]), code='x=1',
+    context={'identity': {'agent_id': 7, 'owns_loop': True, 'actor': None}},
+    timeout_s=1.0, state=None, incarnation=None)
+"""
+
 
 def _exec_envelope_events() -> list[dict[str, Any]]:
     """Read the durable telemetry mirror's exec-envelope rows."""
@@ -358,19 +373,8 @@ def test_writer_killed_before_commit_leaves_no_envelope_at_all(
     import sys
 
     path = tmp_path / "req-crash.json"
-    script = (
-        "import os, sys\n"
-        "from pathlib import Path\n"
-        "import agent.graph.exec.protocol as protocol\n"
-        "def die(*_args, **_kwargs):\n"
-        "    os._exit(9)\n"
-        f"{kill_point} = die\n"
-        "protocol.write_request(Path(sys.argv[1]), code='x=1', "
-        "context={'identity': {'agent_id': 7, 'owns_loop': True, 'actor': None}}, "
-        "timeout_s=1.0, state=None, incarnation=None)\n"
-    )
     completed = subprocess.run(  # noqa: S603 — our own venv python running a fixed in-test script
-        [sys.executable, "-c", script, str(path)], check=False
+        [sys.executable, "-c", _KILLED_WRITER_PROBE, str(path), kill_point], check=False
     )
 
     assert completed.returncode == 9

@@ -1,9 +1,7 @@
 """An actual dead original host cannot retarget its accepted restart successor."""
 
 import asyncio
-import os
 import subprocess
-import sys
 from uuid import uuid4
 
 import psycopg
@@ -26,8 +24,8 @@ from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.native_cancel.test_transfer import (
-    _CHILD,
     _child_failure,
+    _spawn_child,
 )
 
 
@@ -43,18 +41,7 @@ async def test_dead_original_host_is_superseded_without_new_restart_target(
         (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), agent),
     )
     db_conn.commit()
-    child = subprocess.Popen(  # noqa: S603 -- fixed interpreter and existing isolated proof fixture
-        [sys.executable, "-c", _CHILD],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env={
-            **os.environ,
-            "AVA_TEST_NATIVE_DB": db_conn.info.dsn,
-            "AVA_TEST_NATIVE_AGENT": str(agent),
-        },
-    )
+    child = _spawn_child(db_conn.info.dsn, agent)
     try:
         assert child.stdout is not None
         line = await asyncio.wait_for(asyncio.to_thread(child.stdout.readline), 15)

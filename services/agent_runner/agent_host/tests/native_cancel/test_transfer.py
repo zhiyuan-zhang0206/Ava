@@ -69,6 +69,21 @@ asyncio.run(main())
 """
 
 
+def _spawn_child(dsn: str, agent: int, *, successor: bool = False) -> subprocess.Popen[str]:
+    """Start the `_CHILD` proof process for ``agent`` (the one launch site of its source)."""
+    env = {**os.environ, "AVA_TEST_NATIVE_DB": dsn, "AVA_TEST_NATIVE_AGENT": str(agent)}
+    if successor:
+        env["AVA_TEST_NATIVE_SUCCESSOR"] = "1"
+    return subprocess.Popen(  # noqa: S603 -- fixed local interpreter and test-only source
+        [sys.executable, "-c", _CHILD],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+
+
 @pytest.mark.parametrize("hops", [1, 2])
 async def test_real_child_exit_certificate_and_commit_rollback(
     db_conn: psycopg.Connection,
@@ -85,18 +100,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
         (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), agent),
     )
     db_conn.commit()
-    child = subprocess.Popen(  # noqa: S603 -- fixed local interpreter and test-only source
-        [sys.executable, "-c", _CHILD],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env={
-            **os.environ,
-            "AVA_TEST_NATIVE_DB": db_conn.info.dsn,
-            "AVA_TEST_NATIVE_AGENT": str(agent),
-        },
-    )
+    child = _spawn_child(db_conn.info.dsn, agent)
     try:
         assert child.stdout is not None
         line = await asyncio.wait_for(asyncio.to_thread(child.stdout.readline), 15)
@@ -324,19 +328,7 @@ async def _force_successor(
 
 
 async def _exit_successor_child(db_conn: psycopg.Connection, agent: int) -> None:
-    next_child = subprocess.Popen(  # noqa: S603 -- fixed offline test-only child
-        [sys.executable, "-c", _CHILD],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env={
-            **os.environ,
-            "AVA_TEST_NATIVE_DB": db_conn.info.dsn,
-            "AVA_TEST_NATIVE_AGENT": str(agent),
-            "AVA_TEST_NATIVE_SUCCESSOR": "1",
-        },
-    )
+    next_child = _spawn_child(db_conn.info.dsn, agent, successor=True)
     try:
         assert next_child.stdout is not None and next_child.stdin is not None
         assert await asyncio.wait_for(asyncio.to_thread(next_child.stdout.readline), 15)

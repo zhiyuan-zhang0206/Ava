@@ -445,9 +445,10 @@ def test_render_is_deterministic_and_environment_independent(
     rendered = render_to_json(dashboard)
     assert rendered == render_to_json(render_dashboard(core_specs, plugin_specs))
 
+    # Literal source with the repo root in argv, so test selection can read its imports.
     script = (
         "import hashlib, sys;"
-        f"sys.path.insert(0, {str(_REPO_ROOT)!r});"
+        "sys.path.insert(0, sys.argv[1]);"
         "from base.telemetry.metrics.core import catalog;"
         "from base.telemetry.metrics.grafana_dashboard import render_dashboard, render_to_json;"
         "from base.telemetry.metrics.grafana_dashboard_supply import collect_plugin_specs;"
@@ -456,7 +457,7 @@ def test_render_is_deterministic_and_environment_independent(
         "print(hashlib.sha256(render_to_json(render_dashboard(core, plugins.specs)).encode()).hexdigest())"
     )
     scrubbed = subprocess.run(  # noqa: S603 — our own interpreter + a literal script
-        [sys.executable, "-c", script],
+        [sys.executable, "-c", script, str(_REPO_ROOT)],
         capture_output=True,
         text=True,
         cwd="/",

@@ -388,13 +388,14 @@ def test_helper_native_shutdown_wait_never_signals_unresponsive_owner(tmp_path: 
     from services.desktop.permissions_helper import launchd_job as jobs
 
     ready = tmp_path / "ready"
+    # Literal source with the ready marker in argv, so test selection can read it.
     code = (
-        "import pathlib,signal,time\n"
+        "import pathlib,signal,sys,time\n"
         "signal.signal(signal.SIGTERM, lambda *_: None)\n"
-        f"pathlib.Path({str(ready)!r}).touch()\n"
+        "pathlib.Path(sys.argv[1]).touch()\n"
         "time.sleep(60)\n"
     )
-    child = subprocess.Popen([sys.executable, "-c", code])
+    child = subprocess.Popen([sys.executable, "-c", code, str(ready)])
     try:
         deadline = time.monotonic() + 10
         while not ready.exists():

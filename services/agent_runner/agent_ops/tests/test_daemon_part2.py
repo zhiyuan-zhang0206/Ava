@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import textwrap
 import time
 from pathlib import Path
 
@@ -26,6 +25,29 @@ _db = Database.from_settings
 
 
 _REPO = Path(__file__).resolve().parents[4]
+
+# Literal sources with data in argv (argv[1] is the repo root), so test selection
+# can read the probes' imports.
+_WEDGED_ARM_PROBE = """
+import pathlib, sys, time
+sys.path.insert(0, sys.argv[1])
+from services.agent_runner.agent_ops import daemon
+
+ready = pathlib.Path(sys.argv[2])
+pool = daemon._op_thread_pool()
+pool.submit(lambda: (ready.write_text("1"), time.sleep(3600)))
+while not ready.exists():
+    time.sleep(0.01)
+daemon._shutdown_op_pool(pool)
+daemon._hard_exit(0)
+"""
+
+_HARD_EXIT_PROBE = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from services.agent_runner.agent_ops import daemon
+daemon._hard_exit(1)
+"""
 
 
 def _stub_pool() -> ConnectionPool:
@@ -102,21 +124,9 @@ def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
     process is gone. It fails by timing out against the pre-fix code.
     """
     ready = tmp_path / "wedged"
-    script = textwrap.dedent(f"""
-        import pathlib, sys, time
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.agent_runner.agent_ops import daemon
-
-        pool = daemon._op_thread_pool()
-        pool.submit(lambda: (pathlib.Path({str(ready)!r}).write_text("1"), time.sleep(3600)))
-        while not pathlib.Path({str(ready)!r}).exists():
-            time.sleep(0.01)
-        daemon._shutdown_op_pool(pool)
-        daemon._hard_exit(0)
-    """)
     started = time.monotonic()
     done = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script],
+        [sys.executable, "-c", _WEDGED_ARM_PROBE, str(_REPO), str(ready)],
         capture_output=True,
         text=True,
         timeout=30,  # the pre-fix code never returns; the timeout IS the failure
@@ -132,13 +142,11 @@ def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
 def test_the_exit_code_survives_the_hard_exit(tmp_path: Path) -> None:
     """`_hard_exit` replaced a `raise` on the crash path, so the code a supervisor
     reads has to still distinguish a crash from a clean stop."""
-    script = textwrap.dedent(f"""
-        import sys
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.agent_runner.agent_ops import daemon
-        daemon._hard_exit(1)
-    """)
     done = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30, check=False
+        [sys.executable, "-c", _HARD_EXIT_PROBE, str(_REPO)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert done.returncode == 1

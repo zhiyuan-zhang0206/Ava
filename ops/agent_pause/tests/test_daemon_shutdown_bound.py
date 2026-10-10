@@ -208,6 +208,13 @@ class _Child:
         self.log_file.close()
 
 
+# This module's own dotted path (the checkout is the child's cwd), spelled as a
+# literal so test selection can read the child's imports.
+_CHILD_ENTRY = (
+    "from ops.agent_pause.tests.test_daemon_shutdown_bound import _run_child; _run_child()"
+)
+
+
 def _spawn_child(tmp_path: Path, slug: str) -> _Child:
     markers_path = tmp_path / "markers.txt"
     log_path = tmp_path / "child.log"
@@ -220,7 +227,7 @@ def _spawn_child(tmp_path: Path, slug: str) -> _Child:
     env[_CASE_ENV] = slug
     log_file = log_path.open("wb")
     proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter + in-repo entry, no shell
-        [sys.executable, "-c", f"from {__name__} import _run_child; _run_child()"],
+        [sys.executable, "-c", _CHILD_ENTRY],
         cwd=_REPO_ROOT,
         env=env,
         stdout=log_file,

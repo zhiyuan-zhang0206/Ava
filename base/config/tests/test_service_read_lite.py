@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 
-def _probe(code: str, home: Path, *, profile: str | None = None) -> dict[str, Any]:
+def _probe(code: str, home: Path, *argv: str, profile: str | None = None) -> dict[str, Any]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env["AVA_HOME"] = str(home)
     if profile is not None:
         env["AVA_PROCESS_PROFILE"] = profile
     proc = subprocess.run(  # noqa: S603 — this interpreter runs the fixed import probe
-        [sys.executable, "-B", "-c", code],
+        [sys.executable, "-B", "-c", code, *argv],
         cwd=Path(__file__).resolve().parents[3],
         env=env,
         capture_output=True,
@@ -66,7 +66,7 @@ def test_sdk_root_complete_read_keeps_first_use_environment_and_fixed_file(tmp_p
     )
     (later_home / ".env").write_text("AVA_TRACE_ENABLED=true\n")
     code = (
-        "import json, os, base.config as c, ava\n"
+        "import json, os, sys, base.config as c, ava\n"
         "os.environ['AVA_WEB_JINA_BASE_URL'] = 'https://early.invalid/'\n"
         "ava.ensure_plugins_loaded(surface=True)\n"
         "from ava.sdk_surface.install import installed\n"
@@ -75,7 +75,7 @@ def test_sdk_root_complete_read_keeps_first_use_environment_and_fixed_file(tmp_p
         "assert not owner.runtime.has_domain('web')\n"
         "before = c._boot_state()\n"
         "os.environ['AVA_WEB_JINA_BASE_URL'] = 'https://first-use.invalid/'\n"
-        f"os.environ['AVA_HOME'] = {str(later_home)!r}\n"
+        "os.environ['AVA_HOME'] = sys.argv[1]\n"
         "first = owner.service_field_value('web_jina_reader_base')\n"
         "os.environ['AVA_WEB_JINA_BASE_URL'] = 'https://after-read.invalid/'\n"
         "second = owner.service_field_value('web_jina_reader_base')\n"
@@ -83,7 +83,7 @@ def test_sdk_root_complete_read_keeps_first_use_environment_and_fixed_file(tmp_p
         "print(json.dumps({'before': before, 'first': first, 'second': second,\n"
         " 'path': str(owner.env_path), 'trace': aliases['AVA_TRACE_ENABLED']}))\n"
     )
-    result = _probe(code, home, profile="runner")
+    result = _probe(code, home, str(later_home), profile="runner")
     assert result["before"]["mode"] == "lite"
     assert result["before"]["upgrades"] == 0
     assert result["first"] == "https://first-use.invalid/"

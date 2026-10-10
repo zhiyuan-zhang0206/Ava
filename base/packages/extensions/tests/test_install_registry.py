@@ -134,45 +134,51 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[4])
 _HOLD_S = 2.0
 
 
-def _mutator_script(home: Path, name: str, *, marker: Path, wait_for_marker: bool) -> str:
-    """A child that adds one package through a full `mutate` cycle.
+# A child that adds one package through a full `mutate` cycle.
+#
+# `save` stages the new registry into a temp sibling and renames it over the
+# real path, so the read that built it and the rename that publishes it are
+# two separate moments. A writer landing between them is erased: the rename
+# publishes a registry read before that writer's row existed. The slow writer
+# widens exactly that gap; the fast one aims for it.
+#
+# Literal source with data in argv (see `_mutator_argv`), so test selection can
+# read the probe's imports.
+_MUTATOR_SCRIPT = """
+import os, sys, time, pathlib
+root, home, name, marker_path, hold_s, role = sys.argv[1:]
+sys.path.insert(0, root)
+os.environ['AVA_HOME'] = home
+if role == 'slow':
+    _real_replace = os.replace
+    def _slow_replace(src, dst, **kw):
+        if str(dst).endswith('installed.json'):
+            pathlib.Path(marker_path).touch()
+            time.sleep(float(hold_s))
+        return _real_replace(src, dst, **kw)
+    os.replace = _slow_replace
+elif role != 'fast':
+    raise SystemExit(f'unknown mutator role: {role!r}')
+from base.packages.extensions import install_registry as reg
+reg.load()  # pay the import + first-read cost before the handshake
+if role == 'fast':
+    marker = pathlib.Path(marker_path)
+    deadline = time.monotonic() + 60
+    while not marker.exists():
+        if time.monotonic() > deadline:
+            raise SystemExit('the slow writer never reached its window')
+        time.sleep(0.01)
+with reg.mutate() as registry:
+    registry.packages.append(
+        reg.InstalledPackage(name=name, type='skill', source='https://x')
+    )
+"""
 
-    `save` stages the new registry into a temp sibling and renames it over the
-    real path, so the read that built it and the rename that publishes it are
-    two separate moments. A writer landing between them is erased: the rename
-    publishes a registry read before that writer's row existed. The slow writer
-    widens exactly that gap; the fast one aims for it.
-    """
-    stall = (
-        f"_real_replace = os.replace\n"
-        f"def _slow_replace(src, dst, **kw):\n"
-        f"    if str(dst).endswith('installed.json'):\n"
-        f"        pathlib.Path({str(marker)!r}).touch()\n"
-        f"        time.sleep({_HOLD_S})\n"
-        f"    return _real_replace(src, dst, **kw)\n"
-        f"os.replace = _slow_replace\n"
-    )
-    wait = (
-        f"marker = pathlib.Path({str(marker)!r})\n"
-        f"deadline = time.monotonic() + 60\n"
-        f"while not marker.exists():\n"
-        f"    if time.monotonic() > deadline:\n"
-        f"        raise SystemExit('the slow writer never reached its window')\n"
-        f"    time.sleep(0.01)\n"
-    )
-    return (
-        f"import os, sys, time, pathlib\n"
-        f"sys.path.insert(0, {_REPO_ROOT!r})\n"
-        f"os.environ['AVA_HOME'] = {str(home)!r}\n"
-        f"{stall if not wait_for_marker else ''}"
-        f"from base.packages.extensions import install_registry as reg\n"
-        f"reg.load()\n"  # pay the import + first-read cost before the handshake
-        f"{wait if wait_for_marker else ''}"
-        f"with reg.mutate() as registry:\n"
-        f"    registry.packages.append(\n"
-        f"        reg.InstalledPackage(name={name!r}, type='skill', source='https://x')\n"
-        f"    )\n"
-    )
+
+def _mutator_argv(home: Path, name: str, *, marker: Path, wait_for_marker: bool) -> list[str]:
+    """The trailing argv for `_MUTATOR_SCRIPT`: the fast writer waits, the slow one stalls."""
+    role = "fast" if wait_for_marker else "slow"
+    return [_REPO_ROOT, str(home), name, str(marker), str(_HOLD_S), role]
 
 
 def test_concurrent_mutators_in_separate_processes_both_survive(tmp_path: Path) -> None:
@@ -190,14 +196,16 @@ def test_concurrent_mutators_in_separate_processes_both_survive(tmp_path: Path) 
         [
             sys.executable,
             "-c",
-            _mutator_script(tmp_path, "alpha", marker=marker, wait_for_marker=False),
+            _MUTATOR_SCRIPT,
+            *_mutator_argv(tmp_path, "alpha", marker=marker, wait_for_marker=False),
         ]
     )
     fast = subprocess.Popen(  # noqa: S603 — this interpreter, a literal script
         [
             sys.executable,
             "-c",
-            _mutator_script(tmp_path, "beta", marker=marker, wait_for_marker=True),
+            _MUTATOR_SCRIPT,
+            *_mutator_argv(tmp_path, "beta", marker=marker, wait_for_marker=True),
         ]
     )
     try:

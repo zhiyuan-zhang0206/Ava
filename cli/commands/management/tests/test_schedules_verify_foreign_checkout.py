@@ -33,10 +33,8 @@ _CHECK_ROWS = (
 
 
 @pytest.fixture
-def worktree_process(
-    tmp_path: Path, seed_write_generation: Callable[[Path], Any]
-) -> Callable[[str, Path], subprocess.CompletedProcess[str]]:
-    """Run python code as a process whose code root is not the home's recorded source checkout."""
+def worktree_env(tmp_path: Path, seed_write_generation: Callable[[Path], Any]) -> dict[str, str]:
+    """The environment of a process whose code root is not the home's recorded source checkout."""
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
     seed_write_generation(home)
@@ -46,45 +44,48 @@ def worktree_process(
     intent.chmod(0o600)
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "AVA_HOME": str(home)}
     env["AVA_CONFIG_FETCH"] = "skip"
+    return env
 
-    def run(code: str, arg: Path) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [sys.executable, "-c", code, str(arg)],
-            cwd=repo_root(),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
 
-    return run
+def _run_outside_checkout(
+    code: str, arg: Path, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run python code under `worktree_env`; a local helper so test selection reads `code`."""
+    return subprocess.run(
+        [sys.executable, "-c", code, str(arg)],
+        cwd=repo_root(),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
 
 
 def test_a_process_outside_the_home_checkout_cannot_read_the_table(
-    worktree_process: Callable[[str, Path], subprocess.CompletedProcess[str]], tmp_path: Path
+    worktree_env: dict[str, str], tmp_path: Path
 ) -> None:
-    proc = worktree_process(_READ_TABLE, tmp_path / "rows.json")
+    proc = _run_outside_checkout(_READ_TABLE, tmp_path / "rows.json", worktree_env)
     assert proc.returncode != 0
     assert "NoDatabaseAuthorityError" in proc.stderr
     assert "not the home's source checkout" in proc.stderr
 
 
 def test_the_sweep_over_a_rows_file_needs_no_database_authority(
-    worktree_process: Callable[[str, Path], subprocess.CompletedProcess[str]], tmp_path: Path
+    worktree_env: dict[str, str], tmp_path: Path
 ) -> None:
     rows = tmp_path / "rows.json"
     rows.write_text(json.dumps([[1, "clean", "import os\n"], [2, "stopped-empty", ""]]))
-    proc = worktree_process(_CHECK_ROWS, rows)
+    proc = _run_outside_checkout(_CHECK_ROWS, rows, worktree_env)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "checked=2 green=2 red=0 rc=0" in proc.stdout
 
 
 def test_the_sweep_over_a_rows_file_still_reports_a_red_row(
-    worktree_process: Callable[[str, Path], subprocess.CompletedProcess[str]], tmp_path: Path
+    worktree_env: dict[str, str], tmp_path: Path
 ) -> None:
     rows = tmp_path / "rows.json"
     rows.write_text(json.dumps([[7, "drifted", "import zz_ava_verify_missing\n"]]))
-    proc = worktree_process(_CHECK_ROWS, rows)
+    proc = _run_outside_checkout(_CHECK_ROWS, rows, worktree_env)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "RED id=7 name=drifted missing=zz_ava_verify_missing" in proc.stdout
