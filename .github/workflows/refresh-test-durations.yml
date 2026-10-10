@@ -336,7 +336,9 @@ jobs:
           weights only after this PR merges. Future refreshes reuse successful
           main CI after 20 first-parent changes; nightly measurements are the
           fallback. This generated-data PR is submitted to the Trunk merge
-          queue automatically. Required CI and queue checks still gate merging.
+          queue automatically. A maintainer must approve the bot-created PR's
+          workflow before required CI can run. Required CI and queue checks
+          still gate merging.
           EOF
           PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
           if [ -z "$PR_NUMBER" ]; then
@@ -347,7 +349,8 @@ jobs:
           fi
           PR_NUMBER="$(gh pr view "$BRANCH" --json number --jq '.number')"
           echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          gh workflow run ci.yml --ref "$BRANCH"
+          # The PR event starts approval-required CI. workflow_dispatch checks
+          # do not satisfy PR required checks, so do not duplicate that suite.
 
   submit:
     needs: refresh
