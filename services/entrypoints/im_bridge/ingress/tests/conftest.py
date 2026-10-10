@@ -16,7 +16,7 @@ from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
-from tests.fixtures.unit.sdk import _sdk_environment as _sdk_environment
+from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
 from tests.fixtures.unit.sdk import sdk_identity as sdk_identity
 from tests.fixtures.unit.sdk import sdk_metering as sdk_metering
 
