@@ -391,11 +391,14 @@ async def test_ordinary_empty_checkpoint_is_not_delta() -> None:
     assert len(walks) == 1
 
 
-async def test_missing_delta_history_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("history", [{}, {"messages": {"writes": []}}])
+async def test_missing_delta_history_propagates(
+    monkeypatch: pytest.MonkeyPatch, history: dict[str, Any]
+) -> None:
     saver, _walks, _pending = _synthetic_recovery_saver()
 
     async def missing(**_kwargs: Any) -> dict[str, Any]:
-        return {}
+        return history
 
     monkeypatch.setattr(saver, "aget_delta_channel_history", missing)
     with pytest.raises(RuntimeError, match="messages history is missing"):
