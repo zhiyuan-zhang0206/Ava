@@ -34,8 +34,8 @@ def paused_otlp_record(
     monkeypatch.setattr(backend, "_enabled", lambda: True)
     monkeypatch.setattr(telemetry_otlp, "backend", backend)
 
-    def no_sync(*_args: object, **_kwargs: object) -> None:
-        pass
+    def no_sync(*_args: object, **_kwargs: object) -> telemetry.DrainResult:
+        return telemetry.DrainResult(telemetry.DrainStatus.COMPLETED, telemetry.DrainPhase.DRAIN)
 
     monkeypatch.setattr(telemetry, "sync", no_sync)
     paused = Event()
