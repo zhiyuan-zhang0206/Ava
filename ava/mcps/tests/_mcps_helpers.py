@@ -1,5 +1,6 @@
 """Shared fixtures and helpers for the ava.mcps test files; split from ava/mcps/tests/test_mcps.py (task #4922)."""
 
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,11 +8,18 @@ import pytest
 
 import ava.mcps as mcps_mod
 from ava.mcps._clients import McpClients
+from base.config import settings
 
 
-def local_mcp_clients(monkeypatch: pytest.MonkeyPatch) -> McpClients:
+def local_mcp_clients(
+    monkeypatch: pytest.MonkeyPatch, timeout_seconds: Callable[[], float] | None = None
+) -> McpClients:
     """Give this test its own MCP clients (daemon absent -> local mode)."""
-    clients = McpClients()
+    clients = McpClients(
+        timeout_seconds
+        if timeout_seconds is not None
+        else lambda: settings.sandbox.mcp_connect_timeout_seconds
+    )
     monkeypatch.setattr(mcps_mod, "_clients", lambda: clients)
     return clients
 

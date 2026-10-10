@@ -211,7 +211,7 @@ async def test_shared_browser_server_connects_direct_no_child(
 
     monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
 
-    session, stack = await daemon_mod._connect_server("chrome", {})
+    session, stack = await daemon_mod._connect_server("chrome", {}, timeout_seconds=lambda: 15.0)
     assert session is browser_session and stack is browser_stack
     direct.assert_awaited_once_with()
     assert spawned == []
@@ -338,7 +338,7 @@ async def test_connect_server_unknown_shared_value_raises(
     back to a per-connection child (which would defeat the declared intent)."""
     _write_config(fake_home, {"weird": {"command": "x", "shared": "mars"}})
     with pytest.raises(ValueError, match="unknown shared value 'mars'"):
-        await daemon_mod._connect_server("weird", {})
+        await daemon_mod._connect_server("weird", {}, timeout_seconds=lambda: 15.0)
 
 
 async def test_invalidate_session_shared_clears_daemon_wide_buckets(
@@ -413,13 +413,19 @@ async def test_connect_server_routes_url_servers_to_http(
 ) -> None:
     """A `url` entry skips the stdio child path entirely — `_connect_http` owns it."""
     _write_config(fake_home, {"remote": {"url": "https://mcp.example.com/mcp"}})
+    timeout_reader = MagicMock(return_value=15.0)
     http = AsyncMock(return_value=(MagicMock(), MagicMock()))
     monkeypatch.setattr(daemon_mod, "_connect_http", http)
 
-    session, stack = await daemon_mod._connect_server("remote", {})
+    session, stack = await daemon_mod._connect_server("remote", {}, timeout_seconds=timeout_reader)
 
     http.assert_awaited_once_with(
-        "https://mcp.example.com/mcp", None, oauth=False, server="remote", oauth_locks={}
+        "https://mcp.example.com/mcp",
+        None,
+        oauth=False,
+        server="remote",
+        oauth_locks={},
+        timeout_seconds=timeout_reader,
     )
     assert session is http.return_value[0]
     assert stack is http.return_value[1]
@@ -443,7 +449,9 @@ async def test_connect_http_initializes_session(
     session_cls = MagicMock(return_value=session_cm)
     monkeypatch.setattr("mcp.ClientSession", session_cls)
 
-    got, stack = await daemon_mod._connect_http("https://mcp.example.com/mcp", None, oauth_locks={})
+    got, stack = await daemon_mod._connect_http(
+        "https://mcp.example.com/mcp", None, oauth_locks={}, timeout_seconds=lambda: 15.0
+    )
 
     assert got is session
     session.initialize.assert_awaited_once()
@@ -472,7 +480,10 @@ async def test_connect_http_passes_headers_to_client_factory(
     monkeypatch.setattr("mcp.client.streamable_http.create_mcp_http_client", client_factory)
 
     await daemon_mod._connect_http(
-        "https://mcp.example.com/mcp", {"Authorization": "Bearer k"}, oauth_locks={}
+        "https://mcp.example.com/mcp",
+        {"Authorization": "Bearer k"},
+        oauth_locks={},
+        timeout_seconds=lambda: 15.0,
     )
 
     client_factory.assert_called_once_with(headers={"Authorization": "Bearer k"})
@@ -498,7 +509,9 @@ async def test_connect_http_fails_fast_and_closes_stack(
     monkeypatch.setattr(daemon_mod.AsyncExitStack, "aclose", aclose)
 
     with pytest.raises(ConnectionError):
-        await daemon_mod._connect_http("https://mcp.example.com/mcp", None, oauth_locks={})
+        await daemon_mod._connect_http(
+            "https://mcp.example.com/mcp", None, oauth_locks={}, timeout_seconds=lambda: 15.0
+        )
     aclose.assert_awaited_once()
 
 
@@ -507,13 +520,19 @@ async def test_connect_server_routes_oauth_servers(
 ) -> None:
     """An `oauth: true` url entry builds the OAuth client, not static headers."""
     _write_config(fake_home, {"remote": {"url": "https://mcp.example.com/mcp", "oauth": True}})
+    timeout_reader = MagicMock(return_value=15.0)
     http = AsyncMock(return_value=(MagicMock(), MagicMock()))
     monkeypatch.setattr(daemon_mod, "_connect_http", http)
 
-    await daemon_mod._connect_server("remote", {})
+    await daemon_mod._connect_server("remote", {}, timeout_seconds=timeout_reader)
 
     http.assert_awaited_once_with(
-        "https://mcp.example.com/mcp", None, oauth=True, server="remote", oauth_locks={}
+        "https://mcp.example.com/mcp",
+        None,
+        oauth=True,
+        server="remote",
+        oauth_locks={},
+        timeout_seconds=timeout_reader,
     )
 
 
@@ -541,7 +560,12 @@ async def test_connect_http_oauth_builds_provider(
     monkeypatch.setattr(oauth_mod, "oauth_http_client", oauth_builder)
 
     await daemon_mod._connect_http(
-        "https://mcp.example.com/mcp", None, oauth=True, server="exa", oauth_locks=locks
+        "https://mcp.example.com/mcp",
+        None,
+        oauth=True,
+        server="exa",
+        oauth_locks=locks,
+        timeout_seconds=lambda: 15.0,
     )
 
     oauth_builder.assert_awaited_once_with("https://mcp.example.com/mcp", "exa", locks)
@@ -570,7 +594,9 @@ async def test_shared_computer_use_server_connects_direct_no_child(
 
     monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
 
-    got_session, got_stack = await daemon_mod._connect_server("computer_use", {})
+    got_session, got_stack = await daemon_mod._connect_server(
+        "computer_use", {}, timeout_seconds=lambda: 15.0
+    )
     assert got_session is session and got_stack is stack
     direct.assert_awaited_once_with()
     assert spawned == []

@@ -19,6 +19,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.units import spawn_agent
 
 
@@ -85,6 +86,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
         wrap_saver_writes_with_nstep_interval(saver, 100)
         graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
         host = AgentHost(
+            policy=configured_policy(),
             pool=aops_pool,
             checkpointer=saver,
             graph=graph,

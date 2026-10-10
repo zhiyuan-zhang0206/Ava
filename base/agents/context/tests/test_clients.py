@@ -48,6 +48,44 @@ def test_get_builds_once_per_factory_and_close_releases_what_it_built() -> None:
     assert clients.get(factory) is built[1]  # a closed set builds afresh
 
 
+def test_explicit_builders_keep_type_keys_and_rebuild_after_close() -> None:
+    class ConfiguredClient(_Closable):
+        def __init__(self, value: str) -> None:
+            super().__init__()
+            self.value = value
+
+    inputs = {"first": "one", "second": "two"}
+    first = ClientSet(factories={ConfiguredClient: lambda: ConfiguredClient(inputs["first"])})
+    second = ClientSet(factories={ConfiguredClient: lambda: ConfiguredClient(inputs["second"])})
+    assert not first._made and not second._made
+    original = first.get(ConfiguredClient)
+    assert original.value == "one"
+    assert first.get(ConfiguredClient) is original
+    assert second.get(ConfiguredClient).value == "two"
+    inputs["first"] = "updated"
+    assert first.get(ConfiguredClient) is original
+    first.close()
+    assert original.closed
+    assert first.get(ConfiguredClient) is not original
+    assert first.get(ConfiguredClient).value == "updated"
+    assert second.get(ConfiguredClient).value == "two"
+    first.close()
+    second.close()
+
+
+def test_explicit_builder_failure_is_not_replaced_by_a_default() -> None:
+    error = ValueError("invalid supplied configuration")
+
+    def refuses() -> _Closable:
+        raise error
+
+    clients = ClientSet(factories={_Closable: refuses})
+    with pytest.raises(ValueError) as observed:
+        clients.get(_Closable)
+    assert observed.value is error
+    assert not clients._made
+
+
 def test_close_closes_the_connections_it_made_and_keeps_going_past_a_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

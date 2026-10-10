@@ -18,25 +18,8 @@ transaction and cancellation cleanup to LangGraph's saver for that connection.
 Unrelated agents can therefore read and write concurrently. The N-step wrapper
 in `agent/startup/__init__.py` still serializes writes and flushes for the same thread.
 
-Active agents have no default admission limit: `AVA_HOST_MAX_CONCURRENT_TURNS=0`
-allows another agent to start while existing agents wait on models or tools.
-A positive value opts into the host limit; `services/agent_runner/agent_host/scheduling/admission.py`
-(`TurnAdmission`) then serves excess continuations as a fair queue: one ticket
-per agent (`TurnScheduler`'s single flight), arrival-order FIFO, a completed
-turn's next request taken at the tail — ticket rotation, no starvation. Queue
-depth, waiter ages and served-wait counters are exposed on the daemon's
-`/stats`; a wait past `AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS` reports one
-`host_admission_wait_exceeded` anomaly event per episode. A queued turn is
-explicitly exempt from the dispatcher's stall cancellation — its progress clock
-is silent by design and cancelling it would only re-queue it at the tail.
-Per-agent single-flight and resource settlement still apply. Active runtimes
-remain resident; completed turns immediately trim the warm cache to its
-size/idle budget. Host memory, exec capacity and provider quotas remain separate
-constraints.
-
-New runners advertise zero-limit support in their bootstrap request. The gateway
-projects zero to the legacy positive default for older runners, so partial
-updates cannot turn their admission semaphore into a permanent zero-slot wait.
+Host admission capacity and warm-cache policy are described in
+[[agent/docs/agent-runtime/host-policy.ava.okf.md]].
 
 Database clients are independently bounded by `AVA_HOST_DB_POOL_MAX_SIZE`
 (64 workload/checkpoint connections) and `AVA_HOST_CONTROL_POOL_MAX_SIZE`
@@ -109,12 +92,12 @@ context for compaction and to END for idle or lifecycle control. Routing uses
 
 ## Related contracts
 
-- [[graph.ava.okf.md]] — graph topology and hooks
-- [[state.ava.okf.md]] — state and checkpoints
-- [[loop.ava.okf.md]] — turn scheduling
-- [[lifecycle.ava.okf.md]] — native restart, terminate and resurrection
-- [[context.ava.okf.md]] — per-turn dependency injection
-- [[tool-calls.ava.okf.md]] — isolated code execution
+- [[agent/graph/docs/graph.ava.okf.md]] — graph topology and hooks
+- [[agent/docs/state.ava.okf.md]] — state and checkpoints
+- [[agent/docs/loop.ava.okf.md]] — turn scheduling
+- [[agent/docs/lifecycle.ava.okf.md]] — native restart, terminate and resurrection
+- [[agent/graph/docs/context.ava.okf.md]] — per-turn dependency injection
+- [[agent/graph/docs/tool-calls.ava.okf.md]] — isolated code execution
 
 Agents are allocated through `POST /api/agents`; the gateway commits their row
 and work, then the home runner wakes its agent host. No agent Python process is
