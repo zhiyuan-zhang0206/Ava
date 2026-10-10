@@ -130,3 +130,59 @@ def test_pure_admission_rejects_sensitive_and_unknown_core_dependencies(key: str
     body = _FACE.replace("config=Config)", f"config=Config, flags=({key!r},))")
     with pytest.raises(UnknownFlag):
         config_face.configuration_declaration("probe", _plugin("probe", body))
+
+
+@pytest.fixture
+def bootstrap_authority_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+
+
+def _cluster_face(*, sensitive: bool = False) -> str:
+    return _FACE.replace(
+        "json_schema_extra={'per_agent': True}",
+        f"json_schema_extra={{'scope': 'cluster-default', 'sensitive': {sensitive}}}",
+    )
+
+
+def test_bootstrap_packet_reads_fresh_authority_and_only_declared_cluster_fields(
+    bootstrap_authority_home: None,
+) -> None:
+    import json
+
+    from base.packages.plugins.config_registration import disk_image_path
+
+    _plugin("probe", _cluster_face())
+    image = disk_image_path("probe")
+    assert json.loads(config_face.plugin_bootstrap_config()) == {"probe": {"marker": ".git"}}
+    assert not image.exists()
+    image.parent.mkdir(parents=True)
+    image.write_text('{"marker":"first","fixed":2}')
+    assert json.loads(config_face.plugin_bootstrap_config()) == {"probe": {"marker": "first"}}
+    image.write_text('{"marker":"second","fixed":3}')
+    assert json.loads(config_face.plugin_bootstrap_config()) == {"probe": {"marker": "second"}}
+
+
+def test_bootstrap_packet_rejects_sensitive_cluster_declarations(
+    bootstrap_authority_home: None,
+) -> None:
+    _plugin("probe", _cluster_face(sensitive=True))
+    with pytest.raises(ValueError, match=r"probe\.marker may not carry secrets"):
+        config_face.plugin_bootstrap_config()
+
+
+@pytest.mark.parametrize("content", ['{"marker":"only"}', '{"marker":1,"fixed":2}', "bad json"])
+def test_bootstrap_packet_preserves_authority_schema_admission(
+    bootstrap_authority_home: None, content: str
+) -> None:
+    from base.packages.plugins.config_registration import (
+        InvalidConfigData,
+        SchemaDriftError,
+        disk_image_path,
+    )
+
+    _plugin("probe", _cluster_face())
+    image = disk_image_path("probe")
+    image.parent.mkdir(parents=True)
+    image.write_text(content)
+    with pytest.raises((InvalidConfigData, SchemaDriftError)):
+        config_face.plugin_bootstrap_config()

@@ -9,12 +9,13 @@ import pytest
 
 from base import config
 from base.config.domains.storage.data_plane import self_machine_host
-from base.config.service_read import ConfigAuthority, plugin_bootstrap_config
+from base.config.service_read import ConfigAuthority
 from base.host.env import runtime_config as rt
 from base.host.env.dotenv_file import upsert_env
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugins.config_face import plugin_bootstrap_config
 
 
 @pytest.fixture

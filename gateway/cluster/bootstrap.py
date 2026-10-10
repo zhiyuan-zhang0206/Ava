@@ -29,7 +29,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from base import config
-from base.config.service_read import plugin_bootstrap_config
+from base.packages.plugins.config_face import plugin_bootstrap_config
 from gateway.http.auth.request_principal import cluster_credential
 
 router = APIRouter()

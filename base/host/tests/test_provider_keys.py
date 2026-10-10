@@ -9,9 +9,10 @@ from urllib.parse import urlsplit
 import pytest
 
 from base import paths
-from base.config.service_read import ConfigAuthority, plugin_bootstrap_config
+from base.config.service_read import ConfigAuthority
 from base.host.env.dotenv_file import upsert_env
 from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugins.config_face import plugin_bootstrap_config
 
 pytest_plugins = ("base.lm.tests.providers.test_provider_plugins",)
 
