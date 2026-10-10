@@ -76,6 +76,10 @@ export interface UseTimelineResult {
   /** Background refresh in flight — during stale-while-revalidate;
    *   data is already displayed at this point. */
   isRefetching: boolean;
+  /** The authoritative read failed; retained rows remain available. */
+  error: Error | null;
+  isFetching: boolean;
+  retryTimeline: () => void;
   /** Whether older items exist before the oldest loaded one — the timeline
    *   shows a scroll-up affordance only when true. */
   hasMoreOlder: boolean;
@@ -407,6 +411,10 @@ export function useTimeline(
   const loadOlder = useCallback(() => {
     void loadOlderSegment();
   }, [loadOlderSegment]);
+  const { refetch } = timelineQuery;
+  const retryTimeline = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   // Compact-history retention (task #3698; user ruling 2026-09-17): after a
   // compact wholesale-replace lands on this thread, re-attach the previous
@@ -430,6 +438,9 @@ export function useTimeline(
     turnActive,
     isLoading: timelineQuery.isLoading,
     isRefetching: timelineQuery.isRefetching,
+    error: timelineQuery.error,
+    isFetching: timelineQuery.isFetching,
+    retryTimeline,
     hasMoreOlder,
     loadingOlder,
     loadOlder,
