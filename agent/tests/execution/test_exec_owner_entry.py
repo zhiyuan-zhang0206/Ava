@@ -191,6 +191,50 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
             proc.wait(timeout=5)
 
 
+def test_owner_relays_output_larger_than_a_pipe_before_publishing_closed(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    write_request(
+        context.request_path,
+        code="import os; os.write(1, b'x' * 262144); os.write(1, b'final-tail')",
+        context=exec_context(1).describe(),
+        timeout_s=20,
+        state=None,
+        incarnation=None,
+    )
+    context = context.model_copy(
+        update={
+            "allocation": context.allocation.model_copy(
+                update={
+                    "request_digest": hashlib.sha256(context.request_path.read_bytes()).hexdigest()
+                }
+            )
+        }
+    )
+    proc = _start(tmp_path, context)
+    try:
+        ready = _ready(tmp_path, proc)
+        assert proc.stdin is not None
+        permit = OwnerControl(
+            request=ready.allocation.request, domain=ready.allocation.domain, action="permit"
+        )
+        proc.stdin.write(permit.model_dump_json().encode() + b"\n")
+        proc.stdin.flush()
+        assert proc.stdout is not None
+        # Keep stdin owned by the original host while continuously consuming output.
+        output = proc.stdout.read()
+        assert proc.wait(timeout=10) == 0, output.decode(errors="replace")
+        assert output == b"x" * 262144 + b"final-tail"
+        receipt = OwnerClosed.model_validate_json((tmp_path / "owner.closed").read_bytes())
+        assert receipt.reason == "completed"
+        assert receipt.root_exit_code == 0
+    finally:
+        if proc.stdin is not None:
+            proc.stdin.close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
 @pytest.mark.parametrize("ending", ["record", "partial_eof", "oversize"])
 def test_control_pipe_is_bounded_and_owned_by_calling_loop(ending: str) -> None:
     from agent.execution.domain_owner import ControlPipe

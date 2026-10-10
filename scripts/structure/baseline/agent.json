@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "agent/execution/domain_owner.py::thread:run": 1,
     "agent/execution/owner_child.py::thread:main": 1
   }
 }

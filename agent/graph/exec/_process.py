@@ -18,6 +18,8 @@ import psutil
 from base.log import logger
 from base.native_process.exec_domain import ExecProcessDomain as ExecProcessDomain
 
+from ._output_pipe import ExecOutputPipe
+
 _READER_JOIN_TIMEOUT_S = 5.0
 _EMERGENCY_SETTLE_TIMEOUT_S = 5.0
 _ROOT_EXIT_POLL_S = 0.05
@@ -141,7 +143,7 @@ def start_reap(proc: subprocess.Popen[bytes], domain_close: DomainCloseOwner) ->
 
 
 def start_reader_join(
-    reap_task: asyncio.Task[int], reader: threading.Thread, pid: int
+    reap_task: asyncio.Task[int], reader: ExecOutputPipe, pid: int
 ) -> asyncio.Task[None]:
     """Make one bounded reader join after the root's sole reap attempt."""
 
@@ -149,10 +151,8 @@ def start_reader_join(
         # Wait for the reap to settle without reading its result: `settle_resources` reports
         # a reap failure, and the reader is still joined once.
         await asyncio.wait({reap_task})
-        # Put the bound inside Thread.join: wait_for(to_thread(join)) cancels
-        # only the Future and leaves the executor worker blocked indefinitely.
-        await asyncio.to_thread(reader.join, _READER_JOIN_TIMEOUT_S)
-        if reader.is_alive():
+        await reader.finish(_READER_JOIN_TIMEOUT_S)
+        if not reader.closed:
             raise RuntimeError(
                 f"exec reader for pid {pid} remained alive after its process "
                 f"domain closed and {_READER_JOIN_TIMEOUT_S}s join elapsed"
@@ -259,7 +259,7 @@ async def finish_teardown_despite_cancellation(
 
 def settle_cancelled_owners(
     domain_close: DomainCloseOwner,
-    reader: threading.Thread | None,
+    reader: ExecOutputPipe | None,
 ) -> tuple[TeardownFailure, ...]:
     """Synchronously settle resources whose async owners Runner cancelled.
 
@@ -288,11 +288,11 @@ def settle_cancelled_owners(
 
     if reader is not None:
         try:
-            reader.join(max(0.0, deadline - time.monotonic()))
+            reader.finish_now(max(0.0, deadline - time.monotonic()))
         except BaseException as exc:
             failures.append(TeardownFailure("reader_join", exc))
         else:
-            if reader.is_alive():
+            if not reader.closed:
                 failures.append(
                     TeardownFailure(
                         "reader_join",
