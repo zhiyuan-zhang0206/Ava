@@ -31,6 +31,18 @@ An unexpected exit is eligible for the existing health scheduler's replacement;
 no historical custody file blocks spawning. Operator intent, input-seal validation
 and recorded restart failures retain their existing owners.
 
+Supervisor retains every actual watcher Task across generation replacement,
+retrieves its completion, and immediately records an unknown original error.
+That error remains at this Supervisor and is raised at shutdown; it does not
+cancel other root participants. `exited` certifies a completed native reap and
+is never set by an error or cancellation cleanup path. Shutdown closes birth
+admission, attempts every child stop, and observes its retained watchers for an
+independent finite join budget (0.2 seconds by default). A refused child's watch
+continues to observe its real reap. `unfinished_watches` exposes the actual live
+Task identities; a bounded return does not certify their termination. Repeated
+shutdown can collect a late error from the same original owner. Multiple
+failures retain their original objects, including an existing operation failure.
+
 Group signaling is best effort. A child forked during the leader's TERM handler,
 a process that moved to another group/session, or descendants left after a root
 crash may remain. Their disappearance is not a service-replacement requirement.
