@@ -4,7 +4,8 @@ name: Refresh test durations
 # Nightly isolated measurements remain the fallback, with a two-hour backstop.
 # Only a complete published measurement resets either guard; successful no-ops
 # do not. All shards and the publisher share one immutable source SHA. Results
-# go to one reviewable bot PR, which is never auto-merged.
+# go to one generated bot PR, submitted to Trunk after publication. Normal CI
+# and merge-queue readiness remain required before merging.
 
 on:
   schedule:
@@ -222,6 +223,10 @@ jobs:
     name: Refresh .test_durations
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      changed: ${{ steps.publish.outputs.changed }}
+      head-sha: ${{ steps.publish.outputs.head-sha }}
+      pr-number: ${{ steps.pull-request.outputs.number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -285,7 +290,8 @@ jobs:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: cp .test_durations .test_durations.source.json "$CANDIDATE/"
 
-      - name: Push a review branch
+      - name: Push the generated branch
+        id: publish
         env:
           BRANCH: ava-bot/test-durations
           CANDIDATE: ${{ steps.candidate.outputs.path }}
@@ -293,10 +299,26 @@ jobs:
           git -C "$CANDIDATE" config user.name 'ava-durations-bot'
           git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C "$CANDIDATE" add .test_durations .test_durations.source.json
+          if git -C "$CANDIDATE" diff --cached --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'Duration data already matches the measured source; nothing to publish.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if git -C "$CANDIDATE" show-ref --verify --quiet "refs/remotes/origin/$BRANCH" &&
+             git -C "$CANDIDATE" diff --quiet "origin/$BRANCH"; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+            echo "head-sha=$(git -C "$CANDIDATE" rev-parse "origin/$BRANCH")" >> "$GITHUB_OUTPUT"
+            echo 'This complete snapshot is already published; reusing the PR head.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           git -C "$CANDIDATE" commit -m 'ci: refresh .test_durations'
           git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          echo "head-sha=$(git -C "$CANDIDATE" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Open or update the durations PR
+        id: pull-request
+        if: steps.publish.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ava-bot/test-durations
@@ -313,7 +335,8 @@ jobs:
           The provenance file records the measured generation. Main uses these
           weights only after this PR merges. Future refreshes reuse successful
           main CI after 20 first-parent changes; nightly measurements are the
-          fallback. This PR is never auto-merged.
+          fallback. This generated-data PR is submitted to the Trunk merge
+          queue automatically. Required CI and queue checks still gate merging.
           EOF
           PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
           if [ -z "$PR_NUMBER" ]; then
@@ -322,4 +345,39 @@ jobs:
           else
             gh pr edit "$PR_NUMBER" --body-file "$BODY"
           fi
+          PR_NUMBER="$(gh pr view "$BRANCH" --json number --jq '.number')"
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           gh workflow run ci.yml --ref "$BRANCH"
+
+  submit:
+    needs: refresh
+    if: needs.refresh.outputs.changed == 'true'
+    name: Submit generated durations PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Admission code belongs to this workflow's trusted main revision. A
+      # completed main CI may have measured an older source without this helper.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: true
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Submit the generated PR to Trunk
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRUNK_API_TOKEN: ${{ secrets.TRUNK_API_TOKEN }}
+          PR_NUMBER: ${{ needs.refresh.outputs.pr-number }}
+          CANDIDATE_SHA: ${{ needs.refresh.outputs.head-sha }}
+        run: |
+          printf '%s' "$TRUNK_API_TOKEN" | \
+            AVA_HOME="$RUNNER_TEMP/duration-policy-home" AVA_CONFIG_FETCH=skip \
+            uv run python -m scripts.ci.pull_requests.duration_refresh \
+              --repository "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --head-sha "$CANDIDATE_SHA"

@@ -38,12 +38,23 @@ with schema version, measured source SHA, Actions run ID and measurement time.
 Both files publish in one Git commit on `ava-bot/test-durations`. The branch is
 rebuilt from the measured source, so its required CI checks see that generation's
 code. One existing bot PR is updated and explicitly receives `ci.yml` dispatch.
-This PR is never auto-merged.
+Admission runs from the workflow's trusted main revision, independently of the
+older measurement source. After publication, `pull_requests/duration_refresh.py` verifies that the open,
+non-draft GitHub Actions bot PR targets main from this repository's fixed bot
+branch, still has the candidate's exact head SHA, and changes only the two generated
+files. It submits that PR to Trunk with the existing `TRUNK_API_TOKEN`; Trunk
+waits for normal readiness and required checks before testing and merging.
+Already-submitted responses are idempotent; submission or validation failures
+fail the workflow visibly. A candidate with no generated diff against its
+measured source publishes nothing. An identical already-published snapshot
+reuses its existing head without a force-push, then still updates the PR,
+dispatches CI and submits it; an unqueued existing PR is not left behind.
 
 The plan reports applied provenance from main separately from the open bot PR's
 published provenance. Pending publication resets the refresh counter to avoid
 rewriting the PR on every main push; it does **not** mean main uses those weights.
-Review and merge the bot PR to apply them. Later node-ID maintenance can edit
+The weights apply only when Trunk merges the bot PR after its gates pass.
+Later node-ID maintenance can edit
 the timing map without claiming a new measurement by changing provenance.
 Closed unmerged bot PRs do not reset the counter. Older main CI completions
 cannot overwrite a newer published snapshot. API errors or malformed provenance
