@@ -455,3 +455,74 @@ def test_replaced_read_only_open_cannot_certify_source_unchanged(
     )
     assert found.unknown
     assert found.file_executions == ()
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "rewrite(source)",
+        "rewrite(target=source)",
+        "container = {'target': source}\nrewrite(container)",
+        "import os\nos.replace(temporary, source)",
+        "source.unlink()",
+        "Path(source).unlink()",
+        "alias = source\nrewrite(alias)",
+        "write = source.write_text\nwrite('replacement')",
+    ],
+)
+def test_source_path_passed_to_opaque_operations_retains_unknown(
+    tmp_path: Path, operation: str
+) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    prefix = _PREFIX.replace(
+        "spec =", "source = ROOT / 'base/net/probe.py'\n" + operation + "\nspec ="
+    ).replace("'probe', ROOT / 'base/net/probe.py'", "'probe', source")
+    found = facts.collect(
+        ast.parse(prefix + "spec.loader.exec_module(module)\n"),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown
+    assert found.file_executions == ()
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "rewrite(ROOT / 'base/net/other.py')",
+        "(ROOT / 'base/net/probe.py').read_text()",
+        "(ROOT / 'base/net/probe.py').read_bytes()",
+        "(ROOT / 'base/net/probe.py').absolute()",
+    ],
+)
+def test_independent_argument_or_proven_read_only_path_operation_keeps_proof(
+    tmp_path: Path, operation: str
+) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    found = facts.collect(
+        ast.parse(_PREFIX + operation + "\nspec.loader.exec_module(module)\n"),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown == ()
+    assert len(found.file_executions) == 1
+
+
+@pytest.mark.parametrize(
+    "operation", ["rewrite(source)", "import os\nos.replace(temporary, source)"]
+)
+def test_opaque_source_call_after_execution_keeps_earlier_proof(
+    tmp_path: Path, operation: str
+) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    prefix = _PREFIX.replace("spec =", "source = ROOT / 'base/net/probe.py'\nspec =")
+    found = facts.collect(
+        ast.parse(prefix + "spec.loader.exec_module(module)\n" + operation + "\n"),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown == ()
+    assert len(found.file_executions) == 1
