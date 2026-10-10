@@ -89,8 +89,8 @@ def _pidfile() -> Path:
     return _endpoint().pidfile
 
 
-# Per-agent failure backoff. A label that persistently fails (bad key, rate
-# limit, oversized prompt, model error) leaves `label` NULL, so the next poll
+# Per-agent failure backoff. A trusted transient provider failure or an empty /
+# rejected label leaves `label` NULL, so the next poll
 # re-selects the same agent and retries — without a bound this is an unbounded
 # hot loop of build_chat_model + LLM round-trips (~1/s). Each failure pushes the
 # agent's next eligible retry out exponentially (capped), and cooling agents are
@@ -269,6 +269,11 @@ async def _dispatch_loop(
     generate label. A label that fails enters per-agent exponential backoff so a
     persistent failure does not become a hot retry loop.
 
+    Only explicit False generation results enter backoff. Escaping exceptions,
+    including DB failures, reach run/main's existing service failure owner and
+    stop this batch. No task is claimed or acknowledged here. Restart clears
+    the in-memory cooldown and retirement state; it does not isolate a bad row.
+
     generate_label_async writes via internal CAS (WHERE label is unset —
     NULL or empty string — AND NOT label_user_set), so user-edited labels
     are auto-skipped.
@@ -277,64 +282,36 @@ async def _dispatch_loop(
     backoff = _Backoff()
     while True:
         liveness.beat()
-        try:
-            await asyncio.sleep(_POLL_INTERVAL_S)
-            if admission.quiesced():
+        await asyncio.sleep(_POLL_INTERVAL_S)
+        if admission.quiesced():
+            continue
+        now = time.monotonic()
+        cooling = backoff.cooling_ids(now)
+        with pool.connection() as conn, conn.cursor() as cur:
+            rows = _select_unlabeled(cur, cooling)
+        for tid, prompt in rows:
+            liveness.beat()  # per-item: a slow LLM call must not look like a wedge
+            if not prompt:
                 continue
-            now = time.monotonic()
-            cooling = backoff.cooling_ids(now)
-            with pool.connection() as conn, conn.cursor() as cur:
-                rows = _select_unlabeled(cur, cooling)
-            for tid, prompt in rows:
-                liveness.beat()  # per-item: a slow LLM call must not look like a wedge
-                if not prompt:
-                    continue
-                try:
-                    result = await generate_label_async(
-                        tid,
-                        prompt,
-                        config,
-                        db,
-                        bus,
-                        catalog=catalog,
-                        llm_override=llm_override,
-                        overrides=overrides,
-                    )
-                except Exception as exc:
-                    # Defensive: generate_label_async returns False on LLM
-                    # failures instead of raising; an escaping exception is
-                    # the DB CAS / publish path and is also a failure.
-                    delay = backoff.record_failure(tid, now)
-                    _log.error(
-                        "[labeler] generate label for thread %s failed: %r (%s)",
-                        tid,
-                        exc,
-                        backoff.retry_note(tid, delay),
-                    )
-                else:
-                    if result is False:
-                        # LLM failure — recorded as backoff. Keyed on the
-                        # RETURN value, not an exception: generate_label_async
-                        # swallows LLM errors, and the old except-keyed
-                        # backoff never fired (audit round 2, P1).
-                        delay = backoff.record_failure(tid, now)
-                        _log.error(
-                            "[labeler] generate label for thread %s failed (%s)",
-                            tid,
-                            backoff.retry_note(tid, delay),
-                        )
-                    else:
-                        backoff.clear(tid)
-        except asyncio.CancelledError:
-            raise
-        except psycopg.ProgrammingError:
-            _log.critical(
-                "[labeler] schema / syntax error — code<->DB drift; retry will not self-heal, daemon exiting, restart after fix",
-                exc_info=True,
+            result = await generate_label_async(
+                tid,
+                prompt,
+                config,
+                db,
+                bus,
+                catalog=catalog,
+                llm_override=llm_override,
+                overrides=overrides,
             )
-            raise
-        except Exception:
-            _log.exception("[labeler] poll iteration failed")
+            if result is False:
+                delay = backoff.record_failure(tid, now)
+                _log.error(
+                    "[labeler] generate label for thread %s failed (%s)",
+                    tid,
+                    backoff.retry_note(tid, delay),
+                )
+            else:
+                backoff.clear(tid)
 
 
 async def run() -> None:
