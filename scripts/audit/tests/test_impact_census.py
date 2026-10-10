@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
-
-import pytest
 
 from scripts.audit import impact_census
 
@@ -45,9 +45,23 @@ def test_census_counts_shared_sources_and_unbounded_consumers(tmp_path: Path) ->
     assert [(site.path, site.tests) for site in report.heaviest_unbounded] == [("base/leaf.py", 1)]
 
 
-def test_cli_prints_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert impact_census.main(["--repo-root", str(_repo(tmp_path)), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["unbounded_sites"] == 1
+def test_cli_prints_json(tmp_path: Path) -> None:
+    child = subprocess.run(  # noqa: S603 -- fixed interpreter and repository module, no shell
+        [
+            sys.executable,
+            "-m",
+            "scripts.audit.impact_census",
+            "--repo-root",
+            str(_repo(tmp_path)),
+            "--json",
+        ],
+        cwd=Path(__file__).resolve().parents[3],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    assert json.loads(child.stdout)["unbounded_sites"] == 1
 
 
 def test_census_retains_unrelated_resource_unknown_in_the_same_file(tmp_path: Path) -> None:
