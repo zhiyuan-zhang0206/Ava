@@ -94,19 +94,24 @@ class ChildDeferral:
         self._record_metrics = record_metrics
         self._export_live = export_live
         self._lock = threading.Lock()
+        self._clock_lock = threading.Lock()
         self.active = False
         self._clock_started = False
         self._clock: threading.Timer | None = None
+        self._stopped = threading.Event()
+        self.completion_idle = threading.Event()
+        self.completion_idle.set()
 
     def arm(self) -> None:
         """Arm deferred export; no-op when AVA_TELEMETRY_OTLP_CHILD_DEFER is
         off (the documented revert switch)."""
-        if self.active:
+        if self.active or self._stopped.is_set():
             return
         if not _env_flag(_CHILD_DEFER_ENV, default=True):
             return
         with self._lock:
-            self.active = True
+            if not self._stopped.is_set():
+                self.active = True
 
     def is_active(self) -> bool:
         return self.active
@@ -143,46 +148,53 @@ class ChildDeferral:
         hold BEFORE bring-up, replay metrics for exactly that snapshot BEFORE
         the events become visible to the worker."""
         with self._lock:
-            if not self.active:
-                return
-            self._cancel_clock()
-            snapshot = self._take_hold()
-            if not snapshot:
+            self.completion_idle.clear()
+            try:
+                if not self.active or self._stopped.is_set():
+                    return
+                self._cancel_clock()
+                snapshot = self._take_hold()
+                if not snapshot:
+                    self.active = False
+                    return
+                if not self._bring_up():
+                    self._put_back(snapshot)
+                    return
                 self.active = False
-                return
-            if not self._bring_up():
+                for event in snapshot:
+                    with failure_isolated("otlp deferred metric mapping"):
+                        self._record_metrics(event)
                 self._put_back(snapshot)
-                return
-            self.active = False
-            for event in snapshot:
-                with failure_isolated("otlp deferred metric mapping"):
-                    self._record_metrics(event)
-            for event in snapshot:
-                try:
-                    self._queue.put_nowait(event)
-                except queue.Full:  # pragma: no cover — snapshot <= queue bound
-                    break
+            finally:
+                self.completion_idle.set()
 
-    def _start_clock(self) -> None:
-        """Start the one-shot max-age timer on the first held batch.
-
-        This is the observability-delay bound: a low-traffic long child must
-        not stall its records until exit — at the configured age the stack
-        comes up and the backlog ships. A child that exits earlier never fires
-        it."""
-        if self._clock_started:
-            return
-        self._clock_started = True
-        age_s = _env_seconds(_CHILD_DEFER_MAX_AGE_ENV, CHILD_DEFER_MAX_AGE_DEFAULT_S)
-        timer = threading.Timer(age_s, self.complete, args=("age",))
-        timer.daemon = True
-        self._clock = timer
-        timer.start()
-
-    def _cancel_clock(self) -> None:
+    def stop(self, timeout: float) -> bool:
+        """Cancel and observe the existing clock without taking its slow SDK lock."""
+        self._stopped.set()
+        self._cancel_clock()
         clock = self._clock
         if clock is not None:
-            clock.cancel()
+            clock.join(timeout=timeout)
+            return not clock.is_alive() and self.completion_idle.is_set()
+        return self.completion_idle.is_set()
+
+    def _start_clock(self) -> None:
+        """Admit the existing one-shot timer under a short, SDK-free lock."""
+        with self._clock_lock:
+            if self._clock_started or self._stopped.is_set():
+                return
+            self._clock_started = True
+            age_s = _env_seconds(_CHILD_DEFER_MAX_AGE_ENV, CHILD_DEFER_MAX_AGE_DEFAULT_S)
+            timer = threading.Timer(age_s, self.complete, args=("age",))
+            timer.daemon = True
+            self._clock = timer
+            timer.start()
+
+    def _cancel_clock(self) -> None:
+        with self._clock_lock:
+            clock = self._clock
+            if clock is not None:
+                clock.cancel()
 
     def _take_hold(self) -> list[Event]:
         """Drain the queue's held events (the deferral's backlog)."""

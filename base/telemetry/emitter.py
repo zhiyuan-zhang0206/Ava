@@ -768,8 +768,7 @@ def _drain_on_exit() -> None:
     """Close ordinary admission and finitely join its single writer at normal exit.
 
     The ordered exit seam closes downstream sinks only after the writer finishes.
-    Providers use ``shutdown_on_exit=False`` so their independent atexit handlers
-    cannot run first and strand a tail batch. An unfinished writer is reported;
+    Providers leave shutdown to their worker; an unfinished writer is reported;
     process exit may shed its ordinary tail. ``hard_exit`` bypasses this hook.
     """
     pipeline = _state["pipeline"]
@@ -786,10 +785,9 @@ def _drain_on_exit() -> None:
         from base.telemetry.event_store import close_store
 
         close_store()
-    with failure_isolated("otlp shutdown"):
-        from base.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
+    from base.telemetry.otlp import telemetry_otlp
 
-        telemetry_otlp.shutdown()
+    telemetry_otlp.shutdown()
 
 
 atexit.register(_drain_on_exit)
