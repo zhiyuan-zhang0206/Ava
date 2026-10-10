@@ -308,3 +308,131 @@ def test_loaded_resources_do_not_grant_python_subject_or_root_ownership(tmp_path
     assert proof.unknown == ()
     assert proof.modules == ()
     assert proof.directory is None
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        "(ROOT / 'base/net/probe.py').write_text('import other_dependency')",
+        "(ROOT / 'base/net/probe.py').write_bytes(b'import other_dependency')",
+        "open(ROOT / 'base/net/probe.py', 'w')",
+        "(ROOT / 'base/net/probe.py').open('wb')",
+        "open(ROOT / 'base/net/probe.py', 'r+')",
+        "unknown_path.write_text('import other_dependency')",
+        "open(unknown_path, 'w')",
+        "open(ROOT / 'base/net/probe.py', mode=unknown_mode)",
+    ],
+)
+@pytest.mark.parametrize("position", ["before_spec", "before_exec"])
+def test_prior_known_or_unknown_source_writes_block_execution_proof(
+    tmp_path: Path, write: str, position: str
+) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    text = (
+        _PREFIX.replace("spec =", write + "\nspec =")
+        if position == "before_spec"
+        else _PREFIX + write + "\n"
+    ) + "spec.loader.exec_module(module)\n"
+    found = facts.collect(
+        ast.parse(text),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown
+    assert found.file_executions == ()
+    assert (root / "base/net/probe.py").read_text() == "import base.db.pool\n"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "(ROOT / 'base/net/probe.py').write_text('import other_dependency')",
+        "unknown_path.write_bytes(b'import other_dependency')",
+        "open(unknown_path, 'w')",
+    ],
+)
+def test_writes_after_execution_do_not_erase_an_earlier_source_proof(
+    tmp_path: Path, operation: str
+) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    found = facts.collect(
+        ast.parse(_PREFIX + "spec.loader.exec_module(module)\n" + operation + "\n"),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown == ()
+    assert len(found.file_executions) == 1
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "(ROOT / 'base/net/other.py').write_text('import other_dependency')",
+        "open(ROOT / 'base/net/probe.py', 'r')",
+    ],
+)
+def test_distinct_known_output_or_read_only_open_keeps_source_proof(
+    tmp_path: Path, operation: str
+) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    found = facts.collect(
+        ast.parse(_PREFIX + operation + "\nspec.loader.exec_module(module)\n"),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown == ()
+    assert len(found.file_executions) == 1
+
+
+@pytest.mark.parametrize("after_definition", [False, True])
+def test_ancestor_write_has_no_proven_later_order_than_nested_execution(
+    tmp_path: Path, after_definition: bool
+) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    prefix, body = _PREFIX.split("spec =", 1)
+    definition = "def execute():\n" + "".join(
+        " " + line + "\n"
+        for line in ("spec =" + body + "spec.loader.exec_module(module)\n").splitlines()
+    )
+    write = "(ROOT / 'base/net/probe.py').write_text('import other_dependency')\n"
+    text = prefix + (definition + write if after_definition else write + definition)
+    found = facts.collect(
+        ast.parse(text),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown
+    assert found.file_executions == ()
+
+
+def test_write_through_an_existing_symlink_cannot_prove_source_unchanged(tmp_path: Path) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    (root / "base/net/output.py").symlink_to(root / "base/net/probe.py")
+    found = facts.collect(
+        ast.parse(
+            _PREFIX + "(ROOT / 'base/net/output.py').write_text('replacement')\n"
+            "spec.loader.exec_module(module)\n"
+        ),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown
+    assert found.file_executions == ()
+
+
+def test_a_proven_external_literal_output_keeps_source_proof(tmp_path: Path) -> None:
+    root = make_repo(tmp_path / "repo", {"base/net/probe.py": "import base.db.pool\n"})
+    write = f"Path({str(tmp_path / 'external.py')!r}).write_text('replacement')\n"
+    found = facts.collect(
+        ast.parse(_PREFIX + write + "spec.loader.exec_module(module)\n"),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown == ()
+    assert len(found.file_executions) == 1

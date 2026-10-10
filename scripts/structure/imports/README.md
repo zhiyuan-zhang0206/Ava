@@ -149,7 +149,14 @@ Independent domains conservatively produce a Cartesian product.
 
 The facts collector owns source lookup, parsing and analysis under the actual
 proven runtime module name. It models one level of unchanged, checkout-local
-Python sources, with each parsed source reused only within that analysis. Symlink
+Python sources, with each parsed source reused only within that analysis. Recognized
+`write_text`, `write_bytes` and potentially writable `open` calls before execution
+prevent a source proof when their target matches a loaded source or is opaque.
+Targets use the existing resource grammar and physical path resolution; a later
+local write does not retroactively invalidate an earlier execution. Ancestor
+calls have no proven ordering relative to a nested invocation and remain
+conservative. This is a bounded lexical check, not a helper side-effect model.
+Symlink
 aliases, missing or invalid sources, relative package imports, nested loaders and
 opaque names or paths retain Unknown. A factory without proven execution and
 `runpy.run_path` also remain explicit gaps. Only the matching factory gap is
