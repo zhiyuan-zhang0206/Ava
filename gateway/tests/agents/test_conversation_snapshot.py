@@ -157,4 +157,7 @@ def test_snapshot_checkpoint_read_failure_matches_timeline_unavailability(
     problem = resp.json()
     assert problem["detail"] == f"Checkpoint history unavailable for agent {tid}"
     assert problem["retryable"] is True
-    assert problem == test_client.get(f"/api/agents/{tid}/timeline").json()
+    standalone = test_client.get(f"/api/agents/{tid}/timeline").json()
+    assert problem.pop("trace_id")
+    assert standalone.pop("trace_id")
+    assert problem == standalone
