@@ -69,12 +69,11 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     """The notice SDK now goes through the unified gateway write API (R3 door
     ④): route the SDK's gateway client at the in-process app so notify /
     edit_notice / dismiss_notice hit the real endpoints against the test DB."""
-    from fastapi.testclient import TestClient
-
     from ava.gateway_client.transport import use_client
     from gateway.app import app
+    from tests.fixtures.gateway_config import gateway_test_client
 
-    with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
+    with gateway_test_client(app, base_url="http://test-gateway") as tc, use_client(tc):
         yield
 
 

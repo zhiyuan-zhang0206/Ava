@@ -342,6 +342,8 @@ def _start_pg(
     config = ConfigBoot()
 
     def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
         return config.view.walg.walg_config_file
 
     owner = ownership.require_postgres(_pg_data_dir(), pg_port, required=False)

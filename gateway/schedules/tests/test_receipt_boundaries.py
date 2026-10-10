@@ -2,17 +2,17 @@
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 import base.db
 from gateway.app import app
 from gateway.schedules import receipts, router, session_control
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = client.post("/api/schedules", json={"name": "rollback", "script": "pass"}).json()[
             "id"
         ]
@@ -31,7 +31,7 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
 
 
 def test_receipt_replays_after_schedule_deletion(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = client.post("/api/schedules", json={"name": "deleted", "script": "pass"}).json()["id"]
         path = f"/api/schedules/{sid}/restart"
         headers = {"Idempotency-Key": "before-delete"}
@@ -45,7 +45,7 @@ def test_receipt_replays_after_schedule_deletion(db_conn: psycopg.Connection) ->
 def test_delete_cleanup_enqueue_failure_preserves_schedule(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = client.post(
             "/api/schedules", json={"name": "delete-rollback", "script": "pass"}
         ).json()["id"]

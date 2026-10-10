@@ -43,7 +43,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 import base.log
@@ -51,6 +50,7 @@ from base import db
 from base.config import settings
 from gateway.app import app
 from services.agent_runner.agent_ops import daemon
+from tests.fixtures.gateway_config import gateway_test_client
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -212,7 +212,7 @@ def test_gateway_pool_carries_keepalives() -> None:
     """`gateway/app.py`'s request-serving pool, asserted on the object the real
     lifespan builds. Sizing (max_size=8) is the site's own business; the posture
     is not."""
-    with TestClient(app):
+    with gateway_test_client(app):
         pool = app.state.db_pool
         _assert_pool_posture(pool, "gateway/app.py:lifespan")
         assert pool.max_size == 8

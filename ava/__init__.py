@@ -353,7 +353,7 @@ def ensure_plugins_loaded(
 
             if config is None:
                 config = ConfigBoot()
-                config.boot()
+                config.read_process_environment()
             import atexit
 
             # The installation outlives attachments. Bound calls capture their

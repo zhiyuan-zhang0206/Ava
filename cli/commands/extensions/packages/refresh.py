@@ -718,6 +718,8 @@ def run_refresh(
     moment = now or datetime.now(UTC)
     if from_job:
         config = ConfigBoot()
+        if not config.prepared:
+            config.read_process_environment()
         if not os_jobs_enabled(enabled_reader=lambda: config.view.general.os_jobs_enabled):
             return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
     if from_job and not settings.packages.refresh_enabled:

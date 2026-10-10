@@ -31,6 +31,12 @@ class ConvergeCtx:
     config: ConfigBoot
     services: frozenset[str] = frozenset()
 
+    def read_config(self) -> ConfigBoot:
+        """Read startup inputs on first use, retaining an explicitly prepared owner."""
+        if not self.config.prepared:
+            self.config.read_process_environment()
+        return self.config
+
 
 @dataclass(frozen=True)
 class ConvergeStep:

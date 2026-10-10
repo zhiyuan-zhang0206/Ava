@@ -231,7 +231,7 @@ def ensure_redis_bridge(ctx: ConvergeCtx) -> None:
         ctx.ava_home,
         ctx.repo,
         config,
-        enabled_reader=lambda: ctx.config.view.general.os_jobs_enabled,
+        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
     )
 
 

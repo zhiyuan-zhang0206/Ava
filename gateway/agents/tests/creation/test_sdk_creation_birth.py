@@ -18,6 +18,7 @@ from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _s
 from gateway.app import app
 from ops.lifecycle.launch import _validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 
@@ -60,7 +61,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
 
     http.post.side_effect = submit
     with transport.use_client(http):
-        with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as target:
+        with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as target:
             with pytest.raises(GatewayUnavailable):
                 _sdk()
             assert http.post.call_count == 1
@@ -79,7 +80,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
                 assert retry.status_code == 200, retry.text
                 assert retry.json()["launch_attempt_id"] != str(original)
         # A new lifespan owns fresh pools and no prior acceptance cache.
-        with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as target:
+        with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as target:
             assert _sdk() == agent_id
     assert http.post.call_count == 2
     assert http.post.call_args_list[0] == http.post.call_args_list[1]

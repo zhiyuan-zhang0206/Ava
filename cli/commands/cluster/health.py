@@ -563,6 +563,8 @@ def _check_alert_only_health() -> int:
     config = ConfigBoot()
 
     def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
         return config.view.walg.walg_config_file
 
     archive_failure = _walg_archive_failure(path_reader=path_reader)

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import base.db
 from gateway.app import app
 from gateway.schedules import router, session_control
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _create(client: TestClient) -> int:
@@ -28,7 +29,7 @@ def _create(client: TestClient) -> int:
 def test_same_value_edit_preserves_version_timestamp_and_queue(
     db_conn: psycopg.Connection, fields: dict[str, object]
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = _create(client)
         before = db_conn.execute(
             "SELECT updated_at FROM schedules WHERE id = %s", (sid,)
@@ -46,7 +47,7 @@ def test_same_value_edit_preserves_version_timestamp_and_queue(
 
 
 def test_concurrent_identical_edits_append_one_version(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = _create(client)
     with base.db.pool(max_size=4) as pool, ThreadPoolExecutor(max_workers=4) as workers:
 
@@ -64,7 +65,7 @@ def test_concurrent_identical_edits_append_one_version(db_conn: psycopg.Connecti
 def test_enqueue_failure_rolls_back_config_and_version(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = _create(client)
 
     def fail(conn: object, schedule_id: int) -> None:
@@ -88,7 +89,7 @@ def test_response_failure_leaves_committed_convergence_work(
         raise RuntimeError("response lost")
 
     monkeypatch.setattr(session_control, "wait_consumed", fail)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = _create(client)
         with pytest.raises(RuntimeError, match="response lost"):
             client.put(f"/api/schedules/{sid}", json={"script": "print(2)\n"})
@@ -104,7 +105,7 @@ def test_response_failure_leaves_committed_convergence_work(
 def test_repeated_enabled_choice_does_not_enqueue(
     db_conn: psycopg.Connection, enabled: bool, action: str
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = client.post(
             "/api/schedules", json={"name": "choice", "script": "pass", "enabled": enabled}
         ).json()["id"]
@@ -115,7 +116,7 @@ def test_repeated_enabled_choice_does_not_enqueue(
 
 @pytest.mark.parametrize("status", ["completed", "error"])
 def test_explicit_start_preserves_terminal_rerun(db_conn: psycopg.Connection, status: str) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         sid = _create(client)
         db_conn.execute("UPDATE schedules SET status = %s WHERE id = %s", (status, sid))
         db_conn.commit()

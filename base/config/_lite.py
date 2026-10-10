@@ -404,6 +404,8 @@ class ConfigBoot:
         """
         with self._lock:
             if self.prepared:
+                if self.environment is not None:
+                    return
                 raise RuntimeError("configuration owner was already prepared")
             environment = dict(os.environ)
             profile = environment.get(AVA_PROCESS_PROFILE_ENV)

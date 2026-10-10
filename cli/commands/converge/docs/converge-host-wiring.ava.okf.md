@@ -18,6 +18,8 @@ that owner's view, including the package refresh cadence and WAL-G schedule.
 The WAL-G preparation and job steps read the same `view.walg.walg_config_file`;
 clearing it still retires the existing job without an OS registration gate.
 Creating the context does not deliver configuration or register an OS job.
+The first selected config reader captures inputs already delivered by startup;
+converge itself does not repeat dotenv delivery or replace process environment.
 Collector, browser and frontend preparation skip unselected services. Native
 LGTM downloads only selected backends, and invokes Loki's config validator only
 when Loki is selected. Readiness still checks every selected service.

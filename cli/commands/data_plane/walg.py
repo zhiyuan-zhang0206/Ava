@@ -21,6 +21,8 @@ def cmd_walg_check() -> int:
     config = ConfigBoot()
 
     def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
         return config.view.walg.walg_config_file
 
     steps = check.run_check(path_reader=path_reader)
@@ -43,6 +45,8 @@ def cmd_walg_run() -> int:
     config = ConfigBoot()
 
     def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
         return config.view.walg.walg_config_file
 
     return tick.run_tick(Database.from_settings(), _stamped, path_reader=path_reader)
@@ -57,6 +61,8 @@ def cmd_walg_drill() -> int:
     config = ConfigBoot()
 
     def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
         return config.view.walg.walg_config_file
 
     return tick.run_drill_now(_stamped, path_reader=path_reader)
@@ -74,6 +80,8 @@ def cmd_walg_restore(
     config = ConfigBoot()
 
     def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
         return config.view.walg.walg_config_file
 
     if not walg_config.enabled(path_reader=path_reader):
@@ -194,6 +202,8 @@ def cmd_walg_status() -> int:
     config = ConfigBoot()
 
     def path_reader() -> Path | None:
+        if not config.prepared:
+            config.read_process_environment()
         return config.view.walg.walg_config_file
 
     path = walg_config.configured_path(path_reader=path_reader)
