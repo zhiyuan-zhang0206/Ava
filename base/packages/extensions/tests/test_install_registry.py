@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from base.config import ConfigBoot
+from base.config.domains.packages import PackagesSettings
 from base.native_process.os_platform import LockTimeoutError
 from base.packages.extensions import install_registry as reg
 from base.paths import install_registry_path
@@ -269,28 +271,34 @@ def test_newer_schema_version_is_refused(unit_home: Path) -> None:
         reg.load()
 
 
-def test_resolved_policy_resolves_from_source_class(unit_home: Path) -> None:
-    from base.config import settings
+def test_resolved_policy_resolves_from_source_class(
+    process_config: ConfigBoot, unit_home: Path
+) -> None:
 
     repo_pkg = reg.InstalledPackage(
         name="r", type="skill", origin="repo", origin_path="/x/ava_builtins/skills/r"
     )
-    pol = reg.resolved_policy(repo_pkg)
+    pol = reg.resolved_policy(repo_pkg, defaults_reader=lambda: process_config.view.packages)
     assert pol.channel == "core"
-    assert pol.mode == settings.packages.refresh_default_mode
-    assert pol.interval_seconds == settings.packages.refresh_default_interval_seconds
+    assert pol.mode == process_config.view.packages.refresh_default_mode
+    assert pol.interval_seconds == process_config.view.packages.refresh_default_interval_seconds
 
     git_pkg = reg.InstalledPackage(name="g", type="skill", origin="user", source="https://x/g")
-    assert reg.resolved_policy(git_pkg).channel == "git"
+    assert (
+        reg.resolved_policy(git_pkg, defaults_reader=lambda: process_config.view.packages).channel
+        == "git"
+    )
 
     local_pkg = reg.InstalledPackage(name="l", type="skill", origin="user")
-    local_pol = reg.resolved_policy(local_pkg)
+    local_pol = reg.resolved_policy(local_pkg, defaults_reader=lambda: process_config.view.packages)
     assert local_pol.channel is None
     assert local_pol.mode == "off"
     assert local_pol.interval_seconds is None
 
 
-def test_resolved_policy_plugin_channel_follows_origin_path(unit_home: Path) -> None:
+def test_resolved_policy_plugin_channel_follows_origin_path(
+    process_config: ConfigBoot, unit_home: Path
+) -> None:
     from base import paths
 
     inside = reg.InstalledPackage(
@@ -299,22 +307,25 @@ def test_resolved_policy_plugin_channel_follows_origin_path(unit_home: Path) -> 
         origin="plugin",
         origin_path=str(paths.repo_root() / "ava_builtins" / "plugins" / "ava_code" / "skills"),
     )
-    assert reg.resolved_policy(inside).channel == "core"
+    assert (
+        reg.resolved_policy(inside, defaults_reader=lambda: process_config.view.packages).channel
+        == "core"
+    )
 
     outside = reg.InstalledPackage(
         name="q", type="skill", origin="plugin", origin_path="/elsewhere/plugins/q/skills"
     )
-    outside_pol = reg.resolved_policy(outside)
+    outside_pol = reg.resolved_policy(outside, defaults_reader=lambda: process_config.view.packages)
     assert outside_pol.channel is None
     assert outside_pol.mode == "off"
 
 
-def test_resolved_policy_explicit_values_win(unit_home: Path) -> None:
+def test_resolved_policy_explicit_values_win(process_config: ConfigBoot, unit_home: Path) -> None:
     pkg = reg.InstalledPackage(name="r", type="skill", origin="repo")
     pkg.update.mode = "notify"
     pkg.update.interval_seconds = 3600
     pkg.update.channel = "git"  # a deliberately odd pin: explicit wins over provenance
-    pol = reg.resolved_policy(pkg)
+    pol = reg.resolved_policy(pkg, defaults_reader=lambda: process_config.view.packages)
     assert (pol.channel, pol.mode, pol.interval_seconds) == ("git", "notify", 3600)
 
 
@@ -335,3 +346,47 @@ def test_differing_paths_names_changed_added_removed_and_skips_noise(tmp_path: P
         "only_a.md",
         "only_b.md",
     ]
+
+
+def test_resolved_policy_reads_only_missing_defaults() -> None:
+    pkg = reg.InstalledPackage(name="r", type="skill", origin="repo")
+    pkg.update.mode = "notify"
+    seen: list[str] = []
+
+    defaults = PackagesSettings(
+        AVA_PACKAGES_REFRESH_DEFAULT_MODE="off", AVA_PACKAGES_REFRESH_DEFAULT_INTERVAL_SECONDS=123
+    )
+
+    def read_defaults() -> PackagesSettings:
+        seen.append("read")
+        return defaults
+
+    policy = reg.resolved_policy(pkg, defaults_reader=read_defaults)
+    assert (policy.mode, policy.interval_seconds) == ("notify", 123)
+    assert seen == ["read"]
+    pkg.update.interval_seconds = 456
+    seen.clear()
+    policy = reg.resolved_policy(pkg, defaults_reader=read_defaults)
+    assert (policy.mode, policy.interval_seconds) == ("notify", 456)
+    assert seen == []
+
+
+def test_resolved_policy_does_not_read_defaults_without_a_channel() -> None:
+    def unexpected_defaults() -> PackagesSettings:
+        pytest.fail("channelless policy must not read configuration defaults")
+
+    pkg = reg.InstalledPackage(name="local", type="skill", origin="user")
+    policy = reg.resolved_policy(pkg, defaults_reader=unexpected_defaults)
+    assert (policy.channel, policy.mode, policy.interval_seconds) == (None, "off", None)
+
+
+def test_resolved_policy_preserves_defaults_reader_failure() -> None:
+    failure = ValueError("invalid package defaults")
+
+    def invalid_defaults() -> PackagesSettings:
+        raise failure
+
+    pkg = reg.InstalledPackage(name="repo", type="skill", origin="repo")
+    with pytest.raises(ValueError) as raised:
+        reg.resolved_policy(pkg, defaults_reader=invalid_defaults)
+    assert raised.value is failure

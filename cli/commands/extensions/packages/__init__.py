@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+from base.config import ConfigBoot
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, UpdateMode
 
@@ -131,11 +132,11 @@ def _fmt_range(manifest: dict[str, object] | None, manifest_error: str | None) -
     return ", ".join(parts) if parts else "-"
 
 
-def _status_rows(registry: install_registry.Registry) -> list[_Row]:
+def _status_rows(registry: install_registry.Registry, *, config: ConfigBoot) -> list[_Row]:
     """One display row per tracked package, by name."""
     rows: list[_Row] = []
     for pkg in sorted(registry.packages, key=lambda p: p.name):
-        policy = install_registry.resolved_policy(pkg)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=lambda: config.view.packages)
         manifest, manifest_error = _read_declared_range(pkg)
         root = _package_root(pkg)
         host_blocked = install_registry.host_contract_reason(root) if root is not None else None
@@ -229,7 +230,7 @@ def _print_rows(rows: list[_Row]) -> None:
         )
 
 
-def cmd_packages_status(*, json_output: bool = False) -> int:
+def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int:
     """`ava packages status [--json]` — host version, channels, and per-package
     channel/policy/applied-rev/last-result/declared-range. Read-only."""
     import json
@@ -245,7 +246,7 @@ def cmd_packages_status(*, json_output: bool = False) -> int:
         host_bare = None
         host_display = "unknown"
 
-    rows = _status_rows(registry)
+    rows = _status_rows(registry, config=config)
 
     if json_output:
         print(json.dumps(_status_payload(registry, rows, host_bare, host_display), indent=2))
@@ -282,6 +283,7 @@ def cmd_packages_status(*, json_output: bool = False) -> int:
 
 def cmd_packages_refresh(
     *,
+    config: ConfigBoot,
     check_only: bool = False,
     only: str | None = None,
     json_output: bool = False,
@@ -297,7 +299,7 @@ def cmd_packages_refresh(
 
     from cli.commands.extensions.packages.refresh import run_refresh
 
-    report = run_refresh(check_only=check_only, only=only, from_job=from_job)
+    report = run_refresh(config=config, check_only=check_only, only=only, from_job=from_job)
     if json_output:
         payload = {
             "ran": report.ran,
@@ -437,7 +439,7 @@ def _policy_interval(update_mode: str | None, check_every: str | None) -> int | 
 
 
 def cmd_packages_policy(
-    name: str, *, update_mode: str | None = None, check_every: str | None = None
+    name: str, *, config: ConfigBoot, update_mode: str | None = None, check_every: str | None = None
 ) -> int:
     """`ava packages policy <name> [--update-mode auto|notify|off]
     [--check-every 24h]` — record an explicit policy decision on the row; explicit
@@ -470,12 +472,12 @@ def cmd_packages_policy(
             fresh.update.interval_seconds = interval
     updated = install_registry.get(row.name)
     if updated is not None:
-        _print_policy(updated)
+        _print_policy(updated, config=config)
     return 0
 
 
-def _print_policy(updated: InstalledPackage) -> None:
-    policy = install_registry.resolved_policy(updated)
+def _print_policy(updated: InstalledPackage, *, config: ConfigBoot) -> None:
+    policy = install_registry.resolved_policy(updated, defaults_reader=lambda: config.view.packages)
     note = "" if policy.channel is not None else "  (no channel — refresh won't act on it)"
     if policy.mode == "off":
         note = "  (off — checks and applies are skipped)"

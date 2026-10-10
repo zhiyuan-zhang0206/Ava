@@ -74,9 +74,12 @@ def _h_plugins_upgrade(args: argparse.Namespace) -> int:
 
 
 def _h_skill_update(args: argparse.Namespace) -> int:
+    from base.config import ConfigBoot
     from cli.commands.extensions.skill import cmd_skill_update
 
-    return cmd_skill_update(args.names)
+    config = ConfigBoot()
+    config.read_process_environment()
+    return cmd_skill_update(args.names, config=config)
 
 
 def _h_skill_upgrade(args: argparse.Namespace) -> int:

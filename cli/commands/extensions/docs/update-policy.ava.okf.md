@@ -60,6 +60,20 @@ their sources (design §5.3; plugin/MCP applies land in P2):
   `ava packages refresh --from-job` (`base/host/system/packages_job.py`, 15-minute base
   tick; per-package cadence is registry data).
 
+The dispatched package command owns one `ConfigBoot` attachment to the existing
+process delivery and passes it explicitly through the refresh command and pass.
+The executor does not boot or capture configuration. Its job switches, time
+budget, per-iteration apply quota and network timeouts read that same owner at
+their existing operation points, including changes made to the owner during a
+pass. Manual runs still bypass the job-only enable switches.
+
+Package policy resolution also receives a required defaults reader from this
+owner. A channel-less row never reads defaults; an explicit mode or interval
+short-circuits its corresponding default read. Package status, policy output
+and skill update use the same explicit entry-to-reader contract. Invalid
+configuration retains its validation failure instead of becoming a refresh
+error outcome or a replacement value.
+
 ## `ava packages rollback <name>`
 
 Restores the previous tree kept at `skills/.<name>.prev` by the last apply

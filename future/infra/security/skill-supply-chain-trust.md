@@ -4,7 +4,7 @@
 > and why it is shaped this way, is
 > [`docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md`](../../../docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md);
 > the current-state description lives in
-> [`base/packages/extensions/docs/install_registry.ava.okf.md`](../../../base/packages/extensions/docs/install_registry.ava.okf.md)
+> [`base/packages/extensions/docs/install_registry/install_registry.ava.okf.md`](../../../base/packages/extensions/docs/install_registry/install_registry.ava.okf.md)
 > and [`cli/commands/extensions/packages/docs/packages.ava.okf.md`](../../../cli/commands/extensions/packages/docs/packages.ava.okf.md).
 > This doc holds only the open work.
 
