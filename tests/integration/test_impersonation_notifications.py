@@ -488,7 +488,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
         pytest.fail("A terminal notice cannot reserve ordinary input")
 
     class Listener:
-        closed = False
+        stopped = False
 
         async def ensure_listening(self) -> None:
             pass
@@ -496,8 +496,9 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
         async def wait_one(self, timeout: float) -> None:
             pytest.fail("The terminated relay must exit before waiting again")
 
-        async def close(self) -> None:
-            self.closed = True
+        async def stop(self) -> tuple[str, ...]:
+            self.stopped = True
+            return ()
 
     lease_uuid = UUID(session["id"])
     monkeypatch.setattr(adapters, "emit_claude", emitted.append)
@@ -518,7 +519,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
     assert "does not end or cancel any newer" in emitted[1]
     assert "The agent was terminated" in emitted[1]
     assert "no active native runtime is implied" in emitted[1]
-    assert listener.closed
+    assert listener.stopped
 
 
 async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction(

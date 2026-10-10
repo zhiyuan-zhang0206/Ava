@@ -203,8 +203,16 @@ class RedisInboundListener:
         if self._stopped:
             raise RuntimeError("Redis inbound listener has stopped")
 
-    def _subscription_is_current(self, pubsub: _RedisPubSub, generation: int) -> bool:
-        return generation == self._generation and pubsub is self._pubsub and self._redis is not None
+    def _subscription_is_current(
+        self, pubsub: _RedisPubSub | None, redis: aredis.Redis | None, generation: int
+    ) -> bool:
+        return (
+            pubsub is not None
+            and redis is not None
+            and generation == self._generation
+            and pubsub is self._pubsub
+            and redis is self._redis
+        )
 
     @property
     def wake_state(self) -> WakeState:
@@ -414,6 +422,8 @@ class RedisInboundListener:
         wait. Unknown errors propagate to the active caller.
         """
         redis = self._redis
+        pubsub = self._pubsub
+        generation = self._generation
         if redis is None or timeout <= 0:
             return False
         try:
@@ -430,7 +440,11 @@ class RedisInboundListener:
                 t=timeout,
             )
             async with self._lock:
-                await self._close_inner()
+                await self._close_inner(
+                    expected_pubsub=pubsub,
+                    expected_redis=redis,
+                    expected_generation=generation,
+                )
             return False
         except (OSError, aredis.RedisError, TypeError) as exc:
             # First failure of the degraded episode carries the traceback; repeats stay at
@@ -517,6 +531,8 @@ class RedisInboundListener:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 return
+            pubsub, redis = None, None
+            generation = self._generation
             try:
                 # Open/reconnect must honour the caller's budget.
                 self._check_admission()
@@ -532,8 +548,9 @@ class RedisInboundListener:
                     )
                     return
                 pubsub = open_task.result()
+                redis = self._redis
                 generation = self._generation
-                if not self._subscription_is_current(pubsub, generation):
+                if not self._subscription_is_current(pubsub, redis, generation):
                     continue
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
@@ -551,7 +568,7 @@ class RedisInboundListener:
                     return
                 # GETDEL can yield across stop or replacement of this subscription.
                 self._check_admission()
-                if not self._subscription_is_current(pubsub, generation):
+                if not self._subscription_is_current(pubsub, redis, generation):
                     continue
                 # Consume with bounded budget (see `_CONSUME_ABANDON_GRACE`).
                 consume_task = asyncio.create_task(self._consume_one(pubsub, remaining))
@@ -559,7 +576,7 @@ class RedisInboundListener:
                 if not await self._wait_for_operation(
                     consume_task, remaining + _CONSUME_ABANDON_GRACE
                 ):
-                    await self._abandon_consume(remaining)
+                    await self._abandon_consume(remaining, pubsub, redis, generation)
                     return
                 consume_task.result()
                 # Reaching a clean consume (message or timeout, no error) proves
@@ -582,7 +599,11 @@ class RedisInboundListener:
                 # ConnectionError, so uncaught by the branch below) would do.
                 self._note_subscribe_denied(exc)
                 async with self._lock:
-                    await self._close_inner()
+                    await self._close_inner(
+                        expected_pubsub=pubsub,
+                        expected_redis=redis,
+                        expected_generation=generation,
+                    )
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining > 0:
                     await asyncio.sleep(remaining)
@@ -602,14 +623,26 @@ class RedisInboundListener:
                     exc=exc,
                 )
                 async with self._lock:
-                    await self._close_inner()
+                    await self._close_inner(
+                        expected_pubsub=pubsub,
+                        expected_redis=redis,
+                        expected_generation=generation,
+                    )
                 if remaining <= backoff:
                     return
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, max(0.5, remaining / 2))
 
-    async def _abandon_consume(self, remaining: float) -> None:
+    async def _abandon_consume(
+        self,
+        remaining: float,
+        pubsub: _RedisPubSub,
+        redis: aredis.Redis | None,
+        generation: int,
+    ) -> None:
         """Record the stalled consume and discard its unusable connection."""
+        if not self._subscription_is_current(pubsub, redis, generation):
+            return
         self._mark_wake_degraded(WakeFailure.CONSUME_ABANDON)
         logger.warning(
             "RedisInboundListener[agent={a}]: consume never started "
@@ -620,16 +653,25 @@ class RedisInboundListener:
             g=_CONSUME_ABANDON_GRACE,
         )
         self._generation += 1
-        pubsub, redis = self._pubsub, self._redis
         self._pubsub = None
         self._redis = None
         cleanup = asyncio.create_task(self._close_handles(pubsub, redis))
         self._own_operation(cleanup, _Phase.CONSUME_CLEANUP)
         self._abandoned.add(cleanup)
 
-    async def _close_inner(self) -> None:
+    async def _close_inner(
+        self,
+        *,
+        expected_pubsub: _RedisPubSub | None = None,
+        expected_redis: aredis.Redis | None = None,
+        expected_generation: int | None = None,
+    ) -> None:
         """Close the underlying Redis connection + pubsub.  Caller must hold
         `self._lock`."""
+        if expected_generation is not None and not self._subscription_is_current(
+            expected_pubsub, expected_redis, expected_generation
+        ):
+            return
         self._generation += 1
         pubsub = self._pubsub
         redis = self._redis
