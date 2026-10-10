@@ -325,11 +325,8 @@ def test_price_snapshot_absent_for_unpriced_model(
     assert "plugin price registry" in warning
 
 
-def test_gemini_explicit_cache_provenance_labels(loguru_records: list[dict[str, Any]]):
-    """cache_mechanism/cache_scope ride the event extra when the call site
-    knows the request rode the Gemini explicit cache (task #2660) — the API
-    then reports only the explicit block, so the event must say so instead of
-    letting the dashboard misread the share as full-prefix."""
+def test_historical_cache_provenance_labels(loguru_records: list[dict[str, Any]]):
+    """Historical cache provenance remains accepted when records are replayed."""
     msg = AIMessage(
         content="",
         usage_metadata={

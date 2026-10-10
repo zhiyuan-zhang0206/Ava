@@ -473,7 +473,6 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     # reasoning-effort vocabulary ("" pins the provider default; None = unset)
     "reasoning_effort": _validate_reasoning_effort_range,
     # durations / timeouts — strictly positive and finite
-    "gemini_cache_timeout_seconds": _range_validator(gt=0),
     "heartbeat_pause_max_seconds": _range_validator(gt=0),
     "llm_stream_inter_chunk_timeout_seconds": _range_validator(gt=0),
     "llm_stream_total_timeout_seconds": _range_validator(gt=0),

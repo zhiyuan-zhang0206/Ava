@@ -23,28 +23,18 @@ The extension surface enforces that boundary:
 - The prefix map is flat. Duplicate or nested prefixes fail at registration;
   there is no precedence order from which a fallback chain could emerge.
 
-## Invocation adapters
+## Model invocation
 
-`build_chat_model()` still returns an unbound chat model. Its internal
-`build_chat_model_bound()` companion resolves the model once and returns the
-actual client with its selected binding; override factories have no binding.
-The agent host holds that binding beside the client and supplies it through
-`AvaContext`, without serializing either into checkpoints or exec requests.
+`build_chat_model()` returns an unbound chat model; the internal
+`build_chat_model_bound()` companion also returns the selected provider binding.
+Agent streaming and compaction bind `execute_code` at the call site and send
+the complete message prefix, including the original SystemMessage. Gemini
+uses the provider's implicit caching through the ordinary model API.
 
-An optional `ProviderBinding.prepare_call` receives the original messages,
-tools, and caller-resolved policy snapshot. `base/lm/call.py` owns the lightweight
-invocation envelope and its read-only `ProviderCallBinding` preparation protocol.
-`AvaContext` and invocation consumers depend on that protocol, so importing the
-SDK does not load provider registration. The factory still returns the actual
-selected `ProviderBinding`. This transition keeps existing configuration ownership;
-it does not define a second provider configuration image.
-
-Google owns explicit cache eligibility, creation, and attempt-local stale
-classification. Its recovery captures that attempt's cache reference,
-invalidates it, and returns a direct plain invocation. Core retains the total
-timeout, cancellation, one recovery, stream reset, and successful-attempt usage
-provenance. Recovery never prepares another cache; single-attempt callers
-forbid it. Other bindings remain ordinary tool calls when no adapter exists.
+Core owns total deadlines, cancellation, stream-stall recovery and usage
+accounting. It has no explicit CachedContent lifecycle or cache-stale retry.
+Compaction invokes once per caller attempt; guarded generation additionally
+requires the provider's single-attempt construction contract.
 
 ## Current ownership
 

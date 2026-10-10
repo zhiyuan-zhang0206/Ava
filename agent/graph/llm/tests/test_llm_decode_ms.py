@@ -3,7 +3,7 @@
 The ops panel "\u751f\u6210 stage \u8f93\u51fa TPS" (Σout_total/Σdecode_ms) needs an honest
 decode window: first chunk arrival → last chunk arrival (monotonic ms),
 measured in `_consume_stream_with_stall_timeout` and stamped by
-`_stream_with_cache_retry` onto the handler as `llm_decode_ms`. Non-streaming
+`_stream_llm` onto the handler as `llm_decode_ms`. Non-streaming
 fallback calls and empty streams must carry None → NULL in the payload — a
 fake window (e.g. wall-clock) would contaminate the generation-TPS panel.
 
@@ -20,13 +20,12 @@ from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage
 
 from agent.graph._callbacks import RedisStreamHandler
-from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_with_cache_retry
+from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_llm
 from base.agents.observation.turn_progress import TurnProgress
 from base.host.env.agent_slices import AgentSlices
-from base.lm.call import LlmInvocation
 from base.lm.plugin_providers import build_model_catalog
 
 
@@ -57,19 +56,6 @@ class _FakeHandler(RedisStreamHandler):
     def reset(self) -> None:
         self.reset_calls += 1
         super().reset()
-
-
-def _plain_invocation(llm: MagicMock) -> LlmInvocation:
-    return LlmInvocation(
-        runnable=llm, messages=[HumanMessage(content="hi")], used_explicit_cache=False
-    )
-
-
-def _patch_prepare(monkeypatch: pytest.MonkeyPatch, invocation_factory):
-    async def _fake_prepare(llm, messages, _policy, _binding=None):
-        return invocation_factory(llm)
-
-    monkeypatch.setattr("agent.graph.llm._stream.prepare_invocation", _fake_prepare)  # pyright: ignore[reportUnknownArgumentType]
 
 
 async def test_consume_stream_records_first_last_timestamps(
@@ -120,7 +106,7 @@ async def test_consume_stream_empty_stream_returns_none(monkeypatch: pytest.Monk
     assert (first_ts, last_ts) == (None, None)
 
 
-async def test_stream_with_cache_retry_stamps_decode_ms(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stream_llm_stamps_decode_ms(monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy path: handler.llm_decode_ms = (last - first) * 1000, stamped
     alongside llm_latency_ms after the successful attempt."""
     clock = _FakeClock()
@@ -134,11 +120,11 @@ async def test_stream_with_cache_retry_stamps_decode_ms(monkeypatch: pytest.Monk
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream()
-    _patch_prepare(monkeypatch, _plain_invocation)
+    fake_llm.bind_tools.return_value = fake_llm
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
-    await _stream_with_cache_retry(
+    await _stream_llm(
         fake_llm,
         [],
         chunks=chunks,
@@ -165,10 +151,10 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _empty()
-    _patch_prepare(monkeypatch, _plain_invocation)
+    fake_llm.bind_tools.return_value = fake_llm
 
     handler = _FakeHandler()
-    await _stream_with_cache_retry(
+    await _stream_llm(
         fake_llm,
         [],
         chunks=[],
@@ -198,11 +184,11 @@ async def test_non_streaming_fallback_decode_ms_none(monkeypatch: pytest.MonkeyP
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _hang()
     fake_llm.ainvoke = _ainvoke
-    _patch_prepare(monkeypatch, _plain_invocation)
+    fake_llm.bind_tools.return_value = fake_llm
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
-    await _stream_with_cache_retry(
+    await _stream_llm(
         fake_llm,
         [],
         chunks=chunks,
@@ -216,70 +202,41 @@ async def test_non_streaming_fallback_decode_ms_none(monkeypatch: pytest.MonkeyP
     assert len(chunks) == 1  # single full chunk, no streaming window
 
 
-async def test_stale_cache_retry_uses_second_attempt_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Stale-cache retry: the FIRST attempt's partial/failed window is
-    discarded — decode_ms comes from the successful second attempt only."""
-    clock = _FakeClock()
-    monkeypatch.setattr("agent.graph.llm._stream.time.monotonic", clock)
+async def test_stream_preserves_prefix_and_does_not_recover_cache_403() -> None:
+    from google.genai.errors import ClientError
+    from langchain_core.messages import SystemMessage
 
-    class _StaleCacheError(Exception):
-        pass
+    from agent.llm import execute_code
 
-    attempts = {"n": 0}
-
-    async def _flaky_stream() -> AsyncIterator[AIMessageChunk]:
-        attempts["n"] += 1
-        if attempts["n"] == 1:
-            clock.t = 1001.0
-            yield AIMessageChunk(content="discarded partial")
-            raise _StaleCacheError("CachedContent not found")
-        clock.t = 1005.0
-        yield AIMessageChunk(content="a")
-        clock.t = 1008.0
-        yield AIMessageChunk(content="b")
-
-    fake_llm = MagicMock()
-    # Fresh generator per attempt: a generator that raised is closed — the
-    # retry would otherwise see an empty stream on the second astream() call.
-    fake_llm.astream.side_effect = lambda _messages: _flaky_stream()
-    invocations = {"n": 0}
-
-    recovered: list[Exception] = []
-
-    def recover(exc: BaseException) -> LlmInvocation:
-        assert isinstance(exc, _StaleCacheError)
-        recovered.append(exc)
-        return _plain_invocation(fake_llm)
-
-    def _invocation_factory(llm: MagicMock):
-        invocations["n"] += 1
-        return LlmInvocation(
-            runnable=llm,
-            messages=[HumanMessage(content="hi")],
-            used_explicit_cache=True,
-            recover=recover,
-        )
-
-    _patch_prepare(monkeypatch, _invocation_factory)
-
-    handler = _FakeHandler()
-    chunks: list[AIMessageChunk] = []
-    await _stream_with_cache_retry(
-        fake_llm,
-        [],
-        chunks=chunks,
-        handler=handler,
-        agent=AgentSlices.resolve(),
-        catalog=build_model_catalog(),
+    failure = ClientError(
+        403, {"error": {"message": "CachedContent not found or permission denied"}}
     )
 
-    assert len(recovered) == 1
-    assert invocations["n"] == 1
-    assert handler.used_explicit_cache is False
-    assert handler.reset_calls == 1
-    assert handler.llm_decode_ms == 3000.0  # (1008 - 1005) * 1000 — 2nd attempt only
-    assert handler.llm_latency_ms == 8000.0  # (1008 - 1000) * 1000 — whole call
-    assert len(chunks) == 2
-    assert "discarded partial" not in [chunk.content for chunk in chunks]
+    async def stream(_messages: list[AnyMessage]) -> AsyncIterator[AIMessageChunk]:
+        yield AIMessageChunk(content="partial")
+        raise failure
+
+    llm = MagicMock()
+    llm.bind_tools.return_value = llm
+    llm.astream.side_effect = stream
+    messages: list[AnyMessage] = [
+        SystemMessage(content="stable head"),
+        HumanMessage(content="conversation"),
+    ]
+    chunks: list[AIMessageChunk] = []
+    handler = _FakeHandler()
+    with pytest.raises(ClientError) as caught:
+        await _stream_llm(
+            llm,
+            messages,
+            chunks=chunks,
+            handler=handler,
+            agent=AgentSlices.resolve(),
+            catalog=build_model_catalog(),
+        )
+    assert caught.value is failure
+    llm.bind_tools.assert_called_once_with([execute_code])
+    llm.astream.assert_called_once_with(messages)
+    llm.ainvoke.assert_not_called()
+    assert handler.reset_calls == 0
+    assert [chunk.content for chunk in chunks] == ["partial"]

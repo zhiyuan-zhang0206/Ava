@@ -576,50 +576,6 @@ class LmSettings(EnvSettings):
         },
     )
 
-    gemini_explicit_cache_enabled: bool = Field(
-        default=False,
-        alias="AVA_GEMINI_EXPLICIT_CACHE_ENABLED",
-        description=(
-            "Opt-in: pin the system prompt + execute_code tool schema into a Gemini "
-            "explicit context cache (cachedContents API). Default off — Gemini 3.x "
-            "implicit caching covers the whole prompt prefix (threshold 4096 tokens) "
-            "and the API reports those hits honestly in cachedContentTokenCount, so "
-            "the reported cache-read share tracks the real billed share as "
-            "conversations grow (task #2660). Enable only for workloads dominated "
-            "by a huge stable system prompt: with an explicit cache attached the API "
-            "reports ONLY the explicit block, understating the hit rate. Ignored by "
-            "other providers; fail-open to implicit caching on any cache-layer error."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    gemini_cache_timeout_seconds: float = Field(
-        default=15.0,
-        alias="AVA_GEMINI_CACHE_TIMEOUT_SECONDS",
-        description=(
-            "Per-call timeout (seconds) for the Gemini explicit-cache API calls "
-            "(caches.list / create / update). The google-genai SDK has no default "
-            "timeout, so a wedged Gemini API would otherwise hold every agent's "
-            "LLM-call prelude at the SDK default; the cache layer is fail-open, "
-            "so a timeout falls back to implicit caching like any cache-layer error."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
     deepseek_api_key: SecretStr | None = Field(
         default=None,
         alias="DEEPSEEK_API_KEY",

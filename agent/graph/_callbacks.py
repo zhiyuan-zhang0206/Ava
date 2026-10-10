@@ -95,11 +95,6 @@ class RedisStreamHandler:
         self._agent_id = agent_id
         self._turn_progress = turn_progress
         self._msg_idx = msg_idx
-        # Set by llm._stream._stream_with_cache_retry after the successful
-        # attempt: True when the request rode the Gemini explicit cache (the
-        # API then reports only the explicit block in cache_read). Read by
-        # llm/node.py when logging usage to label the event's cache provenance.
-        self.used_explicit_cache = False
         # *_started flags: per content_block_index, only emit *Start on the first
         # real delta, avoiding empty blocks (signature_delta only / boundary
         # chunks etc.) creating empty chat/reasoning items.
@@ -152,7 +147,7 @@ class RedisStreamHandler:
         # is the explicit drain for callers / tests.
         self._coalescer = DeltaCoalescer(self._emit_delta)
         # Whole-call wall-clock (ms) from request start to stream completion,
-        # stamped by `agent.graph.llm._stream._stream_with_cache_retry` after the
+        # stamped by `agent.graph.llm._stream._stream_llm` after the
         # call succeeds (retries included). Consumed by
         # `_finalize_turn_observability` → `log_llm_usage(latency_ms=...)` so
         # the llm_usage agent_event carries per-call latency for the ops
@@ -257,7 +252,7 @@ class RedisStreamHandler:
     def reset(self) -> None:
         """Drop all per-stream state so the handler can re-stream the same
         message from scratch (the stale-cache retry path in
-        `_llm._stream_with_cache_retry`).
+        `_llm._stream_llm`).
 
         Reuse without reset duplicates streamed content: `*_started` sets
         suppress the Start events while deltas re-append (doubled partial

@@ -7,7 +7,7 @@ helpers. Importing declarations never imports the chat-model runtime stack.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.call import LlmInvocation, ProviderCallContext
 from base.lm.registry import ModelSpec
 from base.lm.stop import StopSpec
 
@@ -29,7 +28,7 @@ from base.lm.stop import StopSpec
 # current version. A plugin written against an older shape keeps working —
 # consumers of a new field must degrade when it is absent. (Mirrors the
 # plugin-spec-v2 ``engines.ava`` host-compatibility idea.)
-PROVIDER_API_VERSION = 2
+PROVIDER_API_VERSION = 3
 
 
 class InferenceSpeed(StrEnum):
@@ -177,8 +176,6 @@ class ProviderBinding:
     receipts fail before accounting. Providers without Fast IDs need none."""
     build_single_attempt: Callable[[BuildContext], BaseChatModel] | None = None
     """Fresh construction with no ambiguous SDK retries; absent is unsupported."""
-    prepare_call: Callable[[ProviderCallContext], Awaitable[LlmInvocation | None]] | None = None
-    """Optional invocation adapter; absent preserves ordinary tool binding."""
 
 
 class ProviderRegistrationError(ValueError):
