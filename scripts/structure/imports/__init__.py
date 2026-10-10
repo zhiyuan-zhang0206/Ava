@@ -87,6 +87,18 @@ class Dependency:
     names: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class DependencyEvidence:
+    """Exact first-party edges and targets whose import cannot be established."""
+
+    resolved: tuple[Dependency, ...]
+    unknown: tuple[str, ...]
+
+
+class IncompleteImportError(ImportError):
+    """The refs-only API cannot represent an unresolved first-party import."""
+
+
 def normalize(node: ast.Import | ast.ImportFrom, rel_path: str) -> Clause:
     """Normalize syntax without importing modules or interpreting their values."""
     if isinstance(node, ast.Import):
@@ -114,7 +126,9 @@ def normalize(node: ast.Import | ast.ImportFrom, rel_path: str) -> Clause:
     return Clause(node.lineno, base, bindings, statement)
 
 
-def dependencies(clause: Clause, index: ModuleLookup, tops: Sequence[str]) -> list[Dependency]:
+def dependency_evidence(
+    clause: Clause, index: ModuleLookup, tops: Sequence[str]
+) -> DependencyEvidence:
     """Resolve direct module edges once per clause against the current checkout.
 
     `from pkg import module` names the submodule when it exists; other imported
@@ -122,13 +136,30 @@ def dependencies(clause: Clause, index: ModuleLookup, tops: Sequence[str]) -> li
     Repeated members of that same module produce one edge, retaining all aliases.
     """
     found: dict[str, list[str]] = {}
+    unknown: list[str] = []
     for binding in clause.bindings:
         target = binding.target
         if clause.base is not None and not index.kind(target):
             target = clause.base
-        module = index.resolve_prefix(target, tops)
-        if module is not None:
-            names = found.setdefault(module, [])
+        if target.split(".")[0] not in tops:
+            continue
+        if index.kind(target) is None:
+            unknown.append(target)
+        else:
+            names = found.setdefault(target, [])
             if binding.name not in names:
                 names.append(binding.name)
-    return [Dependency(module, tuple(names)) for module, names in found.items()]
+    return DependencyEvidence(
+        tuple(Dependency(module, tuple(names)) for module, names in found.items()),
+        tuple(dict.fromkeys(unknown)),
+    )
+
+
+def dependencies(clause: Clause, index: ModuleLookup, tops: Sequence[str]) -> list[Dependency]:
+    """Exact direct edges; missing modules cannot silently become a parent package."""
+    evidence = dependency_evidence(clause, index, tops)
+    if evidence.unknown:
+        raise IncompleteImportError(
+            f"line {clause.line}: unresolved first-party import: {', '.join(evidence.unknown)}"
+        )
+    return list(evidence.resolved)
