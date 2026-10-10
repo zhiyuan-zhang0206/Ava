@@ -502,10 +502,10 @@ def _owner_live(
     probe: Callable[[int, int], None],
     receipt_path: Path | None = None,
 ) -> bool:
-    """Protect live pytest/xdist owners, including unreadable commands.
+    """Preserve live or unreadable owners; only absence proves stale residue.
 
-    PID liveness alone cannot distinguish a recycled PID. A readable command
-    must still identify a test run; unknown identity never proves stale residue.
+    Process titles can change while a worker owns live children. Command hints
+    are diagnostic evidence, never authority to signal another owner's children.
     """
     try:
         probe(owner_pid, 0)
@@ -521,7 +521,6 @@ def _owner_live(
         return True
     cmdline = command(owner_pid)
     hints = [hint for hint in _LIVE_RUN_HINTS if cmdline is not None and hint in cmdline]
-    preserved = cmdline is None or bool(hints)
     _write_cleanup_receipt(
         receipt_path,
         "owner",
@@ -529,9 +528,9 @@ def _owner_live(
         probe="alive",
         command_known=cmdline is not None,
         hints=hints,
-        preserved=preserved,
+        preserved=True,
     )
-    return preserved
+    return True
 
 
 def _identity_holds(pid: int, cmdline: str, *, command: Callable[[int], str | None]) -> bool:
@@ -580,7 +579,7 @@ class ProcessInspection:
         return processes
 
     def owner_live(self, pid: int, *, receipt_path: Path | None = None) -> bool:
-        """Preserve a live PID with a pytest/xdist or unreadable command."""
+        """Preserve every owner not proven gone, regardless of its current title."""
         return _owner_live(pid, command=self.command, probe=self.probe, receipt_path=receipt_path)
 
     def matches(self, process: E2EProcess) -> bool:

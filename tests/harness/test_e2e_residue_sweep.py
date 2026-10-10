@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import signal
 import sys
 from collections.abc import Callable
@@ -233,6 +234,10 @@ def _kill_ok(_pid: int, _sig: int) -> None:
     return None
 
 
+def _owner_gone(_pid: int, _sig: int) -> None:
+    raise ProcessLookupError
+
+
 def _cmd_pytest(_pid: int) -> str:
     return "/repo/.venv/bin/pytest tests/e2e/test_x.py"
 
@@ -259,16 +264,16 @@ def _cmd_other(_pid: int) -> str:
 
 @pytest.mark.parametrize(
     ("command", "live"),
-    [(_cmd_pytest, True), (_cmd_xdist, True), (_cmd_sshd, False), (_cmd_none, True)],
+    [(_cmd_pytest, True), (_cmd_xdist, True), (_cmd_sshd, True), (_cmd_none, True)],
 )
-def test_owner_liveness_preserves_an_unreadable_command(
+def test_owner_liveness_preserves_live_pids_regardless_of_command(
     command: Callable[[int], str | None], live: bool
 ) -> None:
     inspection = processes.ProcessInspection(command=command, probe=_kill_ok)
     assert inspection.owner_live(123) is live
 
 
-@pytest.mark.parametrize("owner_state", ["unknown", "live", "dead", "recycled"])
+@pytest.mark.parametrize("owner_state", ["unknown", "live", "dead", "opaque", "permission"])
 def test_native_sweep_preserves_an_unreadable_live_owner(tmp_path: Path, owner_state: str) -> None:
     """The real sweep sees only this test's birth-owned child, never host strangers."""
     owner_pid = 99999999
@@ -290,12 +295,14 @@ def test_native_sweep_preserves_an_unreadable_live_owner(tmp_path: Path, owner_s
             probes.append((pid, sig))
             if owner_state == "dead":
                 raise ProcessLookupError
+            if owner_state == "permission":
+                raise PermissionError
 
         def observed_command(pid: int) -> str | None:
             if pid == child.pid:
                 return native.command(pid)
             assert pid == owner_pid
-            assert owner_state != "dead"
+            assert owner_state not in {"dead", "permission"}
             if owner_state == "unknown":
                 return None
             return _cmd_pytest(pid) if owner_state == "live" else _cmd_sshd(pid)
@@ -304,7 +311,7 @@ def test_native_sweep_preserves_an_unreadable_live_owner(tmp_path: Path, owner_s
             inspection=processes.ProcessInspection(rows=rows, command=observed_command, probe=probe)
         )
         assert probes == [(owner_pid, 0)]
-        if owner_state in {"unknown", "live"}:
+        if owner_state != "dead":
             assert swept == 0
             assert child.poll() is None
         else:
@@ -312,11 +319,55 @@ def test_native_sweep_preserves_an_unreadable_live_owner(tmp_path: Path, owner_s
             assert child.wait(timeout=5) != 0
 
 
-def test_dead_owner_is_not_live() -> None:
-    def gone(_pid: int, _signal: int) -> None:
-        raise ProcessLookupError
+def test_native_sweep_preserves_a_live_owner_with_a_changed_title(tmp_path: Path) -> None:
+    read_fd, write_fd = os.pipe()
+    try:
+        with (
+            processes.managed_proc(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os,sys,time,setproctitle; "
+                    "setproctitle.setproctitle('opaque execution worker'); "
+                    "os.write(int(sys.argv[1]), b'R'); time.sleep(60)",
+                    str(write_fd),
+                ],
+                label="retitled-owner",
+                pass_fds=(write_fd,),
+                log_path=str(tmp_path / "owner.log"),
+            ) as owner,
+            processes.managed_proc(
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+                label="retitled-owner-child",
+                log_path=str(tmp_path / "child.log"),
+            ) as child,
+        ):
+            assert select.select([read_fd], [], [], 5)[0] == [read_fd]
+            assert os.read(read_fd, 1) == b"R"
+            native = processes.ProcessInspection()
+            assert native.command(owner.pid) == "opaque execution worker"
+            command = native.command(child.pid)
+            assert command is not None
+            path = tmp_path / "cleanup.jsonl"
+            inspection = processes.ProcessInspection(
+                rows=lambda: [(child.pid, command, f"AVA_HOME=/proof/ava_e2e_home_{owner.pid}_1")]
+            )
+            assert (
+                processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 0
+            )
+            assert owner.poll() is None and child.poll() is None
+            events = [json.loads(line) for line in path.read_text().splitlines()]
+            owner_event = next(row for row in events if row["event"] == "owner")
+            assert owner_event["probe"] == "alive" and owner_event["preserved"]
+            assert owner_event["command_known"] and owner_event["hints"] == []
+            assert not any(row["event"] == "sweep_signal" for row in events)
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
 
-    inspection = processes.ProcessInspection(command=_cmd_pytest, probe=gone)
+
+def test_dead_owner_is_not_live() -> None:
+    inspection = processes.ProcessInspection(command=_cmd_pytest, probe=_owner_gone)
     assert not inspection.owner_live(123)
 
 
@@ -509,7 +560,7 @@ def test_cleanup_receipt_keeps_signal_exception_contract(
         rows=lambda: [(100, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1")],
         group=lambda pid: pid,
         command=lambda _pid: "fixture child",
-        probe=_kill_ok,
+        probe=_owner_gone,
     )
     path = tmp_path / "cleanup.jsonl"
     if failure is RuntimeError:
@@ -550,7 +601,7 @@ def test_cleanup_receipt_records_a_recycled_target_without_signalling(
         rows=lambda: [(100, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1")],
         group=lambda pid: pid,
         command=lambda _pid: "replacement process",
-        probe=_kill_ok,
+        probe=_owner_gone,
     )
     path = tmp_path / "cleanup.jsonl"
     assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 1
