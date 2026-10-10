@@ -43,7 +43,7 @@ def pool():
         p.close()
 
 
-def _make_idling_agent(
+def idling_agent(
     db: psycopg.Connection,
     *,
     model_catalog: ModelCatalog,
@@ -139,7 +139,7 @@ def _set_host_verdict(
 
 
 @pytest.fixture(autouse=True)
-def _healthy_host_verdict(db_conn: psycopg.Connection) -> None:
+def healthy_host_verdict(db_conn: psycopg.Connection) -> None:
     """Normal dispatch condition: a fresh reachable machine with a live host.
 
     Host-gate tests override the verdict inside the test body."""
@@ -156,7 +156,7 @@ class TestSelectStalePending:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
     ) -> None:
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -189,7 +189,7 @@ class TestSelectStalePending:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
     ) -> None:
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -210,7 +210,7 @@ class TestSelectStalePending:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
     ) -> None:
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -231,7 +231,7 @@ class TestSelectStalePending:
         """A chat inbound queued behind a long in-flight turn (owner
         status='running') is normal, not a delivery stall — the turn-end SELECT
         picks it up. Only waiting/terminal owners signal a real stall."""
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -254,7 +254,7 @@ class TestScanOnce:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
     ) -> None:
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -280,7 +280,7 @@ class TestScanOnce:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
     ) -> None:
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -314,7 +314,7 @@ class TestScanOnce:
         """The alert emits through the unified emitter: the canonical
         `events` row (telemetry/delivery_stalled). The legacy agent_events
         mirror is gone (tracker #898 term-alignment)."""
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -385,7 +385,7 @@ class TestDispatchWakes:
         stale pending row of an idling owner — the lost-wake recovery."""
         import base.db
 
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -429,7 +429,7 @@ class TestDispatchWakes:
         claim loop's 30s recheck remain as backstops."""
         import base.db
 
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -473,7 +473,7 @@ class TestDispatchWakes:
         collapses from 30s to ~1 tick."""
         from base.events.live.redis_listener import RedisInboundListener
 
-        aid = _make_idling_agent(
+        aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -544,7 +544,7 @@ def _wait_for_poisoned_events(agent_id: int) -> list[dict[str, object]]:
 # ── Terminated-owner resurrect retry (Task #689 G4) ───────────────────────────
 
 
-def _make_terminated_agent(
+def terminated_agent(
     db: psycopg.Connection,
     *,
     model_catalog: ModelCatalog,
@@ -578,7 +578,7 @@ def _make_reaped_crash_agent(
 ) -> int:
     """A `terminated` row the SYSTEM reaped after a crash: reaper source plus
     the retained crash marker (task #3617's relaxed-trigger population)."""
-    aid = _make_terminated_agent(
+    aid = terminated_agent(
         db,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -634,7 +634,7 @@ def _insert_claimed_row(
     return iid
 
 
-def _insert_pending_resurrect_row(
+def pending_resurrect_row(
     db: psycopg.Connection,
     agent_id: int,
     *,

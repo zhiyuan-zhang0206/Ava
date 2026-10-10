@@ -63,7 +63,9 @@ async def test_original_compact_restart_without_second_ordinary_work(
     injected = install_apply_loss(
         monkeypatch, aops_pool, db_conn, lost, database_gate=database_gate
     )
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     running = asyncio.create_task(accepted.host.run_turn(accepted.agent))
     cancelled = None
     try:
