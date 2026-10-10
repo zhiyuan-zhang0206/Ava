@@ -268,7 +268,7 @@ def test_per_agent_framing_makes_no_path_resolution_claim(memory_plugin: Any) ->
 
 
 def test_memory_index_injection_guard(
-    memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sdk_model_owner: None
 ) -> None:
     """Audit round-2 up-security-trust P0-2: a MEMORY.md carrying an injection
     imperative (any peer can push to the pool; the index lands in every

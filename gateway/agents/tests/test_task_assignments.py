@@ -16,6 +16,7 @@ from gateway.agents import router as agent_router
 from gateway.agents.task_assignment import router as task_assignments
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from tests.fixtures.gateway_config import gateway_test_client
 
 PATH = "/api/keyed/v1/task-assignments"
 HEADERS = {"Idempotency-Key": "compound", "Idempotency-Scope": "principal-v1"}
@@ -32,7 +33,7 @@ def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterat
         return SpawnedAgent(id=body.agent_id)
 
     monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
-    with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
+    with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
         yield value
 
 

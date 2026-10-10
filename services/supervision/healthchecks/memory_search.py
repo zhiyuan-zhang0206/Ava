@@ -36,7 +36,7 @@ def _post_search(
 def _probe() -> DaemonProbe:
     """Alive when the service answers a real search with a paths payload."""
     config = ConfigBoot()
-    config.boot()
+    config.read_process_environment()
     payload = _post_search(
         config.view.services.memory_search_uri,
         embedding_name_reader=lambda: config.view.services.embedding_backend,

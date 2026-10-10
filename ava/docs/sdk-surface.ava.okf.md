@@ -22,6 +22,10 @@ that installation's configuration affects subsequent reads. Explicit arguments
 still take precedence over defaults. A claim-side security scan receives its
 policy from the agent's own slices, while SDK scans use the installed agent
 configuration. Missing required installation inputs fail at their first use.
+Default SDK clients capture startup's delivered environment at their first
+configuration read. Bare plugin installation uses the same read-only capture;
+neither operation repeats dotenv delivery or changes the process environment.
+Explicit process roots retain their supplied configuration owner and overlays.
 Timestamped SDK operations obtain a fresh clock from their bound context, or
 from the installed process factory when no context is bound. Neither binding
 evaluates the factory; a partial owner without one refuses a clock operation.

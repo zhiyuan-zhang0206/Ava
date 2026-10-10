@@ -86,18 +86,24 @@ def process_clients(
 ) -> ClientSet:
     """Build lazy process clients without reading their configuration or credentials.
 
-    The MCP timeout reader is passed to each freshly built MCP client, which reads it
-    at its operation and session boundaries. Omission uses this root's ConfigBoot view.
+    Explicit startup owners retain their live views. Omission captures the already
+    delivered environment at the first resource read; SDK use never redelivers it.
     """
     from ava.gateway_client.transport import GatewayTransportInputs
     from ava.mcps import McpClients
     from ava.sdk_surface.settings import database_factory
 
     owner = config if config is not None else ConfigBoot()
+
+    def read_config() -> ConfigBoot:
+        if config is None:
+            owner.read_process_environment()
+        return owner
+
     timeout_reader = (
         mcp_timeout_seconds
         if mcp_timeout_seconds is not None
-        else lambda: owner.view.sandbox.mcp_connect_timeout_seconds
+        else lambda: read_config().view.sandbox.mcp_connect_timeout_seconds
     )
 
     def pipeline() -> Any:
@@ -105,23 +111,34 @@ def process_clients(
 
         return build_pipeline(database=make_database)
 
-    make_database = database if database is not None else database_factory(config=owner)
+    database_builder = database if database is not None else database_factory(config=owner)
+
+    def default_database() -> Any:
+        read_config()
+        return database_builder()
+
+    make_database = database if database is not None else default_database
+
     return ClientSet(
-        gateway_url=gateway_url if gateway_url is not None else lambda: _gateway_url(owner),
+        gateway_url=gateway_url if gateway_url is not None else lambda: _gateway_url(read_config()),
         database=make_database,
         pipeline_factory=pipeline,
-        redis=lambda: _redis(url_reader=lambda: owner.view.data_plane.redis_url),
+        redis=lambda: _redis(url_reader=lambda: read_config().view.data_plane.redis_url),
         gateway=lambda url: _gateway(
             url,
-            config=owner,
-            timeout_reader=lambda: owner.view.gateway.gateway_client_http_timeout_seconds,
+            config=read_config(),
+            timeout_reader=lambda: read_config().view.gateway.gateway_client_http_timeout_seconds,
         ),
         factories={
             McpClients: lambda: McpClients(timeout_reader),
             GatewayTransportInputs: lambda: GatewayTransportInputs(
-                max_retries_reader=lambda: owner.view.gateway.gateway_client_max_retries,
-                retry_delay_reader=lambda: owner.view.gateway.gateway_client_retry_delay_seconds,
-                memory_deadline_reader=lambda: owner.view.services.memory_search_deadline_seconds,
+                max_retries_reader=lambda: read_config().view.gateway.gateway_client_max_retries,
+                retry_delay_reader=lambda: (
+                    read_config().view.gateway.gateway_client_retry_delay_seconds
+                ),
+                memory_deadline_reader=lambda: (
+                    read_config().view.services.memory_search_deadline_seconds
+                ),
             ),
         },
     )

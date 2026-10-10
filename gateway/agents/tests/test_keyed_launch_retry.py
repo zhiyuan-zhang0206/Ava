@@ -15,6 +15,7 @@ from gateway.agents import launch_retry
 from gateway.agents import router as birth_router
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
@@ -37,7 +38,7 @@ def client(
 
     monkeypatch.setattr(birth_router, "forward_spawn_to_remote", born)
     monkeypatch.setattr(launch_retry.rpc, "dispatch_to_machine", reconcile)
-    with TestClient(app, headers={"Authorization": "Bearer retry-test-secret"}) as value:
+    with gateway_test_client(app, headers={"Authorization": "Bearer retry-test-secret"}) as value:
         yield value
 
 

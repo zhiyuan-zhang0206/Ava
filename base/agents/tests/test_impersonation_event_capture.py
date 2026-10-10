@@ -169,11 +169,10 @@ def test_central_events_belong_to_the_asserted_actor_not_the_recipient(
 def test_a_label_the_agent_sets_while_borrowed_lands_in_its_lease_log(
     db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
 ) -> None:
-    from fastapi.testclient import TestClient
-
     from gateway.app import app
+    from tests.fixtures.gateway_config import gateway_test_client
 
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         by_agent = client.patch(
             f"/api/agents/{owner.agent_id}", json={"label": "borrowed", "source": "self"}
         )

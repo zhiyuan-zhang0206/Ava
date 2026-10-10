@@ -99,6 +99,8 @@ def test_process_entry_still_delivers_its_home_environment(tmp_path: Path) -> No
     assert os.environ["AVA_MODEL"] == "entry-model"
     assert os.environ["TZ"] == "Asia/Tokyo"
     assert owner.view.lm.llm_model == "entry-model"
+    with pytest.raises(RuntimeError, match="already prepared"):
+        owner.read_process_environment()
 
 
 def test_two_real_models_keep_stable_views_overlays_and_live_readers(

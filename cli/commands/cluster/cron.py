@@ -29,10 +29,14 @@ def cmd_cron_register(
     CLI entry — delegates to `base.host.system.cron.register_os_cron`. Idempotent —
     re-running updates the interval and reloads the job."""
     config = ConfigBoot()
+
+    def enabled_reader() -> bool:
+        if not config.prepared:
+            config.read_process_environment()
+        return config.view.general.os_jobs_enabled
+
     try:
-        register_os_cron(
-            interval_s=interval_s, enabled_reader=lambda: config.view.general.os_jobs_enabled
-        )
+        register_os_cron(interval_s=interval_s, enabled_reader=enabled_reader)
     except RuntimeError as e:
         print(f"  * {e}")
         return 1

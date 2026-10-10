@@ -1,13 +1,12 @@
 """The picker receives distinct services, prices and sourced TPS references."""
 
-from fastapi.testclient import TestClient
-
 from gateway.app import app
 from gateway.schemas.models import ModelsResponse
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def get_models() -> ModelsResponse:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         response = client.get("/api/models")
     assert response.status_code == 200, response.text
     return ModelsResponse.model_validate(response.json())

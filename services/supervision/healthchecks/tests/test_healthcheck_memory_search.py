@@ -92,3 +92,12 @@ def test_unknown_provider_fails_before_search_request(monkeypatch: pytest.Monkey
     with pytest.raises(ValueError, match="unknown embedding provider"):
         hc._post_search("http://memory-search", embedding_name_reader=lambda: "unknown-provider")
     post.assert_not_called()
+
+
+def test_probe_reads_startup_configuration_without_redelivering_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = dict(os.environ)
+    monkeypatch.setattr(hc, "_post_search", Mock(return_value={"paths": []}))
+    assert hc._probe().alive
+    assert dict(os.environ) == before

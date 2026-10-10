@@ -23,6 +23,9 @@ until fresh evidence resolves them. No healthcheck module starts, kills, or
 repairs a service. [[services/supervision/healthchecks/docs/terminal-verdict/terminal-verdict.ava.okf.md|Verdict policy]]
 describes the distinction.
 
+Memory-search probes capture configuration already delivered by startup. A
+readiness observation does not redeliver dotenv inputs or change process env.
+
 [[services/supervision/ava_root_glue/docs/diagnostics.ava.okf.md|Root diagnostics]] schedule host
 policy, native data-plane, helper, browser reachability, and observability checks
 without a recovery verb. Probe failures remain visible independently of the

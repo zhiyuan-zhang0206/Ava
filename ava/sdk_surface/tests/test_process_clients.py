@@ -144,6 +144,45 @@ def test_process_boot_builds_no_connection_stack(pytester: pytest.Pytester) -> N
     proc.stdout.fnmatch_lines(["[]"])
 
 
+def test_default_clients_capture_only_on_first_read_without_delivery(
+    pytester: pytest.Pytester,
+) -> None:
+    code = """
+import os
+from ava.gateway_client.transport import GatewayTransportInputs
+from ava.sdk_surface.process_context import process_clients
+from base.config import ConfigBoot
+
+capture = ConfigBoot.read_process_environment
+reads = []
+snapshots = []
+def observed_capture(owner):
+    reads.append(owner.prepared)
+    capture(owner)
+    snapshots.append(owner.environment)
+ConfigBoot.read_process_environment = observed_capture
+before = dict(os.environ)
+clients = process_clients()
+assert reads == []
+inputs = clients.get(GatewayTransportInputs)
+assert reads == []
+assert inputs.max_retries_reader() > 0
+assert reads == [False]
+assert inputs.retry_delay_reader() >= 0
+assert inputs.memory_deadline_reader() > 0
+assert reads == [False, True, True]
+assert all(snapshot is snapshots[0] for snapshot in snapshots)
+assert dict(os.environ) == before
+clients.close()
+assert clients.get(GatewayTransportInputs).max_retries_reader() > 0
+assert snapshots[-1] is snapshots[0]
+assert dict(os.environ) == before
+clients.close()
+"""
+    result = pytester.run(sys.executable, "-I", "-c", code, timeout=30)
+    assert result.ret == 0, result.stderr.str()
+
+
 def test_gateway_clients_keep_independent_live_config_and_rebuild_credentials(
     monkeypatch: pytest.MonkeyPatch, config_boot: ConfigBoot
 ) -> None:
