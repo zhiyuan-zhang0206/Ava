@@ -15,10 +15,44 @@ import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 
-const displayLimits = vi.hoisted(() => new Map<string, number>());
-vi.mock("@/lib/format/display-limits", () => ({
-  useDisplayLimit: (envVar: string, fallback: number) => displayLimits.get(envVar) ?? fallback,
-}));
+// TimelineView is memoized, so a rerender with the same props renders nothing
+// new; the real settings hooks subscribe to their query / store and re-render
+// the view on change. The mocks below reproduce that: a mocked setting change
+// bumps `mockSettings`, whose subscribers (the mocked hooks) re-render.
+const mockSettings = vi.hoisted(() => {
+  let version = 0;
+  const listeners = new Set<() => void>();
+  return {
+    version: () => version,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    notify: () => {
+      version += 1;
+      for (const listener of listeners) listener();
+    },
+    onChange: () => {
+      // Replaced after imports with an act()-wrapped notify.
+    },
+  };
+});
+const displayLimits = vi.hoisted(() => new (class extends Map<string, number> {
+  override set(key: string, value: number) {
+    super.set(key, value);
+    mockSettings.onChange();
+    return this;
+  }
+})());
+vi.mock("@/lib/format/display-limits", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    useDisplayLimit: (envVar: string, fallback: number) => {
+      useSyncExternalStore(mockSettings.subscribe, mockSettings.version);
+      return displayLimits.get(envVar) ?? fallback;
+    },
+  };
+});
 
 vi.mock("../content/markdown", () => ({
   ChatMarkdown: ({ content }: { content: string }) => (
@@ -77,28 +111,38 @@ vi.mock("../ui/scroll-area", () => ({
 const toggleState = {
   detailsMode: "all" as "all" | "last" | "none",
   isLoading: false,
+  // TimelineView reads the toggle once per render — a render counter.
+  reads: 0,
 };
 function setToggleState(patch: Partial<typeof toggleState>) {
   Object.assign(toggleState, patch);
+  mockSettings.onChange();
 }
 function resetToggleState() {
   toggleState.detailsMode = "all";
   toggleState.isLoading = false;
 }
 
-vi.mock("@/lib/layout/content-toggle-store", () => ({
-  useContentToggle: () => ({
-    detailsMode: toggleState.detailsMode,
-    setDetailsMode: vi.fn(),
-    isLoading: toggleState.isLoading,
-  }),
-  // Same-mode re-pick reset token (user ruling 2026-08-06): static in tests —
-  // TimelineView only clears overrides when the token moves; it never does here.
-  useContentToggleReset: (selector?: (s: { resetToken: number; bumpReset: () => void }) => unknown) =>
-    selector
-      ? selector({ resetToken: 0, bumpReset: vi.fn() })
-      : { resetToken: 0, bumpReset: vi.fn() },
-}));
+vi.mock("@/lib/layout/content-toggle-store", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    useContentToggle: () => {
+      useSyncExternalStore(mockSettings.subscribe, mockSettings.version);
+      toggleState.reads += 1;
+      return {
+        detailsMode: toggleState.detailsMode,
+        setDetailsMode: vi.fn(),
+        isLoading: toggleState.isLoading,
+      };
+    },
+    // Same-mode re-pick reset token (user ruling 2026-08-06): static in tests —
+    // TimelineView only clears overrides when the token moves; it never does here.
+    useContentToggleReset: (selector?: (s: { resetToken: number; bumpReset: () => void }) => unknown) =>
+      selector
+        ? selector({ resetToken: 0, bumpReset: vi.fn() })
+        : { resetToken: 0, bumpReset: vi.fn() },
+  };
+});
 
 // CardHeader now reads user settings via useUserSettings; mock it so the
 // timeline component tests don't need a full React Query provider setup.
@@ -127,6 +171,8 @@ import { TimelineView } from ".";
 import { ItemView, streamingParseIntervalMs } from "./item";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "./markers";
 import { resolveSavedTimelineAnchor } from "./model/use-timeline-window";
+
+mockSettings.onChange = () => act(() => mockSettings.notify());
 
 afterEach(() => {
   cleanup();
@@ -192,6 +238,18 @@ describe("TimelineView accessibility", () => {
 });
 
 describe("timeline document work", () => {
+  it("skips its render when the page re-renders with identical props", () => {
+    const items = [makeItem({ kind: "agent_chat", payload: "steady" })];
+    const onLoadOlder = vi.fn();
+    const { rerender } = render(<TimelineView items={items} threadKey="memo" onLoadOlder={onLoadOlder} />);
+    const reads = toggleState.reads;
+    // e.g. the composer's upload progress or the token meter updated.
+    rerender(<TimelineView items={items} threadKey="memo" onLoadOlder={onLoadOlder} />);
+    expect(toggleState.reads).toBe(reads);
+    rerender(<TimelineView items={[...items]} threadKey="memo" onLoadOlder={onLoadOlder} />);
+    expect(toggleState.reads).toBeGreaterThan(reads);
+  });
+
   it("reuses turn summaries for view changes and refreshes them when items change", () => {
     const code = makeItem({
       item_id: "1.0",
@@ -1464,6 +1522,16 @@ describe("load-older spinner (pinned top overlay)", () => {
     expect(overlay?.className).toContain("opacity-100");
     expect(overlay?.className).not.toContain("opacity-0");
     expect(overlay?.getAttribute("aria-hidden")).toBe("false");
+    expect(overlay?.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  // An infinite animate-spin under opacity-0 kept the style system and the
+  // compositor busy on every idle frame; only the loading state animates.
+  it("loadingOlder=false → the hidden overlay runs no spin animation", () => {
+    render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
+    const overlay = screen.getByTestId("load-older-spinner");
+    expect(overlay.className).toContain("opacity-0");
+    expect(overlay.querySelector(".animate-spin")).toBeNull();
   });
 
   // The overlay sits directly over the scroll viewport at the exact spot the
@@ -1559,8 +1627,10 @@ describe("deep history DOM window", () => {
       smoothTarget: () => smoothTarget,
       finishSmoothScroll: () => {
         // Motion can precede the browser's next scroll event and React commit.
+        // A fresh array models the streamed update that commits (the view is
+        // memoized, so an identical-props rerender would not commit at all).
         top = height - 600;
-        rerender(view(items));
+        rerender(view([...items]));
       },
       requestOlder: () => {
         // Move through the mounted buffer before reaching the paging trigger.
@@ -1627,6 +1697,7 @@ describe("deep history DOM window", () => {
     const observed: Element[] = [];
     vi.stubGlobal("ResizeObserver", class {
       observe(target: Element) { observed.push(target); }
+      unobserve = vi.fn();
       disconnect = vi.fn();
     });
     const chats = Array.from({ length: 20 }, (_, index) => makeItem({
@@ -1641,6 +1712,7 @@ describe("deep history DOM window", () => {
     const observed: Element[] = [];
     vi.stubGlobal("ResizeObserver", class {
       observe(target: Element) { observed.push(target); }
+      unobserve = vi.fn();
       disconnect = vi.fn();
     });
     const chats = Array.from({ length: 60 }, (_, index) => makeItem({
@@ -1775,6 +1847,39 @@ describe("deep history DOM window", () => {
     vi.restoreAllMocks();
   });
 
+  it("subscribes to scroll and resize once while streamed updates arrive", () => {
+    const observers: { targets: Set<Element>; observed: Element[] }[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      readonly record = { targets: new Set<Element>(), observed: [] as Element[] };
+      constructor() { observers.push(this.record); }
+      observe(target: Element) { this.record.targets.add(target); this.record.observed.push(target); }
+      unobserve(target: Element) { this.record.targets.delete(target); }
+      disconnect() { this.record.targets.clear(); }
+    });
+    const chat = (n: number) => makeItem({ item_id: `${n}.0`, kind: "agent_chat", payload: `Reply ${n}` });
+    let items = Array.from({ length: 120 }, (_, index) => chat(index + 1));
+    const { rerender } = render(<TimelineView items={items} threadKey="streaming-window" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const addListener = vi.spyOn(viewport, "addEventListener");
+    const constructed = observers.length;
+    const rowObserver = observers.find(({ targets }) =>
+      [...targets].some((node) => node.hasAttribute("data-virtual-group")));
+    expect(rowObserver).toBeDefined();
+    const observedBefore = rowObserver!.observed.length;
+
+    for (let n = 121; n <= 125; n++) {
+      items = [...items, chat(n)];
+      rerender(<TimelineView items={items} threadKey="streaming-window" />);
+    }
+
+    expect(addListener.mock.calls.filter(([type]) => type === "scroll")).toEqual([]);
+    expect(observers.length).toBe(constructed);
+    // Only the newly mounted groups are observed — not every row again.
+    expect(rowObserver!.observed.length - observedBefore).toBeLessThanOrEqual(5);
+    expect([...rowObserver!.targets].every((node) => node.isConnected)).toBe(true);
+    vi.restoreAllMocks();
+  });
+
   it("keeps the reader when a buffered row grows after layout", () => {
     const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
     vi.stubGlobal("ResizeObserver", class {
@@ -1784,6 +1889,7 @@ describe("deep history DOM window", () => {
         observers.push(this.record);
       }
       observe(target: Element) { this.record.targets.add(target); }
+      unobserve(target: Element) { this.record.targets.delete(target); }
       disconnect() { this.record.targets.clear(); }
     });
     const items = Array.from({ length: 300 }, (_, index) => makeItem({
@@ -4623,6 +4729,7 @@ describe("bounded timeline history (#4702)", () => {
       constructor(cb: ResizeObserverCallback) { roCallback = cb; }
       /* eslint-disable @typescript-eslint/no-empty-function -- manual observer stub */
       observe() {}
+      unobserve() {}
       disconnect() {}
       /* eslint-enable @typescript-eslint/no-empty-function */
     });

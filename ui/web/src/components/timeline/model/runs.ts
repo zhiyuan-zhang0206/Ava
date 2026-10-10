@@ -271,6 +271,20 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   return { total: items.length, thinking, code, output, turns: Math.max(thinking, code, output), systemPrompts, compactSummaries, memories, agentMessages, systemNotes, thinkingMs, codeMs, execMs, sdkCalls, workedMs, lastLiveKind, lastLiveStartedAt };
 }
 
+/** Value equality for two summaries — summarizeTurn builds a fresh object on
+ *  every regroup, so TurnBlock's memo compares by value to skip unchanged turns. */
+export function turnSummaryEqual(a: TurnSummary, b: TurnSummary): boolean {
+  if (a === b) return true;
+  for (const key of Object.keys(a) as (keyof TurnSummary)[]) {
+    if (key !== "sdkCalls" && a[key] !== b[key]) return false;
+  }
+  return (
+    a.sdkCalls.length === b.sdkCalls.length &&
+    a.sdkCalls.every((call, index) =>
+      call.method === b.sdkCalls[index].method && call.count === b.sdkCalls[index].count)
+  );
+}
+
 export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_TURN): string {
   const parts: string[] = [];
   // The model's work rounds first ("5 turns") — one round emits its reasoning,

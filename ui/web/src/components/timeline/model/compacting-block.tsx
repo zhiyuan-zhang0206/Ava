@@ -12,6 +12,7 @@
 
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
 
 import { formatDuration } from "@/lib/format/item-summary";
 import { FLEX } from "@/lib/layout/layout";
@@ -29,6 +30,18 @@ const FAILURE_GRACE_MS = 30_000;
 /** Safety cap: a still-"running" block older than this lost its terminal. */
 const MAX_RUNNING_MS = 30 * 60_000;
 
+/** True once `deadline` (epoch ms) has passed; re-renders exactly once, when
+ *  it does. A null deadline never expires. */
+function useDeadlinePassed(deadline: number | null): boolean {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (deadline === null) return;
+    const id = setTimeout(() => setNow(Date.now()), Math.max(0, deadline - Date.now()) + 1);
+    return () => clearTimeout(id);
+  }, [deadline]);
+  return deadline !== null && now > deadline;
+}
+
 export function CompactingBlock() {
   const live = useTimelineStore((s) => s.liveCompact);
   if (live === null) return null;
@@ -38,22 +51,26 @@ export function CompactingBlock() {
 function CompactingBlockBody({ compact }: { compact: LiveCompact }) {
   const t = useTranslations("timeline");
   const colors = useTimelineColors();
-  // 100ms tick (the reasoning-clock cadence); it also drives the grace
-  // expiry below, which must fire even without another store write.
-  const now = useNow(true);
 
   const startedMs = compact.startedAt === null ? null : Date.parse(compact.startedAt);
   const finishedMs = compact.finishedAt === null ? null : Date.parse(compact.finishedAt);
   const settled = compact.status !== null;
 
   // Self-hide: a terminal whose summary handover never came, or a running
-  // block whose terminal event was lost.
-  if (settled && finishedMs !== null) {
-    const grace = compact.status === "failure" ? FAILURE_GRACE_MS : SETTLE_GRACE_MS;
-    if (now - finishedMs > grace) return null;
-  } else if (!settled && startedMs !== null && now - startedMs > MAX_RUNNING_MS) {
-    return null;
-  }
+  // block whose terminal event was lost. One timer fires at that deadline —
+  // a settled block shows a frozen duration and needs no tick to expire.
+  const deadline = settled
+    ? finishedMs === null
+      ? null
+      : finishedMs + (compact.status === "failure" ? FAILURE_GRACE_MS : SETTLE_GRACE_MS)
+    : startedMs === null
+      ? null
+      : startedMs + MAX_RUNNING_MS;
+  const expired = useDeadlinePassed(deadline);
+  // The shared 100ms live-clock tick drives the running elapsed only; it stops
+  // once the block settles or hides.
+  const now = useNow(!settled && !expired);
+  if (expired) return null;
 
   const label =
     compact.status === null

@@ -30,16 +30,15 @@
 // back to block top).
 
 import { ChevronDown, ChevronRight, Layers } from "lucide-react";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useLayoutEffect, useRef } from "react";
 
 import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 
 import { CallBadge, HEADER_CLS, STICKY_HEADER_CLS, STUCK_HEADER_CLS, UNSTUCK_HEADER_CLS } from "./card";
-import { formatTurnSummary, type TurnSummary } from "./model/runs";
+import { useNow } from "./model/reasoning-clock";
+import { formatTurnSummary, turnSummaryEqual, type TurnSummary } from "./model/runs";
 import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_CLIP } from "@/lib/layout/layout";
-
-const LIVE_CLOCK_INTERVAL_MS = 100;
 
 /**
  * Identify which pinned headers are currently stuck at the top of the
@@ -129,18 +128,7 @@ export function findClosestStuckHeaderId(
   return { topId, childId };
 }
 
-export function TurnBlock({
-  id,
-  memberIds,
-  summary,
-  expanded,
-  onToggle,
-  turnActive,
-  isStuck,
-  children,
-  timelineSource = "canonical",
-  displayRank,
-}: {
+interface TurnBlockProps {
   // The turn's first member item_id, stamped as data-item-id so the load-older
   // scroll anchor has a stable node even when the topmost content is a collapsed
   // turn (whose inner rows — and their own data-item-id — are not mounted).
@@ -156,7 +144,10 @@ export function TurnBlock({
   memberIds: readonly string[];
   summary: TurnSummary;
   expanded: boolean;
-  onToggle: () => void;
+  // Called with this block's id and its current rendered state, so the parent
+  // can pass one stable callback to every block (an inline per-block closure
+  // would defeat the memo below).
+  onToggle: (id: string, currentlyExpanded: boolean) => void;
   // Whether the agent is mid-turn — drives the live "working for X" / "worked for X" clock.
   turnActive?: boolean;
   // Whether this turn block is currently actively stuck at the top of the viewport.
@@ -165,28 +156,55 @@ export function TurnBlock({
   children?: ReactNode;
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
-}) {
-  // Live clock: while a block of this turn is streaming, tick every
-  // LIVE_CLOCK_INTERVAL_MS so the displayed elapsed time advances in real
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a === b || (a.length === b.length && a.every((id, index) => id === b[index]));
+}
+
+// Every streamed chunk regroups the timeline, rebuilding each turn's
+// memberIds array and summary object even when the turn did not change.
+// Compare those two by value so a historical (collapsed, childless) block
+// skips its render; every other prop is compared by identity. An expanded
+// block receives fresh children elements and re-renders as before.
+function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolean {
+  return (
+    prev.id === next.id &&
+    prev.expanded === next.expanded &&
+    prev.onToggle === next.onToggle &&
+    prev.turnActive === next.turnActive &&
+    prev.isStuck === next.isStuck &&
+    prev.children === next.children &&
+    prev.timelineSource === next.timelineSource &&
+    prev.displayRank === next.displayRank &&
+    sameIds(prev.memberIds, next.memberIds) &&
+    turnSummaryEqual(prev.summary, next.summary)
+  );
+}
+
+export const TurnBlock = memo(function TurnBlock({
+  id,
+  memberIds,
+  summary,
+  expanded,
+  onToggle,
+  turnActive,
+  isStuck,
+  children,
+  timelineSource = "canonical",
+  displayRank,
+}: TurnBlockProps) {
+  // Live clock: while a block of this turn is streaming, re-render on the
+  // shared live-clock tick so the displayed elapsed time advances in real
   // time. The streaming block is the ONLY thing that moves the display —
   // every other input is a committed number that changes when a new summary
   // arrives — so an active turn sitting between blocks does not re-render 10x
-  // a second. The `liveNow` state is updated only inside the setInterval
-  // callback (never synchronously in the effect body); the lazy initialiser
-  // seeds it with Date.now().
-  const [liveNow, setLiveNow] = useState(() => Date.now());
+  // a second.
   const liveBlockStartedAt =
     turnActive && summary.lastLiveKind != null && summary.lastLiveStartedAt > 0
       ? summary.lastLiveStartedAt
       : 0;
-
-  useEffect(() => {
-    if (liveBlockStartedAt <= 0) return;
-    const id = setInterval(() => {
-      setLiveNow(Date.now());
-    }, LIVE_CLOCK_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [liveBlockStartedAt]);
+  const liveNow = useNow(liveBlockStartedAt > 0);
 
   // Nested pin line for this block's child headers (task #3215): a child
   // header sticks just below this block's header, so --turn-header-h must
@@ -270,7 +288,7 @@ export function TurnBlock({
       <button
         ref={headerRef}
         type="button"
-        onClick={onToggle}
+        onClick={() => onToggle(id, expanded)}
         className={cn(
           HEADER_CLS,
           "items-start",
@@ -326,7 +344,7 @@ export function TurnBlock({
       </div>
     </div>
   );
-}
+}, turnBlockPropsEqual);
 
 function TurnCallChip({ call, showDot }: { call: SdkCall; showDot: boolean }) {
   return (

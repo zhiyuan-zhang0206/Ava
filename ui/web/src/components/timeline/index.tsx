@@ -20,6 +20,9 @@
 //   keyed on the stable item ref + the resolved color map), so the config
 //   object stays reference-stable for unchanged rows even as the items array
 //   is rebuilt each chunk.
+// - TurnBlock is memoized with a value comparison of the member ids and
+//   summary a regroup rebuilds, and receives the shared `toggleTurn`, so a
+//   collapsed historical turn skips every streamed chunk.
 // - mergeSnapshotWithStreaming returns the same prev reference when
 //   content matches, so Zustand skips setState and the tree skips
 //   reconciliation.
@@ -74,14 +77,7 @@
 // - `./buttons`   — ForkButton + CopyButton
 // - `./row`       — TimelineRow (memo) + cardConfigFor (per-item config cache)
 // - `./overlays`  — LoadOlderSpinner / ColdLoadSpinner / ScrollToBottomButton
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -104,6 +100,7 @@ import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 
 import { ConnectionNotice } from "@/components/notifications/connection-notice";
 import { CompactingBlock } from "./model/compacting-block";
+import { LiveClockGate } from "./model/reasoning-clock";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { classifyItem } from "./model/runs";
 import { groupTimelineSegments } from "./model/segments";
@@ -151,7 +148,11 @@ interface Props {
   maxWidthCss?: string;
 }
 
-export function TimelineView({
+// Memoized: the page re-renders for state the timeline never reads (composer
+// uploads, token usage, pending strip, alerts); every prop the page passes is
+// either a primitive, store data or a stable callback, so those renders skip
+// the whole timeline.
+export const TimelineView = memo(function TimelineView({
   items: canonicalItems,
   compactBuffer = null,
   threadKey,
@@ -1236,68 +1237,74 @@ export function TimelineView({
           {virtualEnabled && virtualRange.before > 0 ? (
             <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
           ) : null}
-          {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ entry, virtualKey, runExpanded, virtualRows }, offset) => {
-            const group = entry.group;
-            const groupIndex = virtualRange.start + offset;
-            const renderedGroup = (() => {
-              if (group.kind === "single") {
-                return renderRow(group.item, entry.indexOffset + group.index, entry.source, entry.rank);
-              }
-              // Every secondary run (even a single item) becomes a collapsible work
-              // block. The last turn auto-expands while the agent is active so the
-              // streaming item is visible. Run id = the first member's item_id
-              // (stable across streaming commits).
-              const turnId = group.items[0].item_id;
-              const isLastTurn = entry === groups[groups.length - 1];
-              const childRange = rowRange(groupIndex);
-              return (
-                <TurnBlock
-                  id={turnId}
-                  memberIds={group.items.map((it) => it.item_id)}
-                  summary={group.summary}
-                  expanded={runExpanded}
-                  onToggle={() => toggleTurn(turnId, runExpanded)}
-                  turnActive={turnActive && isLastTurn}
-                  isStuck={activeStuckHeaderId === turnId}
-                  timelineSource={entry.source}
-                  displayRank={entry.rank}
-                >
-                  {runExpanded ? (
-                    virtualRows ? (
-                      <>
-                        {virtualEnabled && childRange.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: childRange.before }} aria-hidden="true" /> : null}
-                        {group.items.slice(childRange.start, childRange.end).map((it, offset) => {
-                          const index = childRange.start + offset;
-                          // Task #4780 (user ruling 2026-09-26): in None mode the turn was expanded by
-                          // hand — reveal its child rows COLLAPSED (each opens on its own click); All/Last
-                          // keep the #659 one-click cascade for their auto-expand paths.
-                          return (
-                            <div key={virtualRows[index]} data-virtual-row={virtualRows[index]}>
-                              {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, effectiveDetailsMode !== "none")}
-                            </div>
-                          );
-                        })}
-                        {virtualEnabled && childRange.after > 0 ? <div data-timeline-spacer="turn-after" style={{ height: childRange.after }} aria-hidden="true" /> : null}
-                      </>
-                    ) : null
-                  ) : null}
-                </TurnBlock>
+          {/* Live block clocks tick only while the agent is busy: a live stamp
+              that outlived a missed turn-end event freezes on an idle page
+              instead of re-rendering its row 10x/s. The compacting block
+              below keeps its own lifecycle (deadline-bounded). */}
+          <LiveClockGate value={turnActive}>
+            {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ entry, virtualKey, runExpanded, virtualRows }, offset) => {
+              const group = entry.group;
+              const groupIndex = virtualRange.start + offset;
+              const renderedGroup = (() => {
+                if (group.kind === "single") {
+                  return renderRow(group.item, entry.indexOffset + group.index, entry.source, entry.rank);
+                }
+                // Every secondary run (even a single item) becomes a collapsible work
+                // block. The last turn auto-expands while the agent is active so the
+                // streaming item is visible. Run id = the first member's item_id
+                // (stable across streaming commits).
+                const turnId = group.items[0].item_id;
+                const isLastTurn = entry === groups[groups.length - 1];
+                const childRange = rowRange(groupIndex);
+                return (
+                  <TurnBlock
+                    id={turnId}
+                    memberIds={group.items.map((it) => it.item_id)}
+                    summary={group.summary}
+                    expanded={runExpanded}
+                    onToggle={toggleTurn}
+                    turnActive={turnActive && isLastTurn}
+                    isStuck={activeStuckHeaderId === turnId}
+                    timelineSource={entry.source}
+                    displayRank={entry.rank}
+                  >
+                    {runExpanded ? (
+                      virtualRows ? (
+                        <>
+                          {virtualEnabled && childRange.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: childRange.before }} aria-hidden="true" /> : null}
+                          {group.items.slice(childRange.start, childRange.end).map((it, offset) => {
+                            const index = childRange.start + offset;
+                            // Task #4780 (user ruling 2026-09-26): in None mode the turn was expanded by
+                            // hand — reveal its child rows COLLAPSED (each opens on its own click); All/Last
+                            // keep the #659 one-click cascade for their auto-expand paths.
+                            return (
+                              <div key={virtualRows[index]} data-virtual-row={virtualRows[index]}>
+                                {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, effectiveDetailsMode !== "none")}
+                              </div>
+                            );
+                          })}
+                          {virtualEnabled && childRange.after > 0 ? <div data-timeline-spacer="turn-after" style={{ height: childRange.after }} aria-hidden="true" /> : null}
+                        </>
+                      ) : null
+                    ) : null}
+                  </TurnBlock>
+                );
+              })();
+              const content = (
+                <>
+                  {entry.dividerRank === null ? null : (
+                    <CompactHistoryDivider rank={entry.dividerRank} />
+                  )}
+                  {renderedGroup}
+                </>
               );
-            })();
-            const content = (
-              <>
-                {entry.dividerRank === null ? null : (
-                  <CompactHistoryDivider rank={entry.dividerRank} />
-                )}
-                {renderedGroup}
-              </>
-            );
-            return (
-              <div key={virtualKey} data-virtual-group={virtualKey} className={entry.dividerRank === null ? undefined : "space-y-3"}>
-                {content}
-              </div>
-            );
-          })}
+              return (
+                <div key={virtualKey} data-virtual-group={virtualKey} className={entry.dividerRank === null ? undefined : "space-y-3"}>
+                  {content}
+                </div>
+              );
+            })}
+          </LiveClockGate>
           {virtualEnabled && virtualRange.after > 0 ? (
             <div data-timeline-spacer="after" style={{ height: virtualRange.after }} aria-hidden="true" />
           ) : null}
@@ -1308,4 +1315,4 @@ export function TimelineView({
       <ScrollToBottomButton atBottom={atBottom} onClick={handleScrollToBottom} />
     </div>
   );
-}
+});
