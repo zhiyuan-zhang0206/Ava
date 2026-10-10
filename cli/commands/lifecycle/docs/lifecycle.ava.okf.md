@@ -73,6 +73,15 @@ handlers. Fresh-session creation refuses reuse; the public capture wait requires
 bare output rather than shell echo. Native closure, notice count and
 stop-before-data-plane assertions remain intact.
 
+The stop tests' private non-PTY sessions also use literal parent and child
+entries. The launcher accepts only SIGTERM behavior (`default`, `exit`, or
+`ignore`), an optional ignored SIGHUP, and an optional child armed-marker path.
+These values travel as argv data; callers cannot supply executable source.
+The ready marker follows signal setup, the child arms after its own handler,
+and the fixture records native session identity before returning. Its context
+retains each original process and closes that exact private group and pipes
+when the test exits, including an assertion failure.
+
 ## Start
 
 `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` is deliberately
