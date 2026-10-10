@@ -443,7 +443,7 @@ _assert_env_precedes_project_imports()
 
 # ava / base.config read AVA_DB_URL + AVA_HOME at import — must come after the
 # env block above, which is what the assertion just enforced.
-from base.config import ConfigBoot, field_names, get_field, set_field, settings
+from base.config import ConfigBoot, field_domain, field_names, get_field, set_field, settings
 from base.daemon.health import _HEALTH_PORT_OVERRIDES
 from base.host.env.port_table import FIXED_PORTS
 
@@ -672,11 +672,19 @@ _PROCESS_CONFIG_KEY = pytest.StashKey[ConfigBoot]()
 def pytest_configure(config: pytest.Config) -> None:
     """Prepare the session SDK owner before collection and bare function homes."""
     values = {name: get_field(name) for name in field_names()}
+    explicit = {
+        domain: set(getattr(settings, domain).model_fields_set)
+        for domain in {field_domain(name) for name in values}
+    }
     owner = ConfigBoot()
     with patch.dict(os.environ):
-        owner.ensure_eager()
+        model = owner.ensure_eager()
     for name, value in values.items():
         owner.set_field(name, value)
+    for domain, fields in explicit.items():
+        destination = getattr(model, domain).model_fields_set
+        destination.clear()
+        destination.update(fields)
     config.stash[_PROCESS_CONFIG_KEY] = owner
     pin_agent(
         1,
