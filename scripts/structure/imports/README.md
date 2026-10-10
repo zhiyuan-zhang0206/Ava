@@ -108,7 +108,8 @@ source path and lexical parent. The fact and execution-input visitors share thes
 scopes; each scope retains its lexical Call order for transparent-helper checks.
 Binding collection skips nodes that cannot bind names without pruning the public
 lexical walker. The fact visitor resolves its method dispatch once per AST node
-type within that source analysis. It does not descend into Name or Constant leaves;
+type within that source analysis. It caches unbound methods, so completed
+collectors do not retain their parsed source through bound-method reference cycles. It does not descend into Name or Constant leaves;
 their enclosing operations still resolve values through the completed Scope.
 `clear_scopes()` releases the query's scope references; neither scopes nor helper
 proofs cross analyses, source files or checkout generations.

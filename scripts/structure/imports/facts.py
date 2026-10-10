@@ -80,7 +80,7 @@ class _Collector(ast.NodeVisitor):
         self.embedded = embedded
         self.resource_seen: set[int] = set()
         self.has_launches = False
-        self.visitors: dict[type[ast.AST], Callable[[ast.AST], None]] = {}
+        self.visitors: dict[type[ast.AST], Callable[[ast.NodeVisitor, ast.AST], None]] = {}
         self.records: list[Fact] = []
         self.unknown: list[Unknown] = []
 
@@ -89,9 +89,11 @@ class _Collector(ast.NodeVisitor):
         node_type = type(node)
         visitor = self.visitors.get(node_type)
         if visitor is None:
-            visitor = getattr(self, "visit_" + node_type.__name__, self.generic_visit)
+            visitor = getattr(
+                type(self), "visit_" + node_type.__name__, ast.NodeVisitor.generic_visit
+            )
             self.visitors[node_type] = visitor
-        visitor(node)
+        visitor(self, node)
 
     def visit_Name(self, node: ast.Name) -> None:
         """Names are resolved by their enclosing operation and completed Scope."""
