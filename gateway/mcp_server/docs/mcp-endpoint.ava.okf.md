@@ -21,7 +21,7 @@ plane only.
 
 The seven tools are **thin handlers over the same internal functions the REST
 routers call** (`_spawn_preflight_blocking` + `forward_spawn_to_remote`,
-`post_agent_terminate`, `deliver_chat_inbound`, `load_checkpoint_messages`,
+`terminate_agent_with_open_tasks`, `deliver_chat_inbound`, `load_checkpoint_messages`,
 `agent_roster`, `agent_snapshot`, `get_cluster_status`) — no business logic of its own, no
 self-HTTP round-trip (2026-06-07 CLI↔gateway boundary decision). The tool
 surface and result shapes are the ones external MCP clients drive.

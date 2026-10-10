@@ -17,6 +17,7 @@ from typing import Any
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 
 from base.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 from base.db import Database
@@ -53,7 +54,11 @@ class TestResurrectRouting:
         local does not touch DB / does not spawn a session."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+        async def _capture_forward(
+            agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
+        ) -> dict:
+            assert db is app.state.db
+            assert pool is app.state.db_pool
             captured["agent_id"] = agent_id
             captured["path"] = path
             captured["json_body"] = json_body
@@ -85,7 +90,11 @@ class TestResurrectRouting:
         auto-resurrect cannot cover."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+        async def _capture_forward(
+            agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
+        ) -> dict:
+            assert db is app.state.db
+            assert pool is app.state.db_pool
             captured["json_body"] = json_body
             return {"status": "spawned"}
 
@@ -216,3 +225,44 @@ async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
             forward.enqueue_lifecycle(Database.from_settings(), "offline-runner", "/restart", {}),
             timeout=0.2,
         )
+
+
+def test_resurrect_routes_through_each_request_apps_resources(
+    database: Database, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Home lookup and RPC use the serving app even beside an assembled app."""
+    from fastapi import FastAPI
+
+    from base.db import create_agent
+
+    agent_id = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta(id, status, machine) VALUES (%s, 'terminated', %s)",
+        (agent_id, "request-owned-home"),
+    )
+    db_conn.commit()
+    seen: list[Database] = []
+
+    async def enqueue(
+        db: Database, target: str, path: str, json_body: dict[str, object]
+    ) -> dict[str, object]:
+        assert target == "request-owned-home"
+        assert path == f"/api/agents/{agent_id}/resurrect-explicit-v2"
+        assert json_body["resurrected_by"] == "user"
+        seen.append(db)
+        return {"status": "spawned"}
+
+    monkeypatch.setattr(forward_module, "enqueue_lifecycle", enqueue)
+    other_database = Database.from_settings()
+    with database.pool(max_size=2) as first_pool, other_database.pool(max_size=2) as second_pool:
+        for db, pool in [(database, first_pool), (other_database, second_pool)]:
+            serving_app = FastAPI()
+            serving_app.state.db = db
+            serving_app.state.db_pool = pool
+            serving_app.include_router(lifecycle_module.router)
+            with TestClient(serving_app) as client:
+                response = client.post(f"/api/agents/{agent_id}/resurrect")
+                assert response.status_code == 200, response.text
+                assert response.json() == {"status": "spawned"}
+            assert seen == [db]
+            seen.clear()

@@ -518,6 +518,7 @@ def _register_fleet_tools(
                 agent_id,
                 TerminateAgentRequest(message=message, force=force),
                 pool,
+                db=db,
             )
         except AvaAgentError as exc:
             raise ToolError(str(exc)) from exc
