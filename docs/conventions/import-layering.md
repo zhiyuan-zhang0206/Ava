@@ -123,6 +123,10 @@ give a conservative subtree, not proof that every child was read. Known paths
 remain facts when the target is absent, including negative existence checks.
 Unsupported recognized import and execution inputs retain their source location,
 kind and reason in `Evidence.unknown`.
+Recognized `Path` or `open` reads whose repository or external anchor cannot be
+proved also retain an unknown, rather than treating a relative working-directory
+path as repository-rooted. Source embedded in Python `-c` uses the same collector;
+it has no implicit relative-import package or source-file resource anchor.
 
 These facts do not replace import-linter's graph or enable new placement gates.
 CI reverse impact follows unpruned runtime dependencies; test ownership remains

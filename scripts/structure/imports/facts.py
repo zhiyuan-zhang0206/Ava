@@ -62,10 +62,19 @@ _DYNAMIC_CALLS = frozenset(
 
 
 class _Collector(ast.NodeVisitor):
-    def __init__(self, tree: ast.AST, path: str, index: Lookup, tops: Sequence[str]) -> None:
+    def __init__(
+        self,
+        tree: ast.AST,
+        path: str,
+        index: Lookup,
+        tops: Sequence[str],
+        *,
+        embedded: bool = False,
+    ) -> None:
         self.path, self.index, self.tops = path, index, tops
         self.scope = bindings.Scope(tree, path)
         self.depth = len(Path(path).parts) if path else 0
+        self.embedded = embedded
         self.resource_seen: set[int] = set()
         self.records: list[Fact] = []
         self.unknown: list[Unknown] = []
@@ -84,6 +93,11 @@ class _Collector(ast.NodeVisitor):
             self.records.append(Fact(node.lineno, kind, target))
 
     def _import(self, node: ast.Import | ast.ImportFrom) -> None:
+        if self.embedded and isinstance(node, ast.ImportFrom) and node.level:
+            self.gap(
+                node, "Python -c source has no relative import package", FactKind.EMBEDDED_IMPORT
+            )
+            return
         clause = normalize(node, self.path)
         evidence = dependency_evidence(clause, self.index, self.tops)
         self.records.extend(
@@ -136,6 +150,8 @@ class _Collector(ast.NodeVisitor):
             elif reason is not None:
                 self.gap(node, reason, FactKind.PYTHON_MODULE)
         self._resource(node)
+        if not self.embedded:
+            self._resource_read(node)
         self.generic_visit(node)
 
     def _dynamic(self, node: ast.Call, origin: str) -> None:
@@ -207,6 +223,8 @@ class _Collector(ast.NodeVisitor):
         return None
 
     def _resource(self, node: ast.expr) -> None:
+        if self.embedded:
+            return  # Python -c has no source-file __file__ anchor.
         if id(node) in self.resource_seen:
             return
         target = self._resource_path(node)
@@ -218,6 +236,71 @@ class _Collector(ast.NodeVisitor):
             self.gap(node, "Repository resource escapes its root", FactKind.RESOURCE)
             return
         self.records.append(Fact(node.lineno, FactKind.RESOURCE, path.as_posix()))
+
+    def _read_target(self, node: ast.Call) -> ast.expr | None:
+        builtin_open = (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "open"
+            and not self.scope.bound("open")
+        )
+        if builtin_open or self.scope.origin(node.func) in {"builtins.open", "io.open"}:
+            return (
+                node.args[0]
+                if node.args
+                else next((kw.value for kw in node.keywords if kw.arg == "file"), None)
+            )
+        if not isinstance(node.func, ast.Attribute) or node.func.attr not in {
+            "open",
+            "read_text",
+            "read_bytes",
+            "iterdir",
+            "glob",
+            "rglob",
+        }:
+            return None
+        receiver = self.scope.value(node.func.value)
+        if isinstance(receiver, ast.Call) and self.scope.origin(receiver.func) == "pathlib.Path":
+            return receiver.args[0] if receiver.args else None
+        return receiver if self._path_expression(receiver) else None
+
+    def _path_expression(self, node: ast.expr) -> bool:
+        if self._resource_path(node) is not None:
+            return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            return self._path_expression(node.left)
+        if isinstance(node, ast.Call):
+            if self.scope.origin(node.func) == "pathlib.Path":
+                return True
+            if isinstance(node.func, ast.Attribute) and node.func.attr in {
+                "resolve",
+                "absolute",
+                "joinpath",
+            }:
+                return self._path_expression(node.func.value)
+        return False
+
+    def _resource_read(self, node: ast.Call) -> None:
+        target = self._read_target(node)
+        if target is None:
+            return
+        path = self._resource_path(target)
+        if path is not None:
+            if not path:
+                self.records.append(Fact(node.lineno, FactKind.RESOURCE, "."))
+            return
+        values = self.scope.strings(target)
+        if values and all(Path(value).is_absolute() for value in values):
+            for value in values:
+                absolute = Path(value)
+                if absolute.is_relative_to(self.index.repo_root):
+                    relative = absolute.relative_to(self.index.repo_root).as_posix()
+                    self.records.append(Fact(node.lineno, FactKind.RESOURCE, relative))
+            return
+        self.gap(
+            node,
+            "Resource read has no proven repository or external path anchor",
+            FactKind.RESOURCE,
+        )
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
         self._resource(node)
@@ -239,30 +322,39 @@ def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str])
         for g in inputs.unresolved
     )
     for source in inputs.sources:
-        embedded = executed.import_facts(source, rel_path)
-        for node in embedded.clauses:
-            evidence = dependency_evidence(normalize(node, rel_path), index, tops)
-            collector.records.extend(
-                Fact(source.line, FactKind.EMBEDDED_IMPORT, d.module, d.names)
-                for d in evidence.resolved
-            )
-            collector.unknown.extend(
-                Unknown(
-                    rel_path,
-                    source.line,
-                    ast.unparse(node),
-                    f"First-party module does not exist: {target}",
-                    FactKind.EMBEDDED_IMPORT,
-                )
-                for target in evidence.unknown
-            )
-        for target in embedded.targets:
-            synthetic = ast.Constant(value=target, lineno=source.line, col_offset=0)
-            collector.module(synthetic, target, FactKind.EMBEDDED_IMPORT)
-        collector.unknown.extend(
-            Unknown(g.path, g.line, source.text, g.reason, FactKind.EMBEDDED_IMPORT)
-            for g in embedded.unresolved
-        )
+        embedded = _embedded(source, rel_path, index, tops)
+        collector.records.extend(embedded.records)
+        collector.unknown.extend(embedded.unknown)
     return Evidence(
         tuple(dict.fromkeys(collector.records)), tuple(dict.fromkeys(collector.unknown))
+    )
+
+
+def _embedded(source: executed.Source, path: str, index: Lookup, tops: Sequence[str]) -> Evidence:
+    try:
+        tree = ast.parse(source.text)
+    except SyntaxError as error:
+        return Evidence(
+            (),
+            (
+                Unknown(
+                    path,
+                    source.line,
+                    source.text,
+                    f"Invalid Python -c source: {error.msg}",
+                    FactKind.EMBEDDED_IMPORT,
+                ),
+            ),
+        )
+    collector = _Collector(tree, path, index, tops, embedded=True)
+    collector.visit(tree)
+    return Evidence(
+        tuple(
+            Fact(source.line, FactKind.EMBEDDED_IMPORT, fact.target, fact.names)
+            for fact in collector.records
+        ),
+        tuple(
+            Unknown(path, source.line, gap.expression, gap.reason, FactKind.EMBEDDED_IMPORT)
+            for gap in collector.unknown
+        ),
     )

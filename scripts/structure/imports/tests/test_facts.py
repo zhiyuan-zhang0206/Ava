@@ -143,3 +143,58 @@ def test_execution_unknowns_retain_their_kinds(tmp_path: Path) -> None:
         facts.FactKind.PYTHON_MODULE,
         facts.FactKind.EMBEDDED_IMPORT,
     }
+
+
+def test_assignment_alias_retains_import_origin(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\nload = importlib.import_module\nagain = load\nagain('base.net.retry')\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
+def test_embedded_dynamic_import_uses_the_same_binding_resolver(tmp_path: Path) -> None:
+    code = "import importlib\nname = 'base.net.retry'\nload = importlib.import_module\nload(name)\n"
+    found = evidence(
+        make_repo(tmp_path),
+        "import sys, subprocess\nsubprocess.run([sys.executable, '-c', " + repr(code) + "])\n",
+    )
+    assert [(fact.line, fact.kind, fact.target) for fact in found.records] == [
+        (2, facts.FactKind.EMBEDDED_IMPORT, "base.net.retry")
+    ]
+    assert found.unknown == ()
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        "Path('base/data.txt').read_text()",
+        "open('base/data.txt')",
+        "Path(name).read_bytes()",
+        "(ROOT / name).read_text()",
+    ],
+)
+def test_recognized_resource_read_without_anchor_is_unknown(tmp_path: Path, read: str) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[2]\n" + read,
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.RESOURCE
+
+
+def test_known_external_absolute_resource_does_not_depend_on_checkout(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path), "from pathlib import Path\nPath('/etc/hosts').read_text()\n"
+    )
+    assert found.records == found.unknown == ()
+
+
+def test_repository_root_traversal_records_the_directory(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[2]\nROOT.rglob('*.py')\n",
+    )
+    assert [fact.target for fact in found.records] == ["."]

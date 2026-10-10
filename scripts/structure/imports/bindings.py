@@ -84,16 +84,20 @@ class Scope:
             return self.parent.value(node)
         return self.values.get(node.id, node) if self.stores[node.id] == 1 else node
 
-    def origin(self, node: ast.expr) -> str:
+    def origin(self, node: ast.expr, seen: frozenset[str] = frozenset()) -> str:
         if isinstance(node, ast.Attribute):
-            base = self.origin(node.value)
+            base = self.origin(node.value, seen)
             return f"{base}.{node.attr}" if base else ""
         if not isinstance(node, ast.Name):
             return ""
+        if node.id in seen:
+            return ""
         if node.id not in self.stores and self.parent is not None:
-            return self.parent.origin(node)
+            return self.parent.origin(node, seen)
         if node.id == "__import__" and node.id not in self.stores:
             return node.id
+        if self.stores[node.id] == 1 and node.id in self.values:
+            return self.origin(self.values[node.id], seen | {node.id})
         return (
             self.origins.get(node.id, "")
             if self.stores[node.id] == self.import_counts[node.id]
