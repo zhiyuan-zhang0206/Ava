@@ -50,6 +50,13 @@ client set; the first pooled borrow checks the minimum immediately, and later
 handles from that attachment share its thirty-second admission interval.
 Independent attachments do not retain each other's check timestamp. An existing
 context lends its original factory and gate; detach never closes those clients.
+An independent attachment captures the process's existing configuration delivery.
+Its lite reads, eager model and complete SDK read model use those same inputs;
+overlays remain local to that owner. It never reloads or projects `.env` into
+`os.environ`, fetches bootstrap into the environment, or changes process `TZ`.
+Process startup owns that delivery, including provider keys and launcher credentials.
+The existing SDK startup/import contract supplies those inputs without an extra
+caller bootstrap. Fresh config-service reads still use the authority's fixed file.
 Plugins load through the existing extension loader after the identity is bound
 and before reading native state. The installed model catalog then binds to that
 context.

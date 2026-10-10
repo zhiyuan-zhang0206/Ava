@@ -1,6 +1,7 @@
 """Real PostgreSQL + compiled graph + exec child cooperative handoff."""
 
 import json
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any
@@ -27,6 +28,7 @@ from ava.external.state import encode_plugin_delta
 from ava.sdk_surface.process_context import process_clients
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.checkpoint_postgres_walks import (
     HistoryAsyncPostgresSaver as AsyncPostgresSaver,
@@ -45,8 +47,18 @@ from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from tests.impersonation_support import attested_caller, recorded_tree
+
+
+@pytest.fixture
+def handoff_clients() -> Iterator[ClientSet]:
+    clients = process_clients(config=snapshot_process_config())
+    try:
+        yield clients
+    finally:
+        clients.close()
 
 
 def _notes() -> HandoffNotes:
@@ -72,6 +84,7 @@ async def _prepare_graph(
     *,
     automatic: bool = False,
     config_authority: ConfigAuthority,
+    clients: ClientSet,
 ) -> tuple[
     Any,
     AsyncPostgresSaver,
@@ -169,7 +182,7 @@ async def _prepare_graph(
         ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
-        clients=process_clients(),
+        clients=clients,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         original_incarnation=owner,
         catalog=build_model_catalog(),
@@ -271,12 +284,13 @@ async def test_consent_exec_inbox_release_and_resume(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     scope = hosted_resources
     # The real exec child boots this installed unit, whose identity is file-owned.
     config_authority.env_path.write_text(f"AVA_MACHINE_NAME={machine_name()}\n", encoding="utf-8")
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, config_authority=config_authority
+        db_conn, aops_pool, monkeypatch, config_authority=config_authority, clients=handoff_clients
     )
     agent_id = owner.agent_id
 
@@ -438,11 +452,17 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -535,9 +555,15 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     graph, saver, ctx, config, _reset, owner, requested, calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     # Emulate a committed acceptance followed by a crash before claim's update.
@@ -583,12 +609,18 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     from agent.impersonation_handoff import deliver_handoff
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -651,13 +683,19 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     """With every source sealed at release, the event log is complete before delivery."""
     from agent.impersonation_handoff import deliver_handoff
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, _calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 

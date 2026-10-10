@@ -112,7 +112,11 @@ def test_attach_requests_native_plugin_load(
     monkeypatch.setattr(ava, "ensure_plugins_loaded", spy_loader)
     with external.attach("lease"):
         pass
-    assert calls == [{"surface": False}]
+    assert len(calls) == 1
+    assert calls[0]["surface"] is False
+    assert calls[0]["config"] is None
+    assert set(calls[0]) == {"surface", "config", "clock_factory"}
+    assert callable(calls[0]["clock_factory"])
 
 
 def test_plugin_updates_journal_once_and_next_attachment_sees_them(

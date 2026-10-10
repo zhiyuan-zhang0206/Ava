@@ -14,6 +14,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -301,7 +302,17 @@ def test_publish_offsite_module_entry_publishes_the_named_artifact(
     artifact.write_bytes(b"encrypted")
     published: list[tuple[Path, str]] = []
 
-    def _record(path: Path, *, root: str) -> None:
+    def _record(
+        path: Path,
+        *,
+        root: str,
+        endpoint_reader: Callable[[], str],
+        bucket_reader: Callable[[], str],
+        credentials_file_reader: Callable[[], Path | None],
+    ) -> None:
+        assert callable(endpoint_reader)
+        assert callable(bucket_reader)
+        assert callable(credentials_file_reader)
         published.append((path, root))
 
     monkeypatch.setattr(offsite, "publish", _record)
@@ -423,15 +434,7 @@ def test_run_backup_repairs_storage_permissions(
 
 
 def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
-    """The two dumps in the DST fall-back hour order by instant, not wall clock.
-
-    On 2026-11-01 in America/Los_Angeles, 01:30 happens twice — once PDT, once
-    PST an hour later. Under the old local naming both dumps were literally
-    called `ava-20261101-013000.dump` (the second silently replacing the
-    first), and re-parsing that name naive-then-local left which one counted as
-    "oldest" up to whichever offset the parse picked. Prune deletes by this
-    ordering, so the ambiguity decided which backup was destroyed.
-    """
+    """DST-fold dumps order by their UTC instants, preserving both repeated wall times."""
     pdt = _touch(bdir, "ava-20261101T083000Z.dump")  # 01:30 PDT
     pst = _touch(bdir, "ava-20261101T093000Z.dump")  # 01:30 PST, one hour later
     assert [p for _ts, p in backup._managed_dumps(bdir)] == [pdt, pst]

@@ -1,6 +1,7 @@
 """Syntax repair per tool call: it preserves content, an unfixable call does not skip its sibling, and recovered calls keep their repair."""
 
 import json
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,11 +18,13 @@ from ava.sdk_surface.process_context import process_clients
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from tests.fixtures.configuration import snapshot_process_config
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
@@ -56,8 +59,10 @@ def _state(*codes: str) -> AgentState:
     )
 
 
-def _runtime() -> Runtime[AvaContext]:
-    return Runtime(
+@pytest.fixture
+def runtime() -> Iterator[Runtime[AvaContext]]:
+    clients = process_clients(config=snapshot_process_config())
+    context = Runtime(
         context=AvaContext(
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
@@ -66,15 +71,22 @@ def _runtime() -> Runtime[AvaContext]:
             ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
-            clients=process_clients(),
+            clients=clients,
+            clock_factory=Clock.from_settings,
             catalog=build_model_catalog(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )
 
+    try:
+        yield context
+    finally:
+        clients.close()
+
 
 async def test_syntax_repair_is_per_call_and_preserves_content(
     monkeypatch: pytest.MonkeyPatch,
+    runtime: Runtime[AvaContext],
 ) -> None:
     from ava_builtins.plugins.ava_syntax_fix import agent_runtime as syntax
 
@@ -88,7 +100,7 @@ async def test_syntax_repair_is_per_call_and_preserves_content(
     original = ai.model_dump()
     fix = MagicMock(side_effect=[("print(10)", ["test"]), ("print(20)", ["test"])])
     monkeypatch.setattr(syntax, "_apply_fix_pipeline", fix)
-    update = await syntax.syntax_fix_before_exec(state, _runtime(), {})
+    update = await syntax.syntax_fix_before_exec(state, runtime, {})
     assert update is not None
     fixed = update["messages"][0]
     assert [call.args[0] for call in fix.call_args_list] == ["print(1)", "print(2)"]
@@ -101,6 +113,7 @@ async def test_syntax_repair_is_per_call_and_preserves_content(
 async def test_unfixable_syntax_does_not_skip_sibling(
     monkeypatch: pytest.MonkeyPatch,
     fake_cancel_event: InterruptEvent,
+    runtime: Runtime[AvaContext],
 ) -> None:
     from agent.messages.guard import guarded_add_messages
     from ava_builtins.plugins.ava_syntax_fix import agent_runtime as syntax
@@ -112,11 +125,11 @@ async def test_unfixable_syntax_does_not_skip_sibling(
 
     monkeypatch.setattr(syntax, "_apply_fix_pipeline", unchanged)
     monkeypatch.setattr(syntax, "_llm_repair_syntax", AsyncMock(return_value=None))
-    update = await syntax.syntax_fix_before_exec(state, _runtime(), {})
+    update = await syntax.syntax_fix_before_exec(state, runtime, {})
     assert update is not None
     assert "goto" not in update
     state.messages = guarded_add_messages(state.messages, update["messages"])
-    result = await _run_calls(state, _runtime(), {"configurable": {"thread_id": "7"}})
+    result = await _run_calls(state, runtime, {"configurable": {"thread_id": "7"}})
     assert result is not None
     _, first, second = result["messages"]
     assert "SyntaxError" in first.content
@@ -159,9 +172,9 @@ def _ai_with_two_content_tool_uses() -> AIMessage:
     )
 
 
-async def test_syntax_fix_preserves_recovered_calls() -> None:
+async def test_syntax_fix_preserves_recovered_calls(runtime: Runtime[AvaContext]) -> None:
     state = AgentState(messages=[_ai_with_two_content_tool_uses()])
-    update = await syntax_fix_before_exec(state, _runtime(), _config())
+    update = await syntax_fix_before_exec(state, runtime, _config())
     assert update is not None
     fixed = update["messages"][0]
     assert [call["id"] for call in fixed.tool_calls] == ["call_00", "call_01"]

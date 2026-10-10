@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from base.host.proc import process_cmdline
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 
@@ -57,9 +58,12 @@ def test_acquire_writes_own_pid(tmp_path: Any) -> None:
 def test_acquire_refuses_live_instance(tmp_path: Any) -> None:
     """A pidfile held by a live process running the same module is refused."""
     pidfile = tmp_path / "svc.pid"
-    assert acquire_pidfile(pidfile, "pytest") is True  # our own argv contains pytest
+    cmdline = process_cmdline(os.getpid())
+    assert cmdline
+    identity = " ".join(cmdline)
+    assert acquire_pidfile(pidfile, identity) is True
     # second claim, same module, same live process -> refused, file untouched
-    assert acquire_pidfile(pidfile, "pytest") is False
+    assert acquire_pidfile(pidfile, identity) is False
     assert pidfile.read_text().strip() == str(os.getpid())
 
 
@@ -84,9 +88,12 @@ def test_acquire_reclaims_recycled_pid(tmp_path: Any) -> None:
 def test_pidfile_holds_daemon_false_when_argv_mismatch(tmp_path: Any) -> None:
     pidfile = tmp_path / "svc.pid"
     pidfile.write_text(f"{os.getpid()}\n")
-    # our argv names pytest, not the daemon module
+    cmdline = process_cmdline(os.getpid())
+    assert cmdline
+    identity = " ".join(cmdline)
+    assert "services.svc.daemon" not in identity
     assert pidfile_holds_daemon(pidfile, "services.svc.daemon") is False
-    assert pidfile_holds_daemon(pidfile, "pytest") is True
+    assert pidfile_holds_daemon(pidfile, identity) is True
 
 
 def test_remove_pidfile_idempotent(tmp_path: Any) -> None:

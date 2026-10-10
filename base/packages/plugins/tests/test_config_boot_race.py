@@ -47,6 +47,7 @@ async def test_fresh_processes_bind_the_same_winning_image(unit_home: Path) -> N
         import sys
         from unittest.mock import patch
         from pydantic import BaseModel
+        from base.config import settings
         from base.host.env.agent_slices import AgentSlices
         from base.packages.plugins import config_registration as registration
 
@@ -62,7 +63,11 @@ async def test_fresh_processes_bind_the_same_winning_image(unit_home: Path) -> N
         configs = {}
         with patch.object(registration, 'write_default_disk_image', synchronized_write):
             registration.bind_plugin_config('boot-race', Config, configs)
-        bound = registration.get_plugin_config('boot-race', AgentSlices.resolve(plugin_configs=configs), Config)
+        slices = AgentSlices.resolve(
+            plugin_configs=configs,
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        )
+        bound = registration.get_plugin_config('boot-race', slices, Config)
         print(bound.marker, flush=True)
         """
     )

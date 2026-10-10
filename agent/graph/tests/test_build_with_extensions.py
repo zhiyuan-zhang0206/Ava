@@ -8,7 +8,7 @@ Confirms:
 """
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from uuid import uuid4
 
@@ -144,12 +144,19 @@ def test_load_extensions_installs_metering(monkeypatch: pytest.MonkeyPatch):
 
     installed: list[bool] = []
 
-    def install_metering(_sampling: object) -> None:
+    def expected_producer() -> object:
+        return object()
+
+    def install_metering(
+        _sampling: object, *, producer: Callable[[], object] | None
+    ) -> tuple[tuple[object, str], ...]:
+        assert producer is expected_producer
         installed.append(True)
+        return ()
 
     monkeypatch.setattr(metering, "install", install_metering)
 
-    _loader.load_extensions()
+    _loader.load_extensions(producer=expected_producer)
 
     assert installed == [True]
 

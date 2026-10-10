@@ -512,6 +512,7 @@ def _closure_domains(closure: set[Path]) -> set[str]:
     """
     from base.config import Settings
     from base.host.env.config_registry import DOMAIN_ATTRS
+    from cli.commands.lifecycle.tests.startup.config_read_facts import explicit_config_reads
 
     aggregate_facts = {
         name
@@ -524,6 +525,7 @@ def _closure_domains(closure: set[Path]) -> set[str]:
             src_text = py_file.read_text(errors="replace")
         except OSError:
             continue
+        domains.update(domain for domain, _field in explicit_config_reads(src_text, str(py_file)))
         for domain, field in _extract_settings_reads(src_text):
             owner = Settings.model_fields.get(domain)
             if owner is not None:

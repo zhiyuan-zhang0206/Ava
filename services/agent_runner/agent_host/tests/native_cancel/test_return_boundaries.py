@@ -29,9 +29,11 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
 @pytest.mark.parametrize("ending", ["provider_failure", "restart", "terminate"])
@@ -42,68 +44,90 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
     ending: str,
     model_catalog: ModelCatalog,
 ) -> None:
-    pool: ConnectionPool
-    incarnation, initial = await managed_work(db_conn, aops_pool)
-    _insert(db_conn, initial.agent_id)
-    entered, release = asyncio.Event(), asyncio.Event()
+    async with hosted_scope(
+        expected_error=FatalProviderError if ending == "provider_failure" else None
+    ) as resources:
+        pool: ConnectionPool
+        incarnation, initial = await managed_work(db_conn, aops_pool)
+        _insert(db_conn, initial.agent_id)
+        entered, release = asyncio.Event(), asyncio.Event()
+        failure = FatalProviderError(
+            "isolated provider rejection", error_class="permanent", status=401
+        )
 
-    async def model(_state: AgentState) -> Command[Any]:
-        entered.set()
-        await release.wait()
-        if ending == "provider_failure":
-            raise FatalProviderError(
-                "isolated provider rejection", error_class="permanent", status=401
+        async def model(_state: AgentState) -> Command[Any]:
+            entered.set()
+            await release.wait()
+            if ending == "provider_failure":
+                raise failure
+            return Command(
+                update={
+                    "halted": True,
+                    "turn_idle": True,
+                    "restart_requested": ending == "restart",
+                    "exit_requested": ending == "terminate",
+                },
+                goto="__end__",
             )
-        return Command(
-            update={
-                "halted": True,
-                "turn_idle": True,
-                "restart_requested": ending == "restart",
-                "exit_requested": ending == "terminate",
-            },
-            goto="__end__",
-        )
 
-    graph, _saver, host, ctx = await _blocked_host(aops_pool, model, model_catalog=model_catalog)
-    faults = _install_faults(monkeypatch, initial.agent_id, "after_ack")
-    running = asyncio.create_task(
-        host._invoke_until_done(
-            initial.agent_id,
-            replace(ctx, original_incarnation=incarnation, hosted_resources=HostedTurnResources()),
+        graph, _saver, host, ctx = await _blocked_host(
+            aops_pool, model, model_catalog=model_catalog
         )
-    )
-    try:
-        await asyncio.wait_for(entered.wait(), 5)
-        command = None
-        if ending != "provider_failure":
-            command = _command(db_conn, initial.agent_id, ending)
-            async with async_write_transaction(aops_pool) as conn:
-                assert (
-                    await accept_lifecycle_intent(conn, initial.agent_id, incarnation=incarnation)
-                    is not None
+        faults = _install_faults(monkeypatch, initial.agent_id, "after_ack")
+        running = asyncio.create_task(
+            host._invoke_until_done(
+                initial.agent_id,
+                replace(ctx, original_incarnation=incarnation, hosted_resources=resources),
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            command = None
+            if ending != "provider_failure":
+                command = _command(db_conn, initial.agent_id, ending)
+                async with async_write_transaction(aops_pool) as conn:
+                    assert (
+                        await accept_lifecycle_intent(
+                            conn, initial.agent_id, incarnation=incarnation
+                        )
+                        is not None
+                    )
+            with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
+                target = await asyncio.to_thread(observe_native_work, pool, initial.agent_id)
+                assert target is not None
+                accepted = await asyncio.to_thread(
+                    accept_native_cancel, pool, "return-boundary", initial.agent_id, target
                 )
-        with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-            target = await asyncio.to_thread(observe_native_work, pool, initial.agent_id)
-            assert target is not None
-            accepted = await asyncio.to_thread(
-                accept_native_cancel, pool, "return-boundary", initial.agent_id, target
-            )
-        queued = _insert(db_conn, initial.agent_id)
-        release.set()
-        outcome = await asyncio.wait_for(running, 10)
-    finally:
-        release.set()
-        if not running.done():
-            running.cancel()
-        await asyncio.gather(running, return_exceptions=True)
-    assert faults.injected and faults.invocations == 1
-    assert not outcome.native_held and outcome.exited == (ending == "terminate")
-    assert db_conn.execute(
-        "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
-    ).fetchone() == ("applied",)
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE id=%s", (queued,)
-    ).fetchone() == ("pending",)
+            queued = _insert(db_conn, initial.agent_id)
+            release.set()
+            outcome = await asyncio.wait_for(running, 10)
+        finally:
+            release.set()
+            if not running.done():
+                running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+        assert faults.injected and faults.invocations == 1
+        assert not outcome.native_held and outcome.exited == (ending == "terminate")
+        assert db_conn.execute(
+            "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
+        ).fetchone() == ("applied",)
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (queued,)
+        ).fetchone() == ("pending",)
+        _assert_original_return_receipt(db_conn, command, ending, outcome, resources, failure)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": str(initial.agent_id)}})
+        assert snapshot.values["halted"] is True
+
+
+def _assert_original_return_receipt(
+    db_conn: psycopg.Connection,
+    command: int | None,
+    ending: str,
+    outcome: TurnOutcome,
+    resources: HostedTurnResources,
+    failure: FatalProviderError,
+) -> None:
+    """The returned invocation settles its lifecycle command or exact provider error."""
     if command is not None:
         record = db_conn.execute(
             "SELECT applied_at,observed_at FROM inbound_messages WHERE id=%s", (command,)
@@ -112,8 +136,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
         assert (record[1] is not None) == (ending == "terminate")
     else:
         assert outcome.crashed and outcome.aborted
-    snapshot = await graph.aget_state({"configurable": {"thread_id": str(initial.agent_id)}})
-    assert snapshot.values["halted"] is True
+        assert resources.require_service().failures == [(resources, failure)]
 
 
 async def _blocked_host(

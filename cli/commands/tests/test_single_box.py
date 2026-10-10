@@ -23,6 +23,7 @@ from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -212,11 +213,13 @@ def _birth(born: Born) -> None:
 
 @pytest.fixture
 def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Born]:
-    born = _configure(monkeypatch, tmp_path)
-    try:
-        yield born
-    finally:
-        _teardown(born)
+    # These commands simulate a process entry and deliver its unit environment.
+    with patch.dict(os.environ):
+        born = _configure(monkeypatch, tmp_path)
+        try:
+            yield born
+        finally:
+            _teardown(born)
 
 
 @pytest.fixture

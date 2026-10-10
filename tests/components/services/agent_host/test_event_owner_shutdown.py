@@ -178,7 +178,7 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     monkeypatch.setattr(daemon, "_boot_handles", boot_handles)
     monkeypatch.setattr(daemon, "_open_host_pools", open_pools)
     monkeypatch.setattr(daemon, "_close_host_pools", close_pools)
-    monkeypatch.setattr(daemon, "_load_plugin_installation", load_plugins)
+    monkeypatch.setattr(daemon, "load_installation", load_plugins)
     monkeypatch.setattr(daemon, "process_clients", process_clients)
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
     monkeypatch.setattr("agent.process_boot.init_process_scope", no_op)

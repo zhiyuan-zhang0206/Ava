@@ -236,12 +236,13 @@ class TestReapedSuccessorMarker:
     async def test_reaped_successor_marker_clears_when_task_finishes(self, outcome: str) -> None:
         entered = asyncio.Event()
         release = asyncio.Event()
+        failure = ValueError("turn failed")
 
         async def run_turn(_agent_id: int) -> None:
             entered.set()
             await release.wait()
             if outcome == "error":
-                raise ValueError("turn failed")
+                raise failure
 
         scheduler = TurnScheduler(run_turn)
         try:
@@ -262,7 +263,12 @@ class TestReapedSuccessorMarker:
             )
         finally:
             release.set()
-            await scheduler.aclose()
+            if outcome == "error":
+                with pytest.raises(ValueError) as joined:
+                    await scheduler.aclose()
+                assert joined.value is failure
+            else:
+                await scheduler.aclose()
 
     async def test_old_successor_cleanup_preserves_new_reaper_marker(self) -> None:
         release = asyncio.Event()

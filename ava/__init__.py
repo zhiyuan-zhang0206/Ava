@@ -351,11 +351,6 @@ def ensure_plugins_loaded(
             from base.config.service_read import ConfigAuthority
             from base.lm.plugin_providers import build_model_catalog
 
-            def complete_read_model() -> Any:
-                from base.config import Settings
-
-                return Settings(profile=None)
-
             if config is None:
                 config = ConfigBoot()
                 config.boot()
@@ -369,7 +364,7 @@ def ensure_plugins_loaded(
                 producer = clients.event_pipeline
             authority = ConfigAuthority.deferred(
                 runtime=config.view,
-                build_all_domains=complete_read_model,
+                build_all_domains=config.complete_read_model,
                 env_path=paths.ava_home() / ".env",
             )
             loader.load_extensions(

@@ -54,9 +54,9 @@ import runpy
 from base import config
 class BootStoppedError(RuntimeError):
     pass
-def stop_boot():
+def stop_boot(self):
     raise BootStoppedError("after SDK posture")
-config.ensure_eager = stop_boot
+config.ConfigBoot.ensure_eager = stop_boot
 try:
     runpy.run_module("services.agent_runner.agent_host.daemon", run_name="__main__")
 except BootStoppedError:
