@@ -186,17 +186,17 @@ describe("nearestUnit", () => {
 describe("the curve", () => {
   it("bends visibly even when both ends are at the same x, within bounds", () => {
     const c = curveOf("k", 100, 0, 100, 200);
-    expect(Math.abs(c.c1x - c.x0)).toBeGreaterThanOrEqual(20);
-    expect(Math.abs(c.c1x - c.x0)).toBeLessThanOrEqual(140);
+    expect(Math.abs(c.c1x - c.x0)).toBeGreaterThanOrEqual(15);
+    expect(Math.abs(c.c1x - c.x0)).toBeLessThanOrEqual(75);
     expect(c.c1x - c.x0).toBe(c.c2x - c.x1);
     const short = curveOf("k", 100, 0, 100, 4);
-    expect(Math.abs(short.c1x - short.x0)).toBeGreaterThanOrEqual(20);
+    expect(Math.abs(short.c1x - short.x0)).toBeGreaterThanOrEqual(15);
   });
 
   it("pulls further for longer vertical distances, up to a bound", () => {
     const pull = (dy: number) => Math.abs(curveOf("k", 0, 0, 0, dy).c1x);
     expect(pull(400)).toBeGreaterThan(pull(100));
-    expect(pull(10000)).toBeLessThanOrEqual(140);
+    expect(pull(10000)).toBeLessThanOrEqual(75);
   });
 
   it("varies the size of the bend between links, never its side", () => {

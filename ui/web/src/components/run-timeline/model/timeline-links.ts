@@ -160,8 +160,8 @@ export interface Curve {
   y1: number;
 }
 
-const BEND_MIN_PX = 28;
-const BEND_MAX_PX = 140;
+const BEND_MIN_PX = 24;
+const BEND_MAX_PX = 60;
 const BEND_PER_DY = 0.45;
 const STAGGER_STEPS = 5;
 
@@ -261,7 +261,7 @@ export function nearestUnit(data: RunTimelineResponse, ms: number): Selection | 
 }
 
 /** The most arrows the panel shows at once; the merge distance adapts to the viewport to stay within it. */
-export const MAX_ARROWS = 30;
+export const MAX_ARROWS = 20;
 
 /** What clustering needs of an arrow on screen: its identity, which arrows it may merge with, and where its ends are. */
 export interface Arrow {
