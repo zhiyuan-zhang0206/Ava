@@ -145,8 +145,10 @@ a `global` slot, a `ContextVar`, a platform constant, an import-time call or rea
 ask whether anything reads it to decide what to do, and if so build it in a
 composition root and hand it to the component that uses it. Background work must be
 durable or re-derivable from durable state and run as its own service loop; use a
-per-iteration `async with asyncio.TaskGroup()` for bounded parallelism, never a
-free-floating `create_task` or thread. Rule 9 of `scripts/lint/code_structure.py`
+per-iteration `async with asyncio.TaskGroup()` for bounded parallelism. A Thread
+requires an explicit service/process owner with admission, stop, retained handles
+and completion/error collection; free-floating `create_task` or thread work is
+forbidden. Rule 9 of `scripts/lint/code_structure.py`
 (`scripts/structure/ambient_state/`) enforces both: new sites fail, today's are
 frozen in the `ambient_state` baseline section as `path::rule:name -> site count`
 (exact, shrink-only), and the only things let through are the closed, reasoned lists
@@ -155,6 +157,27 @@ in `scripts/structure/ambient_state/allowlist.py` — write-only facades, framew
 (`re.compile`, `TypeVar`, `timedelta`, `Path`) and memoized pure functions. There is
 no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts
 are not.
+
+Thread ownership detection is conservative and structural, with no file list or
+inline owner marker. The scanner recognizes an instance-held Thread whose target
+is a visible method, actual start, a real Event created by that owner and read
+or passed to the worker, and a teardown call graph that sets that same signal,
+joins that same handle with an explicit non-None timeout, checks its liveness,
+and raises the original error retained by the worker. The worker entry captures
+BaseException into an owner field and immediately passes it to an error observer.
+Void completion is observed through join and liveness; value-producing work also
+needs its actual result receipt. Method and field names carry no exemption.
+Other ownership shapes remain findings until their structural evidence is
+supported; they must not be disguised behind Timer, executor, helper or subclass.
+
+AST does not prove that the composition root calls teardown, that branch ordering
+is safe, that a dynamic timeout is finite, that a callback observes an Event, or
+that an observer records a visible failure. It also cannot prove correct result
+semantics, cross-generation receipt retention, preservation of a primary error,
+or interruption of native blocking work. Consumer tests and review must cover
+these properties, including admission after stop, late errors, finite shutdown
+and residual resources. A saved handle, a log call or a syntactic join alone is
+insufficient. See the [accepted ownership and shutdown choices](../decisions/engineering/design/simplification/2026-10-10-owned-workers-and-bounded-shutdown.md).
 
 ## Function quality budgets: complexity and nesting
 
