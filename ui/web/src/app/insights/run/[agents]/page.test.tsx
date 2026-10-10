@@ -22,7 +22,7 @@ const {
   vi.hoisted(() => ({
     getRunTimeline:
       vi.fn<
-        (agentId: number, options?: { from?: string; to?: string }) => Promise<RunTimelineResponse>
+        (agentId: number, options?: { from?: string; to?: string; signal?: AbortSignal }) => Promise<RunTimelineResponse>
       >(),
     getRunTimelineMessages:
       vi.fn<
@@ -290,7 +290,7 @@ afterEach(() => {
 describe("the default window", () => {
   it("asks for the agent's whole lifetime: no from/to", async () => {
     render();
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(42, {}));
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(42, { signal: expect.any(AbortSignal) as AbortSignal }));
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
@@ -536,6 +536,39 @@ describe("zoom and pan", () => {
 });
 
 describe("failure and loading", () => {
+  it("aborts the pending read on unmount without turning cancellation into a failed agent", async () => {
+    let signal: AbortSignal | undefined;
+    getRunTimeline.mockImplementation((_agent, options) => {
+      signal = options?.signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    });
+    const view = render();
+    await waitFor(() => expect(signal).toBeDefined());
+    expect(signal?.aborted).toBe(false);
+    expect(screen.queryByRole("alert")).toBeNull();
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a retry after a pending read times out, then loads the fresh result", async () => {
+    let fail: ((error: DOMException) => void) | undefined;
+    getRunTimeline.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    render();
+    await waitFor(() => expect(fail).toBeDefined());
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    await act(async () => {
+      fail?.(new DOMException("run timeline exceeded 35000ms", "TimeoutError"));
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("Could not load the timeline of agent 42.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("run-timeline-chart");
+    expect(getRunTimeline).toHaveBeenCalledTimes(2);
+  });
+
   it("offers a retry when the read fails", async () => {
     getRunTimeline.mockRejectedValueOnce(new Error("boom"));
     render();
