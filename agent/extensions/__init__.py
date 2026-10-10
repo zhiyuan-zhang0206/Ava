@@ -189,6 +189,7 @@ def load_extensions(
             catalog=catalog,
             authority=authority,
             delivery_sender=sender,
+            sampling=None if previous is None else previous.sampling,
         ),
     )
 

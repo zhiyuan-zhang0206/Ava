@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.agents.sdk.call_policy import SamplingPolicy
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureAdmission, SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 
@@ -37,6 +37,7 @@ def emit(
     duration: float | None = None,
     *,
     identity: Mapping[str, Any],
+    sampling_owner: SamplingPolicyOwner,
     sampling_policy: SamplingPolicy | None = None,
     admission: SdkCaptureAdmission | None = None,
 ) -> None:
@@ -48,7 +49,7 @@ def emit(
     calls supply their entry snapshot so a refresh cannot mask the SDK outcome."""
     from base.agents.sdk.call_policy import policy
 
-    current = policy() if sampling_policy is None else sampling_policy
+    current = policy(sampling_owner) if sampling_policy is None else sampling_policy
     every = current.sample_every if current.sampling_enabled else 1
     if every > 1:
         import random
@@ -89,10 +90,11 @@ def _measure(
     identity: Mapping[str, Any],
     tally: SdkCallTally | None,
     capture_owner: SdkCaptureOwner | None,
+    sampling_owner: SamplingPolicyOwner,
 ) -> Generator[None, None, None]:
     from base.agents.sdk.call_policy import policy
 
-    snapshot = policy()
+    snapshot = policy(sampling_owner)
     caller_identity = dict(identity)
     # Retain this call's original gate until its event is captured. Attachment
     # close can reject new entries but cannot seal this receipt before drain.
@@ -113,6 +115,7 @@ def _measure(
                     fn,
                     duration=time.monotonic() - t0,
                     identity=caller_identity,
+                    sampling_owner=sampling_owner,
                     sampling_policy=snapshot,
                     **capture_args,
                 )
@@ -138,11 +141,12 @@ def run_metered(
     kwargs: Any,
     *,
     identity: Mapping[str, Any],
+    sampling_owner: SamplingPolicyOwner,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
 ) -> Any:
     """Validate each public entry before execution and retain its call-local snapshots."""
-    with _measure(fn, identity, tally, capture_owner):
+    with _measure(fn, identity, tally, capture_owner, sampling_owner):
         return original(*args, **kwargs)
 
 
@@ -153,11 +157,12 @@ async def run_metered_async(
     kwargs: Any,
     *,
     identity: Mapping[str, Any],
+    sampling_owner: SamplingPolicyOwner,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
 ) -> Any:
     """Validate when awaited, preserving cancellation and the call's own admission."""
-    with _measure(fn, identity, tally, capture_owner):
+    with _measure(fn, identity, tally, capture_owner, sampling_owner):
         return await original(*args, **kwargs)
 
 

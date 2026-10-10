@@ -352,6 +352,7 @@ def _run_code(code: str, payload: Any) -> None:
         format_full_traceback,
         register_agent_source,
     )
+    from ava.sdk_surface import install as sdk_install
     from ava.sdk_surface.help import HelpRouter
     from base.agents.sdk import telemetry as sdk_usage_telemetry
 
@@ -375,6 +376,10 @@ def _run_code(code: str, payload: Any) -> None:
 
     tally = sdk_usage_telemetry.SdkCallTally()
     execution_context = ava.context
+    installation = sdk_install.installed()
+    sampling = (
+        contextlib.nullcontext() if installation is None else installation.sampling.execution()
+    )
     ava.bind_context(replace(execution_context, sdk_calls=tally))
     try:
         # From here on the agent-authored code has run (or is about to) — the
@@ -384,7 +389,8 @@ def _run_code(code: str, payload: Any) -> None:
         # Each child owns one execution tally. Its context shares that owner with
         # all public SDK entries, including ordinary threads; boot calls occurred
         # before this binding and do not enter the execution's result.
-        exec(compile(code, "<agent_code>", "exec"), fresh_globals)
+        with sampling:
+            exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
         from base.agents.lifecycle import LifecycleExit
 

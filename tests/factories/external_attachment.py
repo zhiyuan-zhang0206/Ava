@@ -73,14 +73,19 @@ def attached_runtime(
     from ava.sdk_surface import metering
     from base.agents.sdk import call_policy
 
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
 
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+
+    sampling = call_policy.SamplingPolicyOwner()
     installation = Installation(
         registry=EMPTY,
         expansions=(),
         wrap_layers={},
         skill_providers=(),
-        metered=metering.install(),
+        metered=metering.install(sampling),
+        sampling=sampling,
         disabled=frozenset(),
         faces=True,
         undo=(),
