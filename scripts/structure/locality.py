@@ -142,8 +142,12 @@ class _PrivateReach(ast.NodeVisitor):
         self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
     ) -> None:
         parent = self.scope
+        outer, inner = bindings.scope_parts(node)
+        for expression in outer:
+            self.visit(expression)
         self.scope = bindings.Scope(node, self.reach.rel_path, parent.nested_parent())
-        self.generic_visit(node)
+        for statement in inner:
+            self.visit(statement)
         self.scope = parent
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:

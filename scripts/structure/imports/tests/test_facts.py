@@ -198,3 +198,20 @@ def test_repository_root_traversal_records_the_directory(tmp_path: Path) -> None
         "from pathlib import Path\nROOT = Path(__file__).resolve().parents[2]\nROOT.rglob('*.py')\n",
     )
     assert [fact.target for fact in found.records] == ["."]
+
+
+def test_function_default_uses_parent_scope_before_parameter_binding(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\ndef load(importlib=importlib.import_module('base.net.retry')):\n return importlib\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
+def test_class_base_uses_parent_scope_before_class_local_import(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\nclass Example(importlib.import_module('base.net.retry')):\n import third_party as importlib\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]

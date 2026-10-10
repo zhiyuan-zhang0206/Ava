@@ -11,9 +11,27 @@ from typing import cast
 from . import normalize
 
 
+def scope_parts(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda,
+) -> tuple[tuple[ast.AST, ...], tuple[ast.AST, ...]]:
+    """Definition-time expressions use the enclosing scope; only bodies use the new one."""
+    if isinstance(node, ast.ClassDef):
+        outer = (*node.decorator_list, *node.bases, *node.keywords, *node.type_params)
+        return outer, tuple(node.body)
+    if isinstance(node, ast.Lambda):
+        return (node.args,), (node.body,)
+    outer = (node.args, *node.decorator_list, *node.type_params)
+    if node.returns is not None:
+        outer = (*outer, node.returns)
+    return outer, tuple(node.body)
+
+
 def local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
     """Walk this lexical scope, keeping nested scope bodies out of its bindings."""
-    for child in ast.iter_child_nodes(tree):
+    children = ast.iter_child_nodes(tree)
+    if isinstance(tree, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+        children = iter(scope_parts(tree)[1])
+    for child in children:
         yield child
         if not isinstance(
             child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
