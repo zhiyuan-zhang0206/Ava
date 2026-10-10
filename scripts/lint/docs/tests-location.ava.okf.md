@@ -59,7 +59,13 @@ root, preventing needless filename policy from returning.
 `--suggest PATH ...` explains the same strict subject proof. A single-component
 root test names its actual subject directory and must move into that directory's
 `tests/`; incomplete input names the exact unresolved site instead of guessing
-an owner. After moving, preserve autouse isolation in `path_scopes.toml`.
+an owner. After moving, preserve autouse isolation in a local conftest or an existing
+`path_scopes.toml` declaration.
+The path-scope tests check declared paths and the binding mechanism, not a moved
+test's previous environment. Deleting the old declaration and forgetting the new
+one can leave valid paths while losing autouse fixtures. Attach paired old/new
+node runtime fixture closure evidence to migration review; the module-move audit
+does not execute pytest fixtures or prove their preservation.
 
 The commit hook checks changed root tests. A change under `scripts/structure/`
 widens to all tracked root tests; pre-push and CI check the same full set.
