@@ -488,7 +488,7 @@ def test_product_guide_has_one_builtin_source_and_nested_operator_entries() -> N
 
 
 def test_builtin_guide_installs_with_the_core_update_channel(
-    tmp_path: Path, unit_home: Path
+    process_config: ConfigBoot, tmp_path: Path, unit_home: Path
 ) -> None:
     import shutil
 
@@ -515,7 +515,9 @@ def test_builtin_guide_installs_with_the_core_update_channel(
         source.write_bytes(original + b"\nUpdated product guidance.\n")
         converge_skills(repo, unit_home)
         assert installed.read_bytes() == original  # Built-ins update explicitly.
-        policy = install_registry.resolved_policy(entry)
+        policy = install_registry.resolved_policy(
+            entry, defaults_reader=lambda: process_config.view.packages
+        )
         assert policy.channel == "core" and policy.mode == "auto"
         assert entry.origin_path == str(sources / name)
 

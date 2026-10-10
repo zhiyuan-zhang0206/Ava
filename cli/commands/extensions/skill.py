@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
+from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths import ava_home
 from cli.commands.extensions.skills_sync import _Source
@@ -434,6 +435,7 @@ def _update_one(
     registry: reg.Registry,
     now: str,
     *,
+    config: ConfigBoot,
     landed: list[str],
     updated: list[str],
     unchanged: list[str],
@@ -449,7 +451,7 @@ def _update_one(
     skip = reg.preserved_subpaths(dest)
     entry = next((p for p in registry.packages if p.name == s.name), None)
     if entry is not None:
-        policy = reg.resolved_policy(entry)
+        policy = reg.resolved_policy(entry, defaults_reader=lambda: config.view.packages)
         if policy.channel == "core" and policy.mode != "off":
             # Channel-managed (design §5.7-1; tasks #2915/#3267): the content
             # channel (`ava packages refresh`) owns this package's revision —
@@ -558,7 +560,9 @@ def _report_update(
     return 0
 
 
-def cmd_skill_update(names: list[str] | None, *, repo: Path | None = None) -> int:
+def cmd_skill_update(
+    names: list[str] | None, *, config: ConfigBoot, repo: Path | None = None
+) -> int:
     """`ava skill update [name ...]` — bring repo-native skills (from this
     checkout) into the load dir.
 
@@ -608,6 +612,7 @@ def cmd_skill_update(names: list[str] | None, *, repo: Path | None = None) -> in
                 skills_root,
                 registry,
                 now,
+                config=config,
                 landed=landed,
                 updated=updated,
                 unchanged=unchanged,

@@ -36,4 +36,4 @@ than deadlocking, but only after waiting out the full 30s bound: the failure is
 bounded and loud, not fast. Catch it in review or a test, not by watching prod.
 
 
-Parent: [[base/packages/extensions/docs/install_registry.ava.okf.md|install registry]].
+Parent: [[base/packages/extensions/docs/install_registry/install_registry.ava.okf.md|install registry]].

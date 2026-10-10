@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.skill import cmd_skill_update, cmd_skill_upgrade
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -61,8 +62,10 @@ def _set_mode_off(name: str) -> None:
 # ─── skill update: bootstrap ────────────────────────────────────────────────
 
 
-def test_update_lands_missing_and_reports(unit_home: Path, repo: Path, capsys) -> None:
-    assert cmd_skill_update(None, repo=repo) == 0
+def test_update_lands_missing_and_reports(
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+) -> None:
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "landed 'builtin-a'" in out
     assert "project-x" not in out
@@ -72,18 +75,22 @@ def test_update_lands_missing_and_reports(unit_home: Path, repo: Path, capsys) -
 
 
 def test_update_agents_project_skill_is_not_repo_native(
-    unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
 ) -> None:
     """`.agents/skills` skills are no longer repo-native sources (issue #146):
     update reports them as unknown and never lands a copy."""
-    assert cmd_skill_update(["project-x"], repo=repo) == 0
+    assert cmd_skill_update(["project-x"], config=process_config, repo=repo) == 0
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "'project-x' is not a repo-native skill" in err
     assert not (unit_home / "skills" / "project-x").exists()
 
 
-def test_update_unknown_name_errors(unit_home: Path, repo: Path, capsys) -> None:
-    assert cmd_skill_update(["nope"], repo=repo) == 0  # others still run; unknown reported
+def test_update_unknown_name_errors(
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+) -> None:
+    assert (
+        cmd_skill_update(["nope"], config=process_config, repo=repo) == 0
+    )  # others still run; unknown reported
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "'nope' is not a repo-native skill" in err
 
@@ -91,26 +98,30 @@ def test_update_unknown_name_errors(unit_home: Path, repo: Path, capsys) -> None
 # ─── skill update: source change / local edits ──────────────────────────────
 
 
-def test_update_propagates_source_change(unit_home: Path, repo: Path) -> None:
-    assert cmd_skill_update(None, repo=repo) == 0
+def test_update_propagates_source_change(
+    process_config: ConfigBoot, unit_home: Path, repo: Path
+) -> None:
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     _set_mode_off("builtin-a")
     (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
     )
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
     assert "# v2" in body
 
 
-def test_update_replaces_a_local_edit_and_reports(unit_home: Path, repo: Path, capsys) -> None:
-    assert cmd_skill_update(None, repo=repo) == 0
+def test_update_replaces_a_local_edit_and_reports(
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+) -> None:
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     _set_mode_off("builtin-a")
     copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
     copy.write_text("---\nname: builtin-a\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
     (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: v2\n---\n", encoding="utf-8"
     )
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "note:" in out and "local copy differed" in out
     body = copy.read_text(encoding="utf-8")
@@ -118,15 +129,15 @@ def test_update_replaces_a_local_edit_and_reports(unit_home: Path, repo: Path, c
 
 
 def test_update_restores_a_local_edit_without_a_source_change(
-    unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
 ) -> None:
     """Local edits alone (no upstream change) are converged too: the source
     tree is restored and the replacement is reported."""
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     _set_mode_off("builtin-a")
     copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
     copy.write_text("---\nname: builtin-a\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "note:" in out and "local copy differed" in out
     body = copy.read_text(encoding="utf-8")
@@ -136,7 +147,9 @@ def test_update_restores_a_local_edit_without_a_source_change(
 # ─── skill update: adoption of hand-installed .agents residue ───────────────
 
 
-def test_update_adopts_matching_user_residue(unit_home: Path, repo: Path) -> None:
+def test_update_adopts_matching_user_residue(
+    process_config: ConfigBoot, unit_home: Path, repo: Path
+) -> None:
     """The pre-converge way to get a skill into the load dir was a manual
     `skill install --path .agents/skills/<name>` (origin=user) — here of a
     builtin, hand-installed from the open-standard mirror. update adopts the
@@ -150,20 +163,22 @@ def test_update_adopts_matching_user_residue(unit_home: Path, repo: Path) -> Non
             name="builtin-a", type="skill", source=".agents/skills/builtin-a", origin="user"
         )
     )
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     entry = _entry("builtin-a")
     assert entry.origin == "repo" and entry.source is None
     assert (unit_home / "skills" / "builtin-a" / "SKILL.md").exists()
 
 
-def test_update_converges_a_diverged_user_residue(unit_home: Path, repo: Path, capsys) -> None:
+def test_update_converges_a_diverged_user_residue(
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+) -> None:
     _write_skill(unit_home / "skills", "builtin-a", body="# user hacked\n")
     reg.register(
         reg.InstalledPackage(
             name="builtin-a", type="skill", source=".agents/skills/builtin-a", origin="user"
         )
     )
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "note:" in out and "local copy differed" in out
     assert _entry("builtin-a").origin == "repo"
@@ -171,7 +186,9 @@ def test_update_converges_a_diverged_user_residue(unit_home: Path, repo: Path, c
     assert "user hacked" not in body
 
 
-def test_update_leaves_third_party_user_package_alone(unit_home: Path, repo: Path, capsys) -> None:
+def test_update_leaves_third_party_user_package_alone(
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+) -> None:
     """A genuinely third-party user install squatting a repo name is shadowed
     by converge; update must not adopt it either."""
     _write_skill(unit_home / "skills", "builtin-a", body="# third party\n")
@@ -180,7 +197,7 @@ def test_update_leaves_third_party_user_package_alone(unit_home: Path, repo: Pat
             name="builtin-a", type="skill", source="https://example.com/skills.git", origin="user"
         )
     )
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     assert _entry("builtin-a").origin == "user"
     body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
     assert "# third party" in body
@@ -294,7 +311,11 @@ def test_upgrade_replaces_a_local_edit(
 
 
 def test_update_refuses_worktree_repo_for_default_home(
-    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    process_config: ConfigBoot,
+    unit_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
 ) -> None:
     """`ava skill update` from a worktree checkout must not write the prod home
     (the R5 worktree that synced ava-serious-research into prod)."""
@@ -302,7 +323,7 @@ def test_update_refuses_worktree_repo_for_default_home(
     monkeypatch.setattr("base.cluster.derive.default_home", lambda: unit_home)
     wt_repo = tmp_path / "repo" / ".worktrees" / "ava-9999-task"
     _write_skill(wt_repo / "ava_builtins" / "skills", "builtin-a")
-    assert cmd_skill_update(None, repo=wt_repo) == 1
+    assert cmd_skill_update(None, config=process_config, repo=wt_repo) == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "worktree" in err
     assert not (unit_home / "skills" / "builtin-a").exists()
@@ -311,7 +332,9 @@ def test_update_refuses_worktree_repo_for_default_home(
 # ─── adopt trust + stale origin_path re-anchor (audit 02 #5/#15) ────────────
 
 
-def test_update_adopt_sets_builtin_trust(unit_home: Path, repo: Path) -> None:
+def test_update_adopt_sets_builtin_trust(
+    process_config: ConfigBoot, unit_home: Path, repo: Path
+) -> None:
     """Adopting a hand-installed residue of a repo skill stamps it builtin —
     it ships under the checkout's review, not third-party."""
     # Simulate the pre-incorporation state: user row (no disk copy - update materializes source content)
@@ -327,14 +350,16 @@ def test_update_adopt_sets_builtin_trust(unit_home: Path, repo: Path) -> None:
             installed_at=datetime.now(UTC).isoformat(),
         )
     )
-    assert cmd_skill_update(["builtin-a"], repo=repo) == 0
+    assert cmd_skill_update(["builtin-a"], config=process_config, repo=repo) == 0
     assert _entry("builtin-a").trust == "builtin"
 
 
-def test_update_unchanged_reanchors_stale_origin_path(unit_home: Path, repo: Path, capsys) -> None:
+def test_update_unchanged_reanchors_stale_origin_path(
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+) -> None:
     """An up-to-date copy whose recorded origin_path points at a deleted
     worktree gets re-anchored to the current source (no-op pass)."""
-    cmd_skill_update(None, repo=repo)
+    cmd_skill_update(None, config=process_config, repo=repo)
     e = _entry("builtin-a")
     e.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/builtin-a"
     reg.save(reg.load())  # persist
@@ -343,27 +368,27 @@ def test_update_unchanged_reanchors_stale_origin_path(unit_home: Path, repo: Pat
     assert pkg is not None
     pkg.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/builtin-a"
     reg.save(reg.load())
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     assert _entry("builtin-a").origin_path == str(repo / "ava_builtins" / "skills" / "builtin-a")
 
 
 def test_update_skips_channel_managed_packages(
-    unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Resolved core-channel rows belong to `ava packages refresh` (design
     §5.7-1): `skill update` reports the skip and leaves the copy alone, and an
     explicit `mode=off` opts the package back onto the checkout path."""
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     capsys.readouterr()
     (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
     )
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "channel-managed" in out and "skipped" in out
     body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
     assert "# v2" not in body
     _set_mode_off("builtin-a")
-    assert cmd_skill_update(None, repo=repo) == 0
+    assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
     assert "# v2" in body

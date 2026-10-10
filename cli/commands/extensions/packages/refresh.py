@@ -30,6 +30,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,7 +38,8 @@ from pathlib import Path
 from loguru import logger
 
 from base import paths
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
+from base.config.domains.packages import PackagesSettings
 from base.deploy.git.gitenv import git_env
 from base.host.proc import run_bounded
 from base.host.system.cron import os_jobs_enabled
@@ -112,12 +114,15 @@ class _Pass:
     def __init__(
         self,
         *,
+        config: ConfigBoot,
         check_only: bool,
         only: str | None,
         from_job: bool,
         now: datetime,
         repo: Path | None,
     ) -> None:
+        self.config = config
+        self._read_defaults: Callable[[], PackagesSettings] = lambda: config.view.packages
         self.check_only = check_only
         self.only = only
         self.from_job = from_job
@@ -152,7 +157,7 @@ class _Pass:
             delta.update["failures"] = 0
         else:
             delta.update["failures"] = pkg.update.failures + 1
-        policy = install_registry.resolved_policy(pkg)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
         self.items.append(
             ItemOutcome(
                 name=pkg.name,
@@ -166,7 +171,7 @@ class _Pass:
 
     def _keep_resolved(self, pkg: install_registry.InstalledPackage, delta: _Delta) -> None:
         """Freeze the resolved policy into the row at first sight (§5.2)."""
-        policy = install_registry.resolved_policy(pkg)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
         if pkg.update.channel is None and policy.channel is not None:
             delta.update["channel"] = policy.channel
         if pkg.update.mode is None:
@@ -185,7 +190,7 @@ class _Pass:
         for pkg in registry.packages:
             if self.only is not None and match_key(pkg.name) != match_key(self.only):
                 continue
-            policy = install_registry.resolved_policy(pkg)
+            policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
             skip_why: str | None = None
             if policy.channel is None:
                 skip_why = "no channel (local / hand-registered package)"
@@ -221,7 +226,7 @@ class _Pass:
         core_keys = {p.name for p in core}
         queue = sorted(core + git_pkgs, key=lambda p: (p.update.last_check_at or "", p.name))
         for idx, pkg in enumerate(queue):
-            if self.applies_used >= settings.packages.refresh_max_applies:
+            if self.applies_used >= self.config.view.packages.refresh_max_applies:
                 self._count("skipped_budget", len(queue) - idx)
                 break
             if time.monotonic() > self.deadline:
@@ -244,7 +249,7 @@ class _Pass:
                 counts={},
             )
         self.registry = registry
-        self.deadline = time.monotonic() + settings.packages.refresh_budget_seconds
+        self.deadline = time.monotonic() + self.config.view.packages.refresh_budget_seconds
 
         core, git_pkgs = self._partition(registry)
         if self.only is not None and not core and not git_pkgs and not self.notes:
@@ -293,7 +298,7 @@ class _Pass:
                 capture_output=True,
                 text=True,
                 env=git_env(),
-                timeout=settings.packages.refresh_network_timeout_seconds,
+                timeout=self.config.view.packages.refresh_network_timeout_seconds,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             return None, f"ls-remote failed: {exc}"
@@ -312,7 +317,7 @@ class _Pass:
                 capture_output=True,
                 text=True,
                 env=git_env(),
-                timeout=settings.packages.refresh_network_timeout_seconds,
+                timeout=self.config.view.packages.refresh_network_timeout_seconds,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             return f"fetch failed: {exc}"
@@ -435,7 +440,7 @@ class _Pass:
     def _process_core(self, pkg: install_registry.InstalledPackage, head: str | None) -> None:
         if head is None:  # channel resolution failed; the package was recorded then
             return
-        policy = install_registry.resolved_policy(pkg)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
         applied = pkg.update.applied_rev
         if applied == head and pkg.update.failures == 0:
             self._record(pkg, "up_to_date")
@@ -562,7 +567,7 @@ class _Pass:
                 capture_output=True,
                 text=True,
                 env=git_env(),
-                timeout=settings.packages.refresh_network_timeout_seconds,
+                timeout=self.config.view.packages.refresh_network_timeout_seconds,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             return None, False, f"ls-remote failed: {exc}"
@@ -589,7 +594,7 @@ class _Pass:
         """The remote sha worth acquiring, or None after recording why this package stops here."""
         from cli.commands.extensions._pkg_source import looks_like_local_path
 
-        policy = install_registry.resolved_policy(pkg)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
         source = pkg.source
         if not source:
             self._record(pkg, "error: no recorded source to check")
@@ -703,31 +708,34 @@ def _skip(reason: str) -> RefreshReport:
 
 def run_refresh(
     *,
+    config: ConfigBoot,
     check_only: bool = False,
     only: str | None = None,
     from_job: bool = False,
     now: datetime | None = None,
     repo: Path | None = None,
 ) -> RefreshReport:
-    """Run one refresh pass; never raises for expected conditions.
+    """Run one refresh pass with the caller's prepared configuration owner.
+
+    Configuration reads stay live at their original operation points. Expected
+    refresh conditions remain report outcomes; invalid configuration propagates.
 
     `from_job` adds the job-only gates (os jobs enabled, refresh enabled,
     due-time + backoff). A manual run checks every channel-backed package
     regardless of cadence; `--check` never stages or applies. A differing local
     copy is replaced (reported as an info line)."""
+    if not config.prepared:
+        raise ValueError("package refresh requires a prepared configuration owner")
     moment = now or datetime.now(UTC)
-    if from_job:
-        config = ConfigBoot()
-        if not config.prepared:
-            config.read_process_environment()
-        if not os_jobs_enabled(enabled_reader=lambda: config.view.general.os_jobs_enabled):
-            return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
-    if from_job and not settings.packages.refresh_enabled:
+    if from_job and not os_jobs_enabled(enabled_reader=lambda: config.view.general.os_jobs_enabled):
+        return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
+    if from_job and not config.view.packages.refresh_enabled:
         return _skip("refresh disabled (AVA_PACKAGES_REFRESH_ENABLED=false)")
     lock_path = paths.ava_home() / "packages-refresh.lock"
     try:
         with file_lock(lock_path, timeout_s=_QUEUE_LOCK_TIMEOUT_S):
             pass_ = _Pass(
+                config=config,
                 check_only=check_only,
                 only=only,
                 from_job=from_job,

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.packages import cmd_packages_status
 
@@ -22,9 +23,14 @@ def _register(name: str, **kw: object) -> reg.InstalledPackage:
 
 
 def test_empty_registry_prints_host_and_no_packages(
-    unit_home: Path, capsys: pytest.CaptureFixture[str]
+    process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cmd_packages_status() == 0
+    assert (
+        cmd_packages_status(
+            config=process_config,
+        )
+        == 0
+    )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "registry v2" in out
     assert "(no tracked packages)" in out
@@ -32,13 +38,18 @@ def test_empty_registry_prints_host_and_no_packages(
 
 
 def test_text_table_shows_resolved_policy_per_source_class(
-    unit_home: Path, capsys: pytest.CaptureFixture[str]
+    process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _register("repo-skill", origin="repo", origin_path="/x/ava_builtins/skills/repo-skill")
     _register("git-skill", origin="user", source="https://x/git-skill")
     _register("local-skill", origin="user")
 
-    assert cmd_packages_status() == 0
+    assert (
+        cmd_packages_status(
+            config=process_config,
+        )
+        == 0
+    )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     lines = {ln.split()[0]: ln for ln in out.splitlines() if ln.startswith("  ") and "skill" in ln}
     assert (
@@ -51,11 +62,11 @@ def test_text_table_shows_resolved_policy_per_source_class(
 
 
 def test_json_output_carries_host_channels_and_packages(
-    unit_home: Path, capsys: pytest.CaptureFixture[str]
+    process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _register("repo-skill", origin="repo", origin_path="/x/ava_builtins/skills/repo-skill")
 
-    assert cmd_packages_status(json_output=True) == 0
+    assert cmd_packages_status(config=process_config, json_output=True) == 0
     payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     assert payload["host"]["registry_schema"] == 2
     assert "+g" in payload["host"]["display"]
@@ -70,21 +81,23 @@ def test_json_output_carries_host_channels_and_packages(
 
 
 def test_invalid_manifest_reported_not_crashed(
-    unit_home: Path, capsys: pytest.CaptureFixture[str]
+    process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _register("broken", origin="repo", origin_path="/x/ava_builtins/skills/broken")
     manifest = unit_home / "skills" / "broken" / "ava-plugin.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text("{ not json", encoding="utf-8")
 
-    assert cmd_packages_status(json_output=True) == 0
+    assert cmd_packages_status(config=process_config, json_output=True) == 0
     payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     (row,) = payload["packages"]
     assert row["manifest"] is None
     assert "not valid JSON" in row["manifest_error"]
 
 
-def test_declared_range_displayed(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_declared_range_displayed(
+    process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     _register("ranged", origin="repo", origin_path="/x/ava_builtins/skills/ranged")
     manifest = unit_home / "skills" / "ranged" / "ava-plugin.json"
     manifest.parent.mkdir(parents=True)
@@ -99,13 +112,18 @@ def test_declared_range_displayed(unit_home: Path, capsys: pytest.CaptureFixture
         ),
         encoding="utf-8",
     )
-    assert cmd_packages_status() == 0
+    assert (
+        cmd_packages_status(
+            config=process_config,
+        )
+        == 0
+    )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "commit abcdef1" in out
 
 
 def test_host_blocked_package_surfaces_the_reason(
-    unit_home: Path, capsys: pytest.CaptureFixture[str]
+    process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A manifest whose range excludes this host is a load-time drop, and the
     status surface carries the reason (design §5.5)."""
@@ -124,11 +142,16 @@ def test_host_blocked_package_surfaces_the_reason(
         encoding="utf-8",
     )
 
-    assert cmd_packages_status(json_output=True) == 0
+    assert cmd_packages_status(config=process_config, json_output=True) == 0
     payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     (row,) = payload["packages"]
     assert row["host_blocked"] is not None and "2099" in row["host_blocked"]
 
-    assert cmd_packages_status() == 0
+    assert (
+        cmd_packages_status(
+            config=process_config,
+        )
+        == 0
+    )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "not loadable on this host" in out

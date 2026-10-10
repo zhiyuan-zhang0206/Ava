@@ -98,7 +98,7 @@ nodes of the packages that own the code:
 |---|---|
 | `$AVA_HOME` layout, what derives from the home | `base/paths/docs/paths.ava.okf.md` |
 | plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.ava.okf.md` |
-| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry.ava.okf.md` |
+| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry/install_registry.ava.okf.md` |
 | `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages/docs/packages.ava.okf.md` |
 | machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/docs/machine.ava.okf.md` |
 | which services each capability contributes | `services/docs/services.ava.okf.md` |
