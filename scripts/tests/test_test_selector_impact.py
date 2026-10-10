@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ci import test_selector
+from scripts.ci import test_impact, test_selector
 
 
 def _write(root: Path, name: str, text: str = "") -> None:
@@ -54,6 +54,36 @@ def test_transitive_relative_helpers_and_imported_tests_are_runtime_edges(tmp_pa
     }
     _assert_selected(root, "tests/support/inner.py", "tests/consumer/test_scenario.py")
     _assert_selected(root, "base/tests/test_shared.py", "tests/consumer/test_scenario.py")
+
+
+def test_shared_dependency_cycle_propagates_every_consumer(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _write(root, "base/leaf.py")
+    _write(root, "base/left.py", "from base import right\n")
+    _write(root, "base/right.py", "from base import left, leaf\n")
+    _write(root, "tests/test_left.py", "from base import left\n")
+    _write(root, "tests/test_right.py", "from base import right\n")
+    _write(root, "tests/test_consumer.py", "from tests import test_left\n")
+    _write(root, "base/unloaded.py", "import importlib\nimportlib.import_module(target)\n")
+
+    reverse = test_selector.build_import_reverse_map(root)
+
+    consumers = {"tests/test_left.py", "tests/test_right.py", "tests/test_consumer.py"}
+    for dependency in ("base/left.py", "base/right.py", "base/leaf.py"):
+        assert reverse[dependency] == consumers
+    assert reverse["tests/test_left.py"] == {"tests/test_left.py", "tests/test_consumer.py"}
+    assert "base/unloaded.py" not in reverse
+    _assert_selected(root, "base/leaf.py", "tests/test_consumer.py")
+
+
+def test_empty_consumer_universe_has_no_reachable_unknowns(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _write(root, "base/orphan.py", "import importlib\nimportlib.import_module(target)\n")
+
+    impact = test_impact.build_impact(root, frozenset())
+
+    assert impact.tests_by_input == {}
+    assert impact.unknown == ()
 
 
 def test_path_scoped_fixture_closure_reaches_tests_outside_its_owner(tmp_path: Path) -> None:
