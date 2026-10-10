@@ -5,14 +5,16 @@ asked agents. Who did it is the audit row's `source` (`agent:N`); the agent it w
 row's `agent_id`. `target_agent_id` is not used: its direction differs per event (for a
 send_message it is the sender, for a spawn the spawner, for a fork the agent copied from).
 Events whose source is not an agent (user, system, schedule...) are not agent-to-agent and are
-left out; a source with an unknown prefix is an error.
+left out; a send_message counts only when its `inbound_id` names a `kind='chat'` inbound row (a task
+assignment is a system note) -- read per page against `inbound_messages`; a source with an unknown prefix is an error.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, cast, get_args
+from typing import Annotated, Any, cast, get_args
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.agents.messages.envelope import validate_source
@@ -43,6 +45,26 @@ def sender_of(source: str) -> int | None:
 
 def _int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _message_inbound(row: dict[str, object]) -> int | None:
+    attrs = row["attributes"]
+    return _int(attrs.get("inbound_id")) if isinstance(attrs, dict) else None
+
+
+def _chat_inbounds(conn: psycopg.Connection, page: list[dict[str, Any]]) -> set[int]:
+    """The ids among the page's messages whose inbound row is a chat (a task assignment is a system note)."""
+    ids = [
+        inbound
+        for row in page
+        if row["event_name"] == "send_message" and (inbound := _message_inbound(row)) is not None
+    ]
+    if not ids:
+        return set()
+    rows = conn.execute(
+        "SELECT id FROM inbound_messages WHERE id = ANY(%s) AND kind = 'chat'", [ids]
+    ).fetchall()
+    return {int(r[0]) for r in rows}
 
 
 def _link(row: dict[str, object]) -> RunTimelineLink | None:
@@ -82,7 +104,13 @@ def read(db: Database, agents: list[int], start: datetime, end: datetime) -> lis
                 offset=offset,
                 direction="forward",
             )
-            links.extend(link for row in page if (link := _link(row)) is not None)
+            chats = _chat_inbounds(conn, page)
+            links.extend(
+                link
+                for row in page
+                if (row["event_name"] != "send_message" or _message_inbound(row) in chats)
+                and (link := _link(row)) is not None
+            )
             if not has_more:
                 return links
             offset += _PAGE_SIZE
