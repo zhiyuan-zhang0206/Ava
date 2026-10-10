@@ -149,7 +149,11 @@ def test_sdk_attachment_can_pause_heartbeat(
     from tests.fixtures.pin_agent import pin_agent
 
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     lease = active_lease(db_conn, config_authority=config_authority)
     pin_agent(None)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
