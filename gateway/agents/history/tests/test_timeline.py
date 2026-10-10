@@ -300,7 +300,7 @@ class CompactHistoryCases:
 
 
 class TestTimelineFailLoud:
-    """endpoint error handling boundaries: IO errors return empty list 200 (debug log),
+    """Endpoint error handling boundaries: IO errors return 503,
     dispatch errors raise to 500 fail-loud.
 
     Historical lesson (8a3c520 → fixed in #50): during the refactor, a missing import +
@@ -371,22 +371,13 @@ class TestTimelineFailLoud:
             f"dispatch error must fail-loud as 500, got {resp.status_code}: {resp.text[:200]}"
         )
 
-    def test_io_error_returns_empty_list_with_200(
+    def test_io_error_returns_unavailable_instead_of_empty_success(
         self,
         db_conn: psycopg.Connection,
         test_client: TestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """IO layer errors (DB connection drop / deserialization failure) still follow the
-        current contract returning empty list 200 — timeline is a cold-load view, when
-        checkpoint read fails, don't block the UI (frontend gets no timeline but can continue
-        rendering other pages).
-
-        Path: load_checkpoint_messages raises IO failures as CheckpointReadError,
-        get_timeline catches it → warning log + messages=[]. Prevents the fail-loud
-        refactor from going too far and turning read failures into 500 affecting UX
-        (contrast with the /messages data endpoint 503: that doesn't tolerate, this one does).
-        """
+        """A failed store read must not look like a successfully empty conversation."""
 
         tid = create_agent(db_conn)
         attempts: list[object] = []
@@ -402,6 +393,10 @@ class TestTimelineFailLoud:
 
         monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
         resp = test_client.get(f"/api/agents/{tid}/timeline")
-        assert resp.status_code == 200
-        assert resp.json() == {"items": [], "msg_count": 0, "has_more": False}
+        assert resp.status_code == 503
+        problem = resp.json()
+        assert problem["detail"] == f"Checkpoint history unavailable for agent {tid}"
+        assert problem["status"] == 503
+        assert problem["code"] == "http_503"
+        assert problem["retryable"] is True
         assert len(attempts) == 1
