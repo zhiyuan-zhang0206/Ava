@@ -192,8 +192,13 @@ class _Inputs(ast.NodeVisitor):
         self._template_launches: dict[int, tuple[int, ast.Call]] = {}
         self._used_functions: set[int] = set()
 
-    def _nested(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> None:
+    def _nested(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
+    ) -> None:
         parent = self.scope
+        outer, inner = bindings.scope_parts(node)
+        for expression in outer:
+            self.visit(expression)
         lexical_parent = parent.nested_parent()
         self.scope = bindings.Scope(node, self.path, lexical_parent)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -204,7 +209,8 @@ class _Inputs(ast.NodeVisitor):
                     for call in bindings.local_nodes(node)
                     if isinstance(call, ast.Call) and self.scope.origin(call.func) in _LAUNCHERS
                 )
-        self.generic_visit(node)
+        for statement in inner:
+            self.visit(statement)
         self.scope = parent
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -217,10 +223,7 @@ class _Inputs(ast.NodeVisitor):
         self._nested(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        parent = self.scope
-        self.scope = bindings.Scope(node, self.path, parent.nested_parent())
-        self.generic_visit(node)
-        self.scope = parent
+        self._nested(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         if self.scope.origin(node.func) in _LAUNCHERS and id(node) not in self._template_launches:
@@ -309,10 +312,16 @@ class _ImportFacts(ast.NodeVisitor):
         self.scope = bindings.Scope(tree, "")
         self.source, self.path, self.facts = source, path, facts
 
-    def _nested(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> None:
+    def _nested(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
+    ) -> None:
         parent = self.scope
+        outer, inner = bindings.scope_parts(node)
+        for expression in outer:
+            self.visit(expression)
         self.scope = bindings.Scope(node, "", parent.nested_parent())
-        self.generic_visit(node)
+        for statement in inner:
+            self.visit(statement)
         self.scope = parent
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -325,10 +334,7 @@ class _ImportFacts(ast.NodeVisitor):
         self._nested(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        parent = self.scope
-        self.scope = bindings.Scope(node, "", parent.nested_parent())
-        self.generic_visit(node)
-        self.scope = parent
+        self._nested(node)
 
     def visit_Import(self, node: ast.Import) -> None:
         self.facts.clauses.append(node)
