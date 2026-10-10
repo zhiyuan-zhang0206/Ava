@@ -11,7 +11,9 @@ guarded signals without offering any unrelated host process to the sweep.
 
 from __future__ import annotations
 
+import json
 import os
+import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -417,6 +419,160 @@ def test_native_sweep_preserves_live_run_and_recycled_command(tmp_path: Path) ->
         assert children[0].wait(timeout=5) != 0
         assert children[1].poll() is None  # Command identity changed: never signalled.
         assert children[2].poll() is None  # This live concurrent run: never targeted.
+
+
+def _ignore_cleanup_delay(_seconds: float) -> None:
+    pass
+
+
+def test_cleanup_receipt_records_decisions_and_guarded_signals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        (100, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1"),
+        (201, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1"),
+        (300, "fixture child", "AVA_HOME=/proof/ava_e2e_home_901_1"),
+        (400, "fixture child", "AVA_HOME=/proof/ava_e2e_home_902_1"),
+    ]
+    commands: list[int] = []
+    probes: list[int] = []
+    signals: list[tuple[str, int, int]] = []
+
+    def command(pid: int) -> str | None:
+        commands.append(pid)
+        return {901: "[pytest-xdist running] direct case", 902: None}.get(pid, "fixture child")
+
+    def probe(pid: int, sig: int) -> None:
+        assert sig == 0
+        probes.append(pid)
+        if pid == 900:
+            raise ProcessLookupError
+
+    def signal_group(pid: int, sig: int) -> None:
+        signals.append(("group", pid, sig))
+
+    def signal_single(pid: int, sig: int) -> None:
+        signals.append(("single", pid, sig))
+
+    monkeypatch.setattr(os, "killpg", signal_group)
+    monkeypatch.setattr(os, "kill", signal_single)
+    monkeypatch.setattr("time.sleep", _ignore_cleanup_delay)
+    path = tmp_path / "logs" / "cleanup.jsonl"
+    inspection = processes.ProcessInspection(
+        rows=lambda: rows,
+        group=lambda pid: 100 if pid == 201 else pid,
+        command=command,
+        probe=probe,
+    )
+    assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 2
+    assert probes == [900, 900, 901, 902]
+    assert commands == [901, 902, 100, 201, 100, 201]
+    assert signals == [
+        (kind, pid, sig)
+        for sig in (signal.SIGTERM, signal.SIGKILL)
+        for kind, pid in (("group", 100), ("single", 201))
+    ]
+    _assert_sweep_receipt(path)
+
+
+def _assert_sweep_receipt(path: Path) -> None:
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert all(row["sender"] == os.getpid() and row["time_ns"] > 0 for row in events)
+    decisions = {row["target"]: row["selected"] for row in events if row["event"] == "decision"}
+    assert decisions == {100: True, 201: True, 300: False, 400: False}
+    owners = {row["owner"]: row for row in events if row["event"] == "owner"}
+    assert owners[900]["probe"] == "gone" and not owners[900]["preserved"]
+    assert owners[901]["hints"] == ["pytest", "xdist"] and owners[901]["preserved"]
+    assert not owners[902]["command_known"] and owners[902]["preserved"]
+    assert [row["outcome"] for row in events if row["event"] == "sweep_signal"] == [
+        "attempt",
+        "sent",
+        "attempt",
+        "sent",
+        "attempt",
+        "sent",
+        "attempt",
+        "sent",
+    ]
+
+
+@pytest.mark.parametrize("failure", [ProcessLookupError, PermissionError, RuntimeError])
+def test_cleanup_receipt_keeps_signal_exception_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
+) -> None:
+    def signal_failure(_pid: int, _sig: int) -> None:
+        raise failure("original signal failure")
+
+    monkeypatch.setattr(os, "killpg", signal_failure)
+    monkeypatch.setattr("time.sleep", _ignore_cleanup_delay)
+    inspection = processes.ProcessInspection(
+        rows=lambda: [(100, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1")],
+        group=lambda pid: pid,
+        command=lambda _pid: "fixture child",
+        probe=_kill_ok,
+    )
+    path = tmp_path / "cleanup.jsonl"
+    if failure is RuntimeError:
+        with pytest.raises(RuntimeError, match="original signal failure"):
+            processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path)
+    else:
+        assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 1
+        events = [json.loads(line) for line in path.read_text().splitlines()]
+        assert [row["outcome"] for row in events if row["event"] == "sweep_signal"] == [
+            "attempt",
+            failure.__name__,
+            "attempt",
+            failure.__name__,
+        ]
+
+
+def test_unwritable_cleanup_receipt_keeps_the_original_query_result(tmp_path: Path) -> None:
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("existing file")
+    inspection = processes.ProcessInspection(rows=list)
+    assert (
+        processes.sweep_stale_e2e_processes(
+            inspection=inspection, receipt_path=blocked / "cleanup.jsonl"
+        )
+        == 0
+    )
+
+
+def test_cleanup_receipt_records_a_recycled_target_without_signalling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse_signal(_pid: int, _sig: int) -> None:
+        pytest.fail("a recycled process must never be signalled")
+
+    monkeypatch.setattr(os, "killpg", refuse_signal)
+    monkeypatch.setattr("time.sleep", _ignore_cleanup_delay)
+    inspection = processes.ProcessInspection(
+        rows=lambda: [(100, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1")],
+        group=lambda pid: pid,
+        command=lambda _pid: "replacement process",
+        probe=_kill_ok,
+    )
+    path = tmp_path / "cleanup.jsonl"
+    assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 1
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [row["outcome"] for row in events if row["event"] == "sweep_signal"] == [
+        "identity_skip",
+        "identity_skip",
+    ]
+
+
+def test_managed_frontend_receipt_identifies_its_exact_owner(tmp_path: Path) -> None:
+    path = tmp_path / "cleanup.jsonl"
+    with processes.managed_proc(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        label="frontend-receipt-proof",
+        receipt_path=path,
+    ) as child:
+        assert child.poll() is None
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [row["outcome"] for row in events] == ["attempt", "sent"]
+    assert all(row["target"] == child.pid and row["sender"] == os.getpid() for row in events)
+    assert events[0]["owner"] == os.getpid() and events[0]["signal"] == signal.SIGTERM
 
 
 @pytest.mark.parametrize("serving", [False, True])
