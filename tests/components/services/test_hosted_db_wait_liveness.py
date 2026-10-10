@@ -101,6 +101,7 @@ def _recovery_run(
                 database_waits=waits,
                 peek_lock=asyncio.Lock(),
                 work=None,
+                reconcile_inputs=configured_policy().reconcile_inputs,
             )
             recovered.set()
             await asyncio.Event().wait()

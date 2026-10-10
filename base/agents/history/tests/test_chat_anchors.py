@@ -9,7 +9,14 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from base.agents.history.chat_anchors import ChatAnchorDemand, chat_anchor_demand
 from base.agents.history.timeline import build_timeline_items
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
 from base.db import ChatAnchor
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 # Unrelated rows on both sides of the referenced ones: an exact-only render
 # must not depend on them.
@@ -59,7 +66,15 @@ def test_all_modern_render_ignores_anchors() -> None:
     ]
 
     assert chat_anchor_demand(messages) is None
-    assert build_timeline_items(messages, _ANCHORS) == build_timeline_items(messages, [])
+    assert build_timeline_items(
+        messages,
+        _ANCHORS,
+        inputs=_TIMELINE_INPUTS,
+    ) == build_timeline_items(
+        messages,
+        [],
+        inputs=_TIMELINE_INPUTS,
+    )
 
 
 @pytest.mark.parametrize(
@@ -83,9 +98,25 @@ def test_exact_only_render_needs_just_the_referenced_rows(messages: list[BaseMes
     assert demand is not None
     assert not demand.positional
     referenced = [anchor for anchor in _ANCHORS if anchor.id in demand.referenced_ids]
-    assert build_timeline_items(messages, referenced) == build_timeline_items(messages, _ANCHORS)
+    assert build_timeline_items(
+        messages,
+        referenced,
+        inputs=_TIMELINE_INPUTS,
+    ) == build_timeline_items(
+        messages,
+        _ANCHORS,
+        inputs=_TIMELINE_INPUTS,
+    )
     # The anchors really are consumed: an anchor-less render differs.
-    assert build_timeline_items(messages, []) != build_timeline_items(messages, _ANCHORS)
+    assert build_timeline_items(
+        messages,
+        [],
+        inputs=_TIMELINE_INPUTS,
+    ) != build_timeline_items(
+        messages,
+        _ANCHORS,
+        inputs=_TIMELINE_INPUTS,
+    )
 
 
 def test_id_less_inbound_demands_positional_anchors() -> None:
@@ -102,4 +133,8 @@ def test_malformed_embedded_id_is_left_to_rendering() -> None:
 
     assert chat_anchor_demand([malformed]) == ChatAnchorDemand(referenced_ids=[], positional=False)
     with pytest.raises(ValueError, match="ava_inbound_id"):
-        build_timeline_items([malformed], [])
+        build_timeline_items(
+            [malformed],
+            [],
+            inputs=_TIMELINE_INPUTS,
+        )

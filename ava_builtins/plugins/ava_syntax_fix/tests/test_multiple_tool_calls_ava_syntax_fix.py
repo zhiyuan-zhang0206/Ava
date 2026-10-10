@@ -17,6 +17,7 @@ from ava.sdk_surface.process_context import process_clients
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -60,7 +61,9 @@ def _runtime() -> Runtime[AvaContext]:
         context=AvaContext(
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             clients=process_clients(),

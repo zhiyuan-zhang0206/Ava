@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_config_images import (
     PluginConfigChangedError,
@@ -118,7 +119,12 @@ def test_bind_rereads_image_created_after_the_missing_read(
     try:
         assert (
             get_plugin_config(
-                "read-race", AgentSlices.resolve(plugin_configs=configs), BootConfig
+                "read-race",
+                AgentSlices.resolve(
+                    plugin_configs=configs,
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                ),
+                BootConfig,
             ).marker
             == "winner"
         )
@@ -155,7 +161,14 @@ def test_bind_rejects_invalid_winning_image(
     with pytest.raises(expected_error):
         bind_plugin_config("invalid-winner", BootConfig, configs)
     with pytest.raises(KeyError):
-        get_plugin_config("invalid-winner", AgentSlices.resolve(plugin_configs=configs), BootConfig)
+        get_plugin_config(
+            "invalid-winner",
+            AgentSlices.resolve(
+                plugin_configs=configs,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            BootConfig,
+        )
     assert image.read_text() == content
 
 
@@ -176,7 +189,12 @@ def test_bind_propagates_unknown_creation_errors(
     assert not disk_image_path("unknown-writer-error").exists()
     with pytest.raises(KeyError):
         get_plugin_config(
-            "unknown-writer-error", AgentSlices.resolve(plugin_configs=configs), BootConfig
+            "unknown-writer-error",
+            AgentSlices.resolve(
+                plugin_configs=configs,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            BootConfig,
         )
 
 
@@ -210,7 +228,14 @@ def test_bind_does_not_replace_a_disappearing_winner_with_defaults(
         bind_plugin_config("missing-winner", BootConfig, configs)
     assert not image.exists()
     with pytest.raises(KeyError):
-        get_plugin_config("missing-winner", AgentSlices.resolve(plugin_configs=configs), BootConfig)
+        get_plugin_config(
+            "missing-winner",
+            AgentSlices.resolve(
+                plugin_configs=configs,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            BootConfig,
+        )
 
 
 @pytest.mark.parametrize("error_type", [OSError, RuntimeError, ValueError])
@@ -234,5 +259,10 @@ def test_bind_propagates_unknown_winning_image_errors(
     assert json.loads(image.read_text()) == {"marker": "default"}
     with pytest.raises(KeyError):
         get_plugin_config(
-            "unknown-read-error", AgentSlices.resolve(plugin_configs=configs), BootConfig
+            "unknown-read-error",
+            AgentSlices.resolve(
+                plugin_configs=configs,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            BootConfig,
         )

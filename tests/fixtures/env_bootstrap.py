@@ -442,7 +442,7 @@ _assert_env_precedes_project_imports()
 
 # ava / base.config read AVA_DB_URL + AVA_HOME at import — must come after the
 # env block above, which is what the assertion just enforced.
-from base.config import set_field, settings
+from base.config import ConfigBoot, set_field, settings
 from base.daemon.health import _HEALTH_PORT_OVERRIDES
 from base.host.env.port_table import FIXED_PORTS
 
@@ -494,9 +494,20 @@ os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 # `pin_agent(spawn_agent())` (`tests/fixtures/identity_restore.py`); the
 # `identity_restore` plugin puts it back after the test. Do not rely on "the first spawn is 1" —
 # capture the returned id.
+from ava.sdk_surface.process_context import process_clients
+from base.clock import Clock, clock_config_from_boot
 from tests.fixtures.pin_agent import pin_agent
 
-pin_agent(1)
+# Prepare this test process's owner while its session home is still installed.
+# Later unit_home fixtures intentionally have no delivery file. Their first SQL
+# borrow must use the already prepared owner, not boot from the temporary home.
+TEST_PROCESS_CONFIG = ConfigBoot()
+TEST_PROCESS_CONFIG.ensure_eager()
+pin_agent(
+    1,
+    clients=process_clients(config=TEST_PROCESS_CONFIG),
+    clock_factory=lambda: Clock(clock_config_from_boot(TEST_PROCESS_CONFIG)),
+)
 # Remove AVA_AGENT_ID propagated from the agent process — any test that
 # temporarily unbinds the context would re-derive one from this env var with
 # owns_loop=False, corrupting subsequent tests.
@@ -572,6 +583,7 @@ def _pin_setting(field: str, value: object) -> None:
     """Force a settings field for this session, in the singleton and in the env
     under pydantic's `AVA_<FIELD>` name (subprocesses read the latter)."""
     set_field(field, value)
+    TEST_PROCESS_CONFIG.set_field(field, value)
     os.environ[f"AVA_{field.upper()}"] = str(value)
 
 
@@ -597,7 +609,9 @@ _pin_setting("browser_cdp_port", next(_ports))
 _pin_setting("grafana_port", next(_ports))
 _pin_setting("memory_search_port", next(_ports))
 _pin_setting("memory_search_uri", f"http://127.0.0.1:{settings.services.memory_search_port}")
-set_field("permissions_helper_port", next(_ports))
+_permissions_helper_port = next(_ports)
+set_field("permissions_helper_port", _permissions_helper_port)
+TEST_PROCESS_CONFIG.set_field("permissions_helper_port", _permissions_helper_port)
 
 # The ports every test home born in this session records (`guards.py`): one
 # kernel-assigned port per slot of the fixed table.

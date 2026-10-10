@@ -22,6 +22,7 @@ from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
 from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
     _load_ava_code_plugin as _load_ava_code_plugin,
 )
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
@@ -316,10 +317,14 @@ def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pyte
     is declared as an expanded namespace by `contribute()`, so it is
     always expanded and never promoted here."""
     from ava_builtins.plugins.ava_code._prompt_sections import _coding_tools_section
-    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
-    text = _coding_tools_section(AgentSlices.resolve(), catalog=build_model_catalog())
+    text = _coding_tools_section(
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ),
+        catalog=build_model_catalog(),
+    )
     assert "## ava.files" not in text  # expanded by the framework -> skipped
     assert "## ava.shell" in text  # only the child is expanded -> parent stays
     assert "## ava.cwd" not in text  # plugin-registered expand -> skipped too
@@ -330,10 +335,14 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only(
     monkeypatch: pytest.MonkeyPatch,
 ):
     from ava_builtins.plugins.ava_code._prompt_sections import _coding_tools_section
-    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["cwd", "files", "shell"])
-    text = _coding_tools_section(AgentSlices.resolve(), catalog=build_model_catalog())
+    text = _coding_tools_section(
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ),
+        catalog=build_model_catalog(),
+    )
     assert text.startswith("# Coding tools")
     assert "Use the Ava file and shell tools" in text
     # search steering: rg over recursive grep/find (recursive grep times out on

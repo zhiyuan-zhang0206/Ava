@@ -17,6 +17,7 @@ from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import (
 )
 from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import _seed_agent
 from base.agents.observation.snapshot import select_one
+from base.config import settings
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.pin_agent import pin_agent
 
@@ -33,7 +34,12 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     published_awaiting: list[list[str]] = []
 
     def _capture_snapshot(_bus: object, published_agent_id: int) -> None:
-        snapshot = select_one(db_conn, published_agent_id, catalog=model_catalog)
+        snapshot = select_one(
+            db_conn,
+            published_agent_id,
+            catalog=model_catalog,
+            default_model_reader=lambda: settings.lm.llm_model,
+        )
         assert snapshot is not None
         published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
 
@@ -65,7 +71,12 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     resolved: list[int] = []
 
     def _capture_snapshot(_bus: object, published_agent_id: int) -> None:
-        snapshot = select_one(db_conn, published_agent_id, catalog=model_catalog)
+        snapshot = select_one(
+            db_conn,
+            published_agent_id,
+            catalog=model_catalog,
+            default_model_reader=lambda: settings.lm.llm_model,
+        )
         assert snapshot is not None
         published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
 

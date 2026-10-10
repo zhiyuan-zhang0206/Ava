@@ -665,6 +665,7 @@ async def run(
         health = await start_health_server(
             "agent_host",
             endpoint.health_port,
+            image=ava.loaded_code_image(),
             liveness=liveness,
             extra_routes={
                 ("GET", "/stats"): stats_route(host, scheduler),

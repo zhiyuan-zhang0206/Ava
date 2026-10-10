@@ -228,7 +228,10 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     exported = Mock()
     monkeypatch.setattr(emitter, "_export_otlp", exported)
     event = _event("turn_end", ok=True, duration_seconds=2.5)
-    telemetry._write_batch([event])
+    telemetry._write_batch(
+        [event],
+        database=Database.from_settings,
+    )
     exported.assert_called_once_with([event])
     assert len(list(tmp_path.glob("events-*.jsonl"))) >= 1
     assert (

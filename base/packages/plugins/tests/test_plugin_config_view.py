@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.config_registration import (
     all_plugin_configs,
@@ -51,7 +52,11 @@ def two_plugins(unit_home) -> dict[str, BaseModel]:
 def _slices(
     configs: dict[str, BaseModel], plugin_pins: dict[str, dict[str, object]] | None = None
 ) -> AgentSlices:
-    return AgentSlices.resolve(plugin_pins=plugin_pins, plugin_configs=configs)
+    return AgentSlices.resolve(
+        plugin_pins=plugin_pins,
+        plugin_configs=configs,
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    )
 
 
 class TestWithoutPins:
@@ -106,7 +111,10 @@ class TestOverrideResolution:
         self, two_plugins: dict[str, BaseModel]
     ) -> None:
         slices = AgentSlices.resolve(
-            {"llm_model": "m"}, {"alpha": {"marker": "x"}}, plugin_configs=two_plugins
+            {"llm_model": "m"},
+            {"alpha": {"marker": "x"}},
+            plugin_configs=two_plugins,
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         )
         assert slices.overlay() == {"llm_model": "m", "marker": "x"}
 

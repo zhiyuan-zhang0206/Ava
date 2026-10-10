@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -555,14 +556,18 @@ def test_child_overlay_phases_framework_then_plugin(
     from agent.graph.exec.protocol import RequestPayload, ResultPayload
 
     events: list[str] = []
+    results: list[ResultPayload] = []
 
     def fake_read_request(_path: Path) -> RequestPayload:
         return RequestPayload(
             code="pass", context=exec_context(None).describe(), timeout_s=0.0, state=None
         )
 
-    def fake_init_logger(_agent_id: int | None) -> None:
-        return None
+    def fake_init_logger(
+        _agent_id: int | None, *, producer: object, machine_reader: object
+    ) -> None:
+        assert callable(producer)
+        assert callable(machine_reader)
 
     def fake_eval_isolation(*, default_reader: object) -> None:
         events.append("eval_isolation")
@@ -574,12 +579,14 @@ def test_child_overlay_phases_framework_then_plugin(
         return None
 
     def fake_run_code(_code: str, _payload: ResultPayload) -> None:
-        return None
+        _payload.code_reached = True
 
     def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
-        return None
+        results.append(_payload)
 
-    def fake_plugins_loaded(*, surface: bool = True, config: object, clock_factory: object) -> None:
+    def fake_plugins_loaded(
+        *, surface: bool = True, config: object, clock_factory: object, producer: object
+    ) -> None:
         # Stateless request (fake_read_request: state=None) -> the surface load.
         assert surface is True
         events.append("plugins")
@@ -616,7 +623,8 @@ def test_child_overlay_phases_framework_then_plugin(
     old_sigint = signal.getsignal(signal.SIGINT)
     old_sigterm = signal.getsignal(signal.SIGTERM)
     try:
-        exec_child.main()
+        with patch.dict(os.environ):
+            exec_child.main()
     finally:
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)
@@ -628,6 +636,13 @@ def test_child_overlay_phases_framework_then_plugin(
         "sdk_disable",
         "eval_isolation",
     ]
+    (result,) = results
+    assert (result.kind, result.code_reached, result.exc_type, result.full_traceback) == (
+        "done",
+        True,
+        None,
+        None,
+    )
 
 
 def _declare_machine_name(tmp_path: Path) -> None:

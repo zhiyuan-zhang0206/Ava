@@ -16,6 +16,7 @@ from base.native_process.turn_identity import HostedTurnResources
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.settlement import close_hosted_turn
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
     _blocked_host,
@@ -170,6 +171,9 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
         incarnation,
         TurnOutcome(exited=False, crashed=True),
         resources=context.hosted_resources,
+        wake_enabled=configured_policy().recovery_wake_enabled,
+        prompt_reap_enabled=configured_policy().recrash_reap_enabled,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
     row = db_conn.execute(
         "SELECT m.status,w.phase,w.id FROM agents_meta m "

@@ -127,7 +127,9 @@ class TestSyntaxFixBeforeExec:
         ctx = AvaContext(
             ops_pool=AsyncMock(),
             llm=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
         )
