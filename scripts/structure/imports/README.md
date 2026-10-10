@@ -152,8 +152,10 @@ proven runtime module name. It models one level of unchanged, checkout-local
 Python sources, with each parsed source reused only within that analysis. Recognized
 `write_text`, `write_bytes` and potentially writable `open` calls before execution
 prevent a source proof when their target matches a loaded source or is opaque.
-Targets use the existing resource grammar and physical path resolution; a later
-local write does not retroactively invalidate an earlier execution. Ancestor
+Targets use the existing resource grammar and physical path resolution. A
+read-only open also requires its existing unmodified-callee proof; its mode does
+not certify a replaced function. A later local file-write call does not
+retroactively invalidate an earlier execution. Ancestor
 calls have no proven ordering relative to a nested invocation and remain
 conservative. This is a bounded lexical check, not a helper side-effect model.
 Symlink

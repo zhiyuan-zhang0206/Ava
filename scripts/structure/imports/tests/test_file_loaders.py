@@ -436,3 +436,22 @@ def test_a_proven_external_literal_output_keeps_source_proof(tmp_path: Path) -> 
     )
     assert found.unknown == ()
     assert len(found.file_executions) == 1
+
+
+@pytest.mark.parametrize("library", ["builtins", "io"])
+def test_replaced_read_only_open_cannot_certify_source_unchanged(
+    tmp_path: Path, library: str
+) -> None:
+    root = make_repo(tmp_path, {"base/net/probe.py": "import base.db.pool\n"})
+    operation = (
+        f"import {library}\n{library}.open = replacement\n"
+        f"{library}.open(ROOT / 'base/net/probe.py', 'r')\n"
+    )
+    found = facts.collect(
+        ast.parse(_PREFIX + operation + "spec.loader.exec_module(module)\n"),
+        "cli/tests/test_probe.py",
+        placement.ModuleIndex(root),
+        tops=("base",),
+    )
+    assert found.unknown
+    assert found.file_executions == ()
