@@ -405,59 +405,6 @@ class _Collector(ast.NodeVisitor):
             return node.args[0] if node.args else None
         return None
 
-    def _external(self, node: ast.AST, seen: frozenset[str] = frozenset()) -> bool:
-        """A path rooted at a literal location outside the checkout, such as ``/proc``."""
-        if isinstance(node, ast.Name):
-            if node.id in seen:
-                return False
-            value = self.scope.value(node)
-            return value is not node and self._external(value, seen | {node.id})
-        if isinstance(node, ast.expr) and self.scope.origin(node) == "os.devnull":
-            return True
-        if isinstance(node, ast.JoinedStr):
-            first = node.values[0] if node.values else None
-            if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
-                return False
-            # Only complete directory components are fixed text: f"/proc/{pid}" -> /proc.
-            return self._outside_checkout(first.value.rpartition("/")[0])
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return self._outside_checkout(node.value)
-        root = self._path_root(node)
-        return root is not None and self._external(root, seen)
-
-    def _outside_checkout(self, text: str) -> bool:
-        """A fixed absolute location that neither is, contains nor lies inside the checkout."""
-        location = Path(text)
-        root = self.index.repo_root
-        return (
-            location.is_absolute()
-            and location != Path(location.anchor)
-            and not location.is_relative_to(root)
-            and not root.is_relative_to(location)
-        )
-
-    def _path_root(self, node: ast.AST) -> ast.AST | None:
-        """The expression a derived path is built from, for anchor checks."""
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            return node.left
-        if isinstance(node, ast.Attribute) and node.attr in {"parent", "parents"}:
-            return node.value
-        if isinstance(node, ast.Subscript):
-            return node.value
-        if not isinstance(node, ast.Call):
-            return None
-        if self.scope.origin(node.func) == "pathlib.Path":
-            return node.args[0] if node.args else None
-        if isinstance(node.func, ast.Attribute) and node.func.attr in {
-            "resolve",
-            "absolute",
-            "joinpath",
-            "with_name",
-            "with_suffix",
-        }:
-            return node.func.value
-        return None
-
     def _resource_read(self, node: ast.Call) -> None:
         target = self._read_target(node)
         if target is None or self._write_only(node):
@@ -474,7 +421,7 @@ class _Collector(ast.NodeVisitor):
                     relative = absolute.relative_to(self.index.repo_root).as_posix()
                     self.records.append(Fact(node.lineno, FactKind.RESOURCE, relative))
             return
-        if self._external(target):
+        if self.scope.unmodified_origin(target) == "os.devnull":
             return
         self.gap(
             node,

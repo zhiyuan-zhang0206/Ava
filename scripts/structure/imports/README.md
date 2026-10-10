@@ -90,9 +90,10 @@ an automatic rewrite that could change which object a local name binds.
 
 `bindings.module_context()` lets a whole-module reader such as `facts.collect()`
 resolve the module's own `__name__`, subscripts of literal tables and loop variables
-over them. A table written by subscript, augmented assignment, a mutating method call
-or a `global`/`nonlocal` rebinding stays opaque. Iteration yields a dict's keys and
-indexing its values. Like the one-binding rule, this does not observe writes from other
+over them. A table written through itself or a plain alias by subscript, augmented
+assignment, a mutating method call or a `global`/`nonlocal` rebinding stays opaque.
+Iteration yields a dict's keys and indexing its values, resolved in the table's
+definition scope. Like the one-binding rule, this does not observe writes from other
 modules. Scopes built without a context keep the plain one-binding rules.
 
 `bindings.local_nodes()` preserves lexical depth-first order with an explicit
