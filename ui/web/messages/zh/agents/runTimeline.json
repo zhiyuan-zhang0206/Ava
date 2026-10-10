@@ -105,5 +105,6 @@
   "linkUnmatched": "这条消息没有对上接收方的某个块（其历史里没有对应的 inbound id）；箭头落在事件发生的时刻。",
   "interactionsLabel": "交互",
   "userGroup": "用户",
-  "linkNotice": "通知"
+  "linkNotice": "通知",
+  "linkTitle": "标题"
 }

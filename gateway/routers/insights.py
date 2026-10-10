@@ -33,6 +33,7 @@ from base.paths import insights_socket
 from gateway.agents.eval_guard import deny_isolated_result_read
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineContext,
+    RunTimelineLinkContent,
     RunTimelineLinks,
     RunTimelineMessages,
     RunTimelineResponse,
@@ -147,6 +148,20 @@ async def get_run_timeline_links(
 ) -> Response:
     """The agent-to-agent events in a window with an end among the comma-separated `agents`."""
     return await _forward(request, "/api/insights/run-timeline/links")
+
+
+@router.get(
+    "/api/insights/run-timeline/link-content",
+    response_model=RunTimelineLinkContent,
+    dependencies=[Depends(deny_isolated_result_read)],
+)
+async def get_run_timeline_link_content(
+    request: Request,
+    inbound_id: Annotated[int | None, Query(ge=1)] = None,  # noqa: ARG001
+    notice_id: Annotated[int | None, Query(ge=1)] = None,  # noqa: ARG001
+) -> Response:
+    """The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`)."""
+    return await _forward(request, "/api/insights/run-timeline/link-content")
 
 
 @router.get(

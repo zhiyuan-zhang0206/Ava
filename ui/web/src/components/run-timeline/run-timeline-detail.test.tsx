@@ -6,7 +6,7 @@ import type { RunTimelineMessages, RunTimelineNode, RunTimelineUnit } from "@/li
 import { api } from "@/lib/transport/api";
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)) },
+  api: { getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)), getRunTimelineLinkContent: vi.fn() },
 }));
 
 import { NodeDetail, UnitDetail } from "./run-timeline-detail";
@@ -105,7 +105,7 @@ describe("the details of an arrow and of the block it ends on", () => {
   };
   const resolved = (over: Partial<ResolvedLink>): ResolvedLink => ({
     key: "k",
-    link: { kind: "send_message", ts: T, sender: 405, receiver: 6657, inbound_id: 31, fork_from: null, preview: "do the thing" },
+    link: { kind: "send_message", ts: T, sender: 405, receiver: 6657, inbound_id: 31, fork_from: null, notice_id: null },
     from: { row: "units", agent: 405, ms: Date.parse(T) },
     to: { row: "units", agent: 6657, ms: Date.parse(T) },
     external: null,
@@ -131,10 +131,14 @@ describe("the details of an arrow and of the block it ends on", () => {
 
   it("shows an event with no block through the same card and row, as a message", async () => {
     vi.mocked(api.getRunTimelineMessages).mockClear();
-    const none = resolved({ block: null, link: { ...resolved({}).link, preview: "need **a** decision", receiver: null, kind: "notice" } });
+    vi.mocked(api.getRunTimelineLinkContent).mockResolvedValue({ title: "a title", content: "need **a** decision\n\n" + "long ".repeat(500) });
+    const none = resolved({ block: null, link: { ...resolved({}).link, inbound_id: null, notice_id: 3, receiver: null, kind: "notice" } });
     const shown = await messagesOf(<LinkDetail resolved={none} onAddAgent={() => undefined} />);
     expect(shown).toHaveLength(1);
     expect(shown[0]).toContain("<strong");
+    // The whole text goes to the row, not a cut of it; the row folds what is long.
+    expect(shown[0]).toContain("long long long");
+    expect(api.getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 3 });
     expect(api.getRunTimelineMessages).not.toHaveBeenCalled();
   });
 });

@@ -158,6 +158,14 @@ describe("lifecycle endpoints", () => {
     );
   });
 
+  it("getRunTimelineLinkContent GETs one message or notice by its reference", async () => {
+    await api.getRunTimelineLinkContent({ inbound_id: 31 });
+    await api.getRunTimelineLinkContent({ notice_id: 4 });
+
+    expect(calls[0].url).toMatch(/\/api\/insights\/run-timeline\/link-content\?inbound_id=31$/);
+    expect(calls[1].url).toMatch(/\/api\/insights\/run-timeline\/link-content\?notice_id=4$/);
+  });
+
   it("getRunTimelineMessages GETs an index range, uncut only when asked", async () => {
     await api.getRunTimelineMessages(405, { start: 8, end: 68, limit: 50 });
     await api.getRunTimelineMessages(405, { start: 8, end: 68, full: true });

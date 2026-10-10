@@ -105,5 +105,6 @@
   "linkUnmatched": "This message is not matched to a block of the receiver (its history carries no inbound id for it); the arrow ends at the time of the event.",
   "interactionsLabel": "Interactions",
   "userGroup": "User",
-  "linkNotice": "Notice"
+  "linkNotice": "Notice",
+  "linkTitle": "Title"
 }

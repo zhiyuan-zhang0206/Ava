@@ -27,7 +27,7 @@ const link = (partial: Partial<RunTimelineLink>): RunTimelineLink => ({
   receiver: 2,
   inbound_id: null,
   fork_from: null,
-  preview: null,
+  notice_id: null,
   ...partial,
 });
 

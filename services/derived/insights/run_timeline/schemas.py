@@ -131,11 +131,11 @@ class RunTimelineLink(BaseModel):
     """One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.
 
     A `notice` is an agent posting a notice to the user (`agent_notices`, the structured
-    agent-to-user channel): its receiver is None and `preview` its title.
+    agent-to-user channel): its receiver is None and `notice_id` its row. The text of a message or
+    notice is not in the list; `/run-timeline/link-content` serves it for the one that is selected.
 
     `inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent
-    a fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is
-    the start of the message.
+    a fork was copied from (fork only; the sender is the agent that executed the fork).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -146,7 +146,16 @@ class RunTimelineLink(BaseModel):
     receiver: int | None
     inbound_id: int | None
     fork_from: int | None
-    preview: str | None
+    notice_id: int | None
+
+
+class RunTimelineLinkContent(BaseModel):
+    """GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one notice."""
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str | None
+    content: str
 
 
 class RunTimelineLinks(BaseModel):
