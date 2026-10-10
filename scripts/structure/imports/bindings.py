@@ -49,6 +49,8 @@ _BINDING_NODES = (
     ast.ExceptHandler,
 )
 
+_SCOPE_INPUT_NODES = (ast.Call, *_BINDING_NODES)
+
 
 def scope_parts(
     node: ScopeNode,
@@ -198,8 +200,12 @@ def module_name(path: str) -> str:
     return ".".join(parts)
 
 
-def local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
-    """Walk this lexical scope, keeping nested scope bodies out of its bindings."""
+def local_nodes(tree: ast.AST, *, bindings_only: bool = False) -> Iterator[ast.AST]:
+    """Walk one lexical scope, excluding nested bodies and preserving AST order.
+
+    The default yields every child. ``bindings_only`` projects this same walk
+    onto calls and binding inputs; it never prunes an expression's children.
+    """
     children = ast.iter_child_nodes(tree)
     if isinstance(tree, _SCOPE_NODES):
         children = iter(scope_parts(tree)[1])
@@ -210,13 +216,22 @@ def local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
         if child is None:
             pending.pop()
             continue
-        yield child
+        if not bindings_only or _binding_input(child):
+            yield child
         if isinstance(child, _SCOPE_NODES):
             outer, inner = scope_parts(child)
             # Definition-time expressions are separate roots, including lambda decorators.
             pending.append((iter(inner if scope_root else outer), not scope_root))
         elif child._fields:
             pending.append((ast.iter_child_nodes(child), False))
+
+
+def _binding_input(node: ast.AST) -> bool:
+    if isinstance(node, ast.Name):
+        return isinstance(node.ctx, ast.Store)
+    if isinstance(node, ast.Attribute):
+        return isinstance(node.ctx, ast.Store | ast.Del)
+    return isinstance(node, _SCOPE_INPUT_NODES)
 
 
 class Scope:
@@ -243,7 +258,7 @@ class Scope:
         self.stores: Counter[str] = Counter()
         self.domains: dict[str, tuple[str, ...]] = {}
         self.calls: list[ast.Call] = []
-        for node in local_nodes(tree):
+        for node in local_nodes(tree, bindings_only=True):
             if isinstance(node, ast.Call):
                 self.calls.append(node)
             elif isinstance(node, _BINDING_NODES):
