@@ -514,17 +514,18 @@ def _resolve_plugin(sources: _Sources, exposed: str, candidate: _Candidate) -> _
 
 
 def query(index: ModuleSourceLookup, exposed_path: str) -> MemberProof | Unknown:
-    """Prove an exact declared SDK path, retaining opaque runtime inputs as Unknown.
+    """Prove an exact declared SDK path, including the root namespace.
 
     Static availability means a source declaration, not process availability.
     Plugin availability is conditional on installation; wrappers, configuration,
     skill trees, MCP tools and runtime-generated namespaces are not evaluated.
     """
     parts = exposed_path.split(".")
-    if len(parts) < 2 or parts[0] != "ava" or not all(part.isidentifier() for part in parts):
-        raise ValueError("SDK query requires an exact ava member path")
+    if parts[0] != "ava" or not all(part.isidentifier() for part in parts):
+        raise ValueError("SDK query requires an exact ava namespace or member path")
     sources = _Sources(index)
     try:
+        sources.names("ava")
         candidates = sources.plugins(exposed_path)
         if len(candidates) > 1:
             return Unknown(exposed_path, "", 0, "Multiple plugins declare this SDK path")

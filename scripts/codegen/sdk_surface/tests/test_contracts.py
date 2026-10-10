@@ -156,6 +156,22 @@ def test_plugin_namespace_children_must_be_in_the_actual_marker(tmp_path: Path) 
     assert "absent from the canonical" in hidden.reason
 
 
+@pytest.mark.parametrize("marker", ["", "__all__ = []", "__all_for_ava__ = build()"])
+def test_plugin_namespace_cannot_bypass_the_root_marker(tmp_path: Path, marker: str) -> None:
+    index = _sources(
+        tmp_path,
+        {
+            "ava/__init__.py": marker,
+            "ava_builtins/plugins/sample/plugin.py": _plugin(),
+            "ava_builtins/plugins/sample/sdk.py": "def read(): pass\n__all_for_ava__ = ['read']",
+        },
+    )
+    for exposed in ("ava.notes", "ava.notes.read"):
+        result = query(index, exposed)
+        assert isinstance(result, Unknown)
+        assert result.path == "ava/__init__.py"
+
+
 @pytest.mark.parametrize("marker", ["", "__all_for_ava__ = build_surface()"])
 def test_plugin_namespace_without_a_literal_marker_is_unknown(tmp_path: Path, marker: str) -> None:
     index = _sources(
@@ -349,7 +365,7 @@ def test_module_property_provenance_does_not_grant_dynamic_children(tmp_path: Pa
 def test_current_checkout_provenance(
     exposed: str, module: str, name: str, availability: Availability
 ) -> None:
-    index = ModuleIndex(Path(__file__).resolve().parents[3])
+    index = ModuleIndex(Path(__file__).resolve().parents[4])
     proof = query(index, exposed)
     assert isinstance(proof, MemberProof), proof
     assert (proof.definition_module, proof.definition_name) == (module, name)
@@ -367,13 +383,43 @@ def test_current_checkout_provenance(
     ],
 )
 def test_current_runtime_only_surfaces_remain_unknown(exposed: str) -> None:
-    assert isinstance(query(ModuleIndex(Path(__file__).resolve().parents[3]), exposed), Unknown)
+    assert isinstance(query(ModuleIndex(Path(__file__).resolve().parents[4]), exposed), Unknown)
 
 
-@pytest.mark.parametrize("exposed", ["ava", "other.read", "ava..read", "ava.read()"])
+@pytest.mark.parametrize("exposed", ["", "other.read", "ava..read", "ava.read()"])
 def test_query_rejects_invalid_paths(tmp_path: Path, exposed: str) -> None:
-    with pytest.raises(ValueError, match="exact ava member path"):
+    with pytest.raises(ValueError, match="exact ava namespace or member path"):
         query(ModuleIndex(tmp_path), exposed)
+
+
+def test_root_namespace_proof_is_the_actual_canonical_marker(tmp_path: Path) -> None:
+    index = _sources(
+        tmp_path,
+        {"ava/__init__.py": "__all_for_ava__ = []\nraise RuntimeError('Do not execute source')\n"},
+    )
+    proof = query(index, "ava")
+    assert isinstance(proof, MemberProof)
+    assert (proof.definition_module, proof.definition_name, proof.source_line) == ("ava", "", 1)
+    assert (proof.declaration.path, proof.declaration.line) == ("ava/__init__.py", 1)
+    assert proof.availability is Availability.STATIC
+    assert isinstance(query(index, "ava.missing"), Unknown)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "",
+        "__all__ = []",
+        "__all_for_ava__ = build()",
+        "__all_for_ava__ = []\n__all_for_ava__.append('read')",
+    ],
+)
+def test_root_namespace_needs_a_literal_unmodified_sdk_marker(tmp_path: Path, source: str) -> None:
+    assert isinstance(query(_sources(tmp_path, {"ava/__init__.py": source}), "ava"), Unknown)
+
+
+def test_missing_root_source_retains_unknown(tmp_path: Path) -> None:
+    assert isinstance(query(ModuleIndex(tmp_path), "ava"), Unknown)
 
 
 @pytest.mark.parametrize(
