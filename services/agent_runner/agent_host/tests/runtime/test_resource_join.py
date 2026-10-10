@@ -4,13 +4,17 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ava.sdk_surface.install import Installation
+from base.agents.sdk import call_policy
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -18,6 +22,50 @@ from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 from ... import daemon
 from ...host import AgentHost
+
+
+async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
+    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
+) -> None:
+    entered, release = threading.Event(), threading.Event()
+    original = TypeError("sampling reader defect")
+
+    def read() -> call_policy.SamplingPolicy:
+        entered.set()
+        assert release.wait(5)
+        raise original
+
+    sampling = call_policy.SamplingPolicyOwner(reader=read)
+    sampling.read()
+    assert entered.wait(2)
+    release.set()
+    worker = sampling.worker
+    assert worker is not None and worker.completed.wait(2)
+    events: list[str] = []
+
+    async def close_pools(*_args: object) -> None:
+        assert not worker.thread.is_alive()
+        events.append("pools")
+
+    monkeypatch.setattr(daemon, "_close_host_pools", close_pools)
+
+    def remove_pidfile(_path: object) -> None:
+        events.append("pidfile")
+
+    monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
+    with pytest.raises(TypeError) as caught:
+        await daemon._close_process_owners(
+            None,
+            cast(Any, object()),
+            cast(Any, object()),
+            replace(model_installation, sampling=sampling),
+            None,
+            None,
+            None,
+        )
+    assert caught.value is original and sampling.error is not None
+    assert sampling.error[0] is original
+    assert events == ["pools", "pidfile"]
 
 
 async def test_original_error_joins_before_clients_and_pools_close(

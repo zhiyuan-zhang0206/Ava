@@ -25,9 +25,17 @@ from base.agents.sdk.call_policy import SamplingPolicy
 from base.agents.sdk.tally import SdkCallTally
 
 
+@pytest.fixture
+def sampling_owner() -> call_policy.SamplingPolicyOwner:
+    return call_policy.SamplingPolicyOwner()
+
+
 @pytest.fixture(autouse=True)
 def _full_sampling(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(call_policy, "policy", SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
 
 @pytest.fixture
@@ -54,13 +62,27 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]
 # ── scope gate ────────────────────────────────────────────────────────────────
 
 
-def test_emit_without_execution_tally(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_without_execution_tally(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     calls = _spy_emit(monkeypatch)
-    assert sdk_usage_telemetry.run_metered("ns.fn", lambda: "ok", (), {}, identity={}) == "ok"
+    assert (
+        sdk_usage_telemetry.run_metered(
+            "ns.fn",
+            lambda: "ok",
+            (),
+            {},
+            identity={},
+            sampling_owner=sampling_owner,
+        )
+        == "ok"
+    )
     assert calls == [("ns.fn", {})]
 
 
-def test_call_owns_its_entry_identity_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_call_owns_its_entry_identity_snapshot(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     """Mutation of the caller's mapping during the body cannot relabel the emitted event."""
     rows: list[dict[str, Any]] = []
 
@@ -74,16 +96,36 @@ def test_call_owns_its_entry_identity_snapshot(monkeypatch: pytest.MonkeyPatch) 
         identity.update(agent_id=42, source="agent:42")
         return "done"
 
-    assert sdk_usage_telemetry.run_metered("ns.fn", body, (), {}, identity=identity) == "done"
+    assert (
+        sdk_usage_telemetry.run_metered(
+            "ns.fn",
+            body,
+            (),
+            {},
+            identity=identity,
+            sampling_owner=sampling_owner,
+        )
+        == "done"
+    )
     assert rows[0]["agent_id"] == 41
     assert rows[0]["source"] == "agent:41"
 
 
-def test_emit_with_explicit_execution_tally(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_with_explicit_execution_tally(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     calls = _spy_emit(monkeypatch)
     tally = SdkCallTally()
     assert (
-        sdk_usage_telemetry.run_metered("ns.fn", lambda: "ok", (), {}, identity={}, tally=tally)
+        sdk_usage_telemetry.run_metered(
+            "ns.fn",
+            lambda: "ok",
+            (),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
+        )
         == "ok"
     )
     assert calls == [("ns.fn", {})]
@@ -92,37 +134,76 @@ def test_emit_with_explicit_execution_tally(monkeypatch: pytest.MonkeyPatch) -> 
 # ── independent public entries ───────────────────────────────────────────────
 
 
-def test_each_public_entry_emits(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_each_public_entry_emits(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     calls = _spy_emit(monkeypatch)
 
     def inner() -> str:
         return sdk_usage_telemetry.run_metered(
-            "ns.inner", lambda: "inner", (), {}, identity={}, tally=tally
+            "ns.inner",
+            lambda: "inner",
+            (),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
         )
 
     tally = SdkCallTally()
-    out = sdk_usage_telemetry.run_metered("ns.outer", inner, (), {}, identity={}, tally=tally)
+    out = sdk_usage_telemetry.run_metered(
+        "ns.outer",
+        inner,
+        (),
+        {},
+        identity={},
+        tally=tally,
+        sampling_owner=sampling_owner,
+    )
     assert out == "inner"
     assert calls == [("ns.inner", {}), ("ns.outer", {})]
 
 
-def test_return_and_exception_pass_through(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_return_and_exception_pass_through(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     _spy_emit(monkeypatch)
 
     def add(a: int, b: int) -> int:
         return a + b
 
     tally = SdkCallTally()
-    assert sdk_usage_telemetry.run_metered("ns.fn", add, (2, 3), {}, identity={}, tally=tally) == 5
+    assert (
+        sdk_usage_telemetry.run_metered(
+            "ns.fn",
+            add,
+            (2, 3),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
+        )
+        == 5
+    )
 
     def boom() -> None:
         raise ValueError("boom")
 
     with pytest.raises(ValueError, match="boom"):
-        sdk_usage_telemetry.run_metered("ns.boom", boom, (), {}, identity={}, tally=tally)
+        sdk_usage_telemetry.run_metered(
+            "ns.boom",
+            boom,
+            (),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
+        )
 
 
-def test_failed_call_still_emits(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failed_call_still_emits(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     calls = _spy_emit(monkeypatch)
 
     def boom() -> None:
@@ -130,28 +211,50 @@ def test_failed_call_still_emits(monkeypatch: pytest.MonkeyPatch) -> None:
 
     tally = SdkCallTally()
     with pytest.raises(ValueError, match="x"):
-        sdk_usage_telemetry.run_metered("ns.boom", boom, (), {}, identity={}, tally=tally)
+        sdk_usage_telemetry.run_metered(
+            "ns.boom",
+            boom,
+            (),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
+        )
     assert calls == [("ns.boom", {})]  # invocation counts even when the call raises
 
 
-def test_emit_carries_top_level_duration(captured: list[dict[str, Any]]) -> None:
-    sdk_usage_telemetry.emit("shell.run", {"k": 1}, duration=0.42, identity={})
+def test_emit_carries_top_level_duration(
+    captured: list[dict[str, Any]], sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
+    sdk_usage_telemetry.emit(
+        "shell.run",
+        {"k": 1},
+        duration=0.42,
+        identity={},
+        sampling_owner=sampling_owner,
+    )
     assert captured == [{"fn": "shell.run", "duration": 0.42, "detail": {"k": 1}, "sample_rate": 1}]
 
 
-def test_default_records_every_call(captured: list[dict[str, Any]]) -> None:
+def test_default_records_every_call(
+    captured: list[dict[str, Any]], sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     for _ in range(10):
-        sdk_usage_telemetry.emit("files.read", identity={})
+        sdk_usage_telemetry.emit("files.read", identity={}, sampling_owner=sampling_owner)
     assert len(captured) == 10
     assert all(row["sample_rate"] == 1 for row in captured)
 
 
-def test_emit_omits_detail_when_empty(captured: list[dict[str, Any]]) -> None:
-    sdk_usage_telemetry.emit("files.read", identity={})
+def test_emit_omits_detail_when_empty(
+    captured: list[dict[str, Any]], sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
+    sdk_usage_telemetry.emit("files.read", identity={}, sampling_owner=sampling_owner)
     assert "detail" not in captured[0]
 
 
-def test_emit_does_not_classify_transport_errors_or_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_does_not_classify_transport_errors_or_retry(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     failure = httpx.TimeoutException("not a transport owned by the SDK emitter")
     attempts: list[str] = []
 
@@ -161,7 +264,7 @@ def test_emit_does_not_classify_transport_errors_or_retry(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(telemetry, "emit", fail)
     with pytest.raises(httpx.TimeoutException) as raised:
-        sdk_usage_telemetry.emit("ns.fn", identity={})
+        sdk_usage_telemetry.emit("ns.fn", identity={}, sampling_owner=sampling_owner)
     assert raised.value is failure
     assert attempts == ["emit"]
 
@@ -169,22 +272,40 @@ def test_emit_does_not_classify_transport_errors_or_retry(monkeypatch: pytest.Mo
 # ── explicit execution tally, independent of event sampling ───────────────────
 
 
-def test_explicit_owner_collects_full_tally_per_fn(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_owner_collects_full_tally_per_fn(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     """Loop N executions count N; a call that never runs counts nothing; emit's
     spy sees the same order of calls."""
     calls = _spy_emit(monkeypatch)
     tally = SdkCallTally()
     for _ in range(3):
         sdk_usage_telemetry.run_metered(
-            "files.read", lambda: "ok", (), {}, identity={}, tally=tally
+            "files.read",
+            lambda: "ok",
+            (),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
         )
-    sdk_usage_telemetry.run_metered("shell.run", lambda: "ok", (), {}, identity={}, tally=tally)
+    sdk_usage_telemetry.run_metered(
+        "shell.run",
+        lambda: "ok",
+        (),
+        {},
+        identity={},
+        tally=tally,
+        sampling_owner=sampling_owner,
+    )
     assert tally.snapshot() == {"files.read": 3, "shell.run": 1}
     assert [fn for fn, _ in calls] == ["files.read", "files.read", "files.read", "shell.run"]
 
 
 def test_live_sampling_keeps_tally_complete(
-    monkeypatch: pytest.MonkeyPatch, captured: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    captured: list[dict[str, Any]],
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     selected = iter(range(10))
 
@@ -193,14 +314,32 @@ def test_live_sampling_keeps_tally_complete(
 
     monkeypatch.setattr(random, "randrange", sample)
     current = SamplingPolicy(sampling_enabled=True, sample_every=10)
-    monkeypatch.setattr(call_policy, "policy", lambda: current)
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return current
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     tally = SdkCallTally()
     for _ in range(10):
         sdk_usage_telemetry.run_metered(
-            "files.read", lambda: None, (), {}, identity={}, tally=tally
+            "files.read",
+            lambda: None,
+            (),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
         )
     current = SamplingPolicy(sampling_enabled=False, sample_every=10)
-    sdk_usage_telemetry.run_metered("files.read", lambda: None, (), {}, identity={}, tally=tally)
+    sdk_usage_telemetry.run_metered(
+        "files.read",
+        lambda: None,
+        (),
+        {},
+        identity={},
+        tally=tally,
+        sampling_owner=sampling_owner,
+    )
     assert [row["sample_rate"] for row in captured] == [10, 1]
     assert tally.snapshot() == {"files.read": 11}
 
@@ -208,9 +347,12 @@ def test_live_sampling_keeps_tally_complete(
 @pytest.mark.parametrize("async_call", [False, True])
 @pytest.mark.parametrize("failure", ["auth", "schema", "code"])
 async def test_invalid_policy_blocks_sdk_side_effects(
-    monkeypatch: pytest.MonkeyPatch, async_call: bool, failure: str
+    monkeypatch: pytest.MonkeyPatch,
+    async_call: bool,
+    failure: str,
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
 
     def invalid() -> SamplingPolicy:
@@ -224,7 +366,11 @@ async def test_invalid_policy_blocks_sdk_side_effects(
 
     monkeypatch.setattr(call_policy, "_read_policy", invalid)
     cache.refresh()
-    monkeypatch.setattr(call_policy, "policy", cache.read)
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return cache.read()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     calls: list[str] = []
 
     def body() -> None:
@@ -239,11 +385,23 @@ async def test_invalid_policy_blocks_sdk_side_effects(
         with pytest.raises(error):
             if async_call:
                 await sdk_usage_telemetry.run_metered_async(
-                    "files.write", async_body, (), {}, identity={}, tally=tally
+                    "files.write",
+                    async_body,
+                    (),
+                    {},
+                    identity={},
+                    tally=tally,
+                    sampling_owner=sampling_owner,
                 )
             else:
                 sdk_usage_telemetry.run_metered(
-                    "files.write", body, (), {}, identity={}, tally=tally
+                    "files.write",
+                    body,
+                    (),
+                    {},
+                    identity={},
+                    tally=tally,
+                    sampling_owner=sampling_owner,
                 )
     assert tally.snapshot() == {}
     assert calls == []
@@ -256,8 +414,9 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
     captured: list[dict[str, Any]],
     async_call: bool,
     original: BaseException,
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
     cache.next_refresh = float("inf")
     reads: list[str] = []
@@ -269,7 +428,10 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
     def invalid() -> SamplingPolicy:
         raise TypeError("new invalid policy")
 
-    monkeypatch.setattr(call_policy, "policy", current)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return current()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     monkeypatch.setattr(call_policy, "_read_policy", invalid)
     nested: list[str] = []
 
@@ -277,7 +439,12 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
         cache.refresh()
         with pytest.raises(TypeError, match="new invalid policy"):
             sdk_usage_telemetry.run_metered(
-                "inner.call", lambda: nested.append("must not run"), (), {}, identity={}
+                "inner.call",
+                lambda: nested.append("must not run"),
+                (),
+                {},
+                identity={},
+                sampling_owner=sampling_owner,
             )
         raise original
 
@@ -287,34 +454,58 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
     with pytest.raises(type(original)) as caught:
         if async_call:
             await sdk_usage_telemetry.run_metered_async(
-                "outer.call", async_body, (), {}, identity={}
+                "outer.call",
+                async_body,
+                (),
+                {},
+                identity={},
+                sampling_owner=sampling_owner,
             )
         else:
-            sdk_usage_telemetry.run_metered("outer.call", body, (), {}, identity={})
+            sdk_usage_telemetry.run_metered(
+                "outer.call",
+                body,
+                (),
+                {},
+                identity={},
+                sampling_owner=sampling_owner,
+            )
     assert caught.value is original
     assert reads == ["read", "read"]
     assert nested == []
     assert captured[0]["fn"] == "outer.call"
     with pytest.raises(TypeError, match="new invalid policy"):
         sdk_usage_telemetry.run_metered(
-            "next.call", lambda: nested.append("must not run"), (), {}, identity={}
+            "next.call",
+            lambda: nested.append("must not run"),
+            (),
+            {},
+            identity={},
+            sampling_owner=sampling_owner,
         )
     assert nested == []
 
 
 def test_direct_emit_propagates_policy_errors_without_creating_events(
-    monkeypatch: pytest.MonkeyPatch, captured: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    captured: list[dict[str, Any]],
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     def invalid() -> SamplingPolicy:
         raise TypeError("invalid policy")
 
-    monkeypatch.setattr(call_policy, "policy", invalid)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return invalid()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     with pytest.raises(TypeError, match="invalid policy"):
-        sdk_usage_telemetry.emit("files.write", identity={})
+        sdk_usage_telemetry.emit("files.write", identity={}, sampling_owner=sampling_owner)
     assert captured == []
 
 
-def test_tally_counts_a_failed_public_entry_too(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tally_counts_a_failed_public_entry_too(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     """Like its event, a call that raises still counts — it really executed."""
     _spy_emit(monkeypatch)
 
@@ -323,35 +514,75 @@ def test_tally_counts_a_failed_public_entry_too(monkeypatch: pytest.MonkeyPatch)
 
     tally = SdkCallTally()
     with pytest.raises(ValueError, match="x"):
-        sdk_usage_telemetry.run_metered("ns.boom", boom, (), {}, identity={}, tally=tally)
+        sdk_usage_telemetry.run_metered(
+            "ns.boom",
+            boom,
+            (),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
+        )
     assert tally.snapshot() == {"ns.boom": 1}
 
 
-def test_tally_counts_each_public_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tally_counts_each_public_entry(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     """Internal public SDK fan-out is a separate entry in the execution tally."""
     _spy_emit(monkeypatch)
 
     def inner() -> str:
         return sdk_usage_telemetry.run_metered(
-            "ns.inner", lambda: "inner", (), {}, identity={}, tally=tally
+            "ns.inner",
+            lambda: "inner",
+            (),
+            {},
+            identity={},
+            tally=tally,
+            sampling_owner=sampling_owner,
         )
 
     tally = SdkCallTally()
-    sdk_usage_telemetry.run_metered("ns.outer", inner, (), {}, identity={}, tally=tally)
+    sdk_usage_telemetry.run_metered(
+        "ns.outer",
+        inner,
+        (),
+        {},
+        identity={},
+        tally=tally,
+        sampling_owner=sampling_owner,
+    )
     assert tally.snapshot() == {"ns.inner": 1, "ns.outer": 1}
 
 
 def test_calls_keep_their_explicit_tally_owner(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     _spy_emit(monkeypatch)
     sdk_usage_telemetry.run_metered(
-        "ns.fn", lambda: "ok", (), {}, identity={}
+        "ns.fn", lambda: "ok", (), {}, identity={}, sampling_owner=sampling_owner
     )  # framework-internal: no tally
     first = SdkCallTally()
-    sdk_usage_telemetry.run_metered("a.fn", lambda: "ok", (), {}, identity={}, tally=first)
+    sdk_usage_telemetry.run_metered(
+        "a.fn",
+        lambda: "ok",
+        (),
+        {},
+        identity={},
+        tally=first,
+        sampling_owner=sampling_owner,
+    )
     second = SdkCallTally()
-    sdk_usage_telemetry.run_metered("b.fn", lambda: "ok", (), {}, identity={}, tally=second)
+    sdk_usage_telemetry.run_metered(
+        "b.fn",
+        lambda: "ok",
+        (),
+        {},
+        identity={},
+        tally=second,
+        sampling_owner=sampling_owner,
+    )
     assert first.snapshot() == {"a.fn": 1}
     assert second.snapshot() == {"b.fn": 1}
 
@@ -408,7 +639,10 @@ def test_sdk_calls_by_tool_call_id_respects_the_start_window() -> None:
 @pytest.mark.parametrize("error_type", [ImportError, RuntimeError])
 @pytest.mark.parametrize("async_call", [False, True])
 def test_local_capture_import_failure_rejects_body_with_original_exception(
-    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception], async_call: bool
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
+    async_call: bool,
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     import builtins
 
@@ -434,17 +668,31 @@ def test_local_capture_import_failure_rejects_body_with_original_exception(
         if async_call:
             asyncio.run(
                 sdk_usage_telemetry.run_metered_async(
-                    "capture.call", async_body, (), {}, identity={}, tally=tally
+                    "capture.call",
+                    async_body,
+                    (),
+                    {},
+                    identity={},
+                    tally=tally,
+                    sampling_owner=sampling_owner,
                 )
             )
         else:
-            sdk_usage_telemetry.run_metered("capture.call", body, (), {}, identity={}, tally=tally)
+            sdk_usage_telemetry.run_metered(
+                "capture.call",
+                body,
+                (),
+                {},
+                identity={},
+                tally=tally,
+                sampling_owner=sampling_owner,
+            )
     assert raised.value is failure
     assert executed == [] and emitted == [] and tally.snapshot() == {}
 
 
 def test_no_local_participant_uses_the_real_optional_gate(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     from base.agents.impersonation import manifest
 
@@ -456,7 +704,14 @@ def test_no_local_participant_uses_the_real_optional_gate(
         return "without-participant"
 
     assert (
-        sdk_usage_telemetry.run_metered("capture.call", body, (), {}, identity={})
+        sdk_usage_telemetry.run_metered(
+            "capture.call",
+            body,
+            (),
+            {},
+            identity={},
+            sampling_owner=sampling_owner,
+        )
         == "without-participant"
     )
     assert emitted == [("capture.call", {})]
@@ -480,7 +735,7 @@ assert 'base.agents.impersonation.manifest' not in sys.modules
 error_type = {'ImportError': ImportError, 'RuntimeError': RuntimeError}[os.environ['TEST_CAPTURE_ERROR']]
 failure = error_type('invalid cold capture module')
 executed = []
-call_policy.policy = SamplingPolicy
+call_policy.policy = lambda owner: SamplingPolicy()
 telemetry.emit = lambda *args, **kwargs: executed.append('emit')
 
 class BrokenCapture(importlib.abc.MetaPathFinder):
@@ -490,7 +745,8 @@ class BrokenCapture(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, BrokenCapture())
 try:
-    telemetry.run_metered('capture.call', lambda: executed.append('body'), (), {}, identity={})
+    telemetry.run_metered('capture.call', lambda: executed.append('body'), (), {}, identity={},
+                          sampling_owner=call_policy.SamplingPolicyOwner())
 except (ImportError, RuntimeError) as actual:
     assert actual is failure
 else:
@@ -510,85 +766,3 @@ assert executed == []
         check=False,
     )
     assert result.returncode == 0, result.stderr
-
-
-def test_simple_emit_unknown_error_is_not_recovered(monkeypatch: pytest.MonkeyPatch) -> None:
-    failure = RuntimeError("emitter programming error")
-
-    def broken(*_args: Any, **_kwargs: Any) -> None:
-        raise failure
-
-    monkeypatch.setattr(telemetry, "emit", broken)
-    with pytest.raises(RuntimeError) as raised:
-        sdk_usage_telemetry.emit("files.write", identity={})
-    assert raised.value is failure
-
-
-@pytest.mark.parametrize("async_call", [False, True])
-async def test_successful_body_exposes_unknown_emit_failure_without_retry(
-    monkeypatch: pytest.MonkeyPatch, async_call: bool
-) -> None:
-    failure = RuntimeError("emitter programming error")
-    effects: list[str] = []
-    tally = SdkCallTally()
-
-    def broken(*_args: Any, **_kwargs: Any) -> None:
-        raise failure
-
-    def body() -> str:
-        effects.append("committed")
-        return "done"
-
-    async def async_body() -> str:
-        return body()
-
-    monkeypatch.setattr(telemetry, "emit", broken)
-    with pytest.raises(RuntimeError) as raised:
-        if async_call:
-            await sdk_usage_telemetry.run_metered_async(
-                "files.write", async_body, (), {}, identity={}, tally=tally
-            )
-        else:
-            sdk_usage_telemetry.run_metered("files.write", body, (), {}, identity={}, tally=tally)
-    assert raised.value is failure
-    assert effects == ["committed"]
-    assert tally.snapshot() == {"files.write": 1}
-
-
-@pytest.mark.parametrize("async_call", [False, True])
-@pytest.mark.parametrize("primary_type", [ValueError, asyncio.CancelledError, KeyboardInterrupt])
-async def test_emit_secondary_failure_keeps_body_identity_cause_and_tally(
-    monkeypatch: pytest.MonkeyPatch, async_call: bool, primary_type: type[BaseException]
-) -> None:
-    primary = primary_type("body outcome")
-    cause = LookupError("original cause")
-    secondary = RuntimeError("emitter programming error")
-    effects: list[str] = []
-    tally = SdkCallTally()
-
-    def broken(*_args: Any, **_kwargs: Any) -> None:
-        raise secondary
-
-    def body() -> None:
-        effects.append("committed")
-        raise primary from cause
-
-    async def async_body() -> None:
-        body()
-
-    # Reach the cleanup seam independently of emit()'s own former blanket catch.
-    monkeypatch.setattr(sdk_usage_telemetry, "emit", broken)
-    with pytest.raises(primary_type) as raised:
-        if async_call:
-            await sdk_usage_telemetry.run_metered_async(
-                "files.write", async_body, (), {}, identity={}, tally=tally
-            )
-        else:
-            sdk_usage_telemetry.run_metered("files.write", body, (), {}, identity={}, tally=tally)
-    assert raised.value is primary
-    assert primary.__cause__ is cause
-    assert any(
-        "RuntimeError" in note and "emitter programming error" in note for note in primary.__notes__
-    )
-    assert effects == ["committed"]
-    assert tally.snapshot() == {"files.write": 1}

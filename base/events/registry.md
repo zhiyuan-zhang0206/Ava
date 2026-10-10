@@ -117,6 +117,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events | — |
 | `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events | — |
 | `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events | — |
+| `sdk_sampling_refresh_unfinished` | SDK sampling refresh worker retained after the finite shutdown wait | anomaly | — | — | events | — |
 | `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | events | ✓ |
 | `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events | ✓ |
 | `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events | — |

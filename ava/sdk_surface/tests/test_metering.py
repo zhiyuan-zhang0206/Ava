@@ -63,6 +63,7 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, obje
         duration: float | None = None,
         *,
         identity: Mapping[str, Any],
+        sampling_owner: call_policy.SamplingPolicyOwner,
         sampling_policy: call_policy.SamplingPolicy | None = None,
     ) -> None:
         assert sampling_policy is not None
@@ -72,9 +73,19 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, obje
     return calls
 
 
+@pytest.fixture
+def sampling_owner() -> Iterator[call_policy.SamplingPolicyOwner]:
+    owner = call_policy.SamplingPolicyOwner()
+    yield owner
+    owner.close()
+
+
 @pytest.fixture(autouse=True)
 def _valid_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
 
 def _help(*targets: object) -> str:
@@ -85,10 +96,10 @@ def _help(*targets: object) -> str:
 
 
 @pytest.fixture
-def _installed() -> Iterator[None]:
+def _installed(sampling_owner: call_policy.SamplingPolicyOwner) -> Iterator[None]:
     """Install the recorders over the real `ava` singleton, then restore — so a
     wrapped function never leaks into the rest of the suite."""
-    ledger = metering.install()
+    ledger = metering.install(sampling_owner)
     try:
         yield
     finally:
@@ -99,7 +110,9 @@ def _installed() -> Iterator[None]:
 
 
 def test_help_is_byte_identical_across_install(
-    monkeypatch: pytest.MonkeyPatch, model_installation: install.Installation
+    monkeypatch: pytest.MonkeyPatch,
+    model_installation: install.Installation,
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     """Acceptance for the transparency contract: metering must not change a single
     byte of what the agent sees via `ava.help`."""
@@ -108,7 +121,7 @@ def test_help_is_byte_identical_across_install(
     before_ns = _help(ava.files)
     before_fn = _help(ava.files.read)
 
-    ledger = metering.install()
+    ledger = metering.install(sampling_owner)
     try:
         assert _help(ava) == before_root
         assert _help(ava.files) == before_ns
@@ -117,12 +130,12 @@ def test_help_is_byte_identical_across_install(
         metering.uninstall(ledger)
 
 
-def test_signature_and_identity_metadata_preserved() -> None:
-    # Capture the pristine metadata, then install: name / module / doc / signature
-    # must be unchanged (functools.wraps + __wrapped__ resolution).
+def test_signature_and_identity_metadata_preserved(
+    sampling_owner: call_policy.SamplingPolicyOwner,
+) -> None:
     before_sig = inspect.signature(ava.files.read)
     before_doc = ava.files.read.__doc__
-    ledger = metering.install()
+    ledger = metering.install(sampling_owner)
     try:
         read = ava.files.read
         assert read.__name__ == "read"
@@ -139,9 +152,18 @@ def test_function_attached_members_survive(_installed: None) -> None:
     assert isinstance(getattr(ava.understand, "UnderstandError", None), type)
 
 
-def test_install_is_idempotent(_installed: None) -> None:
+def test_install_is_idempotent(
+    _installed: None, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     once = ava.files.read
-    metering.install()  # second install must not double-wrap
+    metering.install(sampling_owner)  # second install must not double-wrap
+    assert ava.files.read is once
+
+
+def test_install_rejects_a_different_owner_before_wrapping(_installed: None) -> None:
+    once = ava.files.read
+    with pytest.raises(ValueError, match="another sampling owner"):
+        metering.install(call_policy.SamplingPolicyOwner())
     assert ava.files.read is once
 
 
@@ -198,7 +220,7 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
 
 
 def test_plugin_wrapped_signature_survives_and_counts_once(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     """A member already wrapped by a plugin (extra kwarg, custom __signature__) stays
     transparent under the recorder and still emits exactly one event."""
@@ -216,7 +238,7 @@ def test_plugin_wrapped_signature_survives_and_counts_once(
     plugin_wrapped.__module__ = "ava.agents"
     plugin_wrapped.__signature__ = inspect.signature(plugin_wrapped)  # type: ignore[attr-defined]
 
-    rec = metering._make_recorder(plugin_wrapped, "agents.spawn")
+    rec = metering._make_recorder(plugin_wrapped, "agents.spawn", sampling_owner)
     assert rec.__name__ == "spawn"
     assert rec.__module__ == "ava.agents"
     assert "label" in inspect.signature(rec).parameters
@@ -227,23 +249,27 @@ def test_plugin_wrapped_signature_survives_and_counts_once(
     assert calls[0][2] is not None and calls[0][2] >= 0
 
 
-def test_recorder_feeds_the_execution_tally(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recorder_feeds_the_execution_tally(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     """The wrapped surface bumps the execution's full tally (two calls count two),
     independent of the emit sampler."""
     _spy_emit(monkeypatch)
-    rec = metering._make_recorder(lambda: "ok", "ns.fn")
+    rec = metering._make_recorder(lambda: "ok", "ns.fn", sampling_owner)
     with _execution_tally() as tally:
         assert rec() == "ok"
         assert rec() == "ok"
     assert tally.snapshot() == {"ns.fn": 2}
 
 
-def test_recorder_recognized_by_identity_not_copied_dict() -> None:
+def test_recorder_recognized_by_identity_not_copied_dict(
+    sampling_owner: call_policy.SamplingPolicyOwner,
+) -> None:
     """P3: ava.extend._install_metadata copies a wrapped callable's __dict__ onto its
     wrapper, so a plugin wrapper built over a recorder inherits the recorder's dict.
     is_recorder() must key off object identity (the marker points at the recorder itself), not the attribute's presence, or
     it would skip re-wrapping such a wrapper and leave the recorder buried inside."""
-    rec = metering._make_recorder(lambda: None, "ns.fn")
+    rec = metering._make_recorder(lambda: None, "ns.fn", sampling_owner)
     assert metering.is_recorder(rec)
 
     def plugin_wrapper() -> None:
@@ -255,7 +281,9 @@ def test_recorder_recognized_by_identity_not_copied_dict() -> None:
     assert not metering.is_recorder(plugin_wrapper)
 
 
-def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mcp_recorder_derives_fq_from_runtime_args(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     """MCP tools are dynamic, so the funnel recorder builds the fq from server/tool at
     call time, both inside and outside an execution tally."""
     calls = _spy_emit(monkeypatch)
@@ -263,7 +291,7 @@ def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPat
     def _fake_call(server: str, tool: str, **_kw: object) -> dict[str, str]:
         return {"server": server, "tool": tool}
 
-    rec = metering._make_mcp_recorder(_fake_call)
+    rec = metering._make_mcp_recorder(_fake_call, sampling_owner)
     with _execution_tally():
         assert rec("chrome", "navigate", url="x") == {"server": "chrome", "tool": "navigate"}
     assert len(calls) == 1
@@ -300,7 +328,7 @@ def test_a_surface_installed_without_the_agent_layer_is_seen() -> None:
 
 
 def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     """Task #3426: teardown restores from the install() ledger, not a fresh
     namespace walk — the walk re-resolves dynamic member surfaces (the `ava.skills`
@@ -317,7 +345,7 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
         return [(target, "demo", "demo")]
 
     monkeypatch.setattr(metering, "_instrument_targets", _stub_targets)
-    ledger = metering.install()
+    ledger = metering.install(sampling_owner)
     wrapped = target.demo
     assert wrapped is not demo
     assert metering.is_recorder(wrapped)
@@ -330,12 +358,14 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
     assert target.demo is demo
 
 
-def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_teardown_survives_a_poisoned_dynamic_surface(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     """Task #3426 acceptance shape: arm metering first, then poison the skills
     surface (simulating the broken-registry state a test deliberately leaves
     behind); uninstall() must complete without touching the surface and restore
     every recorded pair."""
-    ledger = metering.install()
+    ledger = metering.install(sampling_owner)
     assert ledger
     recorded = list(ledger)
 
@@ -357,7 +387,7 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
 
 @pytest.mark.asyncio
 async def test_async_calls_measure_each_concurrent_entry(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     import asyncio
 
@@ -367,7 +397,7 @@ async def test_async_calls_measure_each_concurrent_entry(
         await asyncio.sleep(0)
         return label
 
-    wrapped = metering._make_recorder(body, "plugin.async_call")
+    wrapped = metering._make_recorder(body, "plugin.async_call", sampling_owner)
     assert inspect.iscoroutinefunction(wrapped)
     a, b = wrapped("a"), wrapped("b")
     assert calls == []
@@ -378,7 +408,9 @@ async def test_async_calls_measure_each_concurrent_entry(
 
 @pytest.mark.parametrize("async_call", [False, True])
 async def test_recorder_rejects_invalid_sampling_before_the_original_call(
-    monkeypatch: pytest.MonkeyPatch, async_call: bool
+    monkeypatch: pytest.MonkeyPatch,
+    async_call: bool,
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     from base.agents.sdk import call_policy
 
@@ -394,9 +426,12 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
     async def async_body() -> str:
         return body()
 
-    monkeypatch.setattr(call_policy, "policy", invalid)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return invalid()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     original = async_body if async_call else body
-    wrapped = metering._make_recorder(original, "plugin.write")
+    wrapped = metering._make_recorder(original, "plugin.write", sampling_owner)
     assert inspect.signature(wrapped) == inspect.signature(original)
     with pytest.raises(TypeError, match="invalid sampling configuration"):
         if async_call:
@@ -407,9 +442,8 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
 
 
 def test_borrowed_identity_is_stamped_on_external_sdk_events(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
-
     from base import telemetry
     from base.agents.sdk import call_policy
 
@@ -423,8 +457,12 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
 
     pin_agent(42, lease=ExternalLease(agent_id=99, validate=validate, config=lambda: None))
     monkeypatch.setattr(telemetry, "emit", capture)
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
-    wrapped = metering._make_recorder(lambda: "ok", "files.read")
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+    wrapped = metering._make_recorder(lambda: "ok", "files.read", sampling_owner)
     assert wrapped() == "ok"
     assert rows[0]["agent_id"] == 99
     assert rows[0]["source"] == "agent:99"
@@ -482,21 +520,20 @@ async def test_plugin_wrap_preserves_awaited_single_event(
 
 
 def test_install_does_not_evaluate_dynamic_namespace_directory(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     def dynamic_names() -> list[str]:
         pytest.fail("instrumentation must not load skills or discover remote MCP servers")
 
     monkeypatch.setattr(ava.skills, "__dir__", dynamic_names)
     monkeypatch.setattr(ava.mcps, "__dir__", dynamic_names)
-    ledger = metering.install()
+    ledger = metering.install(sampling_owner)
     metering.uninstall(ledger)
 
 
 @pytest.mark.parametrize("wrapper", ["sync", "async", "mcp"])
 async def test_invalid_identity_snapshot_prevents_sdk_body(
-    monkeypatch: pytest.MonkeyPatch,
-    wrapper: str,
+    monkeypatch: pytest.MonkeyPatch, wrapper: str, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     """Unknown provenance errors fail at admission instead of performing an unattributed action."""
     from base.agents.messages import external_caller
@@ -514,17 +551,19 @@ async def test_invalid_identity_snapshot_prevents_sdk_body(
 
     with pytest.raises(RuntimeError) as caught:
         if wrapper == "async":
-            await metering._make_recorder(body, "probe.async")()
+            await metering._make_recorder(body, "probe.async", sampling_owner)()
         elif wrapper == "mcp":
-            metering._make_mcp_recorder(lambda *_: executed.append("mcp"))("probe", "tool")
+            metering._make_mcp_recorder(lambda *_: executed.append("mcp"), sampling_owner)(
+                "probe", "tool"
+            )
         else:
-            metering._make_recorder(lambda: executed.append("sync"), "probe.sync")()
+            metering._make_recorder(lambda: executed.append("sync"), "probe.sync", sampling_owner)()
     assert caught.value is failure
     assert executed == []
 
 
 async def test_awaited_calls_retain_their_entry_identity(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     """A later attachment cannot relabel an already-admitted async SDK call."""
     import asyncio
@@ -535,7 +574,11 @@ async def test_awaited_calls_retain_their_entry_identity(
     rows: list[dict[str, Any]] = []
     entered = asyncio.Event()
     release = asyncio.Event()
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
     def capture(*_args: Any, **kwargs: Any) -> None:
         rows.append(kwargs)
@@ -549,13 +592,13 @@ async def test_awaited_calls_retain_their_entry_identity(
     pin_agent(41)
     first_tally = SdkCallTally()
     ava.bind_context(replace(ava.context, sdk_calls=first_tally))
-    first = asyncio.create_task(metering._make_recorder(held, "probe.held")())
+    first = asyncio.create_task(metering._make_recorder(held, "probe.held", sampling_owner)())
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
         pin_agent(42)
         second_tally = SdkCallTally()
         ava.bind_context(replace(ava.context, sdk_calls=second_tally))
-        metering._make_recorder(lambda: None, "probe.next")()
+        metering._make_recorder(lambda: None, "probe.next", sampling_owner)()
         release.set()
         await first
     finally:
@@ -569,23 +612,27 @@ async def test_awaited_calls_retain_their_entry_identity(
     ]
 
 
-def test_public_fanout_counts_each_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_public_fanout_counts_each_entry(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     calls = _spy_emit(monkeypatch)
-    inner = metering._make_recorder(lambda: "done", "probe.inner")
-    outer = metering._make_recorder(inner, "probe.outer")
+    inner = metering._make_recorder(lambda: "done", "probe.inner", sampling_owner)
+    outer = metering._make_recorder(inner, "probe.outer", sampling_owner)
     with _execution_tally() as tally:
         assert outer() == "done"
     assert tally.snapshot() == {"probe.inner": 1, "probe.outer": 1}
     assert [row[0] for row in calls] == ["probe.inner", "probe.outer"]
 
 
-def test_recursive_public_entry_counts_each_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recursive_public_entry_counts_each_invocation(
+    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+) -> None:
     calls = _spy_emit(monkeypatch)
 
     def body(depth: int) -> int:
         return recursive(depth - 1) + 1 if depth else 0
 
-    recursive = metering._make_recorder(body, "probe.recursive")
+    recursive = metering._make_recorder(body, "probe.recursive", sampling_owner)
     with _execution_tally() as tally:
         assert recursive(2) == 2
     assert tally.snapshot() == {"probe.recursive": 3}

@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -131,7 +132,12 @@ def _exercise_shutdown(failure: str) -> None:
     async def close_health(*_args: object) -> None:
         await record("health_closed")
 
+    def close_sampling(owner: SamplingPolicyOwner) -> bool:
+        events.append("sampling_stopped")
+        return owner.stop()
+
     with (
+        patch.object(SamplingPolicyOwner, "close", close_sampling),
         patch.multiple(
             process_boot,
             init_process_scope=MagicMock(),
@@ -172,8 +178,10 @@ def _exercise_shutdown(failure: str) -> None:
 def _assert_heartbeat_order(events: list[str], failure: str) -> None:
     assert events.index("beat_started") < events.index("boot_settled")
     assert events.index("beat_stopped") < events.index("owner_released")
+    assert events.index("sampling_stopped") < events.index("pools_closed")
     if failure in {"exception", "dispatcher_returns"}:
         assert events.index("turns_drained") < events.index("beat_stopped")
+        assert events.index("turns_drained") < events.index("sampling_stopped")
     if failure == "heartbeat":
         assert events.index("beat_failed") < events.index("dispatcher_continued")
         assert events.index("dispatcher_continued") < events.index("turns_drained")
@@ -213,6 +221,7 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
         "turns_drained",
         "owner_released",
         "health_closed",
+        "sampling_stopped",
         "pools_closed",
         "pidfile_removed",
         exception,
@@ -317,6 +326,7 @@ def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile() -> None:
         "beat_failed",
         "beat_stopped",
         "boot_continued",
+        "sampling_stopped",
         "pools_closed",
         "pidfile_removed",
         "RuntimeError",

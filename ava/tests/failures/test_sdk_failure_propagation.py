@@ -29,7 +29,11 @@ def test_installed_send_keeps_unknown_response_when_emission_also_fails(
     tally = SdkCallTally()
     ava.bind_context(replace(ava.context, sdk_calls=tally))
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     responses: list[httpx.Response] = []
     emission_failure = RuntimeError("SDK emitter code failed")
 
@@ -58,7 +62,7 @@ def test_installed_send_keeps_unknown_response_when_emission_also_fails(
         ) as client,
         use_client(client),
     ):
-        ledger = metering.install()
+        ledger = metering.install(call_policy.SamplingPolicyOwner())
         try:
             with pytest.raises(httpx.HTTPStatusError) as raised:
                 ava.agents.send_message(42, "one logical send")
