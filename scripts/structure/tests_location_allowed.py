@@ -13,8 +13,10 @@ repo-relative POSIX path:
   itself) or scans the whole tree. `integration`: it spans units that may not import each other,
   so no package may hold it. An entry whose file is gone, that no longer needs one (it moved under
   `BY_DESIGN`, or is also frozen in the baseline) or that has another category or an empty reason
-  fails the lint. Debt that is still to move is not listed here: it is frozen in the
-  `tests_location` baseline section.
+  fails the lint. A complete root subject proof needs no entry: those files use the
+  shared facts on each check, and unresolved inputs prevent admission. Remaining entries
+  retain their existing policy until their actual artifact or integration subjects can
+  be proved without a path exception. There is no tests-location baseline.
 """
 
 from __future__ import annotations
@@ -34,41 +36,13 @@ BY_DESIGN: dict[str, str] = {
 }
 
 ALLOWED: dict[str, tuple[Category, str]] = {
-    "tests/components/agent/test_claim_auto_resurrect.py": (
-        "integration",
-        "agent and ops are peers: the claim node's resurrect batch is driven through ops.agents.wake.resurrect_agent",
-    ),
     "tests/components/agent/test_compact_contract.py": (
         "contract",
         "the compaction triggers point at the ava.self.compact contract in ava_builtins/commands/compact.md",
     ),
-    "tests/components/agent/test_corpse_reap.py": (
-        "integration",
-        "the hosted corpse reaper's recrash trigger runs against real rows the ops lifecycle writes: spans agent, base, ops, no one of which may import all the others",
-    ),
-    "tests/components/agent/test_hosted_resurrection_fences.py": (
-        "integration",
-        "agent and ops are peers: both sides write the same lifecycle row and fence each other",
-    ),
-    "tests/components/agent/test_lifecycle_finalizers.py": (
-        "integration",
-        "dead-letter cleanup must not overwrite a durable lifecycle command: the agent finalizer and the delivery watchdog share the row: spans agent, base, services.wake.delivery_watchdog, no one of which may import all the others",
-    ),
-    "tests/components/agent/test_maintenance.py": (
-        "integration",
-        "maintenance drain over real ownership/claim rows and the compiled graph, driven through the cli and the agent host: spans agent, base, cli, services.agent_runner.agent_host, no one of which may import all the others",
-    ),
     "tests/components/agent/test_maintenance_legacy_cold.py": (
         "integration",
         "maintenance classifies persisted agent ENDs that ops lifecycle rows decide: spans agent, base, ops, no one of which may import all the others",
-    ),
-    "tests/components/agent/test_maintenance_lifecycle_wait.py": (
-        "integration",
-        "maintenance waits for in-flight agent work that ops lifecycle rows describe: spans agent, base, ops, no one of which may import all the others",
-    ),
-    "tests/components/agent/test_resurrect_lifecycle_fence.py": (
-        "integration",
-        "agent and ops are peers: resurrect fences against a pending terminate across both",
     ),
     "tests/components/ava/test_migration_baseline.py": (
         "contract",
@@ -113,10 +87,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/components/base/test_proc_contract.py": (
         "contract",
         "scans the git-driving modules of the whole tree for subprocess.run timeouts",
-    ),
-    "tests/components/base/test_recovery_breaker.py": (
-        "integration",
-        "the recovery breaker's durable streak and halt write are shared by the agent and ops sides: spans agent, base, ops, no one of which may import all the others",
     ),
     "tests/components/base/test_runner_role.py": (
         "contract",
@@ -218,61 +188,17 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "scans the repository root for entry points that declare the database gate exemption",
     ),
-    "tests/components/cli/test_maintenance_readiness.py": (
-        "integration",
-        "cli start against a real gateway app: cli and gateway are peers",
-    ),
-    "tests/components/cli/test_otel_bootstrap_relay.py": (
-        "integration",
-        "the cli bootstrap and the gateway publish one relay routing: spans base, cli, gateway, no one of which may import all the others",
-    ),
-    "tests/components/cli/test_pgbouncer_config.py": (
-        "integration",
-        "cli config generation and the direct-connection exemption of the backup service: spans base, cli, services.backup.dump, no one of which may import all the others",
-    ),
     "tests/components/cli/test_pgbouncer_wire.py": (
         "integration",
         "a real PgBouncer in front of a throwaway Postgres, exercised through the cli, the gateway and the ttl reaper: spans base, cli, gateway, services.upkeep.ttl_reaper, no one of which may import all the others",
-    ),
-    "tests/components/gateway/test_alerts_api.py": (
-        "integration",
-        "/api/alerts through the gateway app against the base ingest core and the shared session database fixtures",
-    ),
-    "tests/components/gateway/test_caller_protocol_path.py": (
-        "integration",
-        "a real cli -> authenticated HTTP -> ownership transaction -> hosted claim proof: spans agent, base, cli, gateway, no one of which may import all the others",
-    ),
-    "tests/components/gateway/test_cluster_endpoints.py": (
-        "integration",
-        "/api/cluster/* endpoints over ops cluster state and the delivery watchdog: spans base, gateway, ops, services.wake.delivery_watchdog, no one of which may import all the others",
-    ),
-    "tests/components/gateway/test_delivery_publish.py": (
-        "integration",
-        "gateway chat delivery against the delivery watchdog's transaction and event ordering: spans base, gateway, services.wake.delivery_watchdog, no one of which may import all the others",
-    ),
-    "tests/components/gateway/test_labels.py": (
-        "integration",
-        "thread-label endpoint and the labeler service share the same rows: spans base, gateway, services.derived.labeler, no one of which may import all the others",
     ),
     "tests/components/gateway/test_okf_graph_contract.py": (
         "contract",
         "every .ava.okf.md bundle of the repository parses identically through the adapter and the legacy parser",
     ),
-    "tests/components/gateway/test_schemas_wire_format.py": (
-        "contract",
-        "freezes the wire schemas against ui/web/openapi.json and ui/web/src/lib/contracts/types.ts",
-    ),
-    "tests/integration/test_hosted_lifecycle_integration.py": (
-        "integration",
-        "agent and ops are peers: a hosted force settles against a prior restart across both, and neither imports the other",
-    ),
     "tests/integration/test_impersonation_audit_root_inventory.py": (
         "contract",
         "scans every production module for audit-construction roots against a classified inventory",
-    ),
-    "tests/integration/test_impersonation_notifications.py": (
-        "integration",
-        "lease reminders and termination notices across agent, ops, cli and the delivery watchdog: spans agent, base, cli, ops, services.wake.delivery_watchdog, no one of which may import all the others",
     ),
     "tests/components/lifecycle/db_authority/test_api_tokens.py": (
         "integration",
@@ -281,18 +207,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/components/lifecycle/db_authority/test_backup_owner.py": (
         "integration",
         "logical backup maintenance on an authenticated home across the cli, the backup scheduler and scripts: spans base, cli, scripts, services.backup.scheduler, no one of which may import all the others",
-    ),
-    "tests/components/ops/test_agent_wake_hosted.py": (
-        "integration",
-        "real-database resurrection: the ops status transition and the agent's hosted wake: spans agent, base, ops, no one of which may import all the others",
-    ),
-    "tests/components/ops/test_resurrection_admission.py": (
-        "integration",
-        "agent and ops are peers: admission and resurrect race on the same rows",
-    ),
-    "tests/components/ops/test_schema_mismatch.py": (
-        "integration",
-        "schema status from an installed image through the cli, the gateway and ops: spans base, cli, gateway, ops, no one of which may import all the others",
     ),
     "tests/components/plugins/test_grafana_dashboard_render.py": (
         "contract",
@@ -370,10 +284,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "compiles the permissions helper's Swift source with tests/components/services/helper_child_custody.swift and checks the native reaper cannot race owned signal delivery",
     ),
-    "tests/components/services/test_ava_root_glue_manifests.py": (
-        "integration",
-        "the ava-root manifest generation from the roster across gateway, ops, browser and ava-root: spans base, gateway, ops, services.supervision.ava_root, services.supervision.ava_root_glue, services.desktop.browser, no one of which may import all the others",
-    ),
     "tests/components/services/test_backup_recovery_contract.py": (
         "contract",
         "asserts the conversation-recovery sources named by services/backup/dump.py, the checkpoint module and db/schema.sql are checkpoint tables, not the events archive",
@@ -381,18 +291,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/components/services/test_backup_scheduler_shutdown.py": (
         "integration",
         "real signal stop of a scheduler blocked in an ops job: spans base, ops, services.backup.scheduler, no one of which may import all the others",
-    ),
-    "tests/components/services/test_gate_root.py": (
-        "integration",
-        "the gate as a native ava-root child with ops and the healthchecks service: spans base, ops, services.supervision.ava_root, services.supervision.healthchecks, no one of which may import all the others",
-    ),
-    "tests/components/services/test_hosted_db_wait_liveness.py": (
-        "integration",
-        "agent-host DB waits against the delivery watchdog's stale scan and force: spans agent, base, services.agent_runner.agent_host, services.wake.delivery_watchdog, no one of which may import all the others",
-    ),
-    "tests/components/services/test_maintenance_readiness.py": (
-        "integration",
-        "readiness of a stopped generation through the cli, the gateway and ops: spans base, cli, gateway, ops, no one of which may import all the others",
     ),
     "tests/skills/test_impersonation_launch.py": (
         "contract",
@@ -405,10 +303,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/skills/test_watcher_send_retry.py": (
         "contract",
         "tests the reference watcher scripts of the ava_builtins skills",
-    ),
-    "tests/skills/use_other_agents/test_coding_session_resume.py": (
-        "contract",
-        "tests the spawn scripts of the ava_builtins/skills/platform/ava-guide/external-agents skill",
     ),
     "tests/skills/use_other_agents/test_spawn_runtime_compat.py": (
         "contract",
@@ -446,14 +340,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests the watch_idle reference snippets of the ava-goal, long-running-agent and ava-fleet skills",
     ),
-    "tests/harness/test_helperproc.py": (
-        "integration",
-        "permissions-helper process sessions routed through the agent host: spans base, services.agent_runner.agent_host, services.desktop.permissions_helper, no one of which may import all the others",
-    ),
-    "tests/harness/test_home_isolation.py": (
-        "contract",
-        "asserts the harness's env bootstrap, tests/fixtures/env_bootstrap.py, hides the operator's home",
-    ),
     "tests/contracts/test_lint_contextvars_allowlist.py": (
         "contract",
         "probes the ruff contextvars ban configured in pyproject.toml",
@@ -477,9 +363,5 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/harness/test_os_job_leak_guard.py": (
         "contract",
         "tests the session OS-job leak guard, tests/_os_jobs.py",
-    ),
-    "tests/harness/test_pool_keepalives.py": (
-        "integration",
-        "every long-lived pool of the gateway and agent ops carries the base keepalive kwargs: spans base, gateway, services.agent_runner.agent_ops, no one of which may import all the others",
     ),
 }
