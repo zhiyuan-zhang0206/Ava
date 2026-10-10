@@ -11,3 +11,18 @@
     "test_core.py",
 ]
 "tests.fixtures.unit.homes" = ["."]
+"tests.fixtures.model_catalog" = [
+    "test_attachment_transport.py",
+    "test_core.py",
+    "test_security.py",
+]
+"tests.fixtures.unit.config_authority" = [
+    "test_attachment_transport.py",
+    "test_core.py",
+    "test_security.py",
+]
+"tests.fixtures.unit.model_owner" = [
+    "test_attachment_transport.py",
+    "test_core.py",
+    "test_security.py",
+]
