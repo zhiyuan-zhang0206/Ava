@@ -11,12 +11,22 @@ regression net, and a gap in the PR-side subset surfaces in the queue instead
 of reaching main; test selection does not change broken-main risk.
 
 The selector is [scripts/ci/test_selector.py](../../../scripts/ci/test_selector.py). It is
-stdlib-only and builds a direct static import reverse map for the checked-out
-tree. It does not execute tests, import application code, modify the checkout,
-or infer dynamic imports. It does not follow imports transitively: the root
-`conftest.py` loads global fixtures through `pytest_plugins`, and those
-fixtures import most of base/, so a transitive closure would select nearly
-every test for nearly every change.
+stdlib-only and consumes the shared runtime dependency facts in
+`scripts.structure.imports.facts`. It follows imports transitively through application
+modules, test helpers and imported tests, and adds the actual pytest fixture bindings:
+root/local conftests, literal `pytest_plugins`, and the shared `path_scopes.toml` reader.
+Relative imports, finite dynamic imports, literal Python subprocess modules/code and
+recognized repository-rooted resource paths use that same evidence owner and module resolver. Placement
+subject policies do not prune this runtime impact graph. The selector never imports
+application code or executes test code.
+
+Global fixture dependencies can therefore reach most tests. This is real runtime
+coupling: the duration guard reports `subset-too-close` and keeps FULL rather than
+removing those edges to produce a smaller subset. An opaque dynamic input on a test's
+reachable dependency graph produces `incomplete-impact`, with source locations and
+reasons in the JSON `diagnostics` field and stderr. Explicit edges do not certify that
+an unrelated opaque input is resolved. Syntax errors, malformed declarations and
+unexpected analysis errors fail the selector job and the required backend check.
 
 The existing e2e-env-guard job is outside this selection path. It continues to
 run its complete tests/e2e/ package plus tests/harness/test_home_isolation.py in one
@@ -36,14 +46,14 @@ matching row decides.
 | --- | --- | --- | --- |
 | 1 | A documentation path (see below) | DOCUMENTATION | none |
 | 2 | Root `conftest.py` | GLOBAL | full suite |
-| 3 | Any other `conftest.py` (also when deleted) | CONFTEST | every collectable test below its directory |
-| 4 | Absent from the head tree | DELETED | ignored |
-| 5 | A collectable test file | TEST | itself |
+| 3 | Any other `conftest.py` (also when deleted) | CONFTEST | every collectable test below its directory plus runtime consumers |
+| 4 | Absent from the head tree | DELETED | base-tree impact; FULL with a diagnostic when base facts are unavailable |
+| 5 | A collectable test file | TEST | itself and its transitive test consumers |
 | 6 | A global path (below) | GLOBAL | full suite |
 | 7a | `.github/`, `.agents/`, `.ava/`, `.trunk/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
-| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, `.test_durations`, `.test_durations.source.json` | TREE_SCAN_ONLY | tree-scan tests only |
-| 8 | A non-Python file under `ui/` | FRONTEND | none; the frontend job owns it |
-| 9 | Any other file under agent/, ava/, ava_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | direct importers plus the owning package's tests |
+| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, `.test_durations`, `.test_durations.source.json` | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
+| 8 | A non-Python file under `ui/` | FRONTEND | recognized backend resource consumers, when backend selection runs; the frontend job also owns it |
+| 9 | Any other file under agent/, ava/, ava_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | transitive runtime consumers plus the owning package's tests |
 | 10 | Anything else | UNMAPPED | full suite |
 
 Global paths apply to every test: `pyproject.toml`, `uv.lock`, `.python-version`,
@@ -52,8 +62,8 @@ Global paths apply to every test: `pyproject.toml`, `uv.lock`, `.python-version`
 under tests/fixtures/, db/, migrations/, deploy/ and commands/. This list and
 the plugin set are the single "global path" concept in the selector.
 
-Tests read `.github/`, `.agents/`, `.ava/` and `.trunk/` by path, so no import
-links them. A change there selects, besides the tree-scan tests, every
+Tests read `.github/`, `.agents/`, `.ava/` and `.trunk/` by path. Recognized
+resource facts reach their transitive consumers. A change there selects, besides the tree-scan tests, every
 collectable test whose source contains the directory as a string literal: the
 unquoted `.github/` (not preceded by a word character or a dot, so the module
 name `base.agents` does not match `.agents`) or the quoted `".github"` or
@@ -64,13 +74,15 @@ nearest `tests` directory that holds at least one collectable test owns it, and
 every collectable test below that directory is the package's test set. The
 directory itself counts when the path is already inside a `tests` directory,
 otherwise a `tests` directory beside an ancestor counts. A path with no nearer
-owner falls back to the top-level tests/ directory. A source file's direct
-importers are always added to its package tests.
+owner falls back to the top-level tests/ directory. A file's transitive runtime
+consumers are always added to its package tests.
 
-A deleted path is ignored because its importers must change in the same PR, or
-the whole-repo type check and collection fail. A deleted `conftest.py` is the
-exception: it removes fixtures without breaking any import, so it still selects
-its subtree.
+CI passes the committed merge-base through `--base-ref`. Selection reads both base
+and head with the same fact collector and resolver, then intersects the resulting tests
+with the current collectable universe. This preserves impact when an import, fixture
+binding or resource edge is removed, and when a changed source is deleted. Base facts
+are read from a temporary Git archive, never from an unrelated working checkout.
+Without base facts, a deleted path cannot certify a subset and reports `incomplete-impact`.
 
 ## Decision rules
 
@@ -84,17 +96,18 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | 2 | Every path is a documentation path | SKIP |
 | 3 | A path is GLOBAL | FULL (`global-path:<first path>`; the payload lists every global path) |
 | 4 | A path is UNMAPPED | FULL (unmapped; the payload lists the paths) |
-| 5 | Otherwise, union the contribution of every path with the tree-scan tests | candidate subset |
-| 6 | The candidate is empty | FULL (no-tests) |
-| 7 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (subset-too-close) |
-| 8 | None of the above | SELECTED (owner-tests) |
+| 5 | Reachable dynamic input or missing deleted-path base facts | FULL (incomplete-impact; diagnostic locations and reasons) |
+| 6 | Otherwise, union the contribution of every path with the tree-scan tests | candidate subset |
+| 7 | The candidate is empty | FULL (no-tests) |
+| 8 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (subset-too-close) |
+| 9 | None of the above | SELECTED (owner-tests) |
 
 Rule 4 is a runtime safety net. scripts/tests/test_test_selector_owner_rules.py
 classifies every tracked path and fails when any is UNMAPPED, so the trunk never
 reaches rule 4; a new top-level directory or root file needs a class in the
 selector before it can merge.
 
-Tree-scan tests join the candidate subset before rules 6-8 run: every
+Tree-scan tests join the candidate subset before the duration and empty-candidate rules run: every
 `test_lint_*.py` under `tests/` (any depth, non-e2e) and the repo-level
 CI/governance checks pinned in `scripts/ci/test_selector.py`
 (`_TREE_SCAN_TESTS`). The owner rules cannot reach a repo-wide scan
@@ -133,30 +146,31 @@ TEST path that runs itself, a helper or data file there belongs to that
 package's tests, and a module that merely carries a `test_` prefix outside a
 `tests/` directory (`scripts/ci/test_selector.py`) is not a test.
 
-## Static map and its limits
+## Runtime impact facts and limits
 
-The map AST-parses every Python file under any `tests/` directory, except files named
-conftest.py, and walks imports in every scope. It includes both module imports
-and absolute from-import targets; for example, from agent.execution import child as exec_child
-reaches agent/execution/child.py, and from base import lm reaches
-base/lm/__init__.py when those paths exist. Relative imports and unresolved
-modules are omitted.
+The dependency graph AST-parses Python files under the shared code roots and `tests`,
+including non-collectable helpers and conftests. Each collectable non-e2e backend test
+is a graph root. Module edges also include concrete package initializers that Python
+executes during import. Dependency cycles terminate through a visited set. A helper
+or imported test affects its transitive test consumers even when those consumers live
+outside its nearest ownership bucket.
 
-Only importer files named test_*.py or *_test.py outside tests/e2e/ are
-collectable. Test helpers are still inspected but do not add selected tests.
-Resolution considers these source roots: agent, ava, cli, gateway, ops,
-services, base, ava_builtins, ui, scripts, and schedules.
+The shared fact collector keeps line numbers, edge kinds and unresolved expressions.
+Rooted resource paths are evidence of possible use, not proof of a read or runtime
+coverage; directory paths conservatively affect changed descendants.
+It supports bounded static evidence, not arbitrary execution or reflection. Known
+external modules have no repository input to select. Unresolved dynamic inputs remain
+explicit unknown evidence. Fixtures registered through `path_scopes.toml` create real
+edges, but an opaque call elsewhere in a plugin remains unknown unless its finite input
+domain is proved. This can require FULL on the current repository; it is not evidence
+that the runtime dependency closure is small or complete.
 
-The map is intentionally partial and is not a coverage claim: many source files
-have no test that imports them directly, and dynamic imports, string-based module
-access, reflection, subprocess boundaries, and helpers are invisible to it. The
-package-test rule is the answer to that gap: a changed file always runs the
-tests of the package that contains it, whether or not a test imports it. What the
-rules still miss, such as a test elsewhere that exercises the file by path or
-through a subprocess, is caught by the full suite in the merge queue.
-
-The map is rebuilt for every run; no map artifact is committed. There is no
-coverage-derived map yet; that is a future option, not an enforcement claim.
+The graph is rebuilt for every run and no coverage-derived map is committed. Package
+ownership and tree-scan rules remain conservative additions. The complete Trunk and
+non-PR suites remain protected, including when ordinary PR selection is incomplete.
+A selector `tests` list contains candidate files, not an executed test count: the
+selected native lane omits the independently executed static lane and flaky tests,
+while the serial lane owns flaky execution. JUnit records remain the execution evidence.
 
 ## Duration guard
 
@@ -191,8 +205,9 @@ routing expression keys off it.
 - No coverage artifacts are produced on that path: the 85% full-tree coverage
   gate stays on the full fan-out — every Trunk merge-tree branch runs one, as
   does every non-SELECTED PR.
-- `test-select` remains non-gating: a selector or setup failure leaves its
-  outputs empty, which routes every consumer down the full-suite path.
+- A selector or setup failure leaves routing outputs empty, which retains the
+  full-suite path, and also fails the required backend aggregator. A parser
+  failure cannot become a successful FULL decision.
 
 **shadow** (the revert switch):
 

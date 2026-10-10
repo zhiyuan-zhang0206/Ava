@@ -43,6 +43,7 @@ def _write(root: Path, rel: str, body: str) -> Path:
         ("ava_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py", True),
         ("base/db/test_db_guard.py", False),
         ("scripts/ci/test_selector.py", False),
+        ("scripts/ci/test_impact.py", False),
         ("base/packages/attests/x.py", False),
     ],
 )

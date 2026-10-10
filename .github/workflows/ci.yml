@@ -157,9 +157,8 @@ jobs:
     name: test selection
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # A setup or selector failure is telemetry: the routing outputs stay empty
-    # and the full shard suite runs instead.
-    continue-on-error: true
+    # Empty outputs retain the full shard net, but selector failures also fail
+    # the required backend check rather than disguising a broken impact parser.
     needs: [classify]
     if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/')) && needs.classify.outputs.backend == 'true' }}
     outputs:
@@ -178,21 +177,23 @@ jobs:
       - name: List changed PR paths
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > /tmp/changed.txt
+        run: |
+          git merge-base "$BASE_SHA" HEAD > /tmp/test-selection-base.txt
+          git diff --name-only "$(cat /tmp/test-selection-base.txt)"...HEAD > /tmp/changed.txt
 
-      - name: Select direct-import test subset
+      - name: Select runtime-impact test subset
         id: selector
         env:
           HEAD_REF: ${{ github.head_ref }}
           EVENT: ${{ github.event_name }}
         run: |
           echo "test-selection mode=$TEST_SELECTION_MODE"
-          # Publish the mode before anything else can fail: job-level routing
-          # (if / continue-on-error) cannot read env, only needs, and an empty
-          # mode degrades to the full-suite path.
+          # Publish routing metadata first; a failure retains the full-suite net
+          # and is separately required by the backend aggregator.
           echo "mode=$TEST_SELECTION_MODE" >> "$GITHUB_OUTPUT"
           python3 scripts/ci/test_selector.py \
             --changed-files /tmp/changed.txt \
+            --base-ref "$(cat /tmp/test-selection-base.txt)" \
             --head-ref "$HEAD_REF" \
             --event "$EVENT" \
             --json | tee /tmp/selector-output.json
@@ -1563,6 +1564,9 @@ jobs:
             echo "structure verified; no backend suite requested"
             exit 0
           fi
+          case "${{ needs.test-select.result }}" in
+            failure|cancelled) fail "test-select: ${{ needs.test-select.result }}";;
+          esac
           check backend-static "${{ needs.backend-static.result }}"
           check backend-serial "${{ needs.backend-serial.result }}"
           check backend-pgvector-smoke "${{ needs.backend-pgvector-smoke.result }}"

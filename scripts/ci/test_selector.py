@@ -20,7 +20,15 @@ if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
 from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry needs repo root first
     is_doc_path,
 )
+from scripts.ci.test_impact import (  # noqa: E402 - standalone script
+    base_checkout,
+    build_impact,
+    module_files,
+    plugin_modules,
+    unknown_diagnostics,
+)
 from scripts.structure.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
+from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone script
 
 # Global paths apply to every test, so a change keeps the full suite. This is the
 # one owner of the concept; the root conftest's `pytest_plugins` modules join it
@@ -84,21 +92,6 @@ _PACKAGE_ROOTS = frozenset(
         "ui",
     }
 )
-_SOURCE_ROOTS = frozenset(
-    {
-        "agent",
-        "ava",
-        "cli",
-        "gateway",
-        "ops",
-        "services",
-        "base",
-        "ava_builtins",
-        "ui",
-        "scripts",
-        "schedules",
-    }
-)
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 _NON_DOCUMENTATION_PREFIXES = ("schedules/", "tests/")
 _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
@@ -126,13 +119,13 @@ class PathClass(StrEnum):
     """How one changed path contributes to the selection."""
 
     DOCUMENTATION = "documentation"  # no backend test; a docs-only diff is SKIP
-    TEST = "test"  # a collectable test file: it runs itself
+    TEST = "test"  # a collectable test file and its runtime test consumers
     CONFTEST = "conftest"  # every collectable test below its directory
-    PACKAGE = "package"  # direct importers plus the owning package's tests
+    PACKAGE = "package"  # runtime consumers plus the owning package's tests
     TREE_SCAN_ONLY = "tree-scan-only"  # repository-level input: tree-scan tests only
     FRONTEND = "frontend"  # ui/ non-Python: the frontend job owns it
     GLOBAL = "global"  # applies to every test: full suite
-    DELETED = "deleted"  # absent from the head tree: ignored
+    DELETED = "deleted"  # absent from head: use base facts or explicitly keep FULL
     UNMAPPED = "unmapped"  # no rule owns it: full suite (the tracked tree has none)
 
 
@@ -148,6 +141,7 @@ class SelectionResult:
     blind_changed: tuple[str, ...] = ()
     forced_roots: tuple[str, ...] = ()
     map_source_count: int = 0
+    diagnostics: tuple[str, ...] = ()
 
     @property
     def count(self) -> int:
@@ -167,6 +161,7 @@ class SelectionResult:
             "blind_changed": list(self.blind_changed),
             "forced_roots": list(self.forced_roots),
             "map_source_count": self.map_source_count,
+            "diagnostics": list(self.diagnostics),
         }
 
 
@@ -238,20 +233,8 @@ def tree_scan_tests(repo_root: Path) -> set[str]:
 
 
 def build_import_reverse_map(repo_root: Path) -> dict[str, set[str]]:
-    """Map each statically resolved source file to its importing test files."""
-    repo_root = repo_root.resolve()
-    collectable = collectable_test_paths(repo_root)
-    reverse_map: dict[str, set[str]] = {}
-
-    for test_path in _test_py_files(repo_root):
-        importer = test_path.relative_to(repo_root).as_posix()
-        if importer not in collectable:
-            continue
-        for module in _imported_modules(test_path):
-            source_path = _resolve_module(repo_root, module)
-            if source_path is not None:
-                reverse_map.setdefault(source_path, set()).add(importer)
-    return reverse_map
+    """Map runtime inputs to collectable tests through unpruned shared facts."""
+    return build_impact(repo_root.resolve(), load_checkout(repo_root).collectable).tests_by_input
 
 
 def load_checkout(repo_root: Path) -> Checkout:
@@ -361,16 +344,19 @@ def _path_tests(
     path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
 ) -> set[str]:
     """What one changed path contributes to the candidate subset."""
+    runtime: set[str] = set()
+    for parent in (Path(path), *Path(path).parents):
+        runtime.update(reverse_map.get(parent.as_posix(), set()))
     if path_class is PathClass.TEST:
-        return {path}
+        return {path} | runtime
     if path_class is PathClass.CONFTEST:
-        return _conftest_tests(path, checkout)
+        return _conftest_tests(path, checkout) | runtime
     if path_class is PathClass.PACKAGE:
-        return reverse_map.get(path, set()) | package_tests(path, checkout)
+        return runtime | package_tests(path, checkout)
     root = path.split("/", maxsplit=1)[0]
     if path_class is PathClass.TREE_SCAN_ONLY and root in _REFERENCED_ROOTS:
-        return _referencing_tests(root, checkout)
-    return set()
+        return _referencing_tests(root, checkout) | runtime
+    return runtime
 
 
 def _owner_tests(
@@ -389,6 +375,7 @@ def select_tests(
     repo_root: Path,
     event: str = "pull_request",
     head_ref: str = "",
+    base_ref: str | None = None,
 ) -> SelectionResult:
     """Apply the ordered conservative test-selection rules to one changed-file list."""
     repo_root = repo_root.resolve()
@@ -407,8 +394,10 @@ def select_tests(
     if forced is not None:
         return forced
 
-    reverse_map = build_import_reverse_map(repo_root)
-    selected = _owner_tests(classes, checkout, reverse_map)
+    candidates = _runtime_candidates(classes, checkout, base_ref, full_estimate)
+    if isinstance(candidates, SelectionResult):
+        return candidates
+    selected, source_count = candidates
     # Tree-scan tests are unreachable through the owner rules; pin them so a
     # SELECTED run keeps the repo-wide gates (task #4183).
     selected.update(tree_scan_tests(repo_root))
@@ -419,7 +408,7 @@ def select_tests(
             "FULL",
             "no-tests",
             full_estimate=full_estimate,
-            map_source_count=len(reverse_map),
+            map_source_count=source_count,
         )
     if estimate > 0.8 * full_estimate:
         return _result(
@@ -427,7 +416,7 @@ def select_tests(
             "subset-too-close",
             est_seconds=estimate,
             full_estimate=full_estimate,
-            map_source_count=len(reverse_map),
+            map_source_count=source_count,
         )
     return _result(
         "SELECTED",
@@ -435,8 +424,48 @@ def select_tests(
         tests=tests,
         est_seconds=estimate,
         full_estimate=full_estimate,
-        map_source_count=len(reverse_map),
+        map_source_count=source_count,
     )
+
+
+def _runtime_candidates(
+    classes: dict[str, PathClass],
+    checkout: Checkout,
+    base_ref: str | None,
+    full_estimate: float,
+) -> tuple[set[str], int] | SelectionResult:
+    """Union both trees' runtime impact, declining a subset when evidence is incomplete."""
+    impact = build_impact(checkout.repo_root, checkout.collectable)
+    reverse_map = impact.tests_by_input
+    diagnostics = list(unknown_diagnostics(impact, tree="head"))
+    selected = _owner_tests(classes, checkout, reverse_map)
+    if base_ref is not None:
+        with base_checkout(checkout.repo_root, base_ref) as base_root:
+            base = load_checkout(base_root)
+            old_impact = build_impact(base_root, base.collectable & checkout.collectable)
+            diagnostics.extend(unknown_diagnostics(old_impact, tree="base"))
+            old_classes = {path: classify_path(path, base) for path in classes}
+            old_forced = _forced_full(old_classes, full_estimate)
+            if old_forced is not None:
+                return old_forced
+            selected.update(_owner_tests(old_classes, base, old_impact.tests_by_input))
+            for path, tests_for_path in old_impact.tests_by_input.items():
+                reverse_map.setdefault(path, set()).update(tests_for_path & checkout.collectable)
+    elif any(kind is PathClass.DELETED for kind in classes.values()):
+        diagnostics.extend(
+            f"head:{path}: deleted path requires --base-ref to recover runtime impact"
+            for path, kind in classes.items()
+            if kind is PathClass.DELETED
+        )
+    if diagnostics:
+        return _result(
+            "FULL",
+            "incomplete-impact",
+            full_estimate=full_estimate,
+            map_source_count=len(reverse_map),
+            diagnostics=tuple(sorted(set(diagnostics))),
+        )
+    return selected, len(reverse_map)
 
 
 def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> SelectionResult | None:
@@ -463,6 +492,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--event", default="pull_request")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--base-ref", help="Committed merge-base for removed dependencies and paths"
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -474,7 +506,10 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=args.repo_root,
         event=args.event,
         head_ref=args.head_ref,
+        base_ref=args.base_ref,
     )
+    for diagnostic in result.diagnostics:
+        print(f"test-impact: {diagnostic}", file=sys.stderr)
     if args.json:
         print(json.dumps(result.as_json(), sort_keys=True))
     else:
@@ -507,56 +542,12 @@ def _is_documentation_path(path: str, hosts: tuple[str, ...]) -> bool:
     )
 
 
-def _imported_modules(test_path: Path) -> set[str]:
-    tree = ast.parse(test_path.read_text(), filename=str(test_path))
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None:
-            modules.add(node.module)
-            modules.update(
-                f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*"
-            )
-    return modules
-
-
-def _module_file(repo_root: Path, module: str) -> str | None:
-    """The repo-relative file of a dotted module (a module file or a package init)."""
-    module_path = repo_root.joinpath(*module.split("."))
-    source_file = module_path.with_suffix(".py")
-    if source_file.is_file():
-        return source_file.relative_to(repo_root).as_posix()
-    package_init = module_path / "__init__.py"
-    if package_init.is_file():
-        return package_init.relative_to(repo_root).as_posix()
-    return None
-
-
-def _resolve_module(repo_root: Path, module: str) -> str | None:
-    if module.split(".", maxsplit=1)[0] not in _SOURCE_ROOTS:
-        return None
-    return _module_file(repo_root, module)
-
-
 def _plugin_modules(repo_root: Path) -> list[str]:
     """The dotted modules the root conftest lists in ``pytest_plugins``."""
     conftest = repo_root / "conftest.py"
     if not conftest.is_file():
         return []
-    for node in ast.parse(conftest.read_text(), filename=str(conftest)).body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and node.targets[0].id == "pytest_plugins"
-        ):
-            value = cast(object, ast.literal_eval(node.value))
-            items = cast(list[object], value) if isinstance(value, list) else []
-            if not isinstance(value, list) or not all(isinstance(item, str) for item in items):
-                raise TypeError("conftest.py pytest_plugins must be a list of module-name strings")
-            return cast(list[str], items)
-    return []
+    return list(plugin_modules(ast.parse(conftest.read_text(), filename=str(conftest))))
 
 
 def _plugin_files(repo_root: Path) -> set[str]:
@@ -565,14 +556,8 @@ def _plugin_files(repo_root: Path) -> set[str]:
     A module that does not resolve to a repo file (an installed plugin such as
     ``pytester``) has no path to change here and is skipped.
     """
-    files: set[str] = set()
-    for module in _plugin_modules(repo_root):
-        parts = module.split(".")
-        for end in range(1, len(parts) + 1):
-            file = _module_file(repo_root, ".".join(parts[:end]))
-            if file is not None:
-                files.add(file)
-    return files
+    index = ModuleIndex(repo_root)
+    return {file for module in _plugin_modules(repo_root) for file in module_files(module, index)}
 
 
 def _load_durations(path: Path) -> dict[str, float]:
@@ -628,6 +613,7 @@ def _result(
     blind_changed: tuple[str, ...] = (),
     forced_roots: tuple[str, ...] = (),
     map_source_count: int = 0,
+    diagnostics: tuple[str, ...] = (),
 ) -> SelectionResult:
     return SelectionResult(
         decision=decision,
@@ -638,6 +624,7 @@ def _result(
         blind_changed=blind_changed,
         forced_roots=forced_roots,
         map_source_count=map_source_count,
+        diagnostics=diagnostics,
     )
 
 
