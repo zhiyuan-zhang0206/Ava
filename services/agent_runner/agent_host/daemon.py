@@ -59,6 +59,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
+from ava import loaded_code_image
 from ava.sdk_surface.install import Installation
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context.clients import ClientSet
@@ -584,8 +585,7 @@ async def run(
     clients: ClientSet | None = None,
     on_clients_owned: Callable[[], None] | None = None,
 ) -> None:
-    """Boot the host and serve wakes until cancelled. See the module docstring
-    for why the order is what it is."""
+    """Boot the host and serve wakes in the order documented by this module."""
     assert_clock_lattice()
     if _is_running():
         _log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -665,7 +665,7 @@ async def run(
         health = await start_health_server(
             "agent_host",
             endpoint.health_port,
-            image=ava.loaded_code_image(),
+            image=loaded_code_image(),
             liveness=liveness,
             extra_routes={
                 ("GET", "/stats"): stats_route(host, scheduler),

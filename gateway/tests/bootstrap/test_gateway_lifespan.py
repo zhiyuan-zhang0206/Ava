@@ -30,7 +30,11 @@ def flusher_tasks(
 
     monkeypatch.setattr(gateway_app.latency, "latency_flusher", flush)
     monkeypatch.setattr(gateway_app.rejection_log, "auth401_flusher", flush)
-    monkeypatch.setattr(gateway_app, "register_os_cron", lambda **_kwargs: None)
+
+    def register_cron(*, enabled_reader: Callable[[], bool]) -> None:
+        return None
+
+    monkeypatch.setattr(gateway_app, "register_os_cron", register_cron)
     return started
 
 
