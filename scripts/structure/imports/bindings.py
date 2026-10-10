@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from itertools import product
 from typing import cast
 
-from . import normalize
+from . import Binding, Clause, normalize
 
 type ScopeNode = (
     ast.FunctionDef
@@ -87,6 +87,8 @@ class Scope:
         self.values: dict[str, ast.expr] = {}
         self.origins: dict[str, str] = {}
         self.import_counts: Counter[str] = Counter()
+        self.import_clauses: dict[str, Clause] = {}
+        self.attribute_writes: list[ast.Attribute] = []
         self.functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
         self.stores: Counter[str] = Counter()
         self.domains: dict[str, tuple[str, ...]] = {}
@@ -111,6 +113,8 @@ class Scope:
             self.values[node.target.id] = node.value
         elif isinstance(node, ast.Import | ast.ImportFrom):
             self._import(node, path)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store | ast.Del):
+            self.attribute_writes.append(node)
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             self.functions[node.name] = node
             self.stores[node.name] += 1
@@ -127,11 +131,45 @@ class Scope:
     def _import(self, node: ast.Import | ast.ImportFrom, path: str) -> None:
         if isinstance(node, ast.ImportFrom) and node.level and not path:
             return
-        for name, origin in normalize(node, path).origins.items():
+        clause = normalize(node, path)
+        for name, origin in clause.origins.items():
             previous = self.origins.get(name, origin)
             self.origins[name] = origin if previous == origin else ""
             self.import_counts[name] += 1
+            self.import_clauses[name] = clause
             self.stores[name] += 1
+
+    def import_binding(
+        self, node: ast.expr, seen: frozenset[str] = frozenset()
+    ) -> tuple[Clause, Binding] | None:
+        """An expression's one import binding, retaining module versus member syntax."""
+        if isinstance(node, ast.Attribute):
+            return self.import_binding(node.value, seen)
+        if not isinstance(node, ast.Name) or node.id in seen:
+            return None
+        if node.id not in self.stores and self.parent is not None:
+            return self.parent.import_binding(node, seen)
+        if self.stores[node.id] != 1:
+            return None
+        if node.id in self.values:
+            return self.import_binding(self.values[node.id], seen | {node.id})
+        clause = self.import_clauses.get(node.id)
+        if clause is None:
+            return None
+        binding = next(binding for binding in clause.bindings if binding.name == node.id)
+        return clause, binding
+
+    def unmodified_origin(self, node: ast.expr) -> str:
+        """Imported origin unless this lexical chain writes an attribute on its path."""
+        origin = self.origin(node)
+        scope: Scope | None = self
+        while origin and scope is not None:
+            for written in scope.attribute_writes:
+                target = scope.origin(written)
+                if target and (origin == target or origin.startswith(target + ".")):
+                    return ""
+            scope = scope.parent
+        return origin
 
     def value(self, node: ast.expr) -> ast.expr:
         """One unambiguous plain binding; parameters and rebinding remain opaque."""
