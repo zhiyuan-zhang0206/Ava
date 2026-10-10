@@ -109,3 +109,41 @@ def test_binding_scan_keeps_rebinding_and_attribute_writes_opaque() -> None:
     assert scope.stores["failure"] == 1
     target = ast.parse("subprocess.run", mode="eval").body
     assert scope.unmodified_origin(target) == ""
+
+
+def test_binding_projection_preserves_calls_and_actual_writes_in_lexical_order() -> None:
+    tree = ast.parse(
+        "import subprocess\n"
+        "value = source + 1\n"
+        "target.attribute = receiver()\n"
+        "del target.deleted\n"
+        "@decorate()\n"
+        "def launch(arg=default()):\n hidden = body()\n"
+        "result = [item() for name in iterable() if check()]\n"
+    )
+    projected = list(bindings.local_nodes(tree, bindings_only=True))
+    assert [ast.unparse(n.func) for n in projected if isinstance(n, ast.Call)] == [
+        "receiver",
+        "default",
+        "decorate",
+        "iterable",
+    ]
+    assert [n.id for n in projected if isinstance(n, ast.Name)] == ["value", "result"]
+    assert [n.attr for n in projected if isinstance(n, ast.Attribute)] == ["attribute", "deleted"]
+    assert not any(isinstance(n, ast.Constant | ast.expr_context | ast.operator) for n in projected)
+    scope = bindings.Scope(tree, "probe.py")
+    assert scope.stores == {"subprocess": 1, "value": 1, "launch": 1, "result": 1}
+    assert [n.attr for n in scope.attribute_writes] == ["attribute", "deleted"]
+    assert [ast.unparse(n.func) for n in scope.calls] == [
+        "receiver",
+        "default",
+        "decorate",
+        "iterable",
+    ]
+
+
+def test_binding_projection_keeps_writes_in_unselected_expression_children() -> None:
+    tree = ast.parse("result = sink((extra := read()))\n")
+    scope = bindings.Scope(tree, "probe.py")
+    assert scope.stores == {"result": 1, "extra": 1}
+    assert [ast.unparse(n.func) for n in scope.calls] == ["sink", "read"]
