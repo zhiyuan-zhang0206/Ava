@@ -42,7 +42,7 @@ import { navigateAcross, type AgentSelection, type ViewAgent } from "./agent-vie
 import { AgentGroupHeader, AgentPending } from "./agent-view/agent-view-group";
 import { useLinkEndLabel, useLinkKindLabels } from "./agent-view/agent-view-link-labels";
 import { LinkRowGroup } from "./agent-view/agent-view-link-group";
-import { LinksCanvas, type LinkHit } from "./canvas/run-timeline-links-canvas";
+import { LinksCanvas, type LinkHit, type LinkHitResult } from "./canvas/run-timeline-links-canvas";
 import {
   endIn,
   groupLinks,
@@ -99,8 +99,8 @@ export function RunTimelineRows({
   onShowOther,
   linkKinds,
   onToggleLinkKind,
-  linkKey,
-  onSelectLink,
+  linkKeys,
+  onSelectLinks,
 }: {
   /** The agents, top to bottom; at least one is loaded. */
   entries: readonly AgentEntry[];
@@ -129,14 +129,26 @@ export function RunTimelineRows({
   linkKinds: ReadonlySet<LinkKind>;
   onToggleLinkKind: (kind: LinkKind) => void;
   /** The selected arrow. */
-  linkKey: string | null;
-  onSelectLink: (key: string) => void;
+  /** The selected links: one for an arrow of one link, several for a merged arrow. */
+  linkKeys: readonly string[];
+  onSelectLinks: (keys: readonly string[]) => void;
 }) {
+  const linkKey = linkKeys.length === 1 ? linkKeys[0] : null;
+  const onSelectLink = (key: string) => onSelectLinks([key]);
   const t = useTranslations("runTimeline");
   const linkLabels = useLinkKindLabels();
   const endLabel = useLinkEndLabel();
   const [hover, setHover] = useState<AgentSelection | null>(null);
-  const [hoverLink, setHoverLink] = useState<string | null>(null);
+  // The arrow under the pointer (a merged one stands for several links); set only when it changes.
+  const [hoverArrow, setHoverArrow] = useState<LinkHitResult | null>(null);
+  const hoverArrowKey = useRef<string | null>(null);
+  const hoverArrowTo = (next: LinkHitResult | null) => {
+    if ((next?.key ?? null) === hoverArrowKey.current) return;
+    hoverArrowKey.current = next?.key ?? null;
+    setHoverArrow(next);
+  };
+  const hoverKeys = useMemo(() => new Set(hoverArrow?.members ?? []), [hoverArrow]);
+  const selectedKeys = useMemo(() => new Set(linkKeys), [linkKeys]);
   // Whether the pointer is over a block or node: an item wins over an arrow drawn across it.
   const overItem = useRef(false);
   const hitRef = useRef<LinkHit>(() => null);
@@ -352,17 +364,17 @@ export function RunTimelineRows({
   }, []);
 
   // A click on an arrow (where no block is under the pointer) selects it; native, like the wheel, because the chart itself is no control.
-  const onLink = useRef(onSelectLink);
+  const onLinks = useRef(onSelectLinks);
   useEffect(() => {
-    onLink.current = onSelectLink;
+    onLinks.current = onSelectLinks;
   });
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
     const onClick = (event: MouseEvent) => {
       if (overItem.current || (event.target instanceof Element && event.target.closest("[data-testid=run-timeline-link-tick]"))) return;
-      const key = hitRef.current(event.clientX, event.clientY);
-      if (key !== null) onLink.current(key);
+      const hit = hitRef.current(event.clientX, event.clientY);
+      if (hit !== null) onLinks.current(hit.members);
     };
     chart.addEventListener("click", onClick);
     return () => chart.removeEventListener("click", onClick);
@@ -378,9 +390,9 @@ export function RunTimelineRows({
     const state = drag.current;
     // An arrow is under the pointer only where no item is (and not over a marker of the Other agents row, which hovers itself).
     if (state === null && !(event.target instanceof Element && event.target.closest("[data-testid=run-timeline-link-tick]"))) {
-      const key = overItem.current ? null : hitRef.current(event.clientX, event.clientY);
-      setHoverLink(key);
-      event.currentTarget.style.cursor = key === null ? "" : "pointer";
+      const hit = overItem.current ? null : hitRef.current(event.clientX, event.clientY);
+      hoverArrowTo(hit);
+      event.currentTarget.style.cursor = hit === null ? "" : "pointer";
     }
     const track = trackRect();
     if (!state || !track || track.width <= 0) return;
@@ -426,16 +438,20 @@ export function RunTimelineRows({
     const line = readoutText(target.selection, { data: owner.data, t, unitLabel, sourceLabel });
     return line !== null && agents.length > 1 ? t("readoutAgent", { id: target.agent, line }) : line;
   };
-  const hovered = hoverLink === null ? undefined : links.find((l) => l.key === hoverLink);
-  const readout =
-    hovered === undefined
-      ? describe(hover)
-      : t("readoutLink", {
-          kind: linkLabels[hovered.link.kind],
-          from: endLabel(hovered.link.sender),
-          to: endLabel(hovered.link.receiver),
-          time: formatShort(hovered.link.ts),
-        });
+  const hoveredLinks = hoverArrow === null ? [] : links.filter((l) => hoverKeys.has(l.key));
+  const readout = (() => {
+    if (hoveredLinks.length === 0) return describe(hover);
+    const first = hoveredLinks[0];
+    const common = { kind: linkLabels[first.link.kind], from: endLabel(first.link.sender), to: endLabel(first.link.receiver) };
+    if (hoveredLinks.length === 1) return t("readoutLink", { ...common, time: formatShort(first.link.ts) });
+    const times = hoveredLinks.map((l) => Date.parse(l.link.ts));
+    return t("readoutLinkGroup", {
+      ...common,
+      count: hoveredLinks.length,
+      start: formatShort(new Date(Math.min(...times)).toISOString()),
+      end: formatShort(new Date(Math.max(...times)).toISOString()),
+    });
+  })();
   // The layout of every row (where each item is drawn) is cached per view: hovering and selecting only repaint.
   const paintStateOf = (agent: ViewAgent): PaintState => {
     const mine = hover?.agent === agent.id ? hover.selection : null;
@@ -529,7 +545,7 @@ export function RunTimelineRows({
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      onPointerLeave={() => setHoverLink(null)}
+      onPointerLeave={() => hoverArrowTo(null)}
       onClickCapture={(event) => {
         if (suppressClick.current) {
           event.stopPropagation();
@@ -538,7 +554,7 @@ export function RunTimelineRows({
       }}
       className="relative select-none space-y-3 rounded-[10px] border border-border bg-card p-3"
     >
-      <LinksCanvas links={shownLinks} selectedKey={linkKey} hoverKey={hoverLink} axis={axis} view={view} hitRef={hitRef} />
+      <LinksCanvas links={shownLinks} selectedKeys={selectedKeys} hoverKeys={hoverKeys} axis={axis} view={view} hitRef={hitRef} />
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
         {spoken ?? ""}
       </p>
@@ -570,7 +586,7 @@ export function RunTimelineRows({
             axis={axis}
             viewU={viewU}
             selectedKey={linkKey}
-            onHover={setHoverLink}
+            onHover={(key) => hoverArrowTo(key === null ? null : { key, members: [key] })}
             onSelect={onSelectLink}
             onClose={() => (row === "user" ? onShowUser(false) : onShowOther(false))}
           />

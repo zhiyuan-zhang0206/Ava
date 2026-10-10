@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 
-import { curveOf, endTangent, hitLink, LINK_COLORS, type Curve, type ResolvedLink } from "../model/timeline-links";
+import { bucketOf, clusterArrows, curveOf, curvePoint, endTangent, hitLink, LINK_COLORS, type Arrow, type Curve, type ResolvedLink } from "../model/timeline-links";
 import type { AxisMap, Viewport } from "../model/timeline-model";
 
 const ROW_TESTID = { units: "run-timeline-row-units", user: "run-timeline-row-user", other: "run-timeline-row-other" } as const;
@@ -15,8 +15,8 @@ const HEAD_PX = 5;
 /** How far from a curve a pointer still counts as on it. */
 export const LINK_HIT_PX = 4;
 
-/** `(clientX, clientY)` to the key of the arrow under that point, or null. */
-export type LinkHit = (clientX: number, clientY: number) => string | null;
+/** `(clientX, clientY)` to the arrow under that point, or null. */
+export type LinkHit = (clientX: number, clientY: number) => LinkHitResult | null;
 
 interface Box {
   left: number;
@@ -33,18 +33,33 @@ function boxOf(canvas: HTMLCanvasElement, end: ResolvedLink["from"]): Box | null
   return { left: rect.left - origin.left, width: rect.width, mid: rect.top - origin.top + rect.height / 2 };
 }
 
+/** The arrow under the pointer: its key (a link's own, or a merged group's) and every link it stands for. */
+export interface LinkHitResult {
+  key: string;
+  members: readonly string[];
+}
+
+const BADGE_FONT_PX = 9;
+const WIDTH_BASE = 1.25;
+const WIDTH_STEP = 0.2;
+const WIDTH_MAX = 3.25;
+
+/** A line a little thicker for each link it stands for, up to a bound. */
+export const widthFor = (count: number) => Math.min(WIDTH_BASE + (count - 1) * WIDTH_STEP, WIDTH_MAX);
+
 export function LinksCanvas({
   links,
-  selectedKey,
-  hoverKey,
+  selectedKeys,
+  hoverKeys,
   axis,
   view,
   hitRef,
 }: {
   /** The arrows to draw (the kinds that are switched on). */
   links: readonly ResolvedLink[];
-  selectedKey: string | null;
-  hoverKey: string | null;
+  /** The links selected / hovered: an arrow is lit when it stands for any of them. */
+  selectedKeys: ReadonlySet<string>;
+  hoverKeys: ReadonlySet<string>;
   axis: AxisMap;
   view: Viewport;
   hitRef: RefObject<LinkHit>;
@@ -65,28 +80,58 @@ export function LinksCanvas({
       ctx.clearRect(0, 0, rect.width, rect.height);
       const shown = axis.viewU(view);
       const span = Math.max(shown.to - shown.from, 1e-9);
+      // A row's track is looked up in the page once per frame, not once per end.
+      const boxes = new Map<string, ReturnType<typeof boxOf>>();
       const place = (end: ResolvedLink["from"]) => {
-        const box = boxOf(el, end);
+        const id = `${end.row}:${end.agent}`;
+        if (!boxes.has(id)) boxes.set(id, boxOf(el, end));
+        const box = boxes.get(id) ?? null;
         const frac = (axis.toU(end.ms) - shown.from) / span;
         return box === null || frac < 0 || frac > 1 ? null : { x: box.left + box.width * frac, y: box.mid };
       };
-      const curves: Curve[] = [];
+      const arrows: Arrow[] = [];
+      const ys = new Map<string, [number, number]>();
+      const byKey = new Map<string, ResolvedLink>();
       for (const l of links) {
         const a = place(l.from);
         const b = place(l.to);
-        if (a !== null && b !== null) curves.push(curveOf(l.key, a.x, a.y, b.x, b.y));
+        if (a === null || b === null) continue;
+        arrows.push({ key: l.key, bucket: bucketOf(l), x0: a.x, x1: b.x });
+        ys.set(l.key, [a.y, b.y]);
+        byKey.set(l.key, l);
       }
-      const byKey = new Map(links.map((l) => [l.key, l]));
+      // Arrows close together on screen are drawn as one with a count; zooming in pulls them apart.
+      const clusters = clusterArrows(arrows);
+      const curves: Curve[] = [];
+      const sizes = new Map<string, number>();
+      const kinds = new Map<string, ResolvedLink["link"]["kind"]>();
+      const members = new Map<string, readonly string[]>();
+      for (const c of clusters) {
+        const [y0, y1] = ys.get(c.members[0]) ?? [0, 0];
+        curves.push(curveOf(c.key, c.x0, y0, c.x1, y1));
+        sizes.set(c.key, c.members.length);
+        members.set(c.key, c.members);
+        const kind = byKey.get(c.members[0])?.link.kind;
+        if (kind !== undefined) kinds.set(c.key, kind);
+      }
+      const litOf = (key: string): 0 | 1 | 2 => {
+        const keys = members.get(key) ?? [];
+        return keys.some((k) => selectedKeys.has(k)) ? 2 : keys.some((k) => hoverKeys.has(k)) ? 1 : 0;
+      };
       // The hovered and the selected arrow go on top of the rest.
-      const order = [...curves].sort((p, q) => Number(p.key === selectedKey || p.key === hoverKey) - Number(q.key === selectedKey || q.key === hoverKey));
+      const order = [...curves].sort((p, q) => litOf(p.key) - litOf(q.key));
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
       for (const c of order) {
-        const l = byKey.get(c.key);
-        if (l === undefined) continue;
-        const lit = c.key === selectedKey ? 2 : c.key === hoverKey ? 1 : 0;
-        ctx.globalAlpha = lit > 0 ? 1 : selectedKey !== null ? 0.25 : 0.55;
-        ctx.strokeStyle = LINK_COLORS[l.link.kind];
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.lineWidth = lit === 2 ? 2.5 : lit === 1 ? 2 : 1.25;
+        const kind = kinds.get(c.key);
+        if (kind === undefined) continue;
+        const lit = litOf(c.key);
+        const count = sizes.get(c.key) ?? 1;
+        const color = LINK_COLORS[kind];
+        ctx.globalAlpha = lit > 0 ? 1 : selectedKeys.size > 0 ? 0.25 : 0.55;
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = lit === 2 ? widthFor(count) + 1.25 : lit === 1 ? widthFor(count) + 0.75 : widthFor(count);
         ctx.beginPath();
         ctx.moveTo(c.x0, c.y0);
         ctx.bezierCurveTo(c.c1x, c.c1y, c.c2x, c.c2y, c.x1, c.y1);
@@ -101,11 +146,26 @@ export function LinksCanvas({
         ctx.lineTo(bx + tan.y * HEAD_PX * 0.6, by - tan.x * HEAD_PX * 0.6);
         ctx.closePath();
         ctx.fill();
+        if (count > 1) {
+          // The count, in a badge in the middle of the arrow.
+          const mid = curvePoint(c, 0.5);
+          const label = String(count);
+          ctx.font = `600 ${BADGE_FONT_PX}px sans-serif`;
+          const w = Math.max(ctx.measureText(label).width + 6, 14);
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.roundRect(mid.x - w / 2, mid.y - 7, w, 14, 7);
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(label, mid.x, mid.y);
+        }
       }
       ctx.globalAlpha = 1;
       hitRef.current = (clientX, clientY) => {
         const now = el.getBoundingClientRect();
-        return hitLink(curves, clientX - now.left, clientY - now.top, LINK_HIT_PX);
+        const key = hitLink(curves, clientX - now.left, clientY - now.top, LINK_HIT_PX);
+        return key === null ? null : { key, members: members.get(key) ?? [key] };
       };
     });
     return () => cancelAnimationFrame(frame);

@@ -259,3 +259,77 @@ export function nearestUnit(data: RunTimelineResponse, ms: number): Selection | 
   }
   return best === null ? null : { kind: "unit", i0: best.i0, i1: best.i1, unitKind: best.kind };
 }
+
+/** Two arrows of one kind between the same rows merge when both ends are closer than this on screen. */
+export const MERGE_PX = 14;
+
+/** What clustering needs of an arrow on screen: its identity, which arrows it may merge with, and where its ends are. */
+export interface Arrow {
+  key: string;
+  /** Arrows merge only within a bucket: the same kind between the same two rows (of the same agents). */
+  bucket: string;
+  x0: number;
+  x1: number;
+}
+
+/** One drawn arrow: a single link, or several merged. */
+export interface Cluster {
+  /** The link's own key for one link; `group:<first key>:<count>` for several. */
+  key: string;
+  bucket: string;
+  /** The members' keys, left to right by the start. */
+  members: string[];
+  /** The middle of the members' ends. */
+  x0: number;
+  x1: number;
+}
+
+/** The bucket of a link: kind and the two rows with their agents. */
+export const bucketOf = (l: ResolvedLink): string => `${l.link.kind}|${l.from.row}:${l.from.agent}|${l.to.row}:${l.to.agent}`;
+
+/**
+ * Merges arrows that lie close together on screen: within a bucket, arrows sorted by their start join
+ * the first open group whose first member is within `px` at both ends, else open a group of their own.
+ * Linear in the arrows after the sort (a group is open only while a later start can still be within
+ * `px` of its first), so a thousand arrows cost no more than the sort. Pure and recomputed on every
+ * viewport change: zooming in splits groups because the distances grow.
+ */
+export function clusterArrows(arrows: readonly Arrow[], px: number = MERGE_PX): Cluster[] {
+  const buckets = new Map<string, Arrow[]>();
+  for (const a of arrows) {
+    const list = buckets.get(a.bucket);
+    if (list === undefined) buckets.set(a.bucket, [a]);
+    else list.push(a);
+  }
+  const out: Cluster[] = [];
+  for (const [bucket, list] of buckets) {
+    list.sort((p, q) => p.x0 - q.x0);
+    let open: { first: Arrow; members: Arrow[] }[] = [];
+    const close = (group: { members: Arrow[] }) => {
+      const n = group.members.length;
+      const x0 = group.members.reduce((sum, m) => sum + m.x0, 0) / n;
+      const x1 = group.members.reduce((sum, m) => sum + m.x1, 0) / n;
+      const keys = group.members.map((m) => m.key);
+      out.push({ key: n === 1 ? keys[0] : `group:${keys[0]}:${n}`, bucket, members: keys, x0, x1 });
+    };
+    for (const a of list) {
+      const stillOpen: typeof open = [];
+      let joined = false;
+      for (const group of open) {
+        if (a.x0 - group.first.x0 >= px) {
+          close(group);
+          continue;
+        }
+        if (!joined && Math.abs(a.x1 - group.first.x1) < px) {
+          group.members.push(a);
+          joined = true;
+        }
+        stillOpen.push(group);
+      }
+      if (!joined) stillOpen.push({ first: a, members: [a] });
+      open = stillOpen;
+    }
+    open.forEach(close);
+  }
+  return out;
+}

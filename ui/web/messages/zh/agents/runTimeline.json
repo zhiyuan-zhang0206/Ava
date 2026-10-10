@@ -108,5 +108,8 @@
   "linkTitle": "标题",
   "userInteractionsLabel": "用户交互",
   "otherInteractionsLabel": "其他 agent 交互",
-  "closeGroup": "隐藏{title}（可在工具栏重新打开）"
+  "closeGroup": "隐藏{title}（可在工具栏重新打开）",
+  "readoutLinkGroup": "{kind} · {from} → {to} · 合并 {count} 条 · {start} – {end}",
+  "linkGroupTitle": "{count} 条{kind}",
+  "linkGroupHeading": "合并的箭头（选一条会放大到它）"
 }

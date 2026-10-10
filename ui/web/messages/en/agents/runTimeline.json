@@ -108,5 +108,8 @@
   "linkTitle": "Title",
   "userInteractionsLabel": "User interactions",
   "otherInteractionsLabel": "Other agents interactions",
-  "closeGroup": "Hide {title} (switch it on again in the toolbar)"
+  "closeGroup": "Hide {title} (switch it on again in the toolbar)",
+  "readoutLinkGroup": "{kind} · {from} → {to} · {count} merged · {start} – {end}",
+  "linkGroupTitle": "{count} × {kind}",
+  "linkGroupHeading": "Merged arrows (select one to zoom to it)"
 }
