@@ -5,7 +5,9 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from collections.abc import Iterator
+from dataclasses import dataclass
 from itertools import product
+from pathlib import Path
 from typing import cast
 
 from . import Binding, Clause, normalize
@@ -59,6 +61,75 @@ def scope_parts(
     return outer, tuple(node.body)
 
 
+_MUTATORS = frozenset(
+    {
+        "__delitem__",
+        "__setitem__",
+        "add",
+        "append",
+        "clear",
+        "discard",
+        "extend",
+        "insert",
+        "pop",
+        "popitem",
+        "remove",
+        "reverse",
+        "setdefault",
+        "sort",
+        "update",
+    }
+)
+_LITERAL_LIMIT = 256
+
+
+@dataclass(frozen=True)
+class ModuleContext:
+    """Whole-module facts that let one reader resolve bounded literal tables.
+
+    ``name`` is the runtime ``__name__`` of the analyzed source. ``mutated``
+    names every binding whose container contents may change after it is bound;
+    their subscripts and loop elements stay opaque.
+    """
+
+    name: str
+    mutated: frozenset[str]
+
+
+def module_context(tree: ast.AST, name: str) -> ModuleContext:
+    """In-module container writes and rebinding statements, without evaluating code."""
+    mutated: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Store | ast.Del)
+            and isinstance(node.value, ast.Name)
+        ):
+            mutated.add(node.value.id)
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            mutated.add(node.target.id)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _MUTATORS
+            and isinstance(node.func.value, ast.Name)
+        ):
+            mutated.add(node.func.value.id)
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            mutated.update(node.names)
+    return ModuleContext(name, frozenset(mutated))
+
+
+def module_name(path: str) -> str:
+    """The import name of a repository-relative Python source path; empty for no path."""
+    if not path:
+        return ""
+    parts = list(Path(path).with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
 def local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
     """Walk this lexical scope, keeping nested scope bodies out of its bindings."""
     children = ast.iter_child_nodes(tree)
@@ -83,8 +154,17 @@ def local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
 class Scope:
     """One lexical scope, without evaluating Python or guessing rebound values."""
 
-    def __init__(self, tree: ast.AST, path: str, parent: Scope | None = None) -> None:
+    def __init__(
+        self,
+        tree: ast.AST,
+        path: str,
+        parent: Scope | None = None,
+        *,
+        context: ModuleContext | None = None,
+    ) -> None:
         self.parent = parent
+        self.context = context if context is not None or parent is None else parent.context
+        self.iterated: dict[str, ast.expr] = {}
         self.is_class = isinstance(tree, ast.ClassDef)
         self.values: dict[str, ast.expr] = {}
         self.origins: dict[str, str] = {}
@@ -115,8 +195,8 @@ class Scope:
             self.values[node.target.id] = node.value
         elif isinstance(node, ast.Import | ast.ImportFrom):
             self._import(node, path)
-        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store | ast.Del):
-            self.attribute_writes.append(node)
+        elif isinstance(node, ast.Attribute | ast.For | ast.AsyncFor):
+            self._bind_statement(node)
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             self.functions[node.name] = node
             self.stores[node.name] += 1
@@ -124,6 +204,13 @@ class Scope:
             isinstance(node, ast.ExceptHandler) and node.name is not None
         ):
             self.stores[cast(str, node.name)] += 1
+
+    def _bind_statement(self, node: ast.Attribute | ast.For | ast.AsyncFor) -> None:
+        if isinstance(node, ast.Attribute):
+            if isinstance(node.ctx, ast.Store | ast.Del):
+                self.attribute_writes.append(node)
+        elif isinstance(node.target, ast.Name):
+            self.iterated[node.target.id] = node.iter
 
     def _assignment(self, targets: list[ast.expr], value: ast.expr) -> None:
         for target in targets:
@@ -218,23 +305,81 @@ class Scope:
         return name in self.stores or (self.parent is not None and self.parent.bound(name))
 
     def strings(self, node: ast.expr, seen: frozenset[str] = frozenset()) -> tuple[str, ...] | None:
-        """Literal texts, one binding, or a bounded literal pytest parameter domain."""
+        """Literal texts, one binding, or a bounded literal pytest parameter domain.
+
+        With a module context, ``__name__``, subscripts of unmutated literal
+        tables and loop variables over them also resolve to their finite values.
+        """
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return (node.value,)
         if isinstance(node, ast.Name):
-            if node.id in seen:
-                return None
-            if node.id not in self.stores and self.parent is not None:
-                return self.parent.strings(node, seen)
-            if self.stores[node.id] != 1:
-                return None
-            if node.id in self.domains:
-                return self.domains[node.id]
-            value = self.values.get(node.id)
-            return self.strings(value, seen | {node.id}) if value is not None else None
+            return self._name_strings(node, seen)
         if isinstance(node, ast.JoinedStr):
             return self._fstring(node, seen)
+        if (
+            isinstance(node, ast.Subscript)
+            and self.context is not None
+            and not isinstance(node.slice, ast.Slice)
+        ):
+            return self._elements(node.value, seen, keys=False)
         return None
+
+    def _name_strings(self, node: ast.Name, seen: frozenset[str]) -> tuple[str, ...] | None:
+        if node.id == "__name__" and self.context is not None and not self.bound(node.id):
+            return (self.context.name,)
+        if node.id in seen:
+            return None
+        if node.id not in self.stores and self.parent is not None:
+            return self.parent.strings(node, seen)
+        if self.stores[node.id] != 1:
+            return None
+        if node.id in self.domains:
+            return self.domains[node.id]
+        value = self.values.get(node.id)
+        if value is not None:
+            return self.strings(value, seen | {node.id})
+        iterated = self.iterated.get(node.id)
+        if iterated is not None and self.context is not None:
+            return self._elements(iterated, seen | {node.id}, keys=True)
+        return None
+
+    def _container(self, node: ast.expr, seen: frozenset[str]) -> ast.expr | None:
+        """The literal a container expression is bound to, unless it may be mutated."""
+        if not isinstance(node, ast.Name):
+            return node
+        if node.id in seen or self.context is None or node.id in self.context.mutated:
+            return None
+        if node.id not in self.stores and self.parent is not None:
+            return self.parent._container(node, seen)
+        if self.stores[node.id] != 1 or node.id not in self.values:
+            return None
+        return self._container(self.values[node.id], seen | {node.id})
+
+    def _elements(
+        self, node: ast.expr, seen: frozenset[str], *, keys: bool
+    ) -> tuple[str, ...] | None:
+        """Every string a literal table yields: dict keys when iterated, values when indexed."""
+        container = self._container(node, seen)
+        if isinstance(container, ast.Dict):
+            if any(key is None for key in container.keys):
+                return None  # ``**`` merges an opaque mapping.
+            items: list[ast.expr] = (
+                [key for key in container.keys if key is not None]
+                if keys
+                else list(container.values)
+            )
+        elif isinstance(container, ast.Tuple | ast.List | ast.Set):
+            items = list(container.elts)
+        else:
+            return None
+        found: list[str] = []
+        for item in items:
+            values = None if isinstance(item, ast.Starred) else self.strings(item, seen)
+            if values is None:
+                return None
+            found.extend(values)
+        unique = tuple(dict.fromkeys(found))
+        return unique if len(unique) <= _LITERAL_LIMIT else None
 
     def _fstring(self, node: ast.JoinedStr, seen: frozenset[str]) -> tuple[str, ...] | None:
         chunks: list[tuple[str, ...]] = []
@@ -250,7 +395,7 @@ class Scope:
                 return None
             chunks.append(values)
             combinations *= len(values)
-        if combinations > 256:
+        if combinations > _LITERAL_LIMIT:
             return None
         return tuple(dict.fromkeys("".join(parts) for parts in product(*chunks)))
 

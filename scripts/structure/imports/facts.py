@@ -73,7 +73,8 @@ class _Collector(ast.NodeVisitor):
         embedded: bool = False,
     ) -> None:
         self.path, self.index, self.tops = path, index, tops
-        self.scope = bindings.Scope(tree, path)
+        name = "__main__" if embedded else bindings.module_name(path)
+        self.scope = bindings.Scope(tree, path, context=bindings.module_context(tree, name))
         self.depth = len(Path(path).parts) if path else 0
         self.embedded = embedded
         self.resource_seen: set[int] = set()
@@ -254,13 +255,35 @@ class _Collector(ast.NodeVisitor):
                 return "" if parent == "." else parent
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             return self._divided_path(node, seen)
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "joinpath"
-        ):
-            return self._joined_path(node.func.value, node.args, seen)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            return self._method_path(node, node.func, seen)
         return None
+
+    def _method_path(
+        self, node: ast.Call, method: ast.Attribute, seen: frozenset[str]
+    ) -> str | None:
+        if method.attr == "joinpath":
+            return self._joined_path(method.value, node.args, seen)
+        if (
+            method.attr in {"with_name", "with_suffix"}
+            and len(node.args) == 1
+            and not node.keywords
+        ):
+            return self._renamed_path(method.value, method.attr, node.args[0], seen)
+        return None
+
+    def _renamed_path(
+        self, base: ast.expr, method: str, argument: ast.expr, seen: frozenset[str]
+    ) -> str | None:
+        prefix = self._resource_path(base, seen)
+        values = self.scope.strings(argument)
+        if not prefix or values is None or len(values) != 1:
+            return None
+        path = Path(prefix)
+        renamed = (
+            path.with_name(values[0]) if method == "with_name" else path.with_suffix(values[0])
+        )
+        return renamed.as_posix()
 
     def _file_path(self, node: ast.AST) -> str | None:
         ascents = placement_evidence.file_ascents(
@@ -363,9 +386,81 @@ class _Collector(ast.NodeVisitor):
                 return self._path_expression(node.func.value)
         return False
 
+    def _write_only(self, node: ast.Call) -> bool:
+        """An ``open`` whose literal mode cannot read: its file is an output, not an input."""
+        mode = self._open_mode(node)
+        values = self.scope.strings(mode) if mode is not None else None
+        return bool(values) and all(
+            "r" not in value and "+" not in value and any(flag in value for flag in "wax")
+            for value in values or ()
+        )
+
+    def _open_mode(self, node: ast.Call) -> ast.expr | None:
+        keyword = next((kw.value for kw in node.keywords if kw.arg == "mode"), None)
+        if keyword is not None:
+            return keyword
+        if self._open_function(node.func):
+            return node.args[1] if len(node.args) > 1 else None
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "open":
+            return node.args[0] if node.args else None
+        return None
+
+    def _external(self, node: ast.AST, seen: frozenset[str] = frozenset()) -> bool:
+        """A path rooted at a literal location outside the checkout, such as ``/proc``."""
+        if isinstance(node, ast.Name):
+            if node.id in seen:
+                return False
+            value = self.scope.value(node)
+            return value is not node and self._external(value, seen | {node.id})
+        if isinstance(node, ast.expr) and self.scope.origin(node) == "os.devnull":
+            return True
+        if isinstance(node, ast.JoinedStr):
+            first = node.values[0] if node.values else None
+            if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+                return False
+            # Only complete directory components are fixed text: f"/proc/{pid}" -> /proc.
+            return self._outside_checkout(first.value.rpartition("/")[0])
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return self._outside_checkout(node.value)
+        root = self._path_root(node)
+        return root is not None and self._external(root, seen)
+
+    def _outside_checkout(self, text: str) -> bool:
+        """A fixed absolute location that neither is, contains nor lies inside the checkout."""
+        location = Path(text)
+        root = self.index.repo_root
+        return (
+            location.is_absolute()
+            and location != Path(location.anchor)
+            and not location.is_relative_to(root)
+            and not root.is_relative_to(location)
+        )
+
+    def _path_root(self, node: ast.AST) -> ast.AST | None:
+        """The expression a derived path is built from, for anchor checks."""
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            return node.left
+        if isinstance(node, ast.Attribute) and node.attr in {"parent", "parents"}:
+            return node.value
+        if isinstance(node, ast.Subscript):
+            return node.value
+        if not isinstance(node, ast.Call):
+            return None
+        if self.scope.origin(node.func) == "pathlib.Path":
+            return node.args[0] if node.args else None
+        if isinstance(node.func, ast.Attribute) and node.func.attr in {
+            "resolve",
+            "absolute",
+            "joinpath",
+            "with_name",
+            "with_suffix",
+        }:
+            return node.func.value
+        return None
+
     def _resource_read(self, node: ast.Call) -> None:
         target = self._read_target(node)
-        if target is None:
+        if target is None or self._write_only(node):
             return
         path = self._resource_path(target)
         if path is not None:
@@ -378,6 +473,8 @@ class _Collector(ast.NodeVisitor):
                 if absolute.is_relative_to(self.index.repo_root):
                     relative = absolute.relative_to(self.index.repo_root).as_posix()
                     self.records.append(Fact(node.lineno, FactKind.RESOURCE, relative))
+            return
+        if self._external(target):
             return
         self.gap(
             node,

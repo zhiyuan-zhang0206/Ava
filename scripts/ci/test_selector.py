@@ -21,6 +21,7 @@ from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry ne
     is_doc_path,
 )
 from scripts.ci.test_impact import (  # noqa: E402 - standalone script
+    Impact,
     base_checkout,
     build_impact,
     module_files,
@@ -431,11 +432,11 @@ def select_tests(
     candidates = _runtime_candidates(classes, checkout, base_ref, full_estimate)
     if isinstance(candidates, SelectionResult):
         return candidates
-    selected, source_count = candidates
+    owned, tainted, source_count, diagnostics = candidates
     # Tree-scan tests are unreachable through the owner rules; pin them so a
     # SELECTED run keeps the repo-wide gates (task #4183).
-    selected.update(tree_scan_tests(repo_root))
-    tests = tuple(sorted(selected & checkout.collectable))
+    owned.update(tree_scan_tests(repo_root))
+    tests = tuple(sorted((owned | tainted) & checkout.collectable))
     estimate = _estimate_seconds(tests, durations, reference_paths=set(checkout.collectable))
     if not tests:
         return _result(
@@ -443,14 +444,26 @@ def select_tests(
             "no-tests",
             full_estimate=full_estimate,
             map_source_count=source_count,
+            diagnostics=diagnostics,
         )
     if estimate > 0.8 * full_estimate:
+        owned_estimate = _estimate_seconds(
+            tuple(sorted(owned & checkout.collectable)),
+            durations,
+            reference_paths=set(checkout.collectable),
+        )
+        # Name the cause: the changed paths' own consumers, or the tests that
+        # must run because their graph holds an input the analysis cannot bound.
+        reason = (
+            "incomplete-impact" if owned_estimate <= 0.8 * full_estimate else "subset-too-close"
+        )
         return _result(
             "FULL",
-            "subset-too-close",
+            reason,
             est_seconds=estimate,
             full_estimate=full_estimate,
             map_source_count=source_count,
+            diagnostics=diagnostics,
         )
     return _result(
         "SELECTED",
@@ -459,6 +472,7 @@ def select_tests(
         est_seconds=estimate,
         full_estimate=full_estimate,
         map_source_count=source_count,
+        diagnostics=diagnostics,
     )
 
 
@@ -467,17 +481,24 @@ def _runtime_candidates(
     checkout: Checkout,
     base_ref: str | None,
     full_estimate: float,
-) -> tuple[set[str], int] | SelectionResult:
-    """Union both trees' runtime impact, declining a subset when evidence is incomplete."""
+) -> tuple[set[str], set[str], int, tuple[str, ...]] | SelectionResult:
+    """Union both trees' runtime impact; tests behind an unbounded input always run.
+
+    Returns the changed paths' consumers, the tests whose dependency graph holds
+    an input the analysis cannot bound (they may read any changed path, so every
+    subset includes them), the map size and the visible diagnostics.
+    """
     impact = build_impact(checkout.repo_root, checkout.collectable)
     reverse_map = impact.tests_by_input
     diagnostics = list(unknown_diagnostics(impact, tree="head"))
+    tainted = _unbounded_tests(impact)
     selected = _owner_tests(classes, checkout, reverse_map)
     if base_ref is not None:
         with base_checkout(checkout.repo_root, base_ref) as base_root:
             base = load_checkout(base_root)
             old_impact = build_impact(base_root, base.collectable & checkout.collectable)
             diagnostics.extend(unknown_diagnostics(old_impact, tree="base"))
+            tainted.update(_unbounded_tests(old_impact))
             old_classes = {path: classify_path(path, base) for path in classes}
             old_forced = _forced_full(old_classes, full_estimate)
             if old_forced is not None:
@@ -486,20 +507,32 @@ def _runtime_candidates(
             for path, tests_for_path in old_impact.tests_by_input.items():
                 reverse_map.setdefault(path, set()).update(tests_for_path & checkout.collectable)
     elif any(kind is PathClass.DELETED for kind in classes.values()):
-        diagnostics.extend(
-            f"head:{path}: deleted path requires --base-ref to recover runtime impact"
-            for path, kind in classes.items()
-            if kind is PathClass.DELETED
-        )
-    if diagnostics:
+        # A removed dependency is only visible in the base tree: without it no
+        # subset can name the tests that lost an input.
         return _result(
             "FULL",
             "incomplete-impact",
             full_estimate=full_estimate,
             map_source_count=len(reverse_map),
-            diagnostics=tuple(sorted(set(diagnostics))),
+            diagnostics=tuple(
+                sorted(
+                    {
+                        *diagnostics,
+                        *(
+                            f"head:{path}: deleted path requires --base-ref to recover runtime impact"
+                            for path, kind in classes.items()
+                            if kind is PathClass.DELETED
+                        ),
+                    }
+                )
+            ),
         )
-    return selected, len(reverse_map)
+    return selected, tainted, len(reverse_map), tuple(sorted(set(diagnostics)))
+
+
+def _unbounded_tests(impact: Impact) -> set[str]:
+    """Tests whose runtime graph reaches an input the analysis could not bound."""
+    return {test for item in impact.unknown for test in impact.tests_by_input.get(item.path, ())}
 
 
 def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> SelectionResult | None:

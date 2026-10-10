@@ -18,17 +18,24 @@ root/local conftests, literal `pytest_plugins`, and the shared `path_scopes.toml
 Each path-scoped binding retains its TOML source as an input, including removed base
 declarations; a missing first-party fixture module reports incomplete impact at that source.
 Relative imports, finite dynamic imports, literal Python subprocess modules/code and
-recognized repository-rooted resource paths use that same evidence owner and module resolver. Placement
+recognized repository-rooted resource paths use that same evidence owner and module resolver.
+Finite dynamic imports include the module's own `__name__` and subscripts of, or loops
+over, an unmutated literal table bound in the same module. Literal file anchors include
+`with_name`/`with_suffix` siblings; reads rooted at a literal path outside the checkout
+(such as `/proc` or `os.devnull`) and write-only `open` modes are not repository inputs. Placement
 subject policies do not prune this runtime impact graph. The selector never imports
 application code or executes test code.
 
 Global fixture dependencies can therefore reach most tests. This is conservative
 runtime coupling: the duration guard reports `subset-too-close` and keeps FULL rather than
-removing those edges to produce a smaller subset. An opaque dynamic input on a test's
-reachable dependency graph produces `incomplete-impact`, with source locations and
-reasons in the JSON `diagnostics` field and stderr. Explicit edges do not certify that
-an unrelated opaque input is resolved. Syntax errors, malformed declarations and
-unexpected analysis errors fail the selector job and the required backend check.
+removing those edges to produce a smaller subset. An opaque dynamic input may load any
+changed path, so every test whose reachable dependency graph holds one joins every
+candidate subset; its source location and reason stay in the JSON `diagnostics` field
+and stderr. Explicit edges do not certify that an unrelated opaque input is resolved.
+When those tests alone push a subset past the duration guard, FULL reports
+`incomplete-impact` instead of `subset-too-close`. Syntax errors, malformed
+declarations and unexpected analysis errors fail the selector job and the required
+backend check.
 
 Documentation is also an input when the shared resource graph proves a possible reader.
 The workflow's classify job and the selector query the same head/base evidence before
@@ -106,10 +113,10 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | 2 | Every path is documentation and has no known runtime reader in either tree | SKIP |
 | 3 | A path is GLOBAL | FULL (`global-path:<first path>`; the payload lists every global path) |
 | 4 | A path is UNMAPPED | FULL (unmapped; the payload lists the paths) |
-| 5 | Reachable dynamic input or missing deleted-path base facts | FULL (incomplete-impact; diagnostic locations and reasons) |
-| 6 | Otherwise, union the contribution of every path with the tree-scan tests | candidate subset |
+| 5 | A deleted path without base facts | FULL (incomplete-impact; diagnostic locations and reasons) |
+| 6 | Otherwise, union the contribution of every path, the tree-scan tests and every test reaching an opaque input in either tree | candidate subset |
 | 7 | The candidate is empty | FULL (no-tests) |
-| 8 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (subset-too-close) |
+| 8 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (`incomplete-impact` when the changed paths' own tests fit and opaque-input tests do not, else `subset-too-close`) |
 | 9 | None of the above | SELECTED (owner-tests) |
 
 Rule 4 is a runtime safety net. scripts/tests/test_test_selector_owner_rules.py
@@ -172,7 +179,8 @@ It supports bounded static evidence, not arbitrary execution or reflection. Know
 external modules have no repository input to select. Unresolved dynamic inputs remain
 explicit unknown evidence. Fixtures registered through `path_scopes.toml` create real
 edges, but an opaque call elsewhere in a plugin remains unknown unless its finite input
-domain is proved. This can require FULL on the current repository; it is not evidence
+domain is proved; its consumers then join every subset. When an opaque input sits in a
+module that most tests reach, this still requires FULL on the current repository; it is not evidence
 that the runtime dependency closure is small or complete.
 
 The graph is rebuilt for every run and no coverage-derived map is committed. Package
