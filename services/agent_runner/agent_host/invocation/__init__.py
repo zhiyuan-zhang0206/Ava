@@ -8,7 +8,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
-from agent.impersonation import settle_checkpoint
+from agent.impersonation import flush_checkpoint, settle_checkpoint
 from agent.ownership.hosted_completion import (
     completed_hosted_lifecycle_kind,
     pending_hosted_lifecycle_id,
@@ -20,8 +20,14 @@ from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_restart import original_guarded_restart_id
+from base.agents.observation.relay_supervision import RelaySupervision
+from base.db import Database
+from base.events.live.bus import EventBus
+from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.db_recovery import database_phase
+from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
+from services.agent_runner.agent_host.invocation.compact.lifecycle import apply_hosted_lifecycle
 from services.agent_runner.agent_host.invocation.native_work import (
     completed_native_cancel,
     settle_native_invocation,
@@ -137,3 +143,79 @@ async def returned_lifecycle_request(
             raise RuntimeError("hosted lifecycle return has no admitted incarnation")
         pending.lifecycle_command_id = await pending_hosted_lifecycle_id(pool, incarnation)
     return pending.lifecycle_command_id is not None or requested
+
+
+async def finish_completed_invocation(
+    pool: AsyncConnectionPool,
+    checkpoints: TurnCheckpoints,
+    agent_id: int,
+    ctx: AvaContext,
+    pending: PendingWorkResult,
+    drop_agent: Callable[[int], None],
+    kill_shell_sessions: Callable[[int], None],
+    *,
+    db: Database,
+    bus: EventBus,
+    relays: RelaySupervision,
+) -> TurnOutcome | None:
+    """Settle the original completed work through its admission's checkpoint view."""
+    # Correlate the original trace only after its checkpoint is durable.
+    async with database_phase():
+        if not pending.checkpoint_flushed:
+            await flush_checkpoint(checkpoints.saver, agent_id)
+            pending.checkpoint_flushed = True
+        if not pending.native_settled:
+            incarnation = ctx.require_original_incarnation(agent_id)
+            pending.native_cancelled = await settle_native_invocation(
+                pool,
+                checkpoints.saver,
+                checkpoints.graph,
+                incarnation,
+                pending.native_work,
+                {"configurable": {"thread_id": str(agent_id)}},
+                resources=ctx.hosted_resources,
+            )
+            pending.native_settled = True
+        if not pending.trace_attached:
+            await attach_trace_checkpoint_ref(checkpoints.graph, ctx, agent_id)
+            pending.trace_attached = True
+    if await returned_lifecycle_request(
+        pool, agent_id, pending, incarnation=ctx.original_incarnation
+    ):
+        incarnation = ctx.require_original_incarnation(agent_id)
+        drop_agent(agent_id)
+        async with database_phase():
+            if pending.lifecycle_command_id is None:
+                return TurnOutcome(exited=False, crashed=False)
+            kind = await apply_hosted_lifecycle(
+                pool,
+                incarnation,
+                bus=bus,
+                kill_shell_sessions=kill_shell_sessions,
+                expected_command_id=pending.lifecycle_command_id,
+                resources=ctx.hosted_resources,
+            )
+            if kind is None:
+                kind = await completed_hosted_lifecycle_kind(
+                    pool, incarnation, pending.lifecycle_command_id
+                )
+        logger.info(
+            "hosted lifecycle return settled",
+            agent_id=agent_id,
+            generation=str(incarnation.generation),
+            command_kind=kind,
+        )
+        return TurnOutcome(exited=kind == "terminate", crashed=False)
+    if pending.native_cancelled or pending.result["turn_idle"]:
+        async with database_phase():
+            await settle_checkpoint(
+                checkpoints.graph,
+                db,
+                bus,
+                agent_id,
+                relays,
+                incarnation=ctx.original_incarnation,
+                resources=ctx.hosted_resources,
+            )
+        return TurnOutcome(exited=False, crashed=False)
+    return None

@@ -275,9 +275,12 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         *,
         incarnation: RuntimeIncarnation,
         resources: HostedTurnResources | None,
+        checkpoints: Any = None,
     ) -> TurnOutcome:
         return await successor._invoke_until_done(
-            _agent, replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
+            _agent,
+            replace(ctx, original_incarnation=incarnation, hosted_resources=resources),
+            checkpoints=checkpoints,
         )
 
     monkeypatch.setattr(successor, "_drive_turns", drive)
@@ -456,9 +459,12 @@ def _host_driving_invoke_until_done(
         *,
         incarnation: RuntimeIncarnation,
         resources: HostedTurnResources | None,
+        checkpoints: Any = None,
     ) -> TurnOutcome:
         return await host._invoke_until_done(
-            _agent, replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
+            _agent,
+            replace(ctx, original_incarnation=incarnation, hosted_resources=resources),
+            checkpoints=checkpoints,
         )
 
     monkeypatch.setattr(host, "_drive_turns", drive)

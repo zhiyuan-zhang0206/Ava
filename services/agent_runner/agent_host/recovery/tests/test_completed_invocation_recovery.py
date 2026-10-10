@@ -16,7 +16,9 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
+from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.invocation import PendingWorkResult
+from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
@@ -53,8 +55,8 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
         catalog=model_catalog,
     )
     original_invoke = host_module.run_invocation_with_stall_guard
-    original_flush = host_module.flush_checkpoint
-    original_settle = host_module.settle_checkpoint
+    original_flush = invocation_owner.flush_checkpoint
+    original_settle = invocation_owner.settle_checkpoint
     invocations = 0
     queued: int | None = None
 
@@ -96,8 +98,8 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
         return result
 
     monkeypatch.setattr(host_module, "run_invocation_with_stall_guard", counted_invoke)
-    monkeypatch.setattr(host_module, "flush_checkpoint", flushing)
-    monkeypatch.setattr(host_module, "settle_checkpoint", settling)
+    monkeypatch.setattr(invocation_owner, "flush_checkpoint", flushing)
+    monkeypatch.setattr(invocation_owner, "settle_checkpoint", settling)
     outcome = await host._invoke_until_done(
         agent,
         replace(ctx, original_incarnation=incarnation, hosted_resources=None, native_work=None),
@@ -144,10 +146,17 @@ async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
         checkpoint_flushed=True,
         trace_attached=True,
     )
-    outcome = await host._finish_completed_invocation(
+    outcome = await invocation_owner.finish_completed_invocation(
+        aops_pool,
+        TurnCheckpoints(saver, graph),
         agent,
         replace(ctx, original_incarnation=incarnation, hosted_resources=None, native_work=None),
         pending,
+        host.drop_agent,
+        host_module.kill_terminating_agent_shells,
+        db=ctx.require_db(),
+        bus=ctx.require_bus(),
+        relays=host.relays,
     )
     assert outcome is not None and not outcome.exited
     assert agent not in host._runtimes

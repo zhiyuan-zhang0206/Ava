@@ -222,7 +222,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             patch.setattr(psycopg.AsyncConnection, "execute", fail_observe)
         else:
             patch.setattr(
-                "services.agent_runner.agent_host.host.apply_hosted_lifecycle",
+                "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle",
                 fail_after_commit,
             )
         with pytest.raises(RuntimeError, match="injected"):

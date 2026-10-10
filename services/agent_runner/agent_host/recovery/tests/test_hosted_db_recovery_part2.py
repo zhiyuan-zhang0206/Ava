@@ -232,10 +232,10 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
     async def flaky_repair(_graph: Any, _agent: int) -> None:
         nonlocal repairs
         repairs += 1
-        await graph.aget_state(config)
+        await _graph.aget_state(config)
         if repairs == 1:
             if write_before_retry:
-                await graph.aupdate_state(
+                await _graph.aupdate_state(
                     config,
                     {"messages": [HumanMessage(content="State changed in repair")]},
                     as_node="work",

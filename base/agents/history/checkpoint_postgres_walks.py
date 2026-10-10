@@ -1,19 +1,19 @@
 """Pinned checkpoint-postgres read adapters: pagination and message reset boundaries.
 
-Remove the pagination wrapper after langgraph#8448 / #8556 ships in a stable
+Remove the pagination override after langgraph#8448 / #8556 ships in a stable
 release. The messages-only reader additionally stops body transfer at a reset
 inside serialized writes; retain it until upstream supports that boundary.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Mapping, Sequence
-from functools import wraps
+from collections.abc import Generator, Mapping, Sequence
 from importlib.metadata import version
 from inspect import Parameter, signature
 from typing import Any, LiteralString, cast
 
 from langchain_core.messages import RemoveMessage, convert_to_messages
+from langchain_core.runnables import RunnableConfig
 from langgraph.channels.binop import _get_overwrite
 from langgraph.checkpoint.base import DeltaChannelHistory, get_checkpoint_id
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -38,23 +38,18 @@ _EXPECTED_PARAMETERS = (
 )
 
 
-def install_checkpoint_postgres_walk_patch() -> None:
-    """Install the pinned pagination and reset-aware message read adapters."""
+def validate_checkpoint_postgres_api() -> None:
+    """Fail at Ava saver construction if its pinned private extension seam changes."""
     dependency_version = version("langgraph-checkpoint-postgres")
     if dependency_version != "3.1.2":
         raise RuntimeError(
-            "checkpoint-postgres walk patch requires langgraph-checkpoint-postgres==3.1.2; "
+            "checkpoint-postgres adapter requires langgraph-checkpoint-postgres==3.1.2; "
             f"found {dependency_version}"
         )
-
     descriptor = vars(BasePostgresSaver)["_try_advance_walks"]
     if not isinstance(descriptor, staticmethod):
         raise TypeError("checkpoint-postgres _try_advance_walks was replaced outside Ava")
-    if getattr(descriptor.__func__, "_ava_walk_patch", False):
-        _install_message_history_reads()
-        return
-
-    original = cast(Callable[..., None], descriptor.__func__)
+    original = descriptor.__func__
     method_signature = signature(original)
     if (
         original.__module__ != "langgraph.checkpoint.postgres.base"
@@ -70,8 +65,12 @@ def install_checkpoint_postgres_walk_patch() -> None:
     ):
         raise RuntimeError("checkpoint-postgres _try_advance_walks signature or identity changed")
 
-    @wraps(original)
-    def advance_walks(
+
+class CheckpointWalks:
+    """Ava-owned pagination extension; upstream classes remain unchanged."""
+
+    @staticmethod
+    def _try_advance_walks(
         target_id: str,
         channels: Sequence[str],
         parent_of: Mapping[str, str | None],
@@ -86,7 +85,7 @@ def install_checkpoint_postgres_walk_patch() -> None:
     ) -> None:
         if target_id not in parent_of:
             return
-        original(
+        BasePostgresSaver._try_advance_walks(
             target_id,
             channels,
             parent_of,
@@ -99,10 +98,6 @@ def install_checkpoint_postgres_walk_patch() -> None:
             walk_cursor_by_ch,
             seeded,
         )
-
-    advance_walks._ava_walk_patch = True  # type: ignore[attr-defined]
-    BasePostgresSaver._try_advance_walks = staticmethod(advance_walks)  # type: ignore[assignment]
-    _install_message_history_reads()
 
 
 # task #3696 exception inventory: transport read guards, not conversation limits.
@@ -278,17 +273,18 @@ def _history_queries(
     )
 
 
-def _install_message_history_reads() -> None:
-    """Install the messages-only read optimization beside the pinned walk fix."""
-    original_sync = PostgresSaver.get_delta_channel_history
-    if getattr(original_sync, "_ava_message_suffix", False):
-        return
-    original_async = AsyncPostgresSaver.aget_delta_channel_history
+class HistoryPostgresSaver(CheckpointWalks, PostgresSaver):
+    """Explicit sync checkpoint reader with pinned pagination and reset suffix reads."""
 
-    @wraps(original_sync)
-    def sync_history(self: PostgresSaver, *, config: Any, channels: Sequence[str]) -> Any:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        validate_checkpoint_postgres_api()
+        super().__init__(*args, **kwargs)
+
+    def get_delta_channel_history(
+        self, *, config: RunnableConfig, channels: Sequence[str]
+    ) -> Mapping[str, DeltaChannelHistory]:
         if list(channels) != ["messages"] or get_checkpoint_id(config) is None:
-            return original_sync(self, config=config, channels=channels)
+            return super().get_delta_channel_history(config=config, channels=channels)
         queries = _history_queries(self, config)
         rows: _Rows = []
         started = False
@@ -302,12 +298,19 @@ def _install_message_history_reads() -> None:
                 cursor.execute(sql, params, binary=True)
                 rows = cursor.fetchall()
 
-    @wraps(original_async)
-    async def async_history(
-        self: AsyncPostgresSaver, *, config: Any, channels: Sequence[str]
-    ) -> Any:
+
+class HistoryAsyncPostgresSaver(CheckpointWalks, AsyncPostgresSaver):
+    """Explicit async checkpoint reader; sync calls use upstream's loop bridge."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        validate_checkpoint_postgres_api()
+        super().__init__(*args, **kwargs)
+
+    async def aget_delta_channel_history(
+        self, *, config: RunnableConfig, channels: Sequence[str]
+    ) -> Mapping[str, DeltaChannelHistory]:
         if list(channels) != ["messages"] or get_checkpoint_id(config) is None:
-            return await original_async(self, config=config, channels=channels)
+            return await super().aget_delta_channel_history(config=config, channels=channels)
         queries = _history_queries(self, config)
         rows: _Rows = []
         started = False
@@ -320,7 +323,3 @@ def _install_message_history_reads() -> None:
             async with self._cursor() as cursor:
                 await cursor.execute(sql, params, binary=True)
                 rows = await cursor.fetchall()
-
-    sync_history._ava_message_suffix = True  # type: ignore[attr-defined]
-    PostgresSaver.get_delta_channel_history = sync_history  # type: ignore[method-assign]
-    AsyncPostgresSaver.aget_delta_channel_history = async_history  # type: ignore[method-assign]

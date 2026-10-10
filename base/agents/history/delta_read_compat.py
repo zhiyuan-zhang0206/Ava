@@ -33,10 +33,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Generator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator, Mapping, Sequence
 from contextlib import aclosing, closing, contextmanager
-from contextvars import ContextVar  # noqa: TID251 — recovery scope must reach LangGraph child tasks
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
@@ -52,14 +51,11 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.errors import EmptyChannelError
 from langgraph.graph.message import add_messages
 
-from base.agents.history.checkpoint_postgres_walks import install_checkpoint_postgres_walk_patch
 from base.agents.messages.identity import (
     normalize_checkpoint_message_ids,
     normalize_stored_message_ids,
 )
 from base.log import logger
-
-install_checkpoint_postgres_walk_patch()
 
 DELTA_COUNTERS_KEY = "counters_since_delta_snapshot"
 """Checkpoint-metadata key carrying per-channel delta replay counters.
@@ -94,15 +90,32 @@ class RecoveryReconstructionScope:
     messages: list[BaseMessage] | None = None
     active: bool = True
 
+    def reader(self) -> AsyncPostgresSaver:
+        """Bind this scope to a read view while retaining the original write owner.
+
+        Copy the saver's instance fields, never its pool, serializer or write
+        buffers. Installed write/flush closures still target the original saver.
+        The read wrapper receives the scope directly, even from LangGraph tasks.
+        """
+        if not self.active:
+            raise RuntimeError("checkpoint recovery scope has ended")
+        view = copy(self.saver)
+        read = cast("Callable[..., Awaitable[CheckpointTuple | None]]", self.saver.aget_tuple)
+
+        async def aget_tuple(config: RunnableConfig) -> CheckpointTuple | None:
+            return await read(config, reconstruction=self)
+
+        def get_tuple(config: RunnableConfig) -> CheckpointTuple | None:
+            return AsyncPostgresSaver.get_tuple(view, config)
+
+        view.aget_tuple = aget_tuple
+        view.get_tuple = get_tuple
+        return view
+
     def invalidate(self) -> None:
         self.generation += 1
         self.key = None
         self.messages = None
-
-
-_recovery_scope: ContextVar[RecoveryReconstructionScope | None] = ContextVar(
-    "delta_recovery_scope", default=None
-)
 
 
 def _invalidate_recovery_scopes(saver: AsyncPostgresSaver, thread_id: str) -> None:
@@ -152,27 +165,24 @@ def _install_recovery_invalidation(saver: AsyncPostgresSaver) -> None:
 
 @contextmanager
 def recovery_reconstruction_scope(
-    saver: AsyncPostgresSaver, thread_id: str
+    saver: AsyncPostgresSaver, thread_id: str, *, parent: RecoveryReconstructionScope | None = None
 ) -> Generator[RecoveryReconstructionScope | None]:
     """Bound one reconstructed checkpoint when saver reads use delta reconstruction.
 
     Writes invalidate every active scope for their thread, including writes from
-    tasks that did not inherit this context. The one entry is cleared at exit.
+    tasks outside this scope. The one entry is cleared at exit.
+    Callers bind the yielded scope via reader(); unbound reads stay uncached.
     An unwrapped saver has no reconstruction to cache.
     """
     if getattr(saver, "_ava_delta_read_compat", False) is not True:
         # A saver without delta reads has no reconstruction to cache.
         yield None
         return
-    current = _recovery_scope.get()
-    if (
-        current is not None
-        and current.active
-        and current.saver is saver
-        and current.thread_id == thread_id
-    ):
-        # Database recovery inside an admitted turn shares its existing scope.
-        yield current
+    if parent is not None:
+        if not parent.active or parent.saver is not saver or parent.thread_id != thread_id:
+            raise ValueError("checkpoint recovery parent does not match this active saver/thread")
+        # Database recovery explicitly reuses its admitted turn's entry.
+        yield parent
         return
     _install_recovery_invalidation(saver)
     scope = RecoveryReconstructionScope(saver=saver, thread_id=thread_id)
@@ -180,7 +190,6 @@ def recovery_reconstruction_scope(
     if scopes.get(thread_id):
         raise RuntimeError(f"concurrent checkpoint recovery for thread {thread_id}")
     scopes.setdefault(thread_id, set()).add(scope)
-    token = _recovery_scope.set(scope)
     try:
         yield scope
     finally:
@@ -189,7 +198,6 @@ def recovery_reconstruction_scope(
         scopes[thread_id].remove(scope)
         if not scopes[thread_id]:
             del scopes[thread_id]
-        _recovery_scope.reset(token)
 
 
 def _coerce_group(group: Sequence[Any]) -> list[BaseMessage] | None:
@@ -312,8 +320,8 @@ def _apply_reconstruction(
         snapshot = cast("_DeltaSnapshot", checkpoint["channel_values"]["messages"])
         checkpoint["channel_values"]["messages"] = cast("list[BaseMessage]", snapshot.value)
         return True
-    if entry is None or (not entry.get("writes") and "seed" not in entry):
-        return False
+    if entry is None:
+        raise RuntimeError("delta checkpoint messages history is missing")
     started = time.monotonic()
     span.phase = "fold"
     try:
@@ -387,10 +395,13 @@ async def areconstruct_delta_messages(
 
 
 async def _areconstruct_in_recovery(
-    saver: AsyncPostgresSaver, tuple_: CheckpointTuple, read_generation: int | None, span: _ReadSpan
+    saver: AsyncPostgresSaver,
+    tuple_: CheckpointTuple,
+    read_generation: int | None,
+    span: _ReadSpan,
+    scope: RecoveryReconstructionScope | None,
 ) -> bool:
     normalize_checkpoint_message_ids(tuple_)
-    scope = _recovery_scope.get()
     configurable = tuple_.config["configurable"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     if (
         scope is None
@@ -511,10 +522,11 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
             )
             raise
 
-    async def aget_tuple(config: Any) -> Any:
+    async def aget_tuple(
+        config: Any, *, reconstruction: RecoveryReconstructionScope | None = None
+    ) -> Any:
         span = _ReadSpan()
-        scope = _recovery_scope.get()
-        read_generation = scope.generation if scope is not None else None
+        read_generation = reconstruction.generation if reconstruction is not None else None
         started = time.monotonic()
         tuple_ = None
         try:
@@ -524,7 +536,9 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
                 span.tuple_read_ms = (time.monotonic() - started) * 1000
             if tuple_ is not None:
                 span.phase = "repair_detection"
-                await _areconstruct_in_recovery(saver, tuple_, read_generation, span)
+                await _areconstruct_in_recovery(
+                    saver, tuple_, read_generation, span, reconstruction
+                )
             return tuple_
         except (Exception, asyncio.CancelledError) as exc:
             _log_reconstruction(

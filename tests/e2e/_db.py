@@ -21,8 +21,8 @@ from typing import Any
 
 import httpx
 import psycopg
-from langgraph.checkpoint.postgres import PostgresSaver
 
+from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.config import settings
 from tests.components.base.poll_until import poll_until

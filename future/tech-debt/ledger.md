@@ -72,9 +72,9 @@ fixture/incident scope.
 ### boundary:checkpoint-postgres-historical-walk-patch
 - **class**: boundary
 - **status**: open
-- **evidence**: `base/agents/history/checkpoint_postgres_walks.py:install_checkpoint_postgres_walk_patch` wraps private `BasePostgresSaver._try_advance_walks` for checkpoint-postgres 3.1.2. It keeps an unseen historical target out of the cached walk cursor until a later page arrives; `base/agents/history/delta_read_compat.py` installs it for gateway and agent-host readers. The dependency version, method identity, and signature are guarded because this is a temporary third-party patch. Once langgraph#8448 / #8556 is released, run `base/agents/history/tests/test_checkpoint_postgres_walks.py`, remove the pagination wrapper (retaining the message-reset suffix reader until upstream supports it), then upgrade the checkpoint-postgres pin (405 tracks the follow-up).
+- **evidence**: `base/agents/history/checkpoint_postgres_walks.py:CheckpointWalks` overrides private `BasePostgresSaver._try_advance_walks` only on Ava's explicit saver subclasses for checkpoint-postgres 3.1.2. It keeps an unseen historical target out of the cached walk cursor until a later page arrives; gateway readers and the host's pooled saver construct those adapters. Construction guards the dependency version, method identity and signature. Upstream classes and shared serializers remain unchanged, but the private upstream extension seam is still temporary debt. Once langgraph#8448 / #8556 is released, run `base/agents/history/tests/test_checkpoint_postgres_walks.py`, remove the pagination override (retaining the message-reset suffix reader until upstream supports it), then upgrade the checkpoint-postgres pin (405 tracks the follow-up).
 - **first-seen**: 2026-09-23 (PR for task #4518)
-- **last-verified**: 2026-09-23
+- **last-verified**: 2026-10-10
 
 ### deps:playwright-1.62to1.63
 - **class**: deps

@@ -101,8 +101,9 @@ def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
             (DB disconnect, msgpack error). The caller decides tolerance
             (see module docstring).
     """
-    from langgraph.checkpoint.postgres import PostgresSaver
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     # Explicit serde allowlist — same types as the agent runner registers
@@ -289,8 +290,9 @@ def load_checkpoint_message_count(db: Database, agent_id: int) -> int:
 
 def _reconstructed_message_count(db: Database, agent_id: int) -> int:
     """Count a delta-written thread's messages via reconstruction (0 when not delta)."""
-    from langgraph.checkpoint.postgres import PostgresSaver
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
@@ -317,8 +319,9 @@ def load_checkpoint_messages_segment(
         CheckpointReadError: the boundary blob exists but could not be read or
             deserialized.
     """
-    from langgraph.checkpoint.postgres import PostgresSaver
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
@@ -416,8 +419,9 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
     Raises:
         CheckpointReadError: the store read or blob deserialize failed.
     """
-    from langgraph.checkpoint.postgres import PostgresSaver
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
@@ -514,8 +518,9 @@ def load_checkpoint_messages_by_trace(
         CheckpointReadError: store read or blob deserialize failed — same
             contract as load_checkpoint_messages.
     """
-    from langgraph.checkpoint.postgres import PostgresSaver
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     # Explicit serde allowlist, same as load_checkpoint_messages — without it

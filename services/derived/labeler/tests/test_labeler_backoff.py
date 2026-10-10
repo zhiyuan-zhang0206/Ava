@@ -6,7 +6,9 @@ poll) into an exponentially-spaced retry. See services/derived/labeler/daemon.py
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import httpx2
 import openai
@@ -298,12 +300,17 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
 ) -> None:
-    """A trusted invocation failure returns False and excludes its row next poll.
+    """A trusted invocation failure excludes its row until its cooldown expires.
 
-    Observe two actual SELECTs, then terminate at the third poll; a regression
+    Observe three actual SELECTs, then terminate at the fourth poll; a regression
     produces a failing assertion rather than an unbounded loop or sleep race.
     """
     monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.0)
+    # Control this owner's poll time without changing time.monotonic globally
+    # or asyncio's clock. Provider failure handling can take longer than the
+    # two-second initial cooldown on a loaded runner.
+    clock = Mock(side_effect=[1000.0, 1001.0, 1003.0, 1004.0])
+    monkeypatch.setattr(daemon, "time", SimpleNamespace(monotonic=clock))
 
     a = create_agent(db_conn)
     _seed_chat(db_conn, a)
@@ -327,7 +334,7 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
     cooling_rounds: list[list[int]] = []
 
     def select(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int, str | None]]:
-        if len(selections) == 2:
+        if len(selections) == 3:
             raise asyncio.CancelledError
         cooling_rounds.append(cooling)
         rows = select_unlabeled(cur, cooling)
@@ -350,6 +357,7 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
             )
     finally:
         p.close()
-    assert llm_calls == [True]
-    assert selections == [[a], []]
-    assert cooling_rounds == [[], [a]]
+    assert llm_calls == [True, True]
+    assert selections == [[a], [], [a]]
+    assert cooling_rounds == [[], [a], []]
+    assert clock.call_count == 4

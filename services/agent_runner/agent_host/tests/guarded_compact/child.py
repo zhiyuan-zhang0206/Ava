@@ -4,8 +4,9 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, Protocol, cast
 
 import psycopg
 import pytest
@@ -14,10 +15,15 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 import ava
 from ava.sdk_surface.install import installed
 from base.agents.compaction.commands import observe
+from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
 from services.agent_runner.agent_host.invocation.compact import execute as compact_execute
 from services.agent_runner.agent_host.invocation.compact import lifecycle as compact_lifecycle
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
+
+
+class _GraphInvocation(Protocol):
+    ainvoke: Callable[..., Awaitable[Any]]
 
 
 async def park(stage: str, model: SummaryModel) -> None:
@@ -27,7 +33,7 @@ async def park(stage: str, model: SummaryModel) -> None:
 
 
 def install(
-    stage: str, model: SummaryModel, patch: pytest.MonkeyPatch, host: Any, agent: int
+    stage: str, model: SummaryModel, patch: pytest.MonkeyPatch, host: AgentHost, agent: int
 ) -> None:
     if stage == "released":
         save_result = compact_execute.save_result
@@ -73,14 +79,17 @@ def install(
 
         patch.setattr(compact_apply, "authorize", permit)
     elif stage == "reset":
-        invoke = host._graph.ainvoke
+        graph_type = type(host._graph)
+        invoke = cast(_GraphInvocation, graph_type).ainvoke
 
-        async def partial_reset(*args: Any, **kwargs: Any) -> Any:
+        async def partial_reset(graph: Any, *args: Any, **kwargs: Any) -> Any:
             await compact_apply.flush_checkpoint(host._checkpointer, agent)
             await park(stage, model)
-            return await invoke(*args, **kwargs)
+            return await invoke(graph, *args, **kwargs)
 
-        patch.setattr(host._graph, "ainvoke", partial_reset)
+        # Admission copies the compiled graph through LangGraph's public API;
+        # intercept the actual receiver rather than one discarded instance.
+        patch.setattr(graph_type, "ainvoke", partial_reset)
     elif stage in ("applied", "short"):
         close = compact_execute.close_terminal
 

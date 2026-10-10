@@ -12,8 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import CheckpointMetadata, CheckpointTuple, DeltaChannelHistory
 from langgraph.checkpoint.base.id import uuid6
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.postgres import PostgresSaver as UpstreamPostgresSaver
 from langgraph.checkpoint.postgres.base import BasePostgresSaver
 from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -21,6 +20,10 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 
 from base.agents.history import checkpoint_postgres_walks
 from base.agents.history.checkpoint import load_checkpoint_messages_segment
+from base.agents.history.checkpoint_postgres_walks import (
+    HistoryAsyncPostgresSaver as AsyncPostgresSaver,
+)
+from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
 from base.db import Database
@@ -31,7 +34,7 @@ def _db() -> Database:
 
 
 def _append_delta_checkpoint(
-    saver: PostgresSaver, *, thread: str, step: int, parent: RunnableConfig | None
+    saver: UpstreamPostgresSaver, *, thread: str, step: int, parent: RunnableConfig | None
 ) -> RunnableConfig:
     configurable: dict[str, Any] = {"thread_id": thread, "checkpoint_ns": ""}
     if parent is not None:
@@ -72,7 +75,7 @@ def _append_delta_checkpoint(
 
 
 def _write_steps(
-    saver: PostgresSaver, thread: str, count: int, parent: RunnableConfig | None
+    saver: UpstreamPostgresSaver, thread: str, count: int, parent: RunnableConfig | None
 ) -> list[RunnableConfig]:
     configs: list[RunnableConfig] = []
     for step in range(count):
@@ -88,7 +91,7 @@ def _write_numbers(entry: DeltaChannelHistory) -> list[int]:
     ]
 
 
-def _history(saver: PostgresSaver, config: RunnableConfig) -> DeltaChannelHistory:
+def _history(saver: UpstreamPostgresSaver, config: RunnableConfig) -> DeltaChannelHistory:
     return saver.get_delta_channel_history(config=config, channels=["messages"])["messages"]
 
 
@@ -98,7 +101,7 @@ def _assert_walk_has_writes_and_seed(entry: DeltaChannelHistory, expected: list[
 
 
 def _assert_early_checkpoints_walk_back_to_root(
-    saver: PostgresSaver, first: list[RunnableConfig]
+    saver: UpstreamPostgresSaver, first: list[RunnableConfig]
 ) -> None:
     assert _history(saver, first[0]) == {"writes": []}
     for target, expected in ((1, []), (2, [1]), (3, [1, 2]), (5, [1, 2, 3, 4])):
@@ -106,7 +109,7 @@ def _assert_early_checkpoints_walk_back_to_root(
 
 
 def _append_newer_checkpoints_across_page_boundary(
-    saver: PostgresSaver, thread: str, first: list[RunnableConfig], target: RunnableConfig
+    saver: UpstreamPostgresSaver, thread: str, first: list[RunnableConfig], target: RunnableConfig
 ) -> None:
     parent = first[-1]
     for step in range(6, 1027):
@@ -142,23 +145,25 @@ async def test_historical_walk_page_boundary_and_compact_segment(
     assert [message.id for message in segment] == ["write-1"]
 
 
-def test_walk_patch_install_is_idempotent() -> None:
+def test_adapter_validation_leaves_upstream_unchanged() -> None:
     installed = vars(BasePostgresSaver)["_try_advance_walks"]
-    checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch()
-    checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch()
+    upstream_read = UpstreamPostgresSaver.get_delta_channel_history
+    PostgresSaver(cast(Any, object()))
+    PostgresSaver(cast(Any, object()))
     assert vars(BasePostgresSaver)["_try_advance_walks"] is installed
+    assert UpstreamPostgresSaver.get_delta_channel_history is upstream_read
 
 
-def test_walk_patch_rejects_new_dependency_version(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_adapter_rejects_new_dependency_version(monkeypatch: pytest.MonkeyPatch) -> None:
     def changed_version(_distribution_name: str) -> str:
         return "3.1.3"
 
     monkeypatch.setattr(checkpoint_postgres_walks, "version", changed_version)
     with pytest.raises(RuntimeError, match=r"requires langgraph-checkpoint-postgres==3.1.2"):
-        checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch()
+        checkpoint_postgres_walks.validate_checkpoint_postgres_api()
 
 
-def test_walk_patch_rejects_changed_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_adapter_rejects_changed_signature(monkeypatch: pytest.MonkeyPatch) -> None:
     def changed(target_id: str) -> None:
         pass
 
@@ -166,13 +171,13 @@ def test_walk_patch_rejects_changed_signature(monkeypatch: pytest.MonkeyPatch) -
     changed.__qualname__ = "BasePostgresSaver._try_advance_walks"
     monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", staticmethod(changed))
     with pytest.raises(RuntimeError, match="signature or identity changed"):
-        checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch()
+        checkpoint_postgres_walks.validate_checkpoint_postgres_api()
 
 
-def test_walk_patch_rejects_foreign_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_adapter_rejects_foreign_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", lambda: None)
     with pytest.raises(TypeError, match="replaced outside Ava"):
-        checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch()
+        checkpoint_postgres_walks.validate_checkpoint_postgres_api()
 
 
 # Delta read compatibility failures during the PostgreSQL history walk.

@@ -14,7 +14,6 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 from langgraph.channels.delta import DeltaChannel
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
@@ -29,6 +28,9 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages_segment,
 )
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
+from base.agents.history.checkpoint_postgres_walks import (
+    HistoryAsyncPostgresSaver as AsyncPostgresSaver,
+)
 from base.agents.history.delta_read_compat import (
     recovery_reconstruction_scope,
     wrap_saver_reads_with_delta_reconstruction,
@@ -203,12 +205,17 @@ async def test_recovery_cache_invalidates_on_graph_state_update(
         return await history(config=config, channels=channels)
 
     monkeypatch.setattr(saver, "aget_delta_channel_history", counted)
-    with recovery_reconstruction_scope(saver, "drc-state-write"):
-        await saver.aget_tuple(previous.config)
-        await saver.aget_tuple(previous.config)
+    with recovery_reconstruction_scope(saver, "drc-state-write") as scope:
+        assert scope is not None
+        reader = scope.reader()
+        await reader.aget_tuple(previous.config)
+        await reader.aget_tuple(previous.config)
         assert walks == 1
-        await graph.aupdate_state(config, {"messages": [HumanMessage(id="new", content="new")]})  # pyright: ignore[reportUnknownMemberType]
-        await saver.aget_tuple(previous.config)
+        scoped_graph = graph.copy({"checkpointer": reader})
+        await scoped_graph.aupdate_state(
+            config, {"messages": [HumanMessage(id="new", content="new")]}
+        )  # pyright: ignore[reportUnknownMemberType]
+        await reader.aget_tuple(previous.config)
         assert walks == 2
 
 

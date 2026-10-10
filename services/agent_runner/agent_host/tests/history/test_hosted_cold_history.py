@@ -121,10 +121,17 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
         *,
         incarnation: RuntimeIncarnation | None,
         resources: HostedTurnResources | None,
+        checkpoints: Any = None,
     ) -> TurnOutcome:
+        assert checkpoints.graph.nodes == graph.nodes
+        assert all(checkpoints.graph.nodes[key] is node for key, node in graph.nodes.items())
+        assert checkpoints.graph.channels == graph.channels
+        assert checkpoints.graph.checkpointer is checkpoints.saver
+        assert checkpoints.saver.serde is saver.serde
+        assert checkpoints.saver.aput is saver.aput
         # Recovery can nest inside this turn without dropping or duplicating its cache.
-        with recovery_reconstruction_scope(saver, str(agent)):
-            await graph.ainvoke({}, config=config)
+        with recovery_reconstruction_scope(saver, str(agent), parent=checkpoints.reconstruction):
+            await checkpoints.graph.ainvoke({}, config=config)
         return TurnOutcome(exited=False, crashed=False)
 
     monkeypatch.setattr(host, "_drive_turns", drive)
