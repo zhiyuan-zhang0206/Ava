@@ -60,12 +60,6 @@ from tests.path_scoped.pty_shells import new, wait_for
 # The idle test's own prompt, set by its home's `.bash_profile`.
 _IDLE_PROMPT = "ava-idle-shell>"
 
-# A process that ignores the closure's HUP and TERM, standing in as a shell or a job.
-_STUBBORN_PROCESS = (
-    "import signal,time; signal.signal(signal.SIGHUP,signal.SIG_IGN); "
-    "signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)"
-)
-
 pytestmark = pytest.mark.usefixtures("written")
 
 
@@ -216,7 +210,7 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     stop_env(monkeypatch, home)
     closed = "ava-agent-987-shell-2051-closed"
     stuck = "ava-agent-987-shell-2052-stuck"
-    shell = identity_of(launch(stuck, _STUBBORN_PROCESS))
+    shell = identity_of(launch(stuck, term="ignore", ignore_hangup=True))
     stub_closure(
         monkeypatch,
         closure.Outcome(
@@ -252,7 +246,7 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     dependencies(monkeypatch)
     stop_env(monkeypatch, home)
     name = "ava-agent-987-shell-2044-stubborn"
-    job = launch("private-job", _STUBBORN_PROCESS)
+    job = launch("private-job", term="ignore", ignore_hangup=True)
     survivor = closure.Survivor(name, identity_of(job), "job")
     stub_closure(
         monkeypatch,
@@ -284,7 +278,7 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
     exited after the closure's verdict is gone, and the stop completes."""
     dependencies(monkeypatch)
     stop_env(monkeypatch, home)
-    proc = launch("private-gone", _STUBBORN_PROCESS)
+    proc = launch("private-gone", term="ignore", ignore_hangup=True)
     gone = identity_of(proc)
     proc.kill()
     proc.wait(timeout=5)
@@ -381,7 +375,7 @@ def test_live_terminals_without_the_service_is_what_its_ledger_still_runs(
     its ledger names that is still its recorded process."""
     assert strict.live_terminals() == []
     name = "ava-agent-987-shell-2053-leftover"
-    proc = launch(name, _STUBBORN_PROCESS)
+    proc = launch(name, term="ignore", ignore_hangup=True)
     ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
     assert strict.live_terminals() == [name]
     proc.kill()
@@ -398,12 +392,9 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
     the hangup, and the ledger is then empty."""
     monkeypatch.setattr(ledger, "SWEEP_HANGUP_WAIT_S", 0.3)
     name = "ava-agent-987-shell-2054-orphaned"
-    code = (
-        _STUBBORN_PROCESS
-        if ignores_hangup
-        else "import time; print('ready',flush=True); time.sleep(60)"
+    proc = launch(
+        name, term="ignore" if ignores_hangup else "default", ignore_hangup=ignores_hangup
     )
-    proc = launch(name, code)
     ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
     assert strict.live_terminals() == [name]
 
@@ -444,7 +435,7 @@ def test_force_close_reports_known_job_without_failing(
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(home))
     name = "ava-agent-987-shell-2055-denied"
-    job = launch("private-job", _STUBBORN_PROCESS)
+    job = launch("private-job", term="ignore", ignore_hangup=True)
     asked = stub_closure(
         monkeypatch,
         closure.Outcome(survivors=(closure.Survivor(name, identity_of(job), "job"),)),
@@ -459,7 +450,7 @@ def test_force_close_still_fails_when_known_shell_survives(
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(home))
     name = "private-surviving-shell"
-    shell = launch(name, _STUBBORN_PROCESS)
+    shell = launch(name, term="ignore", ignore_hangup=True)
     stub_closure(
         monkeypatch,
         closure.Outcome(survivors=(closure.Survivor(name, identity_of(shell), "terminal"),)),
