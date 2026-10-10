@@ -1,10 +1,12 @@
 """where_used finds every reference to a symbol, module or file and groups it by what it is."""
 
 import json
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
+from base.host.proc import run_bounded
 from scripts.audit import where_used as gate
 from scripts.audit import where_used_scan as scan
 
@@ -50,6 +52,21 @@ FILES = {
     "pyproject.toml": '[tool.x]\nfiles = ["pkg/engine.py"]\n',
     "serve.sh": "python -m pkg.engine --flag\n",
 }
+
+
+@pytest.fixture
+def audit_checkout(tmp_path: Path) -> Path:
+    for name, text in FILES.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    run_bounded(
+        ["git", "init", "--quiet"], timeout=10, capture_output=True, cwd=tmp_path
+    ).check_returncode()
+    run_bounded(
+        ["git", "add", "."], timeout=10, capture_output=True, cwd=tmp_path
+    ).check_returncode()
+    return tmp_path
 
 
 def _report(raw: str, files: dict[str, str] | None = None) -> gate.Report:
@@ -301,24 +318,40 @@ def test_output_caps_files_per_group_but_json_and_all_are_complete() -> None:
 
 
 def test_main_reports_a_real_symbol_as_json_and_exits_2_on_an_unknown_target(
+    audit_checkout: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert gate.main(["scripts.audit.module_moves:is_frozen", "--json"]) == 0
+    assert gate.main(["pkg.engine:run", "--json"], repo_root=audit_checkout) == 0
     payload = json.loads(capsys.readouterr().out)
     imports = {hit["path"] for hit in payload[0]["groups"]["imports"]["hits"]}
 
-    assert payload[0]["target"]["name"] == "is_frozen"
-    assert "scripts/audit/where_used.py" in imports
+    assert payload[0]["target"]["name"] == "run"
+    assert "app/main.py" in imports
 
     with pytest.raises(SystemExit) as exit_info:
-        gate.main(["scripts.audit.module_moves:no_such_name"])
+        gate.main(["pkg.engine:no_such_name"], repo_root=audit_checkout)
     assert exit_info.value.code == 2
 
 
-def test_an_absolute_path_inside_this_checkout_is_made_relative() -> None:
-    absolute = str(gate._REPO / "scripts" / "audit" / "where_used.py")
+@pytest.mark.parametrize("suffix", ["", "::run", ":run"])
+def test_an_absolute_path_inside_the_explicit_checkout_is_made_relative(
+    audit_checkout: Path, capsys: pytest.CaptureFixture[str], suffix: str
+) -> None:
+    absolute = str(audit_checkout / "pkg" / "engine.py") + suffix
+    assert gate.main([absolute, "--json"], repo_root=audit_checkout) == 0
+    target = json.loads(capsys.readouterr().out)[0]["target"]
+    assert target["path"] == "pkg/engine.py"
+    assert target["raw"] == "pkg/engine.py" + suffix
 
-    assert gate._relative(absolute) == "scripts/audit/where_used.py"
-    assert gate._relative(absolute + "::scan") == "scripts/audit/where_used.py::scan"
-    assert gate._relative("/elsewhere/x.py") == "/elsewhere/x.py"
-    assert gate._relative("pkg.mod:name") == "pkg.mod:name"
+
+def test_an_absolute_target_outside_the_explicit_checkout_fails(
+    audit_checkout: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    outside = tmp_path_factory.mktemp("outside-audit") / "other.py"
+    outside.write_text("def run() -> None: ...\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        gate.main([str(outside)], repo_root=audit_checkout)
+    assert exit_info.value.code == 2
+    assert str(outside) in capsys.readouterr().err
