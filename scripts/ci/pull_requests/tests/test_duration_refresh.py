@@ -13,11 +13,17 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from base.host import proc
 from scripts.ci.pull_requests import duration_refresh, trunk_api
 
 _HEAD = "a" * 40
 _REPO = "zhiyuan-zhang0206/Ava"
 type Submission = tuple[str, dict[str, object], str]
+
+
+@pytest.fixture
+def credential() -> str:
+    return "test-token"
 
 
 @pytest.fixture
@@ -40,7 +46,7 @@ def submissions(monkeypatch: pytest.MonkeyPatch, candidate: dict[str, Any]) -> l
 
     def gh(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert command[:6] == ["gh", "pr", "view", "5082", "--repo", _REPO]
-        assert kwargs["check"] is True
+        assert "check" not in kwargs
         assert kwargs["timeout"] == 30
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(candidate))
 
@@ -50,15 +56,15 @@ def submissions(monkeypatch: pytest.MonkeyPatch, candidate: dict[str, Any]) -> l
         calls.append((endpoint, payload, token))
         return {}, None
 
-    monkeypatch.setattr(duration_refresh.subprocess, "run", gh)
+    monkeypatch.setattr(duration_refresh.proc, "run_bounded", gh)
     monkeypatch.setattr(trunk_api, "post", post)
     return calls
 
 
 def test_generated_pr_submits_with_normal_readiness(
-    submissions: list[Submission], capsys: pytest.CaptureFixture[str]
+    submissions: list[Submission], capsys: pytest.CaptureFixture[str], credential: str
 ) -> None:
-    assert duration_refresh.submit(5082, _REPO, _HEAD, token="test-token") == 0  # noqa: S106 — fixture token
+    assert duration_refresh.submit(5082, _REPO, _HEAD, token=credential) == 0
     assert submissions == [
         (
             "submitPullRequest",
@@ -89,20 +95,23 @@ def test_generated_pr_submits_with_normal_readiness(
     ],
 )
 def test_altered_candidate_never_submits(
-    candidate: dict[str, Any], submissions: list[Submission], changed: dict[str, Any]
+    candidate: dict[str, Any],
+    submissions: list[Submission],
+    changed: dict[str, Any],
+    credential: str,
 ) -> None:
     candidate.update(changed)
     with pytest.raises(ValueError):
-        duration_refresh.submit(5082, _REPO, _HEAD, token="test-token")  # noqa: S106 — fixture token
+        duration_refresh.submit(5082, _REPO, _HEAD, token=credential)
     assert submissions == []
 
 
 def test_missing_candidate_field_is_not_defaulted(
-    candidate: dict[str, Any], submissions: list[Submission]
+    candidate: dict[str, Any], submissions: list[Submission], credential: str
 ) -> None:
     del candidate["isDraft"]
     with pytest.raises(ValidationError):
-        duration_refresh.submit(5082, _REPO, _HEAD, token="test-token")  # noqa: S106 — fixture token
+        duration_refresh.submit(5082, _REPO, _HEAD, token=credential)
     assert submissions == []
 
 
@@ -110,12 +119,13 @@ def test_already_submitted_response_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
     submissions: list[Submission],
     capsys: pytest.CaptureFixture[str],
+    credential: str,
 ) -> None:
     def already_submitted(*_: object) -> tuple[None, str]:
         return None, "HTTP 409"
 
     monkeypatch.setattr(trunk_api, "post", already_submitted)
-    assert duration_refresh.submit(5082, _REPO, _HEAD, token="test-token") == 0  # noqa: S106 — fixture token
+    assert duration_refresh.submit(5082, _REPO, _HEAD, token=credential) == 0
     assert "already submitted" in capsys.readouterr().out
 
 
@@ -123,12 +133,13 @@ def test_api_failure_fails_the_publisher(
     monkeypatch: pytest.MonkeyPatch,
     submissions: list[Submission],
     capsys: pytest.CaptureFixture[str],
+    credential: str,
 ) -> None:
     def failed(*_: object) -> tuple[None, str]:
         return None, "HTTP 401"
 
     monkeypatch.setattr(trunk_api, "post", failed)
-    assert duration_refresh.submit(5082, _REPO, _HEAD, token="test-token") == 1  # noqa: S106 — fixture token
+    assert duration_refresh.submit(5082, _REPO, _HEAD, token=credential) == 1
     assert "HTTP 401" in capsys.readouterr().err
 
 
@@ -148,9 +159,11 @@ def test_cli_reads_token_from_stdin_and_refuses_missing_token(
 
 
 def git(candidate: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603 — fixed test-owned git argv
-        ["git", "-C", str(candidate), *args], check=True, capture_output=True, text=True
-    ).stdout.strip()
+    result = proc.run_bounded(
+        ["git", "-C", str(candidate), *args], timeout=30, capture_output=True, text=True
+    )
+    result.check_returncode()
+    return result.stdout.strip()
 
 
 @pytest.fixture
@@ -172,7 +185,7 @@ def run_publisher(candidate: Path, tmp_path: Path) -> dict[str, str]:
     steps = yaml.safe_load(workflow.read_text())["jobs"]["refresh"]["steps"]
     publish = next(step for step in steps if step.get("id") == "publish")
     outputs, summary = tmp_path / "outputs", tmp_path / "summary"
-    subprocess.run(  # noqa: S603 — committed publisher step in a test-owned repo
+    result = proc.run_bounded(
         ["bash", "-e", "-o", "pipefail", "-c", publish["run"]],
         env={
             **os.environ,
@@ -181,10 +194,11 @@ def run_publisher(candidate: Path, tmp_path: Path) -> dict[str, str]:
             "GITHUB_OUTPUT": str(outputs),
             "GITHUB_STEP_SUMMARY": str(summary),
         },
+        timeout=30,
         capture_output=True,
         text=True,
-        check=True,
     )
+    result.check_returncode()
     return dict(line.split("=", 1) for line in outputs.read_text().splitlines())
 
 
@@ -214,10 +228,10 @@ def test_identical_published_snapshot_reuses_head_but_still_admits(
 
 
 def test_unchanged_weights_with_new_provenance_can_submit(
-    candidate: dict[str, Any], submissions: list[Submission]
+    candidate: dict[str, Any], submissions: list[Submission], credential: str
 ) -> None:
     candidate["files"] = [{"path": ".test_durations.source.json"}]
-    assert duration_refresh.submit(5082, _REPO, _HEAD, token="test-token") == 0  # noqa: S106 — fixture token
+    assert duration_refresh.submit(5082, _REPO, _HEAD, token=credential) == 0
     assert len(submissions) == 1
 
 

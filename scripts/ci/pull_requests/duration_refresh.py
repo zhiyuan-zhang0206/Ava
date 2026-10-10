@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.host import proc
 from scripts.ci.pull_requests import trunk_api
 
 
@@ -37,7 +38,7 @@ def submit(pr: int, repository: str, head_sha: str, *, token: str) -> int:
     """Validate the just-published PR, then submit without overriding readiness."""
     if not token:
         raise ValueError("TRUNK_API_TOKEN is required for duration PR submission")
-    result = subprocess.run(  # noqa: S603 — fixed gh argv; PR identity is publisher output
+    result = proc.run_bounded(
         [
             "gh",
             "pr",
@@ -50,9 +51,9 @@ def submit(pr: int, repository: str, head_sha: str, *, token: str) -> int:
         ],
         capture_output=True,
         text=True,
-        check=True,
         timeout=30,
     )
+    result.check_returncode()
     candidate = _Candidate.model_validate_json(result.stdout)
     if candidate.head_sha != head_sha:
         raise ValueError("duration PR head changed after publication; refusing submission")
