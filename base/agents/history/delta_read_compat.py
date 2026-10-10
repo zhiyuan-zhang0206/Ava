@@ -320,7 +320,7 @@ def _apply_reconstruction(
         snapshot = cast("_DeltaSnapshot", checkpoint["channel_values"]["messages"])
         checkpoint["channel_values"]["messages"] = cast("list[BaseMessage]", snapshot.value)
         return True
-    if entry is None:
+    if entry is None or (not entry["writes"] and "seed" not in entry):
         raise RuntimeError("delta checkpoint messages history is missing")
     started = time.monotonic()
     span.phase = "fold"

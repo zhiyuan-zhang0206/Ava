@@ -7,8 +7,8 @@ serves the initial full view. Both render through the same
 snapshots agree item-for-item.
 
 This is a cold-load checkpoint reader (see `base.agents.history.checkpoint` for the shared
-read contract). It tolerates a checkpoint read failure by rendering an empty
-view + 200 so the UI is not blocked on a transient store hiccup.
+read contract). Read failures return 503; retained compact history has a
+separate explicit endpoint and never substitutes for the live checkpoint.
 """
 
 from __future__ import annotations
@@ -108,6 +108,31 @@ class TimelineResponse(BaseModel):
     items: list[TimelineItem]
     msg_count: int
     has_more: bool
+
+
+class RetainedTimelineResponse(BaseModel):
+    """One retained compact-history window, independent of live state.messages.
+
+    The boundary identity describes the requested retained segment. Historical
+    item cursors identify every item's own segment, including a crossed page.
+    There is no live message count and these items must not merge into live state.
+    """
+
+    boundary_checkpoint_id: str | None
+    items: list[TimelineItem]
+    has_more: bool
+
+
+def _read_unavailable(agent_id: int, exc: CheckpointReadError) -> HTTPException:
+    _log.warning(
+        "timeline checkpoint read unavailable for agent %s: %s (cause %s)",
+        agent_id,
+        type(exc).__name__,
+        type(exc.__cause__).__name__,
+    )
+    return HTTPException(
+        status_code=503, detail=f"Checkpoint history unavailable for agent {agent_id}"
+    )
 
 
 @dataclass(frozen=True)
@@ -239,7 +264,7 @@ def _load_history_tail(
     limit: int,
     depth: int,
 ) -> tuple[list[TimelineItem], bool]:
-    """Load and window one exact older segment, tolerating bad blobs."""
+    """Load and window one exact older segment."""
     if rank > len(boundary_ids) or not _depth_allows(rank, depth):
         return [], False
     items = _load_history_segment(db, agent_id, boundary_ids[rank - 1], rank, limit=limit)
@@ -258,32 +283,17 @@ def _load_history_segment(
     limit: int | None = None,
     before: str | None = None,
 ) -> list[TimelineItem] | None:
-    """Load and render one persisted segment; damaged data is terminal."""
+    """Load and render one persisted segment; read/render failures stay visible."""
     if limit is None:
         limit = timeline_default_limit()
     try:
         messages = load_checkpoint_messages_segment(db, agent_id, checkpoint_id)
     except CheckpointReadError as exc:
-        _log.warning(
-            "timeline compact history: checkpoint read failed for agent %s boundary %s: %r",
-            agent_id,
-            checkpoint_id,
-            exc,
-        )
-        return None
+        raise _read_unavailable(agent_id, exc) from exc
     if not messages:
         return None
     prefix = f"s{rank}.{checkpoint_id}"
-    try:
-        items, _ = build_timeline_items(messages, [], segment_prefix=prefix)
-    except (TypeError, ValueError) as exc:
-        _log.warning(
-            "timeline compact history: checkpoint render failed for agent %s boundary %s: %r",
-            agent_id,
-            checkpoint_id,
-            exc,
-        )
-        return None
+    items, _ = build_timeline_items(messages, [], segment_prefix=prefix)
     return hydrate(db, items, agent_id, limit=limit, before=before)
 
 
@@ -297,24 +307,14 @@ def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
             limit=depth + 1 if depth > 0 else None,
         )
     except CheckpointReadError as exc:
-        _log.warning(
-            "timeline compact history: boundary index read failed for agent %s: %r",
-            agent_id,
-            exc,
-        )
-        return []
+        raise _read_unavailable(agent_id, exc) from exc
 
 
 def _load_current_message_count(db: Database, agent_id: int) -> int:
     try:
         return load_checkpoint_message_count(db, agent_id)
     except CheckpointReadError as exc:
-        _log.warning(
-            "timeline current message count read failed for agent %s: %r",
-            agent_id,
-            exc,
-        )
-        return 0
+        raise _read_unavailable(agent_id, exc) from exc
 
 
 def _historical_window(
@@ -517,8 +517,8 @@ def get_timeline(
     before the returned window.
 
     One checkpoint segment is built at a time; windowing trims the payload +
-    the frontend render. A checkpoint read failure renders an empty view + 200
-    (cold-load tolerance, see `base.agents.history.checkpoint`).
+    the frontend render. A checkpoint read failure returns 503. Retained
+    compact boundaries remain independently readable via /timeline/retained.
     """
     if limit is None:
         limit = timeline_default_limit()
@@ -543,8 +543,7 @@ def get_timeline(
     try:
         messages = load_checkpoint_messages(db, agent_id)
     except CheckpointReadError as exc:
-        _log.warning("timeline cold load: checkpoint read failed for agent %s: %r", agent_id, exc)
-        messages = []
+        raise _read_unavailable(agent_id, exc) from exc
     items, msg_count = build_timeline_items(messages, chat_anchors)
     items = hydrate(db, items, agent_id, limit=limit, before=before)
     items.sort(key=lambda it: _item_sort_key(it.item_id))
@@ -561,3 +560,53 @@ def get_timeline(
     del messages, items
     older_window, has_more = _load_history_tail(db, agent_id, boundary_ids, 1, limit, depth)
     return TimelineResponse(items=[*paged, *older_window], msg_count=msg_count, has_more=has_more)
+
+
+def _retained_cursor(before: str | None, checkpoint_id: str | None) -> _TimelineCursor | None:
+    if before is None:
+        return None
+    cursor = _parse_cursor(before)
+    if cursor is None or cursor.checkpoint_id is None:
+        raise HTTPException(status_code=400, detail="Retained history requires a historical cursor")
+    if checkpoint_id is not None and cursor.checkpoint_id != checkpoint_id:
+        raise HTTPException(status_code=400, detail="Retained boundary and cursor do not match")
+    return cursor
+
+
+@router.get(
+    "/api/agents/{agent_id}/timeline/retained", dependencies=[Depends(deny_isolated_result_read)]
+)
+def get_retained_timeline(
+    agent_id: int,
+    request: Request,
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    checkpoint_id: str | None = Query(default=None, max_length=_MAX_CURSOR_LENGTH),
+    before: str | None = Query(default=None, max_length=_MAX_CURSOR_LENGTH),
+) -> RetainedTimelineResponse:
+    """Read retained compact history explicitly, without reading the live head.
+
+    Omit checkpoint_id for the newest retained boundary, or select an exact
+    retained boundary. Page using the oldest returned historical item_id.
+    Never resumes, rewrites, or repairs the agent's execution checkpoint.
+    """
+    with request.app.state.db_pool.connection() as conn:
+        if not agent_exists(conn, agent_id):
+            raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
+    db: Database = request.app.state.db
+    depth = settings.gateway.timeline_compact_history
+    boundary_ids = _load_boundary_ids(db, agent_id, depth)
+    cursor = _retained_cursor(before, checkpoint_id)
+    selected = cursor.checkpoint_id if cursor is not None else checkpoint_id
+    if selected is None and not boundary_ids:
+        return RetainedTimelineResponse(boundary_checkpoint_id=None, items=[], has_more=False)
+    selected = selected or boundary_ids[0]
+    if selected not in boundary_ids:
+        raise HTTPException(status_code=404, detail="Retained compact boundary not found")
+    if limit is None:
+        limit = timeline_default_limit()
+    if cursor is not None:
+        items, has_more = _historical_window(db, agent_id, cursor, limit, boundary_ids, depth)
+    else:
+        rank = boundary_ids.index(selected) + 1
+        items, has_more = _load_history_tail(db, agent_id, boundary_ids, rank, limit, depth)
+    return RetainedTimelineResponse(boundary_checkpoint_id=selected, items=items, has_more=has_more)
