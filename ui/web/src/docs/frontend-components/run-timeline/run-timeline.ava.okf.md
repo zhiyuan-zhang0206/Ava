@@ -8,13 +8,6 @@ tags:
 
 # Agent View
 
-The lifetime read uses the shared 35-second HTTP read budget, covering both
-request headers and response-body consumption. Each query passes its cancellation
-signal to the network request: removing the agent or leaving the page cancels
-that read. A timeout follows the existing per-agent failure and Retry flow;
-selection cancellation does not become a business failure. This client deadline
-does not establish a backend history-reconstruction deadline.
-
 `/insights/run/{ids}` (`405` or `405,6657`; the URL follows the agents added and removed, nothing else is kept) draws any number of agents on one timeline; one agent is the view of that agent alone, there is no second page. All agents are equal (no root or lineage), each is a group of rows under its `Agent #id · label` heading with a remove button (never on the last agent), and none is squeezed to one line. A toolbar adds an agent by id and sets two things for all groups: how many tree levels to draw (counted from each agent's topmost level; all by default) and the context bars (Context size row on or off, Messages height equal or by tokens; off and by tokens by default). Each agent is read by its own `GET /api/agents/{id}/run-timeline`; the loaded extent is the union of their windows, a failed agent shows a retry in its own group. Arrows between agents, the Other agents group and their legend are in [[ui/web/src/docs/frontend-components/run-timeline/agent-links.ava.okf.md]]. Per agent
 (`components/run-timeline/`): one row per tree level, topmost first, layer 0 (the
 message blocks) at the bottom on one lane. A block is one of inbound (human / agent), agent text, thinking, tool call, tool output or a framework note; a work unit is drawn as its thinking, call and output blocks (the backend splits it, `units.display_blocks`), colored with the context breakdown's palette (`lib/context-colors.ts`) and listed in a legend; clicking one shows only that part of the raw message. The page
@@ -29,6 +22,13 @@ guarded `panelLayoutStorage`); below that the panel stacks under the chart. The
 `ContextBreakdownCard` follows the chart.
 
 **Source layout.** `components/run-timeline/model/` owns the pure axis, selection, row layout and hover readout models with their tests. `canvas/` owns rendering, painting, the axis and the shared canvas test helper. `agent-view/` owns agent headings, shared controls and navigation across agents with their tests. Page composition, rows and the details panel stay at the component root; consumers import their owning modules directly.
+
+**Lifetime reads.** The lifetime read uses the shared 35-second HTTP read budget, covering both
+request headers and response-body consumption. Each query passes its cancellation
+signal to the network request: removing the agent or leaving the page cancels
+that read. A timeout follows the existing per-agent failure and Retry flow;
+selection cancellation does not become a business failure. This client deadline
+does not establish a backend history-reconstruction deadline.
 
 **Legend highlight.** Each legend entry is a toggle (`run-timeline-legend.tsx`): pressing it highlights every block of that class (`Highlight`: class plus optional source) and fades the rest — other blocks and all summary blocks drop to 0.12 opacity (a selected block keeps its ring). The state lives on the page, so zoom and pan keep it. While an inbound class (human / agent) is highlighted and its blocks come from several senders, a select narrows it to one source (`agent:N` reads "Inbound from agent N"). The context breakdown card's category rows that stand for a block class (user input, agent messages, thinking, text output, tool calls, tool responses, system notes) are the same toggle (`classCategory` / `categoryClass`).
 
