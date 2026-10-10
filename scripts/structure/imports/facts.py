@@ -352,11 +352,14 @@ class _Collector(ast.NodeVisitor):
         }:
             return None
         receiver = self.scope.value(node.func.value)
+        file_read = node.func.attr in {"read_text", "read_bytes"}
         if self._resource_path(receiver) is not None:
             return receiver
         if isinstance(receiver, ast.Call) and self.scope.origin(receiver.func) == "pathlib.Path":
-            return receiver.args[0] if receiver.args else None
-        return receiver if self._path_expression(receiver) else None
+            if receiver.args:
+                return receiver.args[0]
+            return receiver if file_read else None
+        return receiver if file_read or self._path_expression(receiver) else None
 
     def _open_function(self, node: ast.expr) -> bool:
         builtin = isinstance(node, ast.Name) and node.id == "open" and not self.scope.bound("open")
@@ -389,6 +392,8 @@ class _Collector(ast.NodeVisitor):
 
     def _write_only(self, node: ast.Call) -> bool:
         """An ``open`` whose literal mode cannot read: its file is an output, not an input."""
+        if isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "read_bytes"}:
+            return False
         mode = self._open_mode(node)
         values = self.scope.strings(mode) if mode is not None else None
         return bool(values) and all(
