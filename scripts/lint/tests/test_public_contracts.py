@@ -18,6 +18,20 @@ from scripts.lint.public_contracts import (
 from scripts.structure.placement import CODE_TOPS, ModuleIndex
 
 
+@pytest.fixture
+def sdk_contracts(tmp_path: Path) -> Contracts:
+    _write(
+        tmp_path,
+        "ava/__init__.py",
+        "from ._core import _read as read\nfrom . import tools\n"
+        "__all_for_ava__ = ['read', 'tools']\nraise RuntimeError('Do not execute source')\n",
+    )
+    _write(tmp_path, "ava/_core.py", "def _read(): return 'contents'\n")
+    _write(tmp_path, "ava/tools.py", "__all_for_ava__ = ['write']\ndef write(): pass\n")
+    _write(tmp_path, "base/client/use.py", "")
+    return Contracts((Component("base.client", ()),), ModuleIndex(tmp_path), ("base", "ava"))
+
+
 def _write(root: Path, path: str, source: str) -> None:
     target = root / path
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -364,6 +378,8 @@ def test_checkout_entries_have_definition_owners_and_checker_uses_public_contrac
     for path in (
         "scripts/lint/public_contracts.py",
         "scripts/lint/tests/test_public_contracts.py",
+        "scripts/codegen/sdk_surface/contracts.py",
+        "scripts/codegen/sdk_surface/tests/test_contracts.py",
     ):
         assert audit_module(ast.parse((root / path).read_text()), path, contracts) == ()
 
@@ -378,6 +394,7 @@ def test_checkout_entries_have_definition_owners_and_checker_uses_public_contrac
         "from tests.e2e.fakes.scenario_recording import RecordingModel, model_inputs, reset_record\n",
         "from cli.main import main\n",
         "from cli.parsers import build_parser, command_options, parse_args\n",
+        "from scripts.codegen.sdk_surface.contracts import MemberProof, Unknown, query\n",
     ],
 )
 def test_integrated_entry_consumers_resolve_the_actual_definition_owner(source: str) -> None:
@@ -392,4 +409,119 @@ def test_integrated_entry_consumers_resolve_the_actual_definition_owner(source: 
     assert (
         audit_module(ast.parse(source), "scripts/lint/tests/test_public_contracts.py", contracts)
         == ()
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import ava",
+        "import ava as sdk\napi = sdk\napi.read()",
+        "from ava import read as public\npublic()",
+        "import ava.tools as tools\ntools.write()",
+        "import ava\ngetattr(ava, 'read')()",
+        "import ava\nvars(ava)['read']()",
+        "from importlib import import_module\nsdk = import_module('ava')\nsdk.read()",
+        "import subprocess, sys\nsubprocess.run([sys.executable, '-c', 'import ava; ava.read()'])",
+    ],
+)
+def test_sdk_declarations_allow_only_the_exact_exposure(
+    sdk_contracts: Contracts, source: str
+) -> None:
+    assert _reasons(sdk_contracts, source) == []
+
+
+@pytest.mark.parametrize(
+    "source,reason",
+    [
+        ("import ava\nava.missing()", "Unproved SDK declaration"),
+        ("from ava import missing", "Unproved SDK declaration"),
+        ("import ava\ngetattr(ava, 'missing')", "Unproved SDK declaration"),
+        ("import ava\nvars(ava)['missing']", "Unproved SDK declaration"),
+        ("import ava\nava.read.child", "Unproved SDK declaration"),
+        ("from ava._core import _read", "Private names and modules are file-local"),
+        ("import ava\nava._core._read()", "Private names and modules are file-local"),
+        ("import ava\nava()", "SDK namespace is not a callable declaration"),
+        ("from ava import tools\ntools()", "SDK namespace is not a callable declaration"),
+        ("import ava\ngetattr(ava, 'tools')()", "SDK namespace is not a callable declaration"),
+        ("import ava\nvars(ava)['tools']()", "SDK namespace is not a callable declaration"),
+        (
+            "import ava\nnamespace = getattr(ava, 'tools')\nnamespace()",
+            "SDK namespace is not a callable declaration",
+        ),
+        (
+            "import ava\nnamespace = vars(ava)['tools']\nnamespace()",
+            "SDK namespace is not a callable declaration",
+        ),
+        ("import ava\nava.__dict__.get('tools')()", "SDK namespace is not a callable declaration"),
+        (
+            "import ava\nfrom builtins import getattr as find\nfind(ava, 'tools')()",
+            "SDK namespace is not a callable declaration",
+        ),
+        (
+            "import subprocess, sys\nsubprocess.run([sys.executable, '-c', 'import ava; ava.missing()'])",
+            "Unproved SDK declaration",
+        ),
+    ],
+)
+def test_sdk_root_does_not_grant_private_missing_or_callable_access(
+    sdk_contracts: Contracts, source: str, reason: str
+) -> None:
+    assert any(reason in item for item in _reasons(sdk_contracts, source))
+
+
+@pytest.mark.parametrize("root_source", ["", "__all__ = ['read']", "__all_for_ava__ = build()"])
+def test_a_root_import_needs_the_real_sdk_marker(tmp_path: Path, root_source: str) -> None:
+    _write(tmp_path, "ava/__init__.py", root_source)
+    contracts = Contracts((), ModuleIndex(tmp_path), ("ava",))
+    assert any("Unproved SDK declaration" in item for item in _reasons(contracts, "import ava"))
+
+
+@pytest.mark.parametrize("root_source", ["", "__all__ = []", "__all_for_ava__ = build()"])
+def test_a_plugin_import_needs_the_root_marker(tmp_path: Path, root_source: str) -> None:
+    _write(tmp_path, "ava/__init__.py", root_source)
+    _write(
+        tmp_path,
+        "ava_builtins/plugins/sample/plugin.py",
+        "from base.packages.plugins.extensions import PluginContributions, SdkNamespace\n"
+        "from . import sdk\ndef contribute():\n"
+        "    return PluginContributions(sdk_namespaces=(SdkNamespace('notes', sdk),))",
+    )
+    _write(tmp_path, "ava_builtins/plugins/sample/sdk.py", "__all_for_ava__ = []")
+    contracts = Contracts((), ModuleIndex(tmp_path), ("ava",))
+    failures = _reasons(contracts, "from ava import notes")
+    assert any("Unproved SDK declaration at ava/__init__.py:1" in item for item in failures)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import ava\nava.help()",
+        "from ava import self as identity\nidentity.attach()",
+        "import ava\nava.cwd.get()",
+        "import ava\nava.memory.search('query')",
+        "import ava\nava.tasks.create()",
+        "import ava\nava.self.set_label('label')",
+    ],
+)
+def test_actual_sdk_consumers_use_canonical_definition_proofs(source: str) -> None:
+    root = Path(__file__).resolve().parents[3]
+    config = tomllib.loads((root / "pyproject.toml").read_text())
+    contracts = Contracts(
+        read_components(config["tool"]["ava"]["public_contracts"]),
+        ModuleIndex(root),
+        CODE_TOPS,
+    )
+    assert _reasons(contracts, source, "scripts/lint/tests/test_public_contracts.py") == []
+
+
+@pytest.mark.parametrize(
+    "member", ["memory.PATH", "self.AGENT_ID", "skills.read.missing", "mcps.missing"]
+)
+def test_actual_runtime_only_sdk_values_retain_unknown(member: str) -> None:
+    root = Path(__file__).resolve().parents[3]
+    contracts = Contracts((), ModuleIndex(root), CODE_TOPS)
+    assert any(
+        "Unproved SDK declaration" in item
+        for item in _reasons(contracts, f"import ava\nava.{member}")
     )

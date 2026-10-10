@@ -203,6 +203,10 @@ module = "scripts.lint.public_contracts"
 entry_modules = ["scripts.lint.public_contracts"]
 
 [[tool.ava.public_contracts.components]]
+module = "scripts.codegen.sdk_surface"
+entry_modules = ["scripts.codegen.sdk_surface.contracts"]
+
+[[tool.ava.public_contracts.components]]
 module = "base.host.proc"
 entry_modules = ["base.host.proc"]
 
@@ -1215,6 +1219,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/ci/two_section_chain_smoke/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/codegen/sdk_surface/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

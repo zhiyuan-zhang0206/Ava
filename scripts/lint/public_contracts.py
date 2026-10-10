@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard, cast
 
+from scripts.codegen.sdk_surface.contracts import MemberProof, Unknown, query
 from scripts.structure import patch_points, placement
 from scripts.structure.imports import bindings, executed, facts, normalize
 
@@ -31,149 +32,33 @@ __all__ = [
 # not arbitrary double-underscore
 # spellings or framework metadata such as __dataclass_fields__/__all_for_ava__.
 _MODULE_PROTOCOL = frozenset(
-    [
-        "__name__",
-        "__doc__",
-        "__file__",
-        "__path__",
-        "__package__",
-        "__spec__",
-        "__loader__",
-        "__cached__",
-        "__builtins__",
-        "__annotations__",
-        "__all__",
-        "__dict__",
-        "__getattr__",
-        "__dir__",
-    ]
+    {"__name__", "__doc__", "__file__", "__path__", "__package__"}
+    | {"__spec__", "__loader__", "__cached__", "__builtins__"}
+    | {"__annotations__", "__all__", "__dict__", "__getattr__", "__dir__"}
 )
 _OBJECT_PROTOCOL = frozenset(
-    [
-        "__new__",
-        "__name__",
-        "__qualname__",
-        "__module__",
-        "__doc__",
-        "__annotations__",
-        "__dict__",
-        "__class__",
-        "__slots__",
-        "__weakref__",
-        "__match_args__",
-        "__mro__",
-        "__bases__",
-        "__base__",
-        "__subclasses__",
-        "__globals__",
-        "__closure__",
-        "__defaults__",
-        "__kwdefaults__",
-        "__code__",
-        "__self__",
-        "__func__",
-        "__type_params__",
-        "__init__",
-        "__del__",
-        "__repr__",
-        "__str__",
-        "__bytes__",
-        "__format__",
-        "__lt__",
-        "__le__",
-        "__eq__",
-        "__ne__",
-        "__gt__",
-        "__ge__",
-        "__hash__",
-        "__bool__",
-        "__getattribute__",
-        "__getattr__",
-        "__setattr__",
-        "__delattr__",
-        "__dir__",
-        "__get__",
-        "__set__",
-        "__delete__",
-        "__set_name__",
-        "__init_subclass__",
-        "__class_getitem__",
-        "__instancecheck__",
-        "__subclasscheck__",
-        "__call__",
-        "__len__",
-        "__length_hint__",
-        "__getitem__",
-        "__setitem__",
-        "__delitem__",
-        "__missing__",
-        "__iter__",
-        "__next__",
-        "__reversed__",
-        "__contains__",
-        "__add__",
-        "__sub__",
-        "__mul__",
-        "__matmul__",
-        "__truediv__",
-        "__floordiv__",
-        "__mod__",
-        "__divmod__",
-        "__pow__",
-        "__lshift__",
-        "__rshift__",
-        "__and__",
-        "__xor__",
-        "__or__",
-        "__radd__",
-        "__rsub__",
-        "__rmul__",
-        "__rmatmul__",
-        "__rtruediv__",
-        "__rfloordiv__",
-        "__rmod__",
-        "__rdivmod__",
-        "__rpow__",
-        "__rlshift__",
-        "__rrshift__",
-        "__rand__",
-        "__rxor__",
-        "__ror__",
-        "__iadd__",
-        "__isub__",
-        "__imul__",
-        "__imatmul__",
-        "__itruediv__",
-        "__ifloordiv__",
-        "__imod__",
-        "__ipow__",
-        "__ilshift__",
-        "__irshift__",
-        "__iand__",
-        "__ixor__",
-        "__ior__",
-        "__neg__",
-        "__pos__",
-        "__abs__",
-        "__invert__",
-        "__complex__",
-        "__int__",
-        "__float__",
-        "__index__",
-        "__round__",
-        "__trunc__",
-        "__floor__",
-        "__ceil__",
-        "__enter__",
-        "__exit__",
-        "__await__",
-        "__aiter__",
-        "__anext__",
-        "__aenter__",
-        "__aexit__",
-        "__buffer__",
-        "__release_buffer__",
-    ]
+    {"__new__", "__name__", "__qualname__", "__module__", "__doc__"}
+    | {"__annotations__", "__dict__", "__class__", "__slots__", "__weakref__"}
+    | {"__match_args__", "__mro__", "__bases__", "__base__", "__subclasses__"}
+    | {"__globals__", "__closure__", "__defaults__", "__kwdefaults__", "__code__"}
+    | {"__self__", "__func__", "__type_params__", "__init__", "__del__", "__repr__"}
+    | {"__str__", "__bytes__", "__format__", "__lt__", "__le__", "__eq__", "__ne__"}
+    | {"__gt__", "__ge__", "__hash__", "__bool__", "__getattribute__", "__getattr__"}
+    | {"__setattr__", "__delattr__", "__dir__", "__get__", "__set__", "__delete__"}
+    | {"__set_name__", "__init_subclass__", "__class_getitem__", "__instancecheck__"}
+    | {"__subclasscheck__", "__call__", "__len__", "__length_hint__", "__getitem__"}
+    | {"__setitem__", "__delitem__", "__missing__", "__iter__", "__next__"}
+    | {"__reversed__", "__contains__", "__add__", "__sub__", "__mul__", "__matmul__"}
+    | {"__truediv__", "__floordiv__", "__mod__", "__divmod__", "__pow__", "__lshift__"}
+    | {"__rshift__", "__and__", "__xor__", "__or__", "__radd__", "__rsub__", "__rmul__"}
+    | {"__rmatmul__", "__rtruediv__", "__rfloordiv__", "__rmod__", "__rdivmod__"}
+    | {"__rpow__", "__rlshift__", "__rrshift__", "__rand__", "__rxor__", "__ror__"}
+    | {"__iadd__", "__isub__", "__imul__", "__imatmul__", "__itruediv__"}
+    | {"__ifloordiv__", "__imod__", "__ipow__", "__ilshift__", "__irshift__"}
+    | {"__iand__", "__ixor__", "__ior__", "__neg__", "__pos__", "__abs__", "__invert__"}
+    | {"__complex__", "__int__", "__float__", "__index__", "__round__", "__trunc__"}
+    | {"__floor__", "__ceil__", "__enter__", "__exit__", "__await__", "__aiter__"}
+    | {"__anext__", "__aenter__", "__aexit__", "__buffer__", "__release_buffer__"}
 )
 _IMPORT_KINDS = frozenset(
     {
@@ -364,6 +249,7 @@ class Contracts:
         self.index, self.tops = index, tuple(tops)
         self._member_cache: dict[str, frozenset[str]] = {}
         self._classes: dict[str, bool] = {}
+        self._sdk: dict[str, MemberProof | Unknown] = {}
 
     def component(self, module: str) -> Component | None:
         return next(
@@ -429,13 +315,25 @@ class Contracts:
         if not target or target.split(".", maxsplit=1)[0] not in self.tops:
             return None
         module = self.index.resolve_prefix(target, self.tops)
+        sdk = target == "ava" or target.startswith("ava.")
         if module is None:
+            if sdk:
+                private = self._private(target, "ava")
+                if private:
+                    return Violation(
+                        path, line, private, "Private names and modules are file-local"
+                    )
+                return self._sdk_check(path, line, target)
             return Violation(path, line, target, "Unresolved first-party source owner")
         if self.index.file(module) == path:
             return None
         private = self._private(target, module)
         if private:
             return Violation(path, line, private, "Private names and modules are file-local")
+        failure = self._component_check(path, line, target, module)
+        return self._sdk_check(path, line, target) if sdk and failure else failure
+
+    def _component_check(self, path: str, line: int, target: str, module: str) -> Violation | None:
         source, owner = self.component(_module_of(path)), self.component(module)
         if source is None or owner is None:
             return Violation(path, line, target, "Unclassified component boundary")
@@ -452,6 +350,29 @@ class Contracts:
         if member and member not in members and member not in _LANGUAGE_PROTOCOL:
             return Violation(path, line, target, "Member is not in the entry owner's __all__")
         return None
+
+    def _sdk_proof(self, target: str) -> MemberProof | Unknown:
+        if target not in self._sdk:
+            try:
+                self._sdk[target] = query(self.index, target)
+            except ValueError as error:
+                self._sdk[target] = Unknown(target, "", 0, str(error))
+        return self._sdk[target]
+
+    def _sdk_check(self, path: str, line: int, target: str) -> Violation | None:
+        proof = self._sdk_proof(target)
+        if isinstance(proof, Unknown):
+            location = f" at {proof.path}:{proof.line}" if proof.path else ""
+            return Violation(
+                path, line, target, f"Unproved SDK declaration{location}: {proof.reason}"
+            )
+        return None
+
+    def _sdk_namespace(self, target: str) -> bool:
+        if target != "ava" and not target.startswith("ava."):
+            return False
+        proof = self._sdk_proof(target)
+        return isinstance(proof, MemberProof) and not proof.definition_name
 
     def _private(self, target: str, module: str) -> str | None:
         parts = target.split(".")
@@ -625,8 +546,50 @@ class _Access(ast.NodeVisitor):
             for member in names:
                 self.record(line, owner + "." + member)
 
+    def call_targets(self, node: ast.expr, seen: tuple[str, ...] = ()) -> tuple[str, ...]:
+        if target := self.origin(node):
+            return (target,)
+        if isinstance(node, ast.Name) and node.id not in seen:
+            value = self.scope.value(node)
+            if value is not node:
+                return self.call_targets(value, (*seen, node.id))
+        return self.getter_targets(node)
+
+    def getter_targets(self, node: ast.expr) -> tuple[str, ...]:
+        """Resolve the existing bounded getter grammar without executing values."""
+        if isinstance(node, ast.Subscript):
+            owner, name = self.namespace(node.value), node.slice
+        elif isinstance(node, ast.Call) and node.args:
+            callee = self.scope.origin(node.func)
+            if len(node.args) >= 2 and (
+                callee == "builtins.getattr"
+                or (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == "getattr"
+                    and not self.scope.bound("getattr")
+                )
+            ):
+                owner, name = self.origin(node.args[0]), node.args[1]
+            elif isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+                owner, name = self.namespace(node.func.value), node.args[0]
+            else:
+                return ()
+        else:
+            return ()
+        return tuple(owner + "." + name for name in self.scope.strings(name) or ()) if owner else ()
+
     def visit_Call(self, node: ast.Call) -> None:
         callee = self.scope.origin(node.func)
+        for target in self.call_targets(node.func):
+            if self.contracts._sdk_namespace(target):
+                self.violations.add(
+                    Violation(
+                        self.path,
+                        node.lineno,
+                        target,
+                        "SDK namespace is not a callable declaration",
+                    )
+                )
         reflection = {"getattr", "setattr", "delattr", "hasattr"}
         if (
             callee in {"builtins." + name for name in reflection}
