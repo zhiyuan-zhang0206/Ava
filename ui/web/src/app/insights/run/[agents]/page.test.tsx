@@ -184,7 +184,6 @@ const lifetimeResponse: RunTimelineResponse = {
       request: { calls: 1, input: 400, cache_read: 0, output: 20, cache_write: 0, cost_usd: 0, cost_calls: 0 },
     },
   ],
-  events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null, source: "user" }],
 };
 
 const messagesResponse: RunTimelineMessages = {
@@ -310,7 +309,6 @@ describe("the default window", () => {
       .getAllByTestId(/^run-timeline-row-/)
       .map((row) => row.getAttribute("data-testid"));
     expect(rows).toEqual([
-      "run-timeline-row-lifecycle",
       "run-timeline-row-level-2",
       "run-timeline-row-level-1",
       "run-timeline-row-units",
@@ -321,7 +319,6 @@ describe("the default window", () => {
     expect(screen.queryAllByTestId("run-timeline-node")).toHaveLength(0);
     await paintFrame();
     expect(screen.getByTestId("run-timeline-canvas-level-1")).toBeTruthy();
-    expect(screen.getAllByTestId("run-timeline-event")).toHaveLength(1);
     expect(screen.getByTestId("run-timeline-window").textContent).toContain("3 summary nodes");
   });
 

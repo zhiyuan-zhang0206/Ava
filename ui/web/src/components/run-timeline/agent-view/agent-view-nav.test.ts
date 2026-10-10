@@ -45,7 +45,7 @@ const unit = (i0: number, from: number, to: number, tokens: number | null = null
 });
 
 const data = (over: Partial<RunTimelineResponse>) =>
-  ({ nodes: [], units: [], events: [], ...over }) as RunTimelineResponse;
+  ({ nodes: [], units: [], ...over }) as RunTimelineResponse;
 
 describe("row options", () => {
   const d = data({

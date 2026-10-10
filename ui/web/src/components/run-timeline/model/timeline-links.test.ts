@@ -54,9 +54,17 @@ describe("resolveLinks", () => {
     expect(one.unmatched).toBe(true);
   });
 
-  it("lands any other event on the receiver's Lifecycle row", () => {
-    const [one] = resolveLinks([link({ kind: "terminate" })], new Set([1, 2]), loaded);
-    expect(one.to).toEqual({ row: "lifecycle", agent: 2, ms: Date.parse(iso(10)) });
+  it("lands any other event in the receiver's Messages row too: on its inbound block when it has one, else at the event's time", () => {
+    const [on, at, spawn] = resolveLinks(
+      [link({ kind: "terminate", inbound_id: 7 }), link({ kind: "terminate", inbound_id: 99 }), link({ kind: "spawn" })],
+      new Set([1, 2]),
+      loaded,
+    );
+    expect(on.to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(21)) });
+    expect(at.to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(10)) });
+    expect([on.unmatched, at.unmatched]).toEqual([false, true]);
+    // An event that was not delivered as an inbound row has no block to be matched to, and says nothing about it.
+    expect([spawn.to.row, spawn.unmatched]).toEqual(["units", false]);
   });
 
   it("puts an end that is not in the view on the Other agents row and names that agent", () => {
@@ -122,7 +130,7 @@ describe("the curve", () => {
     const c = curveOf("k", 100, 0, 100, 200);
     expect(Math.abs(c.c1x - c.x0)).toBeGreaterThanOrEqual(20);
     expect(Math.abs(c.c1x - c.x0)).toBeLessThanOrEqual(140);
-    expect(c.c1x - c.x0).toBe(-(c.c2x - c.x1));
+    expect(c.c1x - c.x0).toBe(c.c2x - c.x1);
     const short = curveOf("k", 100, 0, 100, 4);
     expect(Math.abs(short.c1x - short.x0)).toBeGreaterThanOrEqual(20);
   });
@@ -133,23 +141,38 @@ describe("the curve", () => {
     expect(pull(10000)).toBeLessThanOrEqual(140);
   });
 
-  it("varies the bend between links so simultaneous ones do not coincide", () => {
-    const pulls = new Set(["a", "b", "c", "d", "e", "f", "g"].map((k) => curveOf(k, 0, 0, 0, 200).c1x));
-    expect(pulls.size).toBeGreaterThan(1);
+  it("varies the size of the bend between links, never its side", () => {
+    const keys = Array.from({ length: 60 }, (_, i) => `link-${i}`);
+    const pulls = keys.map((k) => curveOf(k, 0, 0, 0, 200).c1x);
+    expect(new Set(pulls).size).toBeGreaterThan(1);
+    expect(pulls.every((pull) => pull > 0)).toBe(true);
   });
 
-  it("leaves toward the side the receiver is on", () => {
-    expect(curveOf("k", 0, 0, 300, 100).c1x).toBeGreaterThan(0);
-    expect(curveOf("k", 300, 0, 0, 100).c1x).toBeLessThan(300);
+  it("bulges every curve to the right of the line between its ends, up or down", () => {
+    const cases: [number, number, number, number][] = [
+      [100, 0, 100, 200],
+      [100, 200, 100, 0],
+      [100, 0, 400, 300],
+      [400, 300, 100, 0],
+      [100, 0, 100, 4],
+      [100, 0, 100, 5000],
+    ];
+    for (const [i, [x0, y0, x1, y1]] of cases.entries()) {
+      const c = curveOf(`k${i}`, x0, y0, x1, y1);
+      for (const [cx, cy] of [[c.c1x, c.c1y], [c.c2x, c.c2y]]) {
+        const chordX = x0 + ((cy - y0) / (y1 - y0)) * (x1 - x0);
+        expect(cx).toBeGreaterThan(chordX);
+      }
+    }
   });
 
   it("ends tangent to the curve, not along the line between the ends", () => {
     const c = curveOf("k", 0, 0, 40, 400);
     const tan = endTangent(c);
     expect(Math.hypot(tan.x, tan.y)).toBeCloseTo(1, 5);
-    // The end control point is level with the end, so the head points sideways, not down the chord.
+    // The end control point is level with the end and to its right: the head points left, not down the chord.
     expect(tan.y).toBeCloseTo(0, 5);
-    expect(tan.x).toBeGreaterThan(0.9);
+    expect(tan.x).toBeLessThan(-0.9);
   });
 });
 

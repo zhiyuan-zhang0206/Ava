@@ -199,7 +199,6 @@ export type ContextSection = Schemas["ContextSection"];
 export type RunTimelineResponse = Schemas["RunTimelineResponse"];
 export type RunTimelineNode = Schemas["RunTimelineNode"];
 export type RunTimelineUnit = Schemas["RunTimelineUnit"];
-export type RunTimelineEvent = Schemas["RunTimelineEvent"];
 export type RunTimelineLink = Schemas["RunTimelineLink"];
 export type RunTimelineLinks = Schemas["RunTimelineLinks"];
 export type RunTimelineUsage = Schemas["RunTimelineUsage"];

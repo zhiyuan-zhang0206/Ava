@@ -88,8 +88,8 @@ class RunTimelineUnit(BaseModel):
     inclusive message-index span of the block's unit. Blocks without a time are not served.
     `parent` is the level-1 node whose span holds the block's first message, None for a block no
     node covers (a compaction segment's head, the not yet summarized tail). `inbound_id` is the
-    `inbound_messages` row an inbound block was made from (the checkpoint's `ava_inbound_id`), None
-    for any other block and for an inbound message that predates the stamp.
+    `inbound_messages` row an inbound or note block was made from (the checkpoint's `ava_inbound_id`), None
+    for any other block and for a message that carries no stamp.
 
     `context_tokens` is what the block occupies in the context (None while no request has read
     it), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether
@@ -124,24 +124,13 @@ class RunTimelineUnit(BaseModel):
     request: RunTimelineUsage | None
 
 
-class RunTimelineEvent(BaseModel):
-    """A lifecycle marker from the audit record (spawn, fork, restart, terminate...); `source` is who caused it."""
-
-    model_config = ConfigDict(frozen=True)
-
-    ts: datetime
-    kind: str
-    label: str | None
-    source: str
-
-
 LinkKind = Literal["send_message", "spawn", "fork", "terminate", "restart", "resurrect"]
 
 
 class RunTimelineLink(BaseModel):
     """One event between two agents. `sender` did it to `receiver`.
 
-    `inbound_id` names the receiver's inbound message (send_message only); `fork_from` is the agent
+    `inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent
     a fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is
     the start of the message.
     """
@@ -171,8 +160,7 @@ class RunTimelineResponse(BaseModel):
     `lifetime` is the agent's whole extent — the earliest and latest of its
     messages and understanding nodes — and the default window; None when it has
     neither. `nodes` are the tree's nodes intersecting the window, every level;
-    `units` are layer 0 intersecting it. `events` are optional lifecycle markers
-    in the window; they play no part in the extent.
+    `units` are layer 0 intersecting it.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -182,7 +170,6 @@ class RunTimelineResponse(BaseModel):
     lifetime: RunTimelineWindow | None
     nodes: list[RunTimelineNode]
     units: list[RunTimelineUnit]
-    events: list[RunTimelineEvent]
 
 
 RunTimelinePartKind = Literal[

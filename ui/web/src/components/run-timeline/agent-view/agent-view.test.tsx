@@ -23,6 +23,7 @@ vi.mock("@/lib/transport/api", () => ({
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
 import { drawn, drawnLinks, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas";
+import { curveOf, curvePoint } from "../model/timeline-links";
 import { viewportOf } from "../model/timeline-model";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
@@ -70,7 +71,6 @@ const response = (agent: number, window: [number, number], tree: boolean): RunTi
     ? [node("t", 2, window[0], window[1], null), node("l", 1, window[0], window[1], "t")]
     : [node("l", 1, window[0], window[1], null)],
   units: [unit(0, window[0] + 5, window[0] + 10, "l"), unit(1, window[0] + 20, window[0] + 25, "l")],
-  events: [],
 });
 
 // Agent 7 runs 0-60 min with a two-level tree, agent 8 runs 30-120 min with one level.
@@ -271,7 +271,7 @@ describe("arrows between agents", () => {
     ...partial,
   });
   const LINKS = [
-    link({}),
+    link({ inbound_id: 123 }),
     link({ kind: "spawn", ts: at(35) }),
     link({ kind: "terminate", ts: at(50), sender: 99, receiver: 7 }),
     link({ kind: "fork", ts: at(20), sender: 7, receiver: 98, fork_from: 5 }),
@@ -289,6 +289,10 @@ describe("arrows between agents", () => {
     const track = within(scope).getByTestId(row).querySelector("[data-track]");
     return (track === null ? 0 : trackRect(track).top) + 15;
   };
+
+  // The middle of the message arrow from agent 7 to agent 8 (key as `resolveLinks` makes it).
+  const messageArrowMiddle = () =>
+    curvePoint(curveOf(`send_message-${at(40)}-7-8-0`, 1000 / 3, mid(7, "run-timeline-row-units"), 1000 / 3, mid(8, "run-timeline-row-units")), 0.5);
 
   beforeEach(() => {
     getRunTimelineLinks.mockResolvedValue({ links: LINKS });
@@ -322,9 +326,9 @@ describe("arrows between agents", () => {
     expect(message.x).toBeCloseTo(1000 / 3, 1);
     expect(message.y).toBe(mid(7, "run-timeline-row-units"));
     expect(message.y + message.h).toBe(mid(8, "run-timeline-row-units"));
-    // A spawn ends in agent 8's Lifecycle row, which exists although no marker is in its window.
+    // A spawn ends in agent 8's Messages row too: the agent view has no lifecycle row.
     const [spawn] = byColor(GREEN);
-    expect(spawn.y + spawn.h).toBe(mid(8, "run-timeline-row-lifecycle"));
+    expect(spawn.y + spawn.h).toBe(mid(8, "run-timeline-row-units"));
     // Both ends outside the view are drawn to the Other agents row.
     const toOther = strokes().filter((d) => d.y + d.h === mid(null, "run-timeline-row-other"));
     expect(toOther.map((d) => d.color).sort()).toEqual(["#14b8a6"]);
@@ -362,22 +366,22 @@ describe("arrows between agents", () => {
 
   it("shows the arrow under the pointer in the readout, and a block over it wins", async () => {
     await ready();
-    const middleY = (mid(7, "run-timeline-row-units") + mid(8, "run-timeline-row-units")) / 2;
-    fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: 1000 / 3, clientY: middleY });
+    const { x: arrowX, y: middleY } = messageArrowMiddle();
+    fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
     expect(screen.getByTestId("run-timeline-readout").textContent).toContain("Message · #7 → #8");
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: 900, clientY: middleY });
     expect(screen.getByTestId("run-timeline-readout").textContent).not.toContain("→");
     // The pointer over a block of the Messages row: the block is hovered and clicked, not the arrow across it.
     fireEvent.pointerMove(canvasOf(7, "units"), { clientX: itemX(BY_AGENT[7], "units", "utext-0-0", 1000, BASE_78) });
-    fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: 1000 / 3, clientY: middleY });
+    fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
     expect(screen.getByTestId("run-timeline-readout").textContent).not.toContain("→");
   });
 
   it("selects an arrow by a click on it and shows the event in the details", async () => {
     await ready();
-    const middleY = (mid(7, "run-timeline-row-units") + mid(8, "run-timeline-row-units")) / 2;
-    fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: 1000 / 3, clientY: middleY });
-    fireEvent.click(screen.getByTestId("run-timeline-chart"), { clientX: 1000 / 3, clientY: middleY });
+    const { x: arrowX, y: middleY } = messageArrowMiddle();
+    fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
+    fireEvent.click(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
     const detail = await screen.findByTestId("run-timeline-link-detail");
     expect(detail.textContent).toContain("#7");
     expect(detail.textContent).toContain("#8");
