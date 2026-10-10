@@ -105,27 +105,57 @@ export function nearestLink(row: readonly ResolvedLink[], ms: number): string | 
   return best?.key ?? null;
 }
 
-/** A cubic curve between two points that leaves and arrives vertically. */
+/** A cubic Bezier between two points; its control points sit level with the ends, pulled sideways. */
 export interface Curve {
   key: string;
   x0: number;
   y0: number;
+  c1x: number;
+  c1y: number;
+  c2x: number;
+  c2y: number;
   x1: number;
   y1: number;
 }
 
-const controlY = (c: Curve) => (c.y1 - c.y0) / 2;
+const BEND_MIN_PX = 28;
+const BEND_MAX_PX = 140;
+const BEND_PER_DY = 0.45;
+
+/** A small stable offset per link (0..4), so near-simultaneous curves do not lie on one another. */
+function stagger(key: string): number {
+  let h = 0;
+  for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return h % 5;
+}
+
+/**
+ * The curve of a link: like a flow-chart connector, leaving and arriving sideways in an S. The pull
+ * grows with the vertical distance between the ends (bounded), so a straight-down link still bends
+ * visibly; the stagger varies it by up to +-24% per link.
+ */
+export function curveOf(key: string, x0: number, y0: number, x1: number, y1: number): Curve {
+  const base = Math.min(Math.max(Math.abs(y1 - y0) * BEND_PER_DY, BEND_MIN_PX), BEND_MAX_PX);
+  const pull = base * (0.76 + stagger(key) * 0.12) * (x1 >= x0 ? 1 : -1);
+  return { key, x0, y0, c1x: x0 + pull, c1y: y0, c2x: x1 - pull, c2y: y1, x1, y1 };
+}
 
 export function curvePoint(c: Curve, t: number): { x: number; y: number } {
   const u = 1 - t;
-  const dy = controlY(c);
-  const y = u ** 3 * c.y0 + 3 * u * u * t * (c.y0 + dy) + 3 * u * t * t * (c.y1 - dy) + t ** 3 * c.y1;
-  const x = (u ** 3 + 3 * u * u * t) * c.x0 + (3 * u * t * t + t ** 3) * c.x1;
-  return { x, y };
+  const w0 = u ** 3;
+  const w1 = 3 * u * u * t;
+  const w2 = 3 * u * t * t;
+  const w3 = t ** 3;
+  return { x: w0 * c.x0 + w1 * c.c1x + w2 * c.c2x + w3 * c.x1, y: w0 * c.y0 + w1 * c.c1y + w2 * c.c2y + w3 * c.y1 };
 }
 
-/** +1 when the curve ends below its start, -1 when above: the way the arrowhead points. */
-export const arrowDirection = (c: Curve): 1 | -1 => (c.y1 >= c.y0 ? 1 : -1);
+/** The unit direction of the curve at its end: where an arrowhead points. */
+export function endTangent(c: Curve): { x: number; y: number } {
+  const dx = c.x1 - c.c2x;
+  const dy = c.y1 - c.c2y;
+  const len = Math.hypot(dx, dy);
+  return len === 0 ? { x: 0, y: 1 } : { x: dx / len, y: dy / len };
+}
 
 const SAMPLES = 24;
 
