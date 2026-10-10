@@ -56,7 +56,8 @@ def test_known_document_reader_keeps_unknown_diagnostics_visible(tmp_path: Path)
     root = _repo(tmp_path, _READER + "import importlib\nimportlib.import_module(module_name)\n")
     assert test_selector.documentation_runtime_tests([_DOC], repo_root=root) == {_TEST}
     result = test_selector.select_tests([_DOC], repo_root=root)
-    assert (result.decision, result.reason) == ("FULL", "incomplete-impact")
+    assert result.decision == "SELECTED", result.as_json()
+    assert result.tests == (_TEST,)
     assert any(_TEST in diagnostic for diagnostic in result.diagnostics)
 
 

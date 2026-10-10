@@ -192,6 +192,56 @@ def test_known_external_absolute_resource_does_not_depend_on_checkout(tmp_path: 
     assert found.records == found.unknown == ()
 
 
+@pytest.mark.parametrize("method", ["read_text", "read_bytes"])
+@pytest.mark.parametrize(
+    "source, line, receiver",
+    [
+        ("def helper():\n return build()\nhelper().{method}()\n", 3, "helper()"),
+        ("def helper():\n return build()\nfile = helper()\nfile.{method}()\n", 4, "file"),
+        ("def load(file):\n return file.{method}()\n", 2, "file"),
+        ("def load(owner):\n return owner.file.{method}()\n", 2, "owner.file"),
+        pytest.param("from pathlib import Path\nPath().{method}()\n", 2, "Path()", id="empty-path"),
+    ],
+)
+def test_unproven_file_read_receiver_retains_resource_unknown(
+    tmp_path: Path, method: str, source: str, line: int, receiver: str
+) -> None:
+    found = evidence(make_repo(tmp_path), source.format(method=method))
+    assert found.records == ()
+    assert found.unknown == (
+        facts.Unknown(
+            "cli/tests/test_probe.py",
+            line,
+            f"{receiver}.{method}()",
+            "Resource read has no proven repository or external path anchor",
+            facts.FactKind.RESOURCE,
+        ),
+    )
+
+
+@pytest.mark.parametrize("method", ["read", "open"])
+def test_other_opaque_methods_do_not_claim_a_file_read(tmp_path: Path, method: str) -> None:
+    found = evidence(make_repo(tmp_path), f"def helper():\n return build()\nhelper().{method}()\n")
+    assert found.records == found.unknown == ()
+
+
+@pytest.mark.parametrize("method", ["read_text", "read_bytes"])
+def test_file_read_mode_keyword_does_not_prove_an_output(tmp_path: Path, method: str) -> None:
+    found = evidence(make_repo(tmp_path), f"def load(file):\n return file.{method}(mode='w')\n")
+    assert found.records == ()
+    assert [(gap.line, gap.expression, gap.kind) for gap in found.unknown] == [
+        (2, f"file.{method}(mode='w')", facts.FactKind.RESOURCE)
+    ]
+
+
+def test_builtin_open_of_a_factory_result_retains_resource_unknown(tmp_path: Path) -> None:
+    found = evidence(make_repo(tmp_path), "def helper():\n return build()\nopen(helper())\n")
+    assert found.records == ()
+    assert [(gap.line, gap.expression, gap.kind) for gap in found.unknown] == [
+        (3, "open(helper())", facts.FactKind.RESOURCE)
+    ]
+
+
 def test_repository_root_traversal_records_the_directory(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),
@@ -310,10 +360,23 @@ def test_mock_patch_runtime_edge_keeps_ownership_policy_separate(tmp_path: Path)
     assert not fallback
 
 
+def test_literal_sibling_of_the_source_file_is_a_repository_resource(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\nPath(__file__).with_name('data.txt').read_text()\n"
+        "Path(__file__).with_suffix('.json').read_text()\n",
+    )
+    assert found.unknown == ()
+    assert {fact.target for fact in found.records} == {
+        "cli/tests/data.txt",
+        "cli/tests/test_probe.json",
+    }
+
+
 def test_unsupported_path_operation_read_is_explicitly_unknown(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),
-        "from pathlib import Path\nPath(__file__).with_name('data.txt').read_text()\n",
+        "from pathlib import Path\nimport os\nPath(__file__).with_name(os.environ['N']).read_text()\n",
     )
     assert len(found.unknown) == 1
     assert found.unknown[0].kind == facts.FactKind.RESOURCE
@@ -347,3 +410,169 @@ def test_launchers_retain_execution_analysis_in_every_lexical_scope(
     found = evidence(make_repo(tmp_path), "import sys, subprocess\n" + source)
     assert bool(found.unknown) is unresolved
     assert [fact.target for fact in found.records] == ([] if unresolved else ["base.net.retry"])
+
+
+def test_module_name_and_literal_tables_bound_dynamic_imports(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\n"
+        "_LAZY = {'retry': '.retry', 'pool': 'base.db.pool'}\n"
+        "_MODULES = {'base.config': 1, 'ava.agents.api': 2}\n"
+        "def load(name):\n"
+        "    return importlib.import_module(_LAZY[name], 'base.net')\n"
+        "def every():\n"
+        "    for module in _MODULES:\n"
+        "        importlib.import_module(module)\n"
+        "importlib.import_module(f'{__name__}_helper'.replace('_helper', ''))\n"
+        "importlib.import_module(f'{__name__}'.rpartition('.')[0])\n"
+        "importlib.import_module(__name__)\n",
+        path="base/net/__init__.py",
+    )
+    assert [fact.target for fact in found.records] == [
+        "base.net.retry",
+        "base.db.pool",
+        "base.config",
+        "ava.agents.api",
+        "base.net",
+    ]
+    assert len(found.unknown) == 2  # Method calls on a resolved name stay opaque.
+
+
+def test_mutated_or_spread_tables_stay_unknown(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\n"
+        "_A = {'x': 'base.config'}\n"
+        "_A['y'] = 'base.db.pool'\n"
+        "_B = ['base.config']\n"
+        "_B.append('base.db.pool')\n"
+        "_C = {**_A}\n"
+        "importlib.import_module(_A['x'])\n"
+        "for module in _B:\n"
+        "    importlib.import_module(module)\n"
+        "importlib.import_module(_C['x'])\n",
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 3
+
+
+def test_python_c_source_has_main_module_name(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import subprocess, sys\n"
+        "subprocess.run([sys.executable, '-c', 'import importlib\\nimportlib.import_module(__name__)'])\n",
+    )
+    assert found.records == ()  # ``__main__`` is not a repository module.
+    assert found.unknown == ()
+
+
+def test_reads_rooted_outside_the_checkout_are_external(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import os\nfrom pathlib import Path\n"
+        "Path('/proc/123/stat').read_text()\n"
+        "Path(os.devnull).open('rb')\n",
+    )
+    assert found.records == found.unknown == ()
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "Path(f'/{name}').read_text()",
+        "Path(f'/pro{name}').read_text()",
+        "Path(f'{name}/x').read_text()",
+        "(Path('/') / name).read_text()",
+        "(Path(ROOT.rpartition('/')[0]) / name).read_text()",
+    ],
+)
+def test_open_ended_absolute_prefixes_are_not_external(tmp_path: Path, expression: str) -> None:
+    root = make_repo(tmp_path)
+    found = evidence(
+        root,
+        f"from pathlib import Path\nROOT = {str(root)!r}\ndef read(name):\n    {expression}\n",
+    )
+    assert len(found.unknown) == 1
+
+
+def test_a_literal_location_containing_the_checkout_is_not_external(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    found = evidence(
+        root,
+        f"from pathlib import Path\ndef read(name):\n    (Path({str(root.parent)!r}) / name).read_text()\n",
+    )
+    assert len(found.unknown) == 1
+
+
+def test_write_only_opens_are_outputs_not_inputs(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\n"
+        "def emit(path, name):\n"
+        "    Path(path).open('w')\n"
+        "    open(name, mode='ab')\n"
+        "    Path(path).open('r+')\n",
+    )
+    assert found.records == ()
+    assert [gap.kind for gap in found.unknown] == [facts.FactKind.RESOURCE]
+
+
+@pytest.mark.parametrize(
+    "mutation", ["ALIAS['y'] = 'base.db.pool'", "ALIAS.update({'y': 'base.db.pool'})"]
+)
+def test_alias_mutation_keeps_literal_table_import_unknown(tmp_path: Path, mutation: str) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\nTABLE = {'x': 'base.net.retry'}\nALIAS = TABLE\n"
+        + mutation
+        + "\ndef load(key):\n    importlib.import_module(TABLE[key])\n",
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.DYNAMIC_IMPORT
+
+
+def test_literal_table_elements_keep_their_definition_scope(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\nNAME = 'base.net.retry'\nTABLE = {'x': NAME}\n"
+        "def load(key):\n    NAME = 'base.db.pool'\n    importlib.import_module(TABLE[key])\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
+@pytest.mark.parametrize(
+    "call", ["mutate(TABLE)", "mutate(value=TABLE)", "ALIAS = TABLE\nmutate(ALIAS)"]
+)
+def test_literal_table_escaping_to_a_call_stays_unknown(tmp_path: Path, call: str) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\ndef mutate(value):\n    value['y'] = 'base.db.pool'\n"
+        "TABLE = {'x': 'base.net.retry'}\n"
+        + call
+        + "\ndef load(key):\n    importlib.import_module(TABLE[key])\n",
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.DYNAMIC_IMPORT
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "(Path('/tmp') / path).read_text()",
+        "Path('/tmp').joinpath(path).read_text()",
+        "Path(f'/tmp/{path}').read_text()",
+    ],
+)
+def test_external_prefix_does_not_prove_dynamic_path_stays_external(
+    tmp_path: Path, expression: str
+) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\ndef read(path):\n    " + expression + "\n",
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.RESOURCE

@@ -88,10 +88,35 @@ import strings, patch strings and non-executed source samples are separate
 collector evidence. It preserves alias facts and diagnoses rather than applying
 an automatic rewrite that could change which object a local name binds.
 
+`bindings.module_context()` lets a whole-module reader such as `facts.collect()`
+resolve the module's own `__name__`, subscripts of literal tables and loop variables
+over them. A table written through itself or a plain alias by subscript, augmented
+assignment, a mutating method call or a `global`/`nonlocal` rebinding stays opaque.
+Passing a table or its alias as a call argument also keeps it opaque without a
+read-only proof; the collector does not execute the callee to infer its writes.
+Iteration yields a dict's keys and indexing its values, resolved in the table's
+definition scope. Like the one-binding rule, this does not observe writes from other
+modules. Scopes built without a context keep the plain one-binding rules.
+
 `bindings.local_nodes()` preserves lexical depth-first order with an explicit
 iterator stack, so deep expressions do not repeatedly relay each node through
 recursive generators. Nested bodies and definition-time inputs retain the same
 scope boundaries.
+
+Within one analysis, `ModuleContext.scope()` reuses completed scopes by AST node,
+source path and lexical parent. The fact and execution-input visitors share these
+scopes; each scope retains its lexical Call order for transparent-helper checks.
+Binding collection skips nodes that cannot bind names without pruning the public
+lexical walker. `clear_scopes()` releases the query's scope references; neither
+scopes nor helper proofs cross analyses, source files or checkout generations.
+
+`read_text()` and `read_bytes()` retain a resource Unknown whenever their receiver
+has no proven repository or external anchor, including factory results, aliases
+and parameters. The collector does not infer a factory's return type or execute
+it to discover a path; a `mode` keyword on either read method does not prove an
+output. Other method names such as an arbitrary `read()` or
+`open()` do not establish a file read; built-in/imported `open` and recognized
+Path operations retain their existing resource grammar.
 
 Import-linter contracts, private package doors and test-placement rules remain
 responsible for their existing boundaries.
