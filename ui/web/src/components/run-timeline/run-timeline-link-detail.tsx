@@ -32,6 +32,11 @@ export function LinkDetail({ resolved, onAddAgent }: { resolved: ResolvedLink; o
           {link.inbound_id !== null ? <Metric label={t("linkInbound")} value={String(link.inbound_id)} /> : null}
         </div>
       </Section>
+      {resolved.unmatched ? (
+        <p className="text-xs text-muted-foreground" data-testid="run-timeline-link-unmatched">
+          {t("linkUnmatched")}
+        </p>
+      ) : null}
       {external !== null ? (
         <button
           type="button"

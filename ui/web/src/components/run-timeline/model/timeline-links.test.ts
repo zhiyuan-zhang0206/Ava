@@ -42,11 +42,13 @@ describe("resolveLinks", () => {
     expect(one.from).toEqual({ row: "units", agent: 1, ms: Date.parse(iso(10)) });
     expect(one.to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(21)) });
     expect(one.external).toBeNull();
+    expect(one.unmatched).toBe(false);
   });
 
   it("falls back to the event's time in the Messages row when no block carries the id", () => {
     const [one] = resolveLinks([link({ inbound_id: 99 })], new Set([1, 2]), loaded);
     expect(one.to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(10)) });
+    expect(one.unmatched).toBe(true);
   });
 
   it("lands any other event on the receiver's Lifecycle row", () => {

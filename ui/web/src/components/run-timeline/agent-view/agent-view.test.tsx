@@ -366,6 +366,8 @@ describe("arrows between agents", () => {
     expect(detail.textContent).toContain("#7");
     expect(detail.textContent).toContain("#8");
     expect(screen.queryByTestId("run-timeline-link-add-agent")).toBeNull();
+    // No block of agent 8 carries an inbound id: the arrow says it is not exact.
+    expect(screen.getByTestId("run-timeline-link-unmatched")).toBeTruthy();
   });
 
   it("puts the events of agents not in the view on the Other agents row, and adding one moves its arrow into its own group", async () => {

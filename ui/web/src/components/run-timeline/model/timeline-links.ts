@@ -35,6 +35,8 @@ export interface ResolvedLink {
   to: LinkEnd;
   /** The end that is not in the view, when one is. */
   external: number | null;
+  /** A message whose receiver is in view but whose inbound block was not found: it ends at the event's time, not on a block. */
+  unmatched: boolean;
 }
 
 const middle = (unit: Pick<RunTimelineUnit, "start" | "end">) => (Date.parse(unit.start) + Date.parse(unit.end)) / 2;
@@ -60,12 +62,14 @@ export function resolveLinks(
     if ((senderIn && !loaded.has(link.sender)) || (receiverIn && !loaded.has(link.receiver))) return;
     const from: LinkEnd = senderIn ? { row: "units", agent: link.sender, ms } : { row: "other", agent: link.sender, ms };
     let to: LinkEnd = { row: "other", agent: link.receiver, ms };
+    let unmatched = false;
     if (receiverIn) {
       if (link.kind === "send_message") {
         const block =
           link.inbound_id === null
             ? undefined
             : loaded.get(link.receiver)?.units.find((unit) => unit.kind === "inbound" && unit.inbound_id === link.inbound_id);
+        unmatched = block === undefined;
         to = { row: "units", agent: link.receiver, ms: block === undefined ? ms : middle(block) };
       } else to = { row: "lifecycle", agent: link.receiver, ms };
     }
@@ -75,6 +79,7 @@ export function resolveLinks(
       from,
       to,
       external: senderIn && receiverIn ? null : senderIn ? link.receiver : link.sender,
+      unmatched,
     });
   });
   return out;
