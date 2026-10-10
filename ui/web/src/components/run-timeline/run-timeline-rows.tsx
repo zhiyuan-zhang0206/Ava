@@ -46,6 +46,7 @@ import { LinksCanvas, type LinkHit, type LinkHitResult } from "./canvas/run-time
 import {
   endIn,
   groupLinks,
+  MAX_ARROWS,
   nearestLink,
   nearestUnit,
   selectionMs,
@@ -101,6 +102,7 @@ export function RunTimelineRows({
   onToggleLinkKind,
   linkKeys,
   onSelectLinks,
+  maxArrows = MAX_ARROWS,
 }: {
   /** The agents, top to bottom; at least one is loaded. */
   entries: readonly AgentEntry[];
@@ -132,6 +134,8 @@ export function RunTimelineRows({
   /** The selected links: one for an arrow of one link, several for a merged arrow. */
   linkKeys: readonly string[];
   onSelectLinks: (keys: readonly string[]) => void;
+  /** The most arrows shown at once. */
+  maxArrows?: number;
 }) {
   const linkKey = linkKeys.length === 1 ? linkKeys[0] : null;
   const onSelectLink = (key: string) => onSelectLinks([key]);
@@ -554,7 +558,7 @@ export function RunTimelineRows({
       }}
       className="relative select-none space-y-3 rounded-[10px] border border-border bg-card p-3"
     >
-      <LinksCanvas links={shownLinks} selectedKeys={selectedKeys} hoverKeys={hoverKeys} axis={axis} view={view} hitRef={hitRef} />
+      <LinksCanvas links={shownLinks} selectedKeys={selectedKeys} hoverKeys={hoverKeys} axis={axis} view={view} maxArrows={maxArrows} hitRef={hitRef} />
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
         {spoken ?? ""}
       </p>
