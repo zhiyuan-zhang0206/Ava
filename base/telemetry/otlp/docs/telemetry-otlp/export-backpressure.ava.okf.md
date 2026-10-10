@@ -32,11 +32,13 @@ the collector sidecar owns durable mirroring after acceptance.
   dropped batches and spans; after cooldown exactly one half-open probe runs.
   Probe success closes the circuit and resets consecutive failures, while probe
   failure starts a fresh cooldown.
-- Exec children drain their application queue without blocking, then request a
-  500 ms force-flush budget from each SDK provider. The HTTP exporters retain
-  their own 2-second network ceiling even when an SDK implementation does not
-  propagate that shorter budget. Shutdown requests a separate 2-second budget
-  per provider and never runs inside the turn body.
+- Flush uses a distinct FIFO receipt and one finite caller deadline, including
+  marker admission. The sole worker requests a 500 ms force-flush budget from
+  each SDK provider. Shutdown closes admission and joins the same worker
+  finitely; the worker requests a 2-second provider flush then SDK shutdown.
+  SDK calls may outlive the caller deadline and remain owned. The HTTP exporters
+  retain their own 2-second network ceiling; these observations do not promise
+  delivery or native termination. See [[exit-flush.ava.okf.md|OTLP exit flush]].
 
 ## Recovery
 
