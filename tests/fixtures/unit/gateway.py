@@ -6,11 +6,14 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.unit.identity import _machine_identity
 
 
 @pytest.fixture
-def gateway_unit(db_conn: psycopg.Connection) -> Iterator[TestClient]:
+def gateway_unit(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
     """The gateway unit (gateway): owns the test DB/config, runs the
     in-process gateway app, role='gateway'.
 
@@ -24,12 +27,14 @@ def gateway_unit(db_conn: psycopg.Connection) -> Iterator[TestClient]:
     carry auth headers. Tests that specifically exercise the auth middleware
     re-enable it via monkeypatch.
     """
-    from gateway.app import app as _app
+    from gateway import app as gateway_app
 
+    config = snapshot_process_config()
+    monkeypatch.setattr(gateway_app, "ConfigBoot", lambda: config)
     _ = db_conn  # per-test truncate side effect
     with (
         _machine_identity(role="gateway"),
-        TestClient(_app, base_url="http://test-gateway") as client,
+        TestClient(gateway_app.app, base_url="http://test-gateway") as client,
     ):
         yield client
 
