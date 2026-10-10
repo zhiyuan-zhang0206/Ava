@@ -22,7 +22,8 @@ class _Generation:
     """One process instance of a unit.
 
     `exited` is set as the *last* action of the wait task, so any coroutine
-    that observes the event also observes the exit fully processed.
+    that observes the event also observes the exit fully processed. Error or
+    cancellation completion does not certify a native reap and cannot set it.
     """
 
     proc: asyncio.subprocess.Process
@@ -55,3 +56,4 @@ class _UnitRuntime:
     last_exit: str | None = None
     last_error: str | None = None
     watch_task: asyncio.Task[None] | None = None
+    """Current-generation handle; Supervisor separately owns all generations' outcomes."""

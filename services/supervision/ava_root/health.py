@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import Future
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from threading import Thread
+from threading import Event, Thread
 from typing import Protocol
 
 from base.daemon.health import DaemonProbe
@@ -165,6 +165,51 @@ _NO_REVIVAL_VERB = "no revival verb (not a tree unit)"
 _WINDOW_CLOSED = "replacement did not answer within the verification window"
 
 
+class _ProbeObservation:
+    """Own one native observation through its real completion or bounded join."""
+
+    def __init__(self, probe: Probe) -> None:
+        self.future: Future[DaemonProbe] = Future()
+        self._probe = probe
+        self._stop = Event()
+        self._error: BaseException | None = None
+        self._thread = Thread(target=self._run, name="root-probe", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            if self._stop.is_set():
+                self.future.set_result(DaemonProbe.unavailable("observation admission closed"))
+            else:
+                self.future.set_result(self._sample())
+        except BaseException as exc:
+            self._error = exc
+            _log.error("root observation worker failed", exc_info=exc)
+            self.future.set_exception(exc)
+
+    def _sample(self) -> DaemonProbe:
+        """Inspection failures remain unknown evidence, never recovery evidence."""
+        try:
+            result = self._probe()
+        except Exception as exc:
+            return DaemonProbe.unavailable(f"probe raised {type(exc).__name__}: {exc}")
+        if not isinstance(result, DaemonProbe):
+            return DaemonProbe.unavailable("probe did not return DaemonProbe")
+        return result
+
+    def close(self) -> None:
+        self._stop.set()
+
+    def join(self, timeout_s: float) -> bool:
+        """Stop admission and observe the real worker; native calls may remain live."""
+        self.close()
+        self._thread.join(timeout=timeout_s)
+        complete = not self._thread.is_alive()
+        if self._error is not None:
+            raise self._error
+        return complete
+
+
 class ProbeRunner:
     """One bounded synchronous observation, with at most one daemon worker.
 
@@ -175,34 +220,49 @@ class ProbeRunner:
     """
 
     def __init__(self) -> None:
-        self._pending: Future[DaemonProbe] | None = None
+        self._observation: _ProbeObservation | None = None
+        self._closed = False
+
+    def close(self) -> None:
+        """Prevent fresh observations before any worker join begins."""
+        self._closed = True
+        if self._observation is not None:
+            self._observation.close()
+
+    def stop(self, timeout_s: float = 0.2) -> bool:
+        """Bounded best effort; a late worker error remains owned on repeated stop."""
+        if not math.isfinite(timeout_s) or timeout_s < 0:
+            raise ValueError("probe join timeout must be finite and nonnegative")
+        self.close()
+        return self._observation is None or self._observation.join(timeout_s)
+
+    @staticmethod
+    def _retrieve(future: asyncio.Future[DaemonProbe]) -> None:
+        # A timed-out/cancelled caller does not await this wrapper again. The
+        # native observation retains and raises the same original error at stop.
+        if not future.cancelled():
+            future.exception()
 
     async def observe(
         self, probe: Probe, timeout_s: float, *, overdue: DaemonProbe | None = None
     ) -> DaemonProbe:
         """One verdict; a probe still running at the deadline is `overdue`, else UNAVAILABLE."""
-        if self._pending is not None and not self._pending.done():
+        if self._closed:
+            raise RuntimeError("probe runner admission closed")
+        if self._observation is not None and not self._observation.future.done():
             return DaemonProbe.unavailable("previous observation still running after its deadline")
-        pending: Future[DaemonProbe] = Future()
-        self._pending = pending
-
-        def run() -> None:
-            try:
-                result = probe()
-                if not isinstance(result, DaemonProbe):
-                    result = DaemonProbe.unavailable("probe did not return DaemonProbe")
-            except Exception as exc:
-                result = DaemonProbe.unavailable(f"probe raised {type(exc).__name__}: {exc}")
-            pending.set_result(result)
-
-        Thread(target=run, name="root-probe", daemon=True).start()
+        if self._observation is not None and not self._observation.join(0):
+            return DaemonProbe.unavailable("previous observation worker still completing")
+        observation = _ProbeObservation(probe)
+        self._observation = observation
+        pending = asyncio.wrap_future(observation.future)
+        pending.add_done_callback(self._retrieve)
         try:
-            result = await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(pending)), timeout_s)
+            result = await asyncio.wait_for(asyncio.shield(pending), timeout_s)
         except TimeoutError:
             if overdue is not None:
                 return overdue
             return DaemonProbe.unavailable(f"observation exceeded {timeout_s:g}s deadline")
-        self._pending = None
         return result
 
 
@@ -236,9 +296,13 @@ class HealthMonitor:
         self._runners: dict[str, ProbeRunner] = {}
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
+        self.unfinished_probes: tuple[str, ...] = ()
+        self._closed = False
 
     async def run_round(self) -> None:
         """Probe every unit once, in registration order."""
+        if self._closed:
+            raise RuntimeError("root health admission closed")
         for unit_id in self._registry.unit_ids():
             await self._check_unit(unit_id)
         self._report_failure_states()
@@ -279,19 +343,40 @@ class HealthMonitor:
         """Run rounds until `stop()` — sleep first, then one round per interval."""
         if self._task is not None:
             raise RuntimeError("health monitor already started")
+        if self._closed:
+            raise RuntimeError("root health admission closed")
         if self._tasks is None:
             raise RuntimeError("monitor requires the root participant task group")
         self._task = self._tasks.create_task(self._loop())
 
     async def stop(self) -> None:
-        """Stop the round loop; safe to call when not started."""
+        """Close probe admission and stop all owned work within one join budget."""
+        self._closed = True
+        for runner in self._runners.values():
+            runner.close()
         task = self._task
         self._task = None
-        if task is None:
-            return
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        failures: list[BaseException] = []
+        if task is not None:
+            task.cancel()
+            try:
+                with suppress(asyncio.CancelledError):
+                    await task
+            except BaseException as exc:
+                failures.append(exc)
+        deadline = time.monotonic() + 0.2
+        unfinished: list[str] = []
+        for unit_id, runner in self._runners.items():
+            try:
+                if not runner.stop(max(0.0, deadline - time.monotonic())):
+                    unfinished.append(unit_id)
+            except BaseException as exc:
+                failures.append(exc)
+        self.unfinished_probes = tuple(unfinished)
+        if unfinished:
+            _log.warning("root health stopped with unfinished observations: %s", unfinished)
+        if failures:
+            raise BaseExceptionGroup("root health teardown failed", failures)
 
     def snapshot(self) -> dict[str, UnitHealth]:
         """A copy of every known unit's health state, keyed by unit id."""
@@ -560,6 +645,8 @@ class HealthMonitor:
         self, unit_id: str, probe: Probe, *, timeout_s: float | None = None
     ) -> DaemonProbe:
         """Inspection failures are unavailable evidence, never permission to restart."""
+        if self._closed:
+            raise RuntimeError("root health admission closed")
         runner = self._runners.setdefault(unit_id, ProbeRunner())
         budget = self._config.probe_timeout_s
         # A budget cut short by the caller's verification window is not the
