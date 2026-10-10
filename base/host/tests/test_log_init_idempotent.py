@@ -9,24 +9,29 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 import base.log as slog
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import logs_dir
+from base.telemetry.delivery.pipeline import EventPipeline
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _unused_producer() -> EventPipeline:
+    raise AssertionError("the mocked sink must not construct a pipeline")
 
 
 def gateway_inputs() -> dict[str, Any]:
     """Explicit wiring inputs; sink mocks prevent constructing the test producer."""
     return {
-        "producer": lambda: None,
+        "producer": _unused_producer,
         "machine_reader": lambda: "test-host",
-        "image": SimpleNamespace(sha="test-image"),
+        "image": LoadedCommit(_REPO_ROOT, "test-image"),
     }
 
 
@@ -130,13 +135,13 @@ def test_init_cli_process_idempotent() -> None:
         patch.object(slog, "add_postgres_sink") as mock_pg,
     ):
         slog.init_cli_process(
-            name="cli-spawn-update-1", producer=lambda: None, machine_reader=lambda: "test-host"
+            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
         )
         slog.init_cli_process(
-            name="cli-spawn-update-1", producer=lambda: None, machine_reader=lambda: "test-host"
+            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
         )
         slog.init_cli_process(
-            name="cli-spawn-update-1", producer=lambda: None, machine_reader=lambda: "test-host"
+            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
         )
 
     assert mock_add.call_count == 1
@@ -154,7 +159,9 @@ def test_init_cli_process_per_invocation_log_file() -> None:
         patch.object(slog, "add_postgres_sink"),
     ):
         slog.init_cli_process(
-            name="cli-watchdog-update", producer=lambda: None, machine_reader=lambda: "test-host"
+            name="cli-watchdog-update",
+            producer=_unused_producer,
+            machine_reader=lambda: "test-host",
         )
 
     mock_file_sink.assert_called_once_with(logs_dir() / "cli-watchdog-update.log")

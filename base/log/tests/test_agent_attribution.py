@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
@@ -12,6 +13,8 @@ import pytest
 import ava
 from base.agents.context.identity import AgentIdentity
 from base.log import _message_to_params
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.delivery.pipeline import EventPipeline
 
 
 class _FakeMessage:
@@ -67,6 +70,9 @@ def test_transport_source_preserves_usage_payload_source() -> None:
 def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     import base.log as slog
 
+    def producer() -> EventPipeline:
+        raise AssertionError("the mocked sink must not construct a pipeline")
+
     monkeypatch.setattr(slog, "_init_done", False)
     ava.context = replace(ava.context, identity=AgentIdentity(42, True))
     with (
@@ -80,9 +86,9 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
     ):
         slog.init_gateway_process(
             name="agent_host",
-            producer=lambda: None,
+            producer=producer,
             machine_reader=lambda: "machine-a",
-            image=cast(Any, SimpleNamespace(sha="loaded-generation")),
+            image=LoadedCommit(Path(__file__).resolve().parents[3], "loaded-generation"),
         )
 
     configure.assert_called_once_with(extra={"agent_id": "-"})
