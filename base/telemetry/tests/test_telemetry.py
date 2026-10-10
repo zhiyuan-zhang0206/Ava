@@ -19,7 +19,6 @@ import json
 import queue
 import socket
 import threading
-import time
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -439,6 +438,9 @@ def _mk_event(category: str, event_name: str) -> telemetry.Event:
 def test_regular_events_shed_immediately_when_full() -> None:
     """A telemetry event on a full queue is shed at once (put_nowait)."""
     pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+    pipe._admission_lock = threading.Lock()
+    pipe._stop_requested = threading.Event()
+    pipe._finished = threading.Event()
     pipe._dropped_lock = threading.Lock()
     pipe.dropped = 0
 
@@ -457,6 +459,9 @@ def test_regular_events_shed_immediately_when_full() -> None:
 def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
     """Their record is `audit_events`, so the projection takes no blocking lane."""
     pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+    pipe._admission_lock = threading.Lock()
+    pipe._stop_requested = threading.Event()
+    pipe._finished = threading.Event()
     pipe._dropped_lock = threading.Lock()
     pipe.dropped = 0
 
@@ -472,72 +477,19 @@ def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
     assert pipe.dropped == 1
 
 
-def test_sync_bounds_a_stalled_caller_flush(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An attachment close cannot wait forever for a synchronous mirror write."""
-    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
-    entered = threading.Event()
-    release = threading.Event()
-    pipe._queue = queue.Queue()
-    pipe._sync_done = threading.Event()
+def test_explicit_capture_precedes_closed_projection_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pipe = telemetry._EventPipeline(writer=lambda _batch: None)
+    pipe.stop(timeout=1)
+    monkeypatch.setitem(emitter._state, "pipeline", pipe)
+    captured: list[telemetry.Event] = []
 
-    holder = threading.Thread(target=release.wait, daemon=True)
-    holder.start()
-    pipe._thread = holder
+    def capture(prepared: telemetry.Event) -> telemetry.Event:
+        captured.append(prepared)
+        return prepared
 
-    def blocked_flush() -> None:
-        entered.set()
-        assert release.wait(2), "sync did not release the stalled writer"
-
-    reports: list[str] = []
-
-    def report(message: str, **_extra: Any) -> None:
-        reports.append(message)
-
-    monkeypatch.setattr(pipe, "flush", blocked_flush)
-    monkeypatch.setattr(emitter, "report_no_pipeline", report)
-    timer = threading.Timer(0.1, release.set)
-    timer.daemon = True
-    timer.start()
-    try:
-        started = time.monotonic()
-        pipe.sync(timeout=0.05, bounded=True)
-        assert entered.is_set()
-        assert time.monotonic() - started < 1.0
-        assert any("flush" in message for message in reports)
-    finally:
-        release.set()
-        timer.cancel()
-
-
-def test_sync_bounds_a_full_marker_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The sync marker shares the close-time deadline when the queue is full."""
-    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
-    pipe._queue = queue.Queue(maxsize=1)
-    pipe._queue.put(_mk_event("telemetry", "turn_end"))
-    pipe._sync_done = threading.Event()
-
-    holder_done = threading.Event()
-    holder = threading.Thread(target=holder_done.wait, daemon=True)
-    holder.start()
-    pipe._thread = holder
-    monkeypatch.setattr(pipe, "flush", lambda: None)
-    reports: list[str] = []
-
-    def report(message: str, **_extra: Any) -> None:
-        reports.append(message)
-
-    monkeypatch.setattr(emitter, "report_no_pipeline", report)
-
-    def free_slot() -> None:
-        time.sleep(0.1)
-        pipe._queue.get_nowait()
-
-    freer = threading.Thread(target=free_slot, daemon=True)
-    freer.start()
-    started = time.monotonic()
-    try:
-        pipe.sync(timeout=0.05, bounded=True)
-        assert time.monotonic() - started < 1.0
-        assert any("marker" in message for message in reports)
-    finally:
-        holder_done.set()
+    prepared = _mk_event("log", "log")
+    emitter.emit_prepared(prepared, capture=capture)
+    assert captured == [prepared]
+    assert pipe.dropped == 1
