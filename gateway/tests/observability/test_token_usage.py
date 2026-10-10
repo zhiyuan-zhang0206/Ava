@@ -198,14 +198,12 @@ def test_checkpoint_read_failure_returns_zero(
 ) -> None:
     """A checkpoint store read failure is tolerated to 0/0 — the SSE token_usage
     push refreshes the counter later (contrast the /messages data endpoint's
-    503). Patch langgraph.checkpoint.postgres's PostgresSaver name to raise
-    (load_checkpoint_messages resolves it via a function-local import).
+    503). Make Ava's explicitly constructed saver adapter fail at its tuple read.
     max_input_tokens still reflects the cluster default model (read from
     config_overlay before the checkpoint access)."""
-    from contextlib import contextmanager
+    from typing import NoReturn
 
-    import langgraph.checkpoint.postgres as ckpt_mod
-
+    import base.agents.history.checkpoint_postgres_walks as ckpt_mod
     from base.config import settings
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
@@ -223,16 +221,13 @@ def test_checkpoint_read_failure_returns_zero(
     expected_hard = _budget.hard_compact_tokens
 
     tid = create_agent(db_conn)
+    attempts: list[object] = []
 
-    @contextmanager
-    def fake_saver(_url):
+    def fail_read(_saver: object, config: object) -> NoReturn:
+        attempts.append(config)
         raise OSError("simulated DB connection lost")
-        yield  # type: ignore[unreachable]
 
-    class FakeSaver:
-        from_conn_string = staticmethod(fake_saver)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(ckpt_mod, "PostgresSaver", FakeSaver)
+    monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
     resp = test_client.get(f"/api/agents/{tid}/token-usage")
     assert resp.status_code == 200
     assert resp.json() == {
@@ -243,3 +238,4 @@ def test_checkpoint_read_failure_returns_zero(
         "soft_compact_tokens": expected_soft,
         "hard_compact_tokens": expected_hard,
     }
+    assert len(attempts) == 1
