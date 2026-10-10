@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { RunTimelineLink, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
+  bucketOf,
+  clusterArrows,
+  clusterToMax,
+  MAX_ARROWS,
+  MAX_ARROWS_CAP,
+  parseArrowLimit,
   curveOf,
   curvePoint,
   distanceToCurve,
@@ -130,6 +136,8 @@ describe("the User group", () => {
       ["send_message", null, 2, "user"],
       ["send_message", null, 2, "ui:page:fleet"],
     ]);
+    // Its own kind, so it has its own color and legend entry and is never merged with messages between agents.
+    expect(user.map((l) => l.kind)).toEqual(["user_message", "user_message"]);
     expect(user[0].to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(21)) });
     expect(user[0].from).toEqual({ row: "user", agent: 0, ms: Date.parse(iso(20)) });
     expect([user[0].unmatched, user[0].external]).toEqual([false, null]);
@@ -182,17 +190,17 @@ describe("nearestUnit", () => {
 describe("the curve", () => {
   it("bends visibly even when both ends are at the same x, within bounds", () => {
     const c = curveOf("k", 100, 0, 100, 200);
-    expect(Math.abs(c.c1x - c.x0)).toBeGreaterThanOrEqual(20);
-    expect(Math.abs(c.c1x - c.x0)).toBeLessThanOrEqual(140);
+    expect(Math.abs(c.c1x - c.x0)).toBeGreaterThanOrEqual(15);
+    expect(Math.abs(c.c1x - c.x0)).toBeLessThanOrEqual(75);
     expect(c.c1x - c.x0).toBe(c.c2x - c.x1);
     const short = curveOf("k", 100, 0, 100, 4);
-    expect(Math.abs(short.c1x - short.x0)).toBeGreaterThanOrEqual(20);
+    expect(Math.abs(short.c1x - short.x0)).toBeGreaterThanOrEqual(15);
   });
 
   it("pulls further for longer vertical distances, up to a bound", () => {
     const pull = (dy: number) => Math.abs(curveOf("k", 0, 0, 0, dy).c1x);
     expect(pull(400)).toBeGreaterThan(pull(100));
-    expect(pull(10000)).toBeLessThanOrEqual(140);
+    expect(pull(10000)).toBeLessThanOrEqual(75);
   });
 
   it("varies the size of the bend between links, never its side", () => {
@@ -250,5 +258,135 @@ describe("hitting a curve", () => {
   it("prefers the one drawn later when two are equally near", () => {
     const p = curvePoint(down, 0.5);
     expect(hitLink([down, { ...down, key: "c" }], p.x, p.y, 4)).toBe("c");
+  });
+});
+
+describe("merging arrows that lie close together", () => {
+  const arrow = (key: string, x0: number, x1: number, bucket = "a") => ({ key, bucket, x0, x1 });
+  const sizes = (arrows: ReturnType<typeof arrow>[], px: number) =>
+    clusterArrows(arrows, px)
+      .map((c) => c.members.length)
+      .sort((a, b) => b - a);
+  const PX = 14;
+
+  it("merges arrows whose two ends are both closer than the distance, and puts the merged one in the middle of them", () => {
+    const [one, ...rest] = clusterArrows([arrow("p", 100, 300), arrow("q", 104, 306), arrow("r", 108, 303)], PX);
+    expect(rest).toEqual([]);
+    expect(one.members).toEqual(["p", "q", "r"]);
+    expect(one.key).toBe("group:p:3");
+    expect(one.x0).toBeCloseTo(104, 5);
+    expect(one.x1).toBeCloseTo(303, 5);
+  });
+
+  it("leaves an arrow alone under its own key", () => {
+    expect(clusterArrows([arrow("only", 10, 20)], PX)).toEqual([{ key: "only", bucket: "a", members: ["only"], x0: 10, x1: 20 }]);
+  });
+
+  it("keeps arrows apart when either end is farther than the distance", () => {
+    expect(sizes([arrow("p", 100, 300), arrow("q", 100 + PX, 300)], PX)).toEqual([1, 1]);
+    expect(sizes([arrow("p", 100, 300), arrow("q", 100, 300 + PX)], PX)).toEqual([1, 1]);
+    expect(sizes([arrow("p", 100, 300), arrow("q", 100 + PX - 1, 300 + PX - 1)], PX)).toEqual([2]);
+  });
+
+  it("never merges arrows of different kinds or between different rows", () => {
+    const kinds = ["send_message", "spawn"].map((k) => `${k}|units:1|units:2`);
+    expect(sizes([arrow("p", 100, 300, kinds[0]), arrow("q", 101, 301, kinds[1])], 1000)).toEqual([1, 1]);
+    const rows = ["send_message|units:1|units:2", "send_message|units:1|units:3"];
+    expect(sizes([arrow("p", 100, 300, rows[0]), arrow("q", 101, 301, rows[1])], 1000)).toEqual([1, 1]);
+  });
+
+  it("puts the links with different peers outside the view in one bucket, since they share the Other agents row", () => {
+    const [a, b] = resolveLinks(
+      [link({ sender: 1, receiver: 8 }), link({ sender: 1, receiver: 9 })],
+      new Set([1, 2]),
+      new Map([[1, agent([])], [2, agent([])]]),
+    );
+    expect(bucketOf(a)).toBe(bucketOf(b));
+  });
+
+  it("buckets a link by its kind and the two rows its ends stand in", () => {
+    const [a, b, c] = resolveLinks(
+      [link({}), link({ kind: "spawn" }), link({ receiver: 3 })],
+      new Set([1, 2, 3]),
+      new Map([[1, agent([])], [2, agent([])], [3, agent([])]]),
+    );
+    expect(new Set([bucketOf(a), bucketOf(b), bucketOf(c)]).size).toBe(3);
+  });
+
+  it("counts every member exactly once, however they chain", () => {
+    const many = Array.from({ length: 500 }, (_, i) => arrow(`k${i}`, (i * 7) % 200, (i * 13) % 400, `b${i % 3}`));
+    const clusters = clusterArrows(many, PX);
+    expect(clusters.reduce((n, c) => n + c.members.length, 0)).toBe(500);
+    expect(new Set(clusters.flatMap((c) => c.members)).size).toBe(500);
+  });
+});
+
+describe("merging down to a limit", () => {
+  const spread = (n: number, scale: number, bucket = "a") =>
+    Array.from({ length: n }, (_, i) => ({ key: `k${i}`, bucket, x0: ((i * 37) % 997) * scale, x1: ((i * 91) % 991) * scale }));
+  const total = (c: { clusters: { members: string[] }[] }) => c.clusters.reduce((n, x) => n + x.members.length, 0);
+
+  it("merges nothing while the arrows already fit", () => {
+    const found = clusterToMax(spread(20, 1), 30, 2000);
+    expect(found.clusters).toHaveLength(20);
+    expect(found.px).toBe(0);
+    expect(found.withinMax).toBe(true);
+  });
+
+  it("keeps at most the limit, with every arrow in exactly one cluster, by the smallest distance that does", () => {
+    const arrows = spread(400, 1);
+    for (const max of [20, 30, 50]) {
+      const found = clusterToMax(arrows, max, 2000);
+      expect(found.clusters.length).toBeLessThanOrEqual(max);
+      expect(total(found)).toBe(400);
+      expect(found.withinMax).toBe(true);
+      // A smaller distance would have left more than the limit.
+      expect(clusterArrows(arrows, found.px - 1).length).toBeGreaterThan(max);
+    }
+  });
+
+  it("merges less the more room there is: a larger limit needs a smaller distance", () => {
+    const arrows = spread(400, 1);
+    expect(clusterToMax(arrows, 50, 2000).px).toBeLessThan(clusterToMax(arrows, 20, 2000).px);
+  });
+
+  it("falls apart on zooming in: fewer arrows are in view, so the distance shrinks, and with few enough there is none", () => {
+    // 400 arrows over the whole window; zoomed in 8x only an eighth of them are on screen, spread 8x wider.
+    const whole = Array.from({ length: 400 }, (_, i) => ({ key: `k${i}`, bucket: "a", x0: (i * 2.5) % 1000, x1: (i * 2.5 + 40) % 1000 }));
+    const zoomed = whole.filter((a) => a.x0 < 125).map((a) => ({ ...a, x0: a.x0 * 8, x1: a.x1 * 8 }));
+    const far = clusterToMax(whole, 30, 2000);
+    const near = clusterToMax(zoomed, 30, 2000);
+    expect(near.px).toBeLessThan(far.px);
+    expect(clusterToMax(zoomed.slice(0, 20), 30, 2000).clusters).toHaveLength(20);
+  });
+
+  it("does not merge across kinds or rows to reach the limit, and says so", () => {
+    const arrows = ["a", "b", "c", "d"].flatMap((bucket) => spread(10, 1, bucket));
+    const found = clusterToMax(arrows, 3, 2000);
+    expect(found.withinMax).toBe(false);
+    expect(found.clusters).toHaveLength(4);
+    for (const c of found.clusters) expect(new Set(c.members.map((m) => m)).size).toBe(c.members.length);
+    expect(new Set(found.clusters.map((c) => c.bucket)).size).toBe(4);
+  });
+
+  it("defaults to 20", () => {
+    expect(MAX_ARROWS).toBe(20);
+  });
+
+  it("accepts whole numbers from 1 to the cap, and nothing else", () => {
+    for (const ok of ["1", "20", "50", "499", String(MAX_ARROWS_CAP)]) expect(parseArrowLimit(ok), ok).toBe(Number(ok));
+    for (const bad of ["", " ", "0", "00", "-1", "1.5", "2.0", "abc", "1e2", "+5", "0x10", "٣", String(MAX_ARROWS_CAP + 1), "99999999999999999999", "5 "]) {
+      expect(parseArrowLimit(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it("stays fast on thousands of arrows, the search included", () => {
+    for (const n of [5000, 20000]) {
+      const arrows = Array.from({ length: n }, (_, i) => ({ key: `k${i}`, bucket: `b${i % 8}`, x0: (i * 37) % 1800, x1: (i * 91) % 1800 }));
+      const started = performance.now();
+      clusterToMax(arrows, 30, 3600);
+      // Measured in the report; the bound is generous so a slow CI machine does not flake.
+      expect(performance.now() - started).toBeLessThan(2000);
+    }
   });
 });

@@ -108,5 +108,12 @@
   "linkTitle": "Title",
   "userInteractionsLabel": "User interactions",
   "otherInteractionsLabel": "Other agents interactions",
-  "closeGroup": "Hide {title} (switch it on again in the toolbar)"
+  "closeGroup": "Hide {title} (switch it on again in the toolbar)",
+  "readoutLinkGroup": "{kind} · {from} → {to} · {count} merged · {start} – {end}",
+  "linkGroupTitle": "{count} × {kind}",
+  "linkGroupHeading": "Merged arrows (select one to zoom to it)",
+  "linkUserMessage": "User message",
+  "maxArrowsLabel": "Max arrows",
+  "maxArrowsTitle": "The most arrows shown at once; more are merged by closeness",
+  "maxArrowsInvalid": "Enter a whole number from 1 to {max}; the last valid limit stays in force"
 }
