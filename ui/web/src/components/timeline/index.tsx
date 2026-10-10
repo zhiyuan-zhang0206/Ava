@@ -108,7 +108,7 @@ import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { classifyItem } from "./model/runs";
 import { groupTimelineSegments } from "./model/segments";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
-import { resolveSavedTimelineAnchor, useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
+import { applySavedTimelineScroll, useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
 import { CompactHistoryDivider, LoadOlderSpinner, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
@@ -217,9 +217,11 @@ export function TimelineView({
   const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
   // The child layout pass precedes useTimeline's parent selection effect.
   // Reserve a saved position until the mount's switch bump has been scheduled;
-  // its next commit (or the first ResizeObserver pass) restores before paint.
+  // a later commit or ResizeObserver pass restores once the target fits.
   const initialRestorePassRef = useRef(true);
-  useLayoutEffect(() => () => { initialRestorePassRef.current = true; }, []);
+  // The first post-mount attempt marks the end of mount-owned requests.
+  const restoreRequestRef = useRef<number | null>(null);
+  useLayoutEffect(() => () => { initialRestorePassRef.current = true; restoreRequestRef.current = null; }, []);
   // Memory identity for the scroll handler (registered once with empty deps,
   // so it reads the latest props through a ref).
   const scrollMemoryRef = useRef<{ entryKey: string; contentKey: string } | null>(null);
@@ -519,16 +521,9 @@ export function TimelineView({
         pendingRestoreRef.current = null; // other content now -- position is stale
         return;
       }
-      const max = viewport.scrollHeight - viewport.clientHeight;
-      if (max <= 0) return; // content not laid out yet -- retried on the next pass
-      const anchor = !saved.followBottom ? saved.anchor : undefined;
-      const target = anchor ? resolveSavedTimelineAnchor(viewport, anchor, compactBuffer, canonicalItemsRef.current) : null;
-      if (target?.present && !target.node) return;
-      if (target?.node) {
-        viewport.scrollTop += target.node.getBoundingClientRect().top -
-          viewport.getBoundingClientRect().top - target.viewportTop;
-      } else {
-        viewport.scrollTop = Math.min(saved.scrollTop, max);
+      if (!applySavedTimelineScroll(viewport, saved, compactBuffer, canonicalItemsRef.current)) {
+        restoreRequestRef.current ??= useTimelineStore.getState().scrollToBottomRequest;
+        return;
       }
       controller.notifyRestored({
         scrollTop: viewport.scrollTop,
@@ -558,12 +553,13 @@ export function TimelineView({
       // genuine downward move (not the prepend echo below it) ends the burst.
       const isPrependEcho = prependEchoRef.current;
       prependEchoRef.current = false;
+      if (direction !== "none" && !isPrependEcho) pendingRestoreRef.current = null;
       if (direction === "down" && !isPrependEcho) upwardGestureRef.current.pages = 0;
       measureAtBottom();
       maybeLoadOlderAtTop(direction === "up");
       trimFollowing();
       const mem = scrollMemoryRef.current;
-      if (mem) {
+      if (mem && !pendingRestoreRef.current) {
         // The reader's position for this history entry; the sticky flag rides
         // along so a follower returns following instead of frozen at a stale
         // offset.
@@ -598,6 +594,7 @@ export function TimelineView({
     // on. Touch devices never fire wheel.
     const onWheel = (e: WheelEvent) => {
       controller.handleWheel(e.deltaY, snapshot());
+      if (!controller.isSticky()) pendingRestoreRef.current = null;
     };
     viewport.addEventListener("wheel", onWheel, { passive: true });
 
@@ -666,16 +663,13 @@ export function TimelineView({
   const scrollToBottomRequest = useTimelineStore((s) => s.scrollToBottomRequest);
   useLayoutEffect(() => {
     pendingAnchorRef.current = null;
-    // A kept history entry's pending restore owns the position while it lasts
-    // (the effect right below lands it). This expects the mount's own switch
-    // bump — switchThread bumps on every mount, and that bump's pin run lands
-    // one commit after the restore's first look — so every request in the
-    // window is treated as part of entering the page. The window closes with
-    // the first commit whose content is measurable (the restore clears the
-    // flag), long before a user command can arrive; a restore abandoned on a
-    // content mismatch leaves sticky at its mount value, so growth still
-    // follows.
-    if (pendingRestoreRef.current) return;
+    // Mount selection yields until the saved position can land. After a
+    // post-mount restore attempt, a new send/selection request supersedes an
+    // unreachable target instead of waiting for shortened content to grow.
+    if (pendingRestoreRef.current) {
+      if (restoreRequestRef.current === null || restoreRequestRef.current === scrollToBottomRequest) return;
+      pendingRestoreRef.current = null;
+    }
     // We are about to force the viewport to the bottom, so hide the button
     // immediately rather than waiting for the post-scroll measurement.
     setAtBottom(true);

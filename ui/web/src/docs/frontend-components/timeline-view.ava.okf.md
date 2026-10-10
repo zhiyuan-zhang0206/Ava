@@ -62,7 +62,7 @@ Reading-row compensation and its parked window pin yield to the sticky controlle
 while following. A bottom-button, send, or switch command clears the parked row
 so subsequent commits cannot cancel smooth scrolling or restore an old position.
 
-History restore waits past the first child layout pass so the parent's mount pin cannot override it.
+History restores wait past the mount pin for layout to hold the target; scroll/send supersedes them.
 
 After a compact, `display.compact_history_sessions` controls automatic history pages above the new summary: 0 skips them, positive values fetch that many pages, and -1 walks all available pages serially. The store edge and retention hook live in [[ui/web/src/docs/frontend-state/timeline-cache.ava.okf.md|Selected Timeline State]].
 
