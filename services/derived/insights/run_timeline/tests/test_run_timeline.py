@@ -144,7 +144,9 @@ def test_default_window_is_the_lifetime_of_the_messages_read_times(
 
 def test_lifecycle_events_never_move_the_default_window(monkeypatch: pytest.MonkeyPatch) -> None:
     world = World(monkeypatch)
-    world.events = [RunTimelineEvent(ts=T0 + timedelta(days=1), kind="spawn", label=None)]
+    world.events = [
+        RunTimelineEvent(ts=T0 + timedelta(days=1), kind="spawn", label=None, source="user")
+    ]
     result = read(world)
     assert (result.window.from_, result.window.to) == (T0, T0 + timedelta(minutes=10))
     assert [e.kind for e in result.events] == ["spawn"]
@@ -188,6 +190,23 @@ def test_a_unit_names_the_leaf_covering_its_first_message(monkeypatch: pytest.Mo
         ("output", 2, "1"),
         ("text", 4, "2"),
     ]
+
+
+def test_an_inbound_block_names_the_inbound_row_the_checkpoint_stamped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = World(monkeypatch)
+    messages = history_messages()
+    messages[1].additional_kwargs["ava_inbound_id"] = 77
+    world.view = view(messages)
+    result = read(world)
+    assert {u.kind: u.inbound_id for u in result.units} == {
+        "inbound": 77,
+        "thinking": None,
+        "call": None,
+        "output": None,
+        "text": None,
+    }
 
 
 def test_a_unit_no_leaf_covers_has_no_parent(monkeypatch: pytest.MonkeyPatch) -> None:

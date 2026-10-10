@@ -1,4 +1,4 @@
-"""Lifecycle markers come from `audit_events` — spawn, restart, terminate only, this agent only."""
+"""Lifecycle markers come from `audit_events` — spawn, fork, restart, terminate only, this agent only."""
 
 from __future__ import annotations
 
@@ -14,12 +14,14 @@ from services.derived.insights.run_timeline import _lifecycle
 
 _INSERT: LiteralString = (
     "INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, source, "
-    "agent_id) VALUES (%s, now() - (%s * interval '1 hour'), 'm', 'p', %s, 'info', 'test', %s)"
+    "agent_id) VALUES (%s, now() - (%s * interval '1 hour'), 'm', 'p', %s, 'info', %s, %s)"
 )
 
 
-def record(conn: psycopg.Connection, agent_id: int, name: str, hours_ago: float) -> None:
-    conn.execute(_INSERT, (uuid.uuid4().int % (1 << 62), hours_ago, name, agent_id))
+def record(
+    conn: psycopg.Connection, agent_id: int, name: str, hours_ago: float, source: str = "test"
+) -> None:
+    conn.execute(_INSERT, (uuid.uuid4().int % (1 << 62), hours_ago, name, source, agent_id))
     conn.commit()
 
 
@@ -33,6 +35,16 @@ def test_only_lifecycle_events_of_the_agent_in_the_window(db_conn: psycopg.Conne
     now = datetime.now(UTC)
     events = _lifecycle.read(Database.from_settings(), 405, now - timedelta(hours=48), now)
     assert [e.kind for e in events] == ["spawn", "restart_completed", "terminate"]
+
+
+def test_fork_and_restart_are_markers_and_carry_who_caused_them(
+    db_conn: psycopg.Connection,
+) -> None:
+    record(db_conn, 405, "fork", 3, "agent:7")
+    record(db_conn, 405, "restart", 2, "user")
+    now = datetime.now(UTC)
+    events = _lifecycle.read(Database.from_settings(), 405, now - timedelta(hours=48), now)
+    assert [(e.kind, e.source) for e in events] == [("fork", "agent:7"), ("restart", "user")]
 
 
 def test_a_window_longer_than_a_page_is_read_completely(

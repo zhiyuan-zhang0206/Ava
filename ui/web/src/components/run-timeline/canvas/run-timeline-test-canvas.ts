@@ -32,6 +32,7 @@ class RecordingContext {
   fillStyle = "";
   strokeStyle = "";
   lineWidth = 1;
+  globalAlpha = 1;
   font = "";
   textAlign = "left";
   textBaseline = "alphabetic";
@@ -52,6 +53,17 @@ class RecordingContext {
   }
   clearRect() {
     this.frame = [];
+  }
+  // A curve is recorded as its box: from (x, y) to (x + w, y + h), so a test can read both ends.
+  private from = { x: 0, y: 0 };
+  moveTo(x: number, y: number) {
+    this.from = { x, y };
+    this.path = null;
+  }
+  lineTo = noop;
+  closePath = noop;
+  bezierCurveTo(_c1x: number, _c1y: number, _c2x: number, _c2y: number, x: number, y: number) {
+    this.path = { x: this.from.x, y: this.from.y, w: x - this.from.x, h: y - this.from.y, radius: 0 };
   }
   rect(x: number, y: number, w: number, h: number) {
     this.path = { x, y, w, h, radius: 0 };
@@ -98,6 +110,12 @@ export async function paintFrame() {
   await act(async () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
+}
+
+/** What the arrows canvas drew in its last frame. */
+export function drawnLinks(): Drawn[] {
+  const el = screen.getByTestId<HTMLCanvasElement>("run-timeline-links-canvas");
+  return contexts.get(el)?.frame ?? [];
 }
 
 /** What the canvas of `row` drew in its last frame. */

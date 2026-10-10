@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
+import { LINK_COLORS, LINK_KINDS, type LinkKind } from "./model/timeline-links";
 import { BLOCK_CLASSES, classColor, type BlockClass, type Highlight } from "./model/timeline-model";
 
 export function RunTimelineLegend({
@@ -17,6 +18,10 @@ export function RunTimelineLegend({
   classLabel,
   sources,
   sourceLabel,
+  linkKinds,
+  linkLabels,
+  linkCounts,
+  onToggleLinkKind,
 }: {
   highlight: Highlight | null;
   onHighlight: (highlight: Highlight | null) => void;
@@ -24,6 +29,12 @@ export function RunTimelineLegend({
   /** The distinct senders of the highlighted inbound kind. */
   sources: readonly string[];
   sourceLabel: (source: string) => string;
+  /** The kinds of arrows between agents that are drawn. */
+  linkKinds: ReadonlySet<LinkKind>;
+  linkLabels: Record<LinkKind, string>;
+  /** How many arrows of each kind the view has. */
+  linkCounts: ReadonlyMap<LinkKind, number>;
+  onToggleLinkKind: (kind: LinkKind) => void;
 }) {
   const t = useTranslations("runTimeline");
   return (
@@ -55,6 +66,30 @@ export function RunTimelineLegend({
                   style={{ background: classColor(kind) }}
                 />
                 {classLabel[kind]}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <ul
+        aria-label={t("linkLegendLabel")}
+        data-testid="run-timeline-link-legend"
+        className={cn(FLEX, "flex-wrap gap-x-1 gap-y-1 pl-[88px] text-[10px] text-muted-foreground")}
+      >
+        {LINK_KINDS.map((kind) => {
+          const on = linkKinds.has(kind);
+          return (
+            <li key={kind}>
+              <button
+                type="button"
+                aria-pressed={on}
+                data-testid={`run-timeline-link-legend-${kind}`}
+                title={t("linkLegendToggle", { kind: linkLabels[kind] })}
+                onClick={() => onToggleLinkKind(kind)}
+                className={cn(FLEX, "items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground", !on && "opacity-50")}
+              >
+                <span aria-hidden="true" className="inline-block h-0.5 w-3.5 rounded-sm" style={{ background: LINK_COLORS[kind] }} />
+                {`${linkLabels[kind]} ${linkCounts.get(kind) ?? 0}`}
               </button>
             </li>
           );
