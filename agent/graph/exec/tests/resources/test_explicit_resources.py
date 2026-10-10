@@ -1,10 +1,15 @@
 """Cleanup consumes only the exact resources retained by the original execution."""
 
 import asyncio
-import threading
+import os
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
+from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._process import ExecTeardownError, TeardownFailure
+from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import _finish_request_evidence, _retain_late_reader_completion
 from base.native_process.turn_identity import HostedTurnResources
 
@@ -14,6 +19,18 @@ def _files(directory: Path) -> tuple[Path, Path]:
     request.write_text("request")
     result.write_text("result")
     return request, result
+
+
+def _closed_output_pipe() -> ExecOutputPipe:
+    source, writer = os.pipe()
+    os.close(writer)
+    # The output owner consumes only Popen's stdout handle. Use an actual pipe
+    # at EOF without launching a process unrelated to the resource-CAS proof.
+    proc = cast("subprocess.Popen[bytes]", SimpleNamespace(stdout=os.fdopen(source, "rb")))
+    reader = ExecOutputPipe(proc, StreamingTextIO(max_chars=64))
+    reader.finish_now(0)
+    assert reader.closed
+    return reader
 
 
 def test_failed_cleanup_keeps_primary_resource_and_wire_evidence(tmp_path: Path) -> None:
@@ -39,7 +56,7 @@ async def test_late_reader_cannot_clean_replacement_domain(tmp_path: Path) -> No
     original, replacement = object(), object()
     resources.unresolved[request] = original
     failure = ExecTeardownError((TeardownFailure("reader_join", TimeoutError("join")),))
-    reader = threading.Thread()  # Already finished: no new join owner or worker is created.
+    reader = _closed_output_pipe()
     _retain_late_reader_completion(failure, request, result, reader, resources=resources)
     tasks = set(resources.completions)
     resources.unresolved[request] = replacement
@@ -62,7 +79,7 @@ async def test_secondary_teardown_failure_cannot_certify_cleanup(tmp_path: Path)
         )
     )
     _retain_late_reader_completion(
-        failure, request, result, threading.Thread(), resources=resources
+        failure, request, result, _closed_output_pipe(), resources=resources
     )
     assert not resources.completions
     assert resources.unresolved[request] is domain
