@@ -12,3 +12,5 @@
     "test_stop_extras.py",
     "test_stop_terminals.py",
 ]
+"tests.fixtures.unit.generation" = ["."]
+"tests.fixtures.unit.homes" = ["."]

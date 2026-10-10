@@ -12,3 +12,5 @@
     "test_pty_commands.py",
     "test_stop_parser.py",
 ]
+"tests.fixtures.unit.generation" = ["."]
+"tests.fixtures.unit.homes" = ["."]

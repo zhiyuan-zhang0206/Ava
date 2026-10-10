@@ -1,1 +1,2 @@
 "tests.path_scoped.db_authority_tests" = ["test_roles.py"]
+"tests.fixtures.unit.gateway" = ["test_command_http.py"]

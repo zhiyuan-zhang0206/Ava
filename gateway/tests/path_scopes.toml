@@ -3,3 +3,5 @@
 "tests.path_scoped.gateway_tests" = [
     ".",
 ]
+"tests.fixtures.unit.homes" = ["."]
+"tests.fixtures.unit.identity" = ["."]

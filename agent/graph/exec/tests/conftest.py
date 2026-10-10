@@ -4,6 +4,7 @@ import pytest
 
 from agent.graph.exec.tests.output_inputs import CropConfig
 from base.clock import Clock, ClockConfig
+from tests.fixtures.unit.homes import unit_home as unit_home
 
 
 @pytest.fixture
