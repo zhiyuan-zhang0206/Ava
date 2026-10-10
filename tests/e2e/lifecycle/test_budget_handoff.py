@@ -28,6 +28,7 @@ from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record, scratch_root
+from tests.fixtures.model_catalog import model_catalog as model_catalog
 
 _OBSERVER = (
     Path(__file__).resolve().parents[3]

@@ -10,3 +10,17 @@
     "test_llm_helpers.py",
     "test_llm_understanding_wiring.py",
 ]
+"tests.fixtures.model_catalog" = [
+    "test_build_with_extensions.py",
+    "test_interrupt.py",
+]
+"tests.fixtures.unit.config_authority" = [
+    "test_interrupt.py",
+]
+"tests.fixtures.log_capture" = [
+    "test_build_with_extensions.py",
+    "test_interrupt.py",
+    "test_llm_helpers.py",
+    "test_model_interrupt_owner.py",
+    "test_node_log.py",
+]
