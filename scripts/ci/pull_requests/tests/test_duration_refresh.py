@@ -226,7 +226,13 @@ def test_admission_uses_workflow_revision_and_requires_publication() -> None:
     jobs = yaml.safe_load(workflow.read_text())["jobs"]
     job = jobs["submit"]
     assert job["needs"] == "refresh"
-    assert job["if"] == "needs.refresh.outputs.changed == 'true'"
+    assert {part.strip() for part in job["if"].split("&&")} == {
+        "!cancelled()",
+        "needs.refresh.result == 'success'",
+        "needs.refresh.outputs.changed == 'true'",
+        "needs.refresh.outputs.pr-number != ''",
+        "needs.refresh.outputs.head-sha != ''",
+    }
     checkout = next(
         step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@")
     )
