@@ -39,6 +39,8 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -150,6 +152,7 @@ def test_get_ava_overview_advertises_installed_plugin_namespace() -> None:
 
 def _make_runtime(
     *,
+    resources: HostedTurnResources,
     llm=None,
     event_publisher=None,
     execution_info: ExecutionInfo | None = None,
@@ -165,6 +168,7 @@ def _make_runtime(
     if isinstance(llm, MagicMock):
         llm.bind_tools.return_value = llm
     ctx = AvaContext(
+        hosted_resources=resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
@@ -190,6 +194,7 @@ def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
 
 
 async def test_cancel_branch_publishes_cancelled_and_returns_halted(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     ledger: LlmLedger,
 ) -> None:
@@ -219,7 +224,10 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
 
     trigger = asyncio.create_task(_trigger())
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG, ledger=ledger
+        state,
+        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        _CONFIG,
+        ledger=ledger,
     )
     await trigger
 
@@ -242,6 +250,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
 
 
 async def test_stream_normal_completion_no_cancelled_event(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     ledger: LlmLedger,
 ) -> None:
@@ -269,7 +278,10 @@ async def test_stream_normal_completion_no_cancelled_event(
 
     # Note: do not set cancel_event —— stream should complete naturally
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG, ledger=ledger
+        state,
+        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        _CONFIG,
+        ledger=ledger,
     )
 
     # (a) no Cancelled event
@@ -287,7 +299,9 @@ async def test_stream_normal_completion_no_cancelled_event(
     )
 
 
-async def test_silent_idle_with_reasoning_continue_loops_not_raises(ledger: LlmLedger) -> None:
+async def test_silent_idle_with_reasoning_continue_loops_not_raises(
+    hosted_resources: HostedTurnResources, ledger: LlmLedger
+) -> None:
     """No tool_call AND empty text BUT output_tokens > 0 (model produced
     reasoning) → the node no longer raises. It commits the reasoning AIMessage
     and returns halted=False so the claim node loops straight back to the LLM
@@ -306,7 +320,10 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises(ledger: LlmL
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
+        state,
+        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _CONFIG,
+        ledger=ledger,
     )
 
     assert isinstance(result, Command)
@@ -320,7 +337,7 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises(ledger: LlmL
 
 
 async def test_truly_empty_no_reasoning_halts_with_warning(
-    loguru_records, ledger: LlmLedger
+    hosted_resources: HostedTurnResources, loguru_records, ledger: LlmLedger
 ) -> None:
     """No tool_call AND empty text AND output_tokens=0 (model truly produced
     nothing, not even reasoning) → the existing WARNING + halt path still
@@ -338,7 +355,10 @@ async def test_truly_empty_no_reasoning_halts_with_warning(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
+        state,
+        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _CONFIG,
+        ledger=ledger,
     )
 
     assert isinstance(result, Command)
@@ -397,6 +417,7 @@ def test_text_display_uses_dot_text_for_list_content() -> None:
 
 
 async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_done(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     ledger: LlmLedger,
 ) -> None:
@@ -417,7 +438,10 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
     fake_cancel_event.set()
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG, ledger=ledger
+        state,
+        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        _CONFIG,
+        ledger=ledger,
     )
 
     assert isinstance(result, Command)
@@ -436,7 +460,9 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 # ───────────── Silent idle supplementary tests (PR #35 review, agent #976) ─────────────
 
 
-async def test_silent_idle_with_thinking_blocks_continue_loops(ledger: LlmLedger) -> None:
+async def test_silent_idle_with_thinking_blocks_continue_loops(
+    hosted_resources: HostedTurnResources, ledger: LlmLedger
+) -> None:
     """thinking blocks present but output_tokens=0 → still judged as silent idle.
 
     The first condition of `has_reasoning`: when content contains a type="thinking" block,
@@ -458,7 +484,10 @@ async def test_silent_idle_with_thinking_blocks_continue_loops(ledger: LlmLedger
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
+        state,
+        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _CONFIG,
+        ledger=ledger,
     )
 
     assert isinstance(result, Command)
@@ -534,6 +563,7 @@ def test_check_consecutive_error_cap_below_threshold_passes(ledger: LlmLedger) -
 
 
 async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
+    hosted_resources: HostedTurnResources,
     ledger: LlmLedger,
 ) -> None:
     """DeepSeek model's reasoning is in `additional_kwargs.reasoning_content`,
@@ -557,7 +587,10 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
+        state,
+        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _CONFIG,
+        ledger=ledger,
     )
 
     assert isinstance(result, Command)
@@ -569,6 +602,7 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
 
 
 async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
     ledger: LlmLedger,
 ) -> None:
@@ -590,7 +624,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
         fake_llm.astream.return_value = _reasoning_content_only()
         result = await llm_node(
             AgentState(messages=[HumanMessage(content="hi")], halted=False),
-            _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
+            _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
             _CONFIG,
             ledger=ledger,
         )
@@ -626,6 +660,7 @@ def _astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
 
 
 async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fields(
+    hosted_resources: HostedTurnResources,
     loguru_records,
     ledger: LlmLedger,
 ) -> None:
@@ -644,7 +679,10 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
 
     with pytest.raises(FatalProviderError) as exc_info:
         await llm_node(
-            state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
+            state,
+            _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+            _CONFIG,
+            ledger=ledger,
         )
 
     assert exc_info.value.error_class == "permanent"
