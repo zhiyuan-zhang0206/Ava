@@ -132,7 +132,11 @@ path as repository-rooted. Source embedded in Python `-c` uses the same collecto
 it has no implicit relative-import package or source-file resource anchor.
 The lexical fact pass also identifies recognized launchers. Source with none
 skips the second execution-input pass; launcher-bearing source retains the full
-execution grammar and its unknown diagnostics.
+execution grammar and its unknown diagnostics. Within one execution-input query,
+a transparent helper declaration and lexical parent share one shape analysis
+and reuse the body scope already constructed by the visitor. Each caller still
+resolves its own source argument and unknown independently; no helper or scope
+cache survives the query or crosses source files.
 
 These facts do not replace import-linter's graph or enable new placement gates.
 CI reverse impact follows unpruned runtime dependencies; test ownership remains
