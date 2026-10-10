@@ -12,6 +12,7 @@ from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -74,6 +75,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     )
 
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         control_pool=aops_pool,
         checkpointer=Mock(),
@@ -129,6 +131,7 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
     if status == "idling":
         assert await settle_hosted_runtime(aops_pool, original, bus=event_bus, resources=None)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),

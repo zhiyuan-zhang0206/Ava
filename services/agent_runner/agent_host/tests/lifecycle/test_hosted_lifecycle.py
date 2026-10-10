@@ -32,6 +32,7 @@ from base.native_process.turn_identity import HostedTurnResources
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.force_termination import kill_terminating_agent_shells
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 def _graph_blocked_until_released(
@@ -108,6 +109,7 @@ async def test_hosted_applies_only_after_continuation_returns(
     inbound = _command(db_conn, agent_id, kind)
     entered, release = asyncio.Event(), asyncio.Event()
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=_graph_blocked_until_released(kind, entered, release),
@@ -185,6 +187,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
     )
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=graph,
@@ -291,6 +294,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
     ] == [inbound]
     assert await settle_hosted_runtime(aops_pool, owner, bus=event_bus, resources=None)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -355,6 +359,7 @@ async def _run_terminating_turn(
         return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
     )
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=graph,
@@ -492,6 +497,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     )
     agent_id = _agent(db_conn)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -529,6 +535,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
 ) -> None:
     agent_id = _agent(db_conn)
     old = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),

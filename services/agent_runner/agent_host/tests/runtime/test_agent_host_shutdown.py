@@ -28,6 +28,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
@@ -194,7 +195,8 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
             sys.executable,
             "-c",
             "from services.agent_runner.agent_host.tests.runtime.test_agent_host_shutdown import _exercise_shutdown; "
-            f"_exercise_shutdown({failure!r})",
+            "import sys; _exercise_shutdown(sys.argv[1])",
+            failure,
         ],
         capture_output=True,
         check=False,
@@ -281,6 +283,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
 
     monkeypatch.setattr(host_mod, "_RELEASE_OWNER_TIMEOUT_S", 0.05)
     host = host_mod.AgentHost(
+        policy=configured_policy(),
         pool=cast(Any, _UnreachablePool()),
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),

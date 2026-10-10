@@ -28,6 +28,7 @@ from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.test_turn_dispatcher import _FixedClock, _ScanScheduler
 from tests.components.base.poll_until import poll_until_async
 
@@ -62,6 +63,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
     lifecycle = insert_inbound(db_conn, agent, "", "system:test", kind="restart")
     db_conn.commit()
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=AsyncMock(),
         graph=AsyncMock(),
@@ -128,6 +130,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
 
     graph, saver = await _graph(aops_pool, agent, work)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         graph=graph,
         checkpointer=saver,
@@ -216,6 +219,7 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
         as_node="work",
     )
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
@@ -284,6 +288,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     )
     agent = incarnation.agent_id
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=AsyncMock(),
         graph=AsyncMock(),
@@ -327,6 +332,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
     )
     agent = incarnation.agent_id
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=AsyncMock(),
         graph=AsyncMock(),
