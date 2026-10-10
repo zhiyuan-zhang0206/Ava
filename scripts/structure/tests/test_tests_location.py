@@ -378,6 +378,16 @@ def test_every_shipped_entry_has_a_known_category_and_a_reason() -> None:
         assert reason.strip() and "\n" not in reason, rel
 
 
+def test_shipped_entries_do_not_bypass_an_available_complete_root_proof() -> None:
+    from scripts.structure import placement_evidence
+
+    index = placement.ModuleIndex(_ROOT)
+    for rel in tests_location_allowed.ALLOWED:
+        tree = ast.parse((_ROOT / rel).read_text(encoding="utf-8"), filename=rel)
+        proof = placement_evidence.subject_lca(tree, rel, index)
+        assert proof.directory != "", f"{rel} needs no filename entry: its subjects prove root"
+
+
 # ------------------------------------------------------------------ --suggest (on demand, reads the code)
 
 
@@ -439,6 +449,27 @@ def test_complete_cross_package_subjects_prove_root_without_registration(
 ) -> None:
     _track(repo, "tests/components/agent/test_integration.py", source)
     assert _run(repo, capsys) == (0, "", "")
+
+
+@pytest.mark.parametrize(
+    "new_input",
+    [
+        "def consume(path):\n    return path.read_text()\n",
+        "def consume(path):\n    return path.read_bytes()\n",
+        "import importlib\nimportlib.import_module(unknown)\n",
+    ],
+)
+def test_retired_registration_rechecks_changed_inputs_instead_of_retaining_path_authority(
+    repo: pathlib.Path, capsys: pytest.CaptureFixture[str], new_input: str
+) -> None:
+    rel = "tests/components/agent/test_contract.py"
+    source = "from agent.own import hosted\nfrom base.net import retry\nhosted.admit()\nretry.backoff()\n"
+    _track(repo, rel, source)
+    assert _run(repo, capsys) == (0, "", "")
+    _write(repo, rel, source + new_input)
+    status, out, _ = _run(repo, capsys)
+    assert status == 1
+    assert "incomplete subject evidence" in out
 
 
 @pytest.mark.parametrize(

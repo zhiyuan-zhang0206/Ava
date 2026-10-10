@@ -45,6 +45,15 @@ policy; this change adds no entries or baseline. Stale files, redundant entries,
 unknown categories and empty reasons still fail. Future policy retirement needs
 a verified replacement proof, not another registration.
 
+Thirty existing entries now use the complete subject proof instead of their
+filename registration. They retain their root location, business assertions and
+fixture bindings; the gate rechecks their current source, so adding an unknown
+input fails admission. The remaining table still carries unproved historical
+artifact, harness and integration policies. Its presence is migration debt, not
+evidence that those subjects or the legacy private-patch authority are complete.
+The shipped-registry test refuses an entry whose current subjects already prove
+root, preventing needless filename policy from returning.
+
 ## Diagnosis and scope
 
 `--suggest PATH ...` explains the same strict subject proof. A single-component
