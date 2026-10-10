@@ -461,12 +461,15 @@ class _OtlpBackend:
 
     def _close_admission(self) -> tuple[OtlpWorker | None, BaseException | None]:
         """Keep a deferred attempt asynchronous, then stop even if preparation failed."""
-        # The deferred hold can begin its existing exporter attempt without
-        # waiting on SDK construction. It remains the same owned work after a
-        # finite return; an empty hold still constructs nothing.
+        # Deferred bring-up retains its enabled gate and finite observation owner.
         preparation_error: BaseException | None = None
         try:
-            if self._deferral.is_active() and not self._queue.empty() and not self._closed.is_set():
+            if (
+                self._deferral.is_active()
+                and not self._queue.empty()
+                and not self._closed.is_set()
+                and self._enabled()
+            ):
                 self._get_worker()
         except BaseException as exc:
             preparation_error = exc

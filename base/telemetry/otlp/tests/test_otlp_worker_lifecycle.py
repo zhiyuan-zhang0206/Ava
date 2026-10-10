@@ -228,6 +228,60 @@ def test_shutdown_replays_deferred_metrics_before_logs_once(
     assert len(calls) == 4
 
 
+def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, logs, metrics = _backend(monkeypatch)
+    reads: list[bool] = []
+    delivered: list[Event] = []
+
+    def enabled_at_bringup() -> bool:
+        reads.append(False)
+        return False
+
+    monkeypatch.setattr(backend, "_enabled", enabled_at_bringup)
+    monkeypatch.setattr(backend, "_emit_log", delivered.append)
+    event = _event()
+    backend.defer_until_exit()
+    backend.export_batch([event])
+    assert reads == []  # holding remains cold; the flag is read only at bring-up
+    result = backend.shutdown()
+    assert reads == [False]
+    assert backend._closed.is_set()
+    assert backend._deferral.stop(timeout=5)
+    assert result.status is DrainStatus.UNFINISHED
+    assert backend._worker is None
+    assert backend._queue.qsize() == 1
+    assert delivered == []
+    assert not logs.flushed.is_set() and not logs.closed.is_set()
+    assert not metrics.closed.is_set()
+
+
+def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, logs, metrics = _backend(monkeypatch)
+    reads: list[bool] = []
+    delivered: list[Event] = []
+
+    def enabled_at_bringup() -> bool:
+        reads.append(True)
+        return True
+
+    monkeypatch.setattr(backend, "_enabled", enabled_at_bringup)
+    monkeypatch.setattr(backend, "_emit_log", delivered.append)
+    event = _event()
+    backend.defer_until_exit()
+    backend.export_batch([event])
+    assert reads == []
+    assert backend.shutdown().status is DrainStatus.COMPLETED
+    assert reads == [True]
+    assert backend._worker is not None
+    assert not backend._worker._thread.is_alive()
+    assert delivered == [event]
+    assert logs.closed.is_set() and metrics.closed.is_set()
+
+
 def test_primary_error_survives_blocked_secondary_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
