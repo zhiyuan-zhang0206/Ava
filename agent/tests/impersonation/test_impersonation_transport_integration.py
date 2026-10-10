@@ -23,7 +23,11 @@ from agent.tests.impersonation.test_impersonation_integration import (
     _prepare_graph,
     _relay_ready,
 )
+from agent.tests.impersonation.test_impersonation_integration import (
+    handoff_clients as handoff_clients,
+)
 from base.agents import impersonation as leases
+from base.agents.context.clients import ClientSet
 from base.agents.impersonation import _store, delivery
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.cluster.machine import machine_name
@@ -148,12 +152,18 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     """Actual graph fencing persists through delivery faults; only authority end resumes it."""
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -242,10 +252,16 @@ async def test_unreadable_executor_preserves_authority_across_native_wakes(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     """Repeated unreadable process evidence cannot spend TTL or consume queued input."""
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     await graph.ainvoke(
@@ -320,6 +336,7 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     """A newly admitted runtime reads the durable takeover before doing native work."""
     from dataclasses import replace
@@ -327,7 +344,12 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     from base.agents.impersonation import history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
@@ -428,10 +450,16 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     """Delivery exhaustion limits pushes, but does not revoke a valid controller's receipt."""
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
@@ -504,6 +532,7 @@ async def test_end_note_resumes_an_empty_queue(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     """A release with nothing queued must still run the end note's first turn.
 
@@ -515,7 +544,12 @@ async def test_end_note_resumes_an_empty_queue(
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -597,13 +631,19 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
 ) -> None:
     """Task #5010: an ACK acknowledges the message, not the work — input the executor
     received and never finished survives expiry into the record and the resume note."""
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+        config_authority=config_authority,
+        clients=handoff_clients,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(history, "workspace_dir", Mock(return_value=tmp_path))
