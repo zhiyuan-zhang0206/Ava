@@ -1,9 +1,7 @@
 """OTLP export backend — the write side of the OTel + Tempo/Loki/Prometheus stack.
 
-Exports the unified event stream: every batch the emitter's drain thread flushes
-(``base.telemetry._write_batch``) is exported here, when ``AVA_TELEMETRY_OTLP_ENABLED=true``
-(default since the 2026-08-11 stack decision). The Postgres `events` copy was retired with the
-LGTM cutover (task #1197) — OTLP is now the only live sink besides the JSONL mirror.
+Exports unified emitter batches when the startup OTLP flag is enabled. The
+JSONL mirror precedes this ordinary observation sink; OTLP does not replace it.
 
 The endpoint (``AVA_TELEMETRY_OTLP_ENDPOINT``, default 127.0.0.1:4318) is the LOCAL OTel
 Collector sidecar on every machine (task #1266, 2026-08-14): agents never dial a backend
@@ -34,33 +32,13 @@ first hop is still its own sidecar. Three signals:
   ``ava trace ship`` is the separate recovery replay: gateway units dial Tempo
   directly; pure runners use the authenticated gateway collector ingress.
 
-Failure isolation — the contract this module exists to keep: **the OTLP side must never block,
-break, or slow the event drain after its JSONL mirror write.** Three layers:
+Exporter log mapping and SDK failures retain their named isolation scopes.
+The owned writer keeps provider creation, flush and teardown off exit callers;
+finite observations report unfinished work without claiming SDK termination.
 
-1. The emitter drain thread only does bounded ``put_nowait`` into this
-   module's queue (shed, counted, reported) plus in-memory metric recordings —
-   nothing here can block it.
-2. All network I/O runs on SDK-owned threads (``BatchLogRecordProcessor`` /
-   ``PeriodicExportingMetricReader``). Their exporters retry on their own
-   clock and drop when their bounded queues fill; they cannot raise into any
-   Ava thread.
-3. Every entry point is suppress-guarded end to end, and the emitter wraps the
-   call again (``_export_otlp``) — even a programming error here cannot cost a
-   batch its JSONL copy.
-
-Flag semantics: the implicit collector is available only to a registered machine running
-against the production ``~/.ava`` cluster. Other processes, including disposable exec children
-in test or ad-hoc homes, stay off unless an operator explicitly sets
-``AVA_TELEMETRY_OTLP_ENDPOINT``. Every allowed process reads ``AVA_TELEMETRY_OTLP_ENABLED``
-from the startup-frozen settings singleton (``restart_required`` on the config fields). Exec
-children never first-construct the OTel SDK during interpreter shutdown: the child deferral
-completes its bring-up during life (``base.telemetry.otlp.telemetry_otlp_defer``), and
-``_ensure()`` refuses to construct while ``sys.is_finalizing()`` is true — the invariant the
-old eager ``warmup()`` call served. This is **startup-applied**, matching every other config
-field in the system — there is no live-reload mechanism in ``base/config``, and the
-isolation above makes the flag a rare emergency kill switch, not the primary defense. Off
-means JSONL mirror only: Loki and Prometheus stop advancing. Flipping it + restarting is the
-documented apply path.
+Export defaults require a registered production machine; explicit endpoints
+allow other homes. Startup-frozen settings control enablement. First construction
+is refused during interpreter finalization; disabled export keeps the JSONL mirror.
 
 Child deferral (task #3816 M4b): an exec child arms `defer_until_exit()` before
 its first record; batches are held in the bounded queue — OTel stack, settings
@@ -76,6 +54,7 @@ mirror records the outage even while OTLP itself cannot carry the event.
 
 from __future__ import annotations
 
+import math
 import queue
 import sys
 import threading
@@ -83,7 +62,15 @@ import time
 from functools import cache
 from typing import Any
 
-from base.telemetry import Event, failure_isolated, report_no_pipeline, report_sink_failure
+from base.telemetry import (
+    DrainPhase,
+    DrainResult,
+    DrainStatus,
+    Event,
+    failure_isolated,
+    report_no_pipeline,
+    report_sink_failure,
+)
 from base.telemetry.metrics import ci_runs_metrics
 from base.telemetry.observability import (
     cluster_label,
@@ -92,11 +79,6 @@ from base.telemetry.observability import (
     production_identity,
 )
 from base.telemetry.otlp import telemetry_otlp_metrics
-from base.telemetry.otlp.telemetry_otlp_barrier import (
-    WorkerFlushMarker,
-    stop_worker,
-    wait_for_worker,
-)
 from base.telemetry.otlp.telemetry_otlp_defer import ChildDeferral
 from base.telemetry.otlp.telemetry_otlp_gauges import (
     GaugeValues,
@@ -121,6 +103,7 @@ from base.telemetry.otlp.telemetry_otlp_metrics import (
 from base.telemetry.otlp.telemetry_otlp_metrics import (
     _metric_views as _metric_views,
 )
+from base.telemetry.otlp.telemetry_otlp_worker import OtlpWorker
 
 __all__ = [
     "COLLECTOR_RETRY_INTERVAL_S",
@@ -347,6 +330,13 @@ class _OtlpBackend:
         self._init_failed_at: float | None = None
         self._init_lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self._worker: OtlpWorker | None = None
+        self._closed = threading.Event()
+        self._admission_lock = threading.Lock()
+        self._producers_idle = threading.Event()
+        self._producers_idle.set()
+        self._active_producers = 0
+        self._start_error: BaseException | None = None
         # Child deferral (task #3816 M4b) — policy in base.telemetry.otlp.telemetry_otlp_defer;
         # the lambdas look the backend methods up per call so test seams stay live.
         self._deferral = ChildDeferral(
@@ -366,10 +356,18 @@ class _OtlpBackend:
         While deferred (exec-child arm, task #3816 M4b) the batch is held in the
         same bounded queue with no worker — no settings read, no OTel import —
         until saturation, the max-age timer, or finalize()/shutdown()."""
-        if not events:
+        if not events or self._closed.is_set():
             return
         if self._deferral.is_active() and self._logs is None:
-            self._deferral.hold_batch(events)
+            with self._admission_lock:
+                if self._closed.is_set():
+                    return
+                self._active_producers += 1
+                self._producers_idle.clear()
+            try:
+                self._deferral.hold_batch(events)
+            finally:
+                self._producer_finished()
             return
         if not self._enabled() or not self._ensure():
             return
@@ -381,6 +379,24 @@ class _OtlpBackend:
         Split out of export_batch so the deferred hand-off (saturation,
         finalize) reuses the exact live semantics — including the counted shed
         when the queue stays full."""
+        with self._admission_lock:
+            if self._closed.is_set():
+                return
+            self._active_producers += 1
+            self._producers_idle.clear()
+        try:
+            self._publish_live(events)
+        finally:
+            self._producer_finished()
+
+    def _producer_finished(self) -> None:
+        with self._admission_lock:
+            self._active_producers -= 1
+            if not self._active_producers:
+                self._producers_idle.set()
+
+    def _publish_live(self, events: list[Event]) -> None:
+        """Record admitted events; teardown retains providers until this SDK use ends."""
         lost = 0
         example = None
         for event in events:
@@ -403,73 +419,80 @@ class _OtlpBackend:
             with failure_isolated("otlp metric mapping"):
                 self._record_metrics(event)
 
-    def flush(self, timeout: float = 2.0) -> None:
-        """Drain queued and worker-held records boundedly, then flush providers."""
-        if self._deferral.is_active():
-            return
-        worker = self._thread
-        if worker is not None and worker.is_alive() and threading.current_thread() is not worker:
-            wait_for_worker(self._queue, timeout, self._report)
-        else:
-            while True:
-                try:
-                    event = self._queue.get_nowait()
-                except queue.Empty:
-                    break
-                if event is None:
-                    break
-                if isinstance(event, WorkerFlushMarker):
-                    event.done.set()
-                    continue
-                with failure_isolated("otlp log emit"):
-                    self._emit_log(event)
-        with failure_isolated("otlp log flush"):
-            if self._logs is not None:
-                self._logs.force_flush(timeout_millis=500)
-        with failure_isolated("otlp metric flush"):
-            if self._metric_provider is not None:
-                self._metric_provider.force_flush(timeout_millis=500)
+    def flush(self, timeout: float = 2.0) -> DrainResult:
+        """A finite receipt from the sole SDK writer, including provider flush."""
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("OTLP timeout must be finite and non-negative")
+        worker = self._worker
+        if worker is None:
+            if self._start_error is not None:
+                raise self._start_error
+            completed = self._queue.empty()
+            return DrainResult(
+                DrainStatus.COMPLETED if completed else DrainStatus.UNFINISHED, DrainPhase.DRAIN
+            )
+        return worker.sync(timeout)
 
-    def shutdown(self) -> None:
-        """Stop the worker thread and flush the SDK providers (process exit)."""
-        # Complete a deferred hold first (task #3816 M4b): the atexit path for
-        # abnormal exits reaches here too, and held records must face the same
-        # best-effort completion a clean exit gets through finalize().
-        with failure_isolated("otlp finalize"):
-            self.finalize()
-        worker = self._thread
-        if worker is not None and worker.is_alive() and threading.current_thread() is not worker:
-            stop_worker(self._queue, worker, self._report)
-        with failure_isolated("otlp log flush at shutdown"):
-            if self._logs is not None:
-                self._logs.force_flush(timeout_millis=2000)
-        with failure_isolated("otlp metric flush at shutdown"):
-            if self._metric_provider is not None:
-                self._metric_provider.force_flush(timeout_millis=2000)
+    def shutdown(self, timeout: float = 2.0) -> DrainResult:
+        """Close admission and observe this exporter within one local deadline."""
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("OTLP timeout must be finite and non-negative")
+        deadline = time.monotonic() + timeout
+        worker, preparation_error = self._close_admission()
+        deferred_finished = self._deferral.stop(timeout=max(0.0, deadline - time.monotonic()))
+        if self._start_error is not None:
+            raise self._start_error
+        if worker is None:
+            if preparation_error is not None:
+                raise preparation_error
+            completed = self._queue.empty() and deferred_finished and self._producers_idle.is_set()
+            if not completed:
+                self._report("OTLP shutdown degraded; deferred records remain unfinished")
+            return DrainResult(
+                DrainStatus.COMPLETED if completed else DrainStatus.UNFINISHED, DrainPhase.STOP
+            )
+        result = worker.stop(timeout=max(0.0, deadline - time.monotonic()))
+        if preparation_error is not None:
+            raise preparation_error
+        if not deferred_finished:
+            self._report("OTLP shutdown degraded; child deferral remains unfinished")
+            return DrainResult(DrainStatus.UNFINISHED, DrainPhase.STOP)
+        return result
+
+    def _close_admission(self) -> tuple[OtlpWorker | None, BaseException | None]:
+        """Keep a deferred attempt asynchronous, then stop even if preparation failed."""
+        # Deferred bring-up retains its enabled gate and finite observation owner.
+        preparation_error: BaseException | None = None
+        try:
+            if (
+                self._deferral.is_active()
+                and not self._queue.empty()
+                and not self._closed.is_set()
+                and self._enabled()
+            ):
+                self._get_worker()
+        except BaseException as exc:
+            preparation_error = exc
+        with self._admission_lock:
+            self._closed.set()
+            worker = self._worker
+            if worker is not None:
+                worker.request_stop()
+        return worker, preparation_error
 
     # ── child deferral (task #3816 M4b) ─────────────────────────────────────
 
     def defer_until_exit(self) -> None:
-        """Arm deferred export for this process (the exec-child arm path).
-
-        Called before any record can reach export_batch: batches are held in
-        the bounded queue while the OTel stack, the settings chain, and the
-        metric plumbing stay unimported. No-op once the backend is up, and when
-        AVA_TELEMETRY_OTLP_CHILD_DEFER is off (the documented revert switch).
-        """
+        """Arm a cold child hold; flag-off and already-live backends are no-ops."""
         if self._logs is not None:
             return
         self._deferral.arm()
 
     def finalize(self) -> None:
-        """Complete a deferred hold (clean exit / shutdown), then flush.
+        """Complete an ordinary deferred hold, then observe its FIFO flush.
 
-        A deferred backend is completed here: the hold is brought up and
-        drained synchronously — or degrades to JSONL-only when the bring-up
-        fails (the standard failed path; its five-minute retry gate is the only
-        retry). A deferred backend with an empty hold skips the bring-up
-        entirely (zero-record children keep M3's zero-import exit); a backend
-        that was never deferred takes the plain flush path.
+        Failed bring-up preserves the hold under the existing retry gate; an
+        empty hold constructs no SDK resources. Shutdown has its finite seam.
         """
         if self._deferral.is_active():
             self._deferral.complete("finalize")
@@ -498,103 +521,90 @@ class _OtlpBackend:
         return endpoint_reachable(endpoint)
 
     def _ensure(self) -> bool:
-        """Bring up the backend, retrying a failed init at five-minute cadence.
+        """Resolve one lazy exporter attempt; a real stop wakes a stuck init waiter."""
+        worker = self._get_worker()
+        return worker is not None and worker.wait_ready()
 
-        The interval gate prevents per-batch probes. Initialization remains
-        best-effort and never raises into the event drain.
-
-        Never constructs during interpreter shutdown (the hazard the old eager
-        ``warmup()`` call existed to prevent — exec children now complete their
-        bring-up during life): a finalization-time attempt degrades to the
-        unsent path; the JSONL mirror retains the records.
-        """
-        if sys.is_finalizing():
-            return False
-        if self._logs is not None:
-            return True
-        now = time.monotonic()
-        if (
-            self._init_failed_at is not None
-            and now - self._init_failed_at < COLLECTOR_RETRY_INTERVAL_S
-        ):
-            return False
-        with self._init_lock:
-            if self._logs is not None:
-                return True
-            now = time.monotonic()
+    def _get_worker(self) -> OtlpWorker | None:
+        if self._closed.is_set() or sys.is_finalizing() or self._start_error is not None:
+            return None
+        with self._init_lock, self._admission_lock:
+            if self._closed.is_set():
+                return None
+            if self._worker is not None:
+                if self._worker._thread.is_alive():
+                    return self._worker
+                self._worker._check_error()
+                if not self._worker._cleanup_complete:
+                    return self._worker  # retain uncertain SDK resources across retry opportunities
             if (
                 self._init_failed_at is not None
-                and now - self._init_failed_at < COLLECTOR_RETRY_INTERVAL_S
+                and time.monotonic() - self._init_failed_at < COLLECTOR_RETRY_INTERVAL_S
             ):
-                return False
-
-            endpoint: str | None = None
+                return None
             try:
-                if self._providers is not None:
-                    logs, metric_provider = self._providers
-                else:
-                    from base.config import settings
-
-                    endpoint = settings.observability.telemetry_otlp_endpoint
-                    if not self._endpoint_reachable(endpoint):
-                        self._init_failed_at = time.monotonic()
-                        self._report(
-                            f"OTLP endpoint {endpoint} not answering — OTLP export disabled; "
-                            f"retrying in {COLLECTOR_RETRY_INTERVAL_S}s"
-                        )
-                        _emit_backend_event(
-                            "otlp_backend_disabled",
-                            reason="endpoint not answering",
-                            endpoint=endpoint,
-                        )
-                        return False
-                    logs, metric_provider = _build_providers(endpoint)
-                meter = metric_provider.get_meter("ava.telemetry")
-                worker = threading.Thread(target=self._run, daemon=True, name="otlp-exporter")
-                disabled_at = self._init_failed_at
-                self._logs = logs
-                self._metric_provider = metric_provider
-                self._meter = meter
-                self._thread = worker
-                worker.start()
-            except Exception as exc:
-                self._logs = None
-                self._metric_provider = None
-                self._meter = None
-                self._thread = None
-                self._init_failed_at = time.monotonic()
-                reason = f"init failed: {exc!r}"
-                self._report(
-                    "OTLP backend init failed — OTLP side disabled; "
-                    f"retrying in {COLLECTOR_RETRY_INTERVAL_S}s: {exc!r}"
+                worker = OtlpWorker(
+                    event_queue=self._queue,
+                    initialize=self._initialize_worker,
+                    emit_log=self._emit_log,
+                    record_metrics=self._record_metrics,
+                    producers_idle=self._producers_idle,
+                    deferred_idle=self._deferral.completion_idle,
+                    deferred_active=self._deferral.is_active,
                 )
-                _emit_backend_event(
-                    "otlp_backend_disabled",
-                    reason=reason,
-                    endpoint=endpoint,
-                )
-                return False
+                self._worker = worker
+                self._thread = worker._thread
+            except BaseException as exc:
+                self._start_error = exc
+                report_sink_failure("otlp worker start", exc)
+                return None
+        return worker
 
-            self._init_failed_at = None
-            if disabled_at is not None:
-                _emit_backend_event(
-                    "otlp_backend_recovered",
-                    endpoint=endpoint,
-                    disabled_s=max(0.0, now - disabled_at),
-                )
-            return True
+    def _initialize_worker(self, worker: OtlpWorker) -> bool:
+        """Keep the existing named SDK init isolation and every partial resource."""
+        endpoint: str | None = None
+        disabled_at = self._init_failed_at
+        try:
+            if self._providers is not None:
+                worker.logs, worker.metrics = self._providers
+            else:
+                from base.config import settings
 
-    def _run(self) -> None:
-        """Worker loop: map + emit queued events to the OTel log processor."""
-        while True:
-            event = self._queue.get()
-            if event is None:
-                return
-            if isinstance(event, WorkerFlushMarker):
-                event.done.set()
-                continue
-            with failure_isolated("otlp log emit"):
-                self._emit_log(event)
+                endpoint = settings.observability.telemetry_otlp_endpoint
+                if not self._endpoint_reachable(endpoint):
+                    self._init_failed_at = time.monotonic()
+                    self._report(
+                        f"OTLP endpoint {endpoint} not answering — OTLP export disabled; retrying in {COLLECTOR_RETRY_INTERVAL_S}s"
+                    )
+                    _emit_backend_event(
+                        "otlp_backend_disabled", reason="endpoint not answering", endpoint=endpoint
+                    )
+                    return False
+                worker.logs, worker.metrics = _build_providers(
+                    endpoint,
+                    keep_logs=lambda provider: setattr(worker, "logs", provider),
+                    keep_reader=lambda reader: setattr(worker, "metric_reader", reader),
+                    keep_metrics=lambda provider: setattr(worker, "metrics", provider),
+                )
+            meter = worker.metrics.get_meter("ava.telemetry")
+            self._logs, self._metric_provider, self._meter = worker.logs, worker.metrics, meter
+        except Exception as exc:
+            self._init_failed_at = time.monotonic()
+            self._report(
+                f"OTLP backend init failed — OTLP side disabled; retrying in {COLLECTOR_RETRY_INTERVAL_S}s: {exc!r}"
+            )
+            _emit_backend_event(
+                "otlp_backend_disabled", reason=f"init failed: {exc!r}", endpoint=endpoint
+            )
+            return False
+        self._init_failed_at = None
+        if disabled_at is not None:
+            _emit_backend_event(
+                "otlp_backend_recovered",
+                endpoint=endpoint,
+                disabled_s=max(0.0, time.monotonic() - disabled_at),
+            )
+        return True
 
     # ── signal mapping ───────────────────────────────────────────────────────
 
@@ -785,6 +795,6 @@ def flush() -> None:
     backend.flush()
 
 
-def shutdown() -> None:
-    """Flush + stop the OTLP backend (process exit, called by telemetry)."""
-    backend.shutdown()
+def shutdown(timeout: float = 2.0) -> DrainResult:
+    """Finitely stop the OTLP backend and report any residual owned exporter work."""
+    return backend.shutdown(timeout)
