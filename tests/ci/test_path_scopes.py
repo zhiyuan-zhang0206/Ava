@@ -243,7 +243,11 @@ def test_scope_validity_does_not_prove_a_moved_tests_autouse_closure(tmp_path: P
 
 def test_the_plugin_registers_only_listed_paths() -> None:
     by_path = path_scopes.modules_by_path(PATH_SCOPES)
-    assert sorted(by_path) == sorted(p for scope in PATH_SCOPES.values() for p in scope.paths)
+    assert set(by_path) == {p for scope in PATH_SCOPES.values() for p in scope.paths}
+    for path, modules in by_path.items():
+        declared = {module for module, scope in PATH_SCOPES.items() if path in scope.paths}
+        assert set(modules) == declared
+        assert len(modules) == len(declared)
 
 
 def test_scopes_are_read_from_the_files_next_to_the_tests(tmp_path: Path) -> None:
