@@ -438,9 +438,10 @@ def _run_classify(
         "BASE_SHA": base,
         "GITHUB_OUTPUT": str(output),
         "PYTHONPATH": str(_REPO_ROOT),
+        "TMPDIR": str(output.parent),
         "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
     }
-    return subprocess.run(  # noqa: S603 -- checked-in workflow over test-owned inputs
+    result = subprocess.run(  # noqa: S603 -- checked-in workflow over test-owned inputs
         ["bash", "-eu", "-c", script],
         cwd=repo,
         env=environment,
@@ -448,6 +449,8 @@ def _run_classify(
         text=True,
         check=False,
     )
+    assert not list(output.parent.glob("ava-classify.*")), "classify scratch leaked after exit"
+    return result
 
 
 def test_native_classify_routes_document_resources_and_propagates_analysis_errors(

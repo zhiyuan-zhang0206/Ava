@@ -34,7 +34,9 @@ Documentation is also an input when the shared resource graph proves a possible 
 The workflow's classify job and the selector query the same head/base evidence before
 skipping a documentation-only diff. Inputs with known readers request backend CI;
 unrelated unknowns alone do not turn an unread documentation change into a runtime edge.
-Classification analysis errors fail the required backend check as well.
+Classification analysis errors fail the required backend check as well. Each classify
+invocation keeps its base and changed-path evidence in a private temporary directory,
+removed on success or failure; concurrent invocations cannot replace each other's inputs.
 
 The existing e2e-env-guard job is outside this selection path. It continues to
 run its complete tests/e2e/ package plus tests/harness/test_home_isolation.py in one
