@@ -134,6 +134,11 @@ observations; `ResidueSweepPlan` reports immutable candidate groups, individual
 PIDs, and run owners. The sweep rechecks command identity before every signal
 and preserves live concurrent runs and its own process group. Its return value
 counts planned targets, including targets skipped by that identity guard.
+Foreign children are cleaned only when their owner PID is proven gone. A live
+or unreadable owner is preserved even if its title lacks pytest/xdist hints;
+those hints remain diagnostic. A recycled live PID may therefore leave some
+stale residue until it exits. Explicit `include_own` teardown still cleans this
+worker's children; it never grants ownership of a peer's children.
 The fixture `-m tests.e2e.process_support` entry supplies only the explicit test
 serving gate; it does not establish production root custody.
 
