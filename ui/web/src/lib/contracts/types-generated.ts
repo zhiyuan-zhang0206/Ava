@@ -1378,10 +1378,34 @@ export interface paths {
          *     before the returned window.
          *
          *     One checkpoint segment is built at a time; windowing trims the payload +
-         *     the frontend render. A checkpoint read failure renders an empty view + 200
-         *     (cold-load tolerance, see `base.agents.history.checkpoint`).
+         *     the frontend render. A checkpoint read failure returns 503. Retained
+         *     compact boundaries remain independently readable via /timeline/retained.
          */
         get: operations["get_timeline_api_agents__agent_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/timeline/retained": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Retained Timeline
+         * @description Read retained compact history explicitly, without reading the live head.
+         *
+         *     Omit checkpoint_id for the newest retained boundary, or select an exact
+         *     retained boundary. Page using the oldest returned historical item_id.
+         *     Never resumes, rewrites, or repairs the agent's execution checkpoint.
+         */
+        get: operations["get_retained_timeline_api_agents__agent_id__timeline_retained_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7809,6 +7833,22 @@ export interface components {
          */
         ResurrectResult: "spawned" | "already_alive";
         /**
+         * RetainedTimelineResponse
+         * @description One retained compact-history window, independent of live state.messages.
+         *
+         *     The boundary identity describes the requested retained segment. Historical
+         *     item cursors identify every item's own segment, including a crossed page.
+         *     There is no live message count and these items must not merge into live state.
+         */
+        RetainedTimelineResponse: {
+            /** Boundary Checkpoint Id */
+            boundary_checkpoint_id: string | null;
+            /** Items */
+            items: components["schemas"]["TimelineItem"][];
+            /** Has More */
+            has_more: boolean;
+        };
+        /**
          * RetryLaunchAccepted
          * @description Historical committed intent; neither a wake nor execution acknowledgement.
          */
@@ -10974,6 +11014,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TimelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_retained_timeline_api_agents__agent_id__timeline_retained_get: {
+        parameters: {
+            query?: {
+                limit?: number | null;
+                checkpoint_id?: string | null;
+                before?: string | null;
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetainedTimelineResponse"];
                 };
             };
             /** @description Validation Error */
