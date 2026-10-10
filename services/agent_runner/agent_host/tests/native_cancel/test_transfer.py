@@ -298,7 +298,7 @@ async def _force_successor(
     original, target = await managed_work(db_conn, aops_pool)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(accept_native_cancel, pool, "before-force", target.agent_id, target)
-        *_prefix, force = await asyncio.to_thread(
+        _status, _pid, _pages, force, _shell_cutoff = await asyncio.to_thread(
             _force_terminate_transaction, target.agent_id, pool, source="user"
         )
     assert await original_host_force(

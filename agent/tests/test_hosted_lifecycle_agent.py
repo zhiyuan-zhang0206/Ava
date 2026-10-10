@@ -59,7 +59,7 @@ def _record_kills(
     """Patch the host's kill primitive; record (agent id, status at kill time)."""
     calls: list[tuple[int, str | None]] = []
 
-    def _kill(agent_id: int) -> list[int]:
+    def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
             row = conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
         calls.append((agent_id, None if row is None else row[0]))
@@ -87,7 +87,7 @@ async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
         await apply_hosted_lifecycle(
             aops_pool,
             owner,
-            kill_shell_sessions=lambda _aid: kills.append((_aid, None)),
+            kill_shell_sessions=lambda _aid, _cutoff: kills.append((_aid, None)),
             bus=event_bus,
             resources=None,
         )

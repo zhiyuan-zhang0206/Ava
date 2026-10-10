@@ -55,9 +55,9 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
         _body: object,
         _pool: object,
         _recovery_wake: str | None,
-    ) -> tuple[AgentStatus, int | None, list[str], int]:
+    ) -> tuple[AgentStatus, int | None, list[str], int, int]:
         captured["agent_id"] = aid
-        return AgentStatus.RUNNING, None, [], 91
+        return AgentStatus.RUNNING, None, [], 91, 0
 
     monkeypatch.setattr(lifecycle, "_terminate_force_blocking", _fake_force_blocking)
     cancelled: list[tuple[int, int]] = []

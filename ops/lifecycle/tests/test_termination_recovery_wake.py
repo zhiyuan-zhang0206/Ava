@@ -90,7 +90,7 @@ def _inbound_count(db: psycopg.Connection, agent_id: int) -> int:
 def test_the_wake_commits_with_the_fence_and_qualifies_as_a_trigger(
     db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
 ) -> None:
-    _, _, _, fence = termination._force_terminate_transaction(
+    _, _, _, fence, _cutoff = termination._force_terminate_transaction(
         agent_id, db_pool, source="system", recovery_wake=_WAKE
     )
 
@@ -237,7 +237,9 @@ def _audit_rows(
 def test_a_force_terminate_records_its_audit_fact_in_the_same_transaction(
     db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
 ) -> None:
-    _, _, _, fence = termination._force_terminate_transaction(agent_id, db_pool, source="system")
+    _, _, _, fence, _cutoff = termination._force_terminate_transaction(
+        agent_id, db_pool, source="system"
+    )
 
     assert _audit_rows(db_conn, agent_id, "terminate") == [("system", {"inbound_id": fence})]
 

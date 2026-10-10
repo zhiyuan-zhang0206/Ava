@@ -205,7 +205,7 @@ async def _terminate_native(
                 quiescent=True,
             )
         else:
-            terminate_id = _enqueue_termination_inbounds(
+            terminate_id, _cutoff = _enqueue_termination_inbounds(
                 Database.from_settings(),
                 EventBus.from_settings(),
                 owner.agent_id,

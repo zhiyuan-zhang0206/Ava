@@ -152,7 +152,7 @@ async def finish_completed_invocation(
     ctx: AvaContext,
     pending: PendingWorkResult,
     drop_agent: Callable[[int], None],
-    kill_shell_sessions: Callable[[int], None],
+    kill_shell_sessions: Callable[[int, int], None],
     *,
     db: Database,
     bus: EventBus,

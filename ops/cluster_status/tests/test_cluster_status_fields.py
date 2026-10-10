@@ -312,6 +312,8 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
         "ava-agent-7-shell-2-watcher",
         page,
         "ava-agent-7-shell-5-dev-server",
+        "ava-agent-7-shell-6-new-generation",
+        "ava-agent-7-shell-8-later",
         "ava-agent-71-shell-0",
         "ava-agent-12-shell-3",
         "ava-restarter",
@@ -319,7 +321,7 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
     backend = _KillAllBackend()
     monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
 
-    assert cluster_status.kill_agent_shells(7) == [0, 2, 5]
+    assert cluster_status.kill_agent_shells(7, before_session_index=6) == [0, 2, 5]
     assert sorted(backend.killed) == sorted(
         [
             session_name("agent-7-shell-0"),
@@ -328,7 +330,7 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
         ]
     )
     assert page not in backend.killed
-    assert cluster_status.kill_agent_shells(99) == []
+    assert cluster_status.kill_agent_shells(99, before_session_index=6) == []
 
 
 def test_kill_agent_shells_raises_after_trying_every_session(
@@ -341,7 +343,7 @@ def test_kill_agent_shells_raises_after_trying_every_session(
     monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
 
     with pytest.raises(RuntimeError, match=r"shell session\(s\) \[0\] of agent 7"):
-        cluster_status.kill_agent_shells(7)
+        cluster_status.kill_agent_shells(7, before_session_index=6)
     assert backend.killed == [session_name("agent-7-shell-1")]
 
 

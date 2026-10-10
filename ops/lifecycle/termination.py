@@ -196,26 +196,27 @@ def _enqueue_termination_inbounds(
     source: str,
     message: str | None,
     kill_all_shell_sessions: bool = False,
-) -> int | None:
+) -> tuple[int | None, int | None]:
     """Persist graceful termination and publish its audit/wake effects.
 
     With `kill_all_shell_sessions` the agent row is locked first and the
     request rides the terminate command, so it serializes against the home
     runtime's apply (which locks the same row): either the apply sees the
-    request and kills the sessions before the termination commits, or this
-    transaction sees the row already terminated and returns None — the caller
-    then kills the sessions itself instead of queueing a request no apply
-    will ever read. Without the option the path is unchanged.
+    request and attempts older sessions after the termination commits, or this
+    transaction sees the row already terminated and returns its shell cutoff
+    with no command ID. The caller then attempts those older sessions instead
+    of queueing a request no apply will ever read. Without the option the
+    persistence path is unchanged and the returned cutoff is None.
     """
     with write_transaction(db_pool) as conn:
         if kill_all_shell_sessions:
             row = conn.execute(
-                "SELECT status FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,)
+                "SELECT status,session_index FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,)
             ).fetchone()
             if row is None:
                 raise AgentNotFound(f"agent {agent_id} does not exist")
             if AgentStatus(row[0]) is AgentStatus.TERMINATED:
-                return None
+                return None, row[1]
         _, terminate_id = _insert_termination_inbounds(
             conn,
             agent_id,
@@ -232,7 +233,7 @@ def _enqueue_termination_inbounds(
         )
     telemetry.emit_prepared(prepared_event)
     _publish_force_terminate_inbound(db, bus, agent_id, terminate_id, source)
-    return terminate_id
+    return terminate_id, None
 
 
 def _force_terminate_transaction(
@@ -243,7 +244,7 @@ def _force_terminate_transaction(
     message: str | None = None,
     kill_all_shell_sessions: bool = False,
     recovery_wake: str | None = None,
-) -> tuple[AgentStatus, int | None, list[str], int]:
+) -> tuple[AgentStatus, int | None, list[str], int, int]:
     """Lock the agent, insert termination intent and install its host resource fence. A newer inbound cannot bypass this accepted force command.
 
     `recovery_wake` (the delivery watchdog's wedged-turn recovery) is the
@@ -253,8 +254,9 @@ def _force_terminate_transaction(
     rolls the whole force back, leaving the agent as it was.
 
     `kill_all_shell_sessions` is recorded on the force command and in its audit
-    event; the caller kills the sessions once this fence commits, and the host
-    sweeps them again when it observes the force quiescent
+    event; the returned shell cutoff is captured under this row lock. After
+    commit the caller attempts older sessions, and the host captures one new
+    cutoff when it observes the force quiescent
     (`base.agents.incarnation.hosted_force`). The fence supersedes any unapplied graceful
     terminate, including a shell-session kill that terminate carried: a force
     kills sessions only when asked itself.
@@ -262,7 +264,7 @@ def _force_terminate_transaction(
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
-            "SELECT status, pid FROM agents_meta WHERE id = %s FOR UPDATE",
+            "SELECT status, pid,session_index FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
         row = cur.fetchone()
@@ -308,7 +310,7 @@ def _force_terminate_transaction(
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
     telemetry.emit_prepared(prepared_event)
-    return old_status, pid, page_names, terminate_inbound_id
+    return old_status, pid, page_names, terminate_inbound_id, row[2]
 
 
 def _publish_force_terminate_inbound(
@@ -328,7 +330,7 @@ def force_mark_terminated(
     message: str | None = None,
 ) -> list[str]:
     """Install a force fence and return the affected page names."""
-    _, _, page_names, inbound_id = _force_terminate_transaction(
+    _, _, page_names, inbound_id, _cutoff = _force_terminate_transaction(
         agent_id,
         db_pool,
         source=source,
