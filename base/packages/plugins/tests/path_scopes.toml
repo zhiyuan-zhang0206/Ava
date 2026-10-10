@@ -3,3 +3,10 @@
 "tests.path_scoped.gateway_tests" = [
     "test_enable_config.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_config_boot_race.py",
+    "test_data_registry.py",
+    "test_enable_config.py",
+    "test_plugin_config.py",
+    "test_plugin_config_ownership.py"
+]

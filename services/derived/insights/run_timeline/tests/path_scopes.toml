@@ -3,3 +3,6 @@
 "tests.path_scoped.services_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_run_timeline_links.py"
+]

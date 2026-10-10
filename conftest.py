@@ -20,7 +20,8 @@ Order is load-bearing:
 3. `identity_restore` and `plugin_registrations` before `provisioning` and
    `guards`: pytest sets same-scope autouse fixtures up in registration order,
    so these two restore-after-every-test fixtures see (and put back) whatever
-   the later autouse fixtures do.
+   the later autouse fixtures do. The identity guard receives its SDK context
+   slot through a consumer-local fixture override; unrelated tests have no slot.
 4. The hook-only `static_environment` loads before `provisioning`, which imports
    its mode predicate. It changes data-plane setup only for an explicit static
    process. `provisioning` stays before `guards`: autouse fixtures are set up
@@ -28,7 +29,7 @@ Order is load-bearing:
    `_guard_*` fixtures. The hooks in `provisioning` also stay registered
    before `collection_guard` and the stall probe, as they were.
 5. The remaining hook plugins and pytester subprocess harness follow.
-   Opt-in unit, model, serving, logging and retry fixtures bind beside consumers.
+   Opt-in unit, SDK, model, serving, logging and retry fixtures bind beside consumers.
 """
 
 pytest_plugins = [

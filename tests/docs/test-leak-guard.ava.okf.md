@@ -55,7 +55,8 @@ An existing module attribute assigned a new value (a static lint's job; the agen
 
 ## The agent identity is restored, not compared
 
-The identity a test acts as is bound bare by hundreds of tests (`pin_agent(...)`, `tests/fixtures/pin_agent.py`: it binds an `AvaContext` carrying it), so reporting it would turn the convention into a defect. The root plugin `identity_restore` (`tests/fixtures/identity_restore.py`) restores the explicit `ava.context` process slot after every test. It closes only clients created by the test, then restores the previous SDK context. Native admission scopes do not provide or rebind SDK identity. `tests/ci/test_leak_guard.py` checks that boundary, that `ava.sdk_surface.agent_identity` holds no process-global slot of its own, and that the restore isolates the next-test victim. `ava.self.AGENT_ID` is not touched: the module `__getattr__` serves it, and writing a read value back would store it for good (PR #3791); a test that stores it is a `module-attr` leak.
+Identity restoration and its SDK boundary are owned by
+[[tests/fixtures/unit/docs/unit-fixtures.ava.okf.md]].
 
 ## Fixing a finding
 

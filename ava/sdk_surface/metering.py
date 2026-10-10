@@ -257,8 +257,9 @@ def uninstall(ledger: tuple[tuple[Any, str], ...]) -> None:
 
     ``ledger`` is the record ``install()`` returned — the ``(parent, attr)`` pairs it
     actually wrapped, in wrap order; the Installation carries it
-    (``install.installed().metered``), and the suite's autouse restore
-    (``tests/fixtures/guards.py``) passes that plus any direct ``install()`` return.
+    (``install.installed().metered``), and the consumer-local SDK restore
+    (``tests/fixtures/unit/sdk.py``) passes that ledger. Direct callers own their
+    returned ledger and restore it in their own ``finally``.
 
     Restore from the record, never by re-walking the namespace: the walk resolves
     dynamic member surfaces (``ava.skills``'s index scans the skills tree and reads

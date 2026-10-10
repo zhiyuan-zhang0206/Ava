@@ -7,3 +7,6 @@
 "tests.path_scoped.agent_tests" = [
     "test_exec_domain_confirmation.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_exec_domain_confirmation.py"
+]

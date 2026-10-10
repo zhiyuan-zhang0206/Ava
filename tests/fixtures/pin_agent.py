@@ -1,7 +1,7 @@
 """Pin the identity a test acts as: bind an `AvaContext` carrying it for the rest of the test.
 
 `identity_restore` (autouse) puts the previous context back afterwards. Kept apart from that plugin
-because tests and `env_bootstrap` import these helpers directly, and a pytest plugin module that is
+because tests import these helpers directly, and a pytest plugin module that is
 imported before pytest registers it cannot be assertion-rewritten.
 """
 

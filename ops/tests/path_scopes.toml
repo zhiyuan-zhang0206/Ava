@@ -10,3 +10,11 @@
 "tests.path_scoped.services_tests" = [
     "test_healthcheck_page_server.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_agent_skill_view.py",
+    "test_cluster_rpc.py",
+    "test_cluster_status_op.py",
+    "test_cross_machine_dispatch.py",
+    "test_inventory_ops.py",
+    "test_stub_everywhere_alias_scan.py"
+]

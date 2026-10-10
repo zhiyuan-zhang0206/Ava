@@ -23,3 +23,6 @@
     "test_terminate_forward.py",
     "test_understanding_build_endpoints.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "."
+]

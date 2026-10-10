@@ -5,3 +5,16 @@
     "test_services_weixin_adapter.py",
 ]
 "tests.fixtures.unit.gateway" = ["test_weixin_chat_identity.py"]
+"tests.fixtures.unit.sdk" = [
+    "feishu_adapter/test_poll_feeds_messages_newer_than_cursor_in.py",
+    "feishu_adapter/test_websocket_owner.py",
+    "test_feishu_adapter.py",
+    "test_feishu_durable_cursor.py",
+    "test_feishu_owner_seed.py",
+    "test_im_bridge_telegram.py",
+    "test_prepared_timeline.py",
+    "test_segment_retry_safety.py",
+    "test_telegram_adapter.py",
+    "test_weixin_adapter.py",
+    "test_weixin_chat_identity.py"
+]

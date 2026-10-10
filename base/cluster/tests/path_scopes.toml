@@ -1,2 +1,5 @@
 
 "tests.fixtures.unit.gateway" = ["test_two_unit_fixtures.py"]
+"tests.fixtures.unit.sdk" = [
+    "test_two_unit_fixtures.py"
+]

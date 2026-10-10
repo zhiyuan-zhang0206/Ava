@@ -6,6 +6,7 @@ import pytest
 @pytest.mark.parametrize(
     "name",
     [
+        "sdk_environment",
         "add_bindings",
         "add_models",
         "config_authority",
@@ -41,3 +42,83 @@ def test_optin_fixtures_are_not_visible_to_unrelated_collectors(
     assert (
         request.config.pluginmanager.get_plugin("base.deploy.lifecycle.tests.serving_root") is None
     )
+
+
+def test_global_guard_cycle_does_not_load_the_sdk(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(
+        """
+import sys
+pytest_plugins = [
+    "tests.fixtures.env_bootstrap",
+    "tests.fixtures.leak_guard",
+    "tests.fixtures.identity_restore",
+    "tests.fixtures.plugin_registrations",
+    "tests.fixtures.guards",
+]
+
+def pytest_unconfigure(config):
+    assert "ava" not in sys.modules
+    assert "ava.sdk_surface.install" not in sys.modules
+"""
+    )
+    pytester.makepyfile(
+        """
+import sys
+
+def test_guarded_pure_case(request):
+    assert "ava" not in sys.modules
+    assert "ava.sdk_surface.install" not in sys.modules
+    assert {"_restore_agent_identity", "_restore_metering", "_guard_bootstrap_fetch",
+            "_guard_process_exec", "_guard_permissions_helper_native_io"} <= set(request.fixturenames)
+    assert request.getfixturevalue("sdk_identity") is None
+"""
+    )
+    result = pytester.runpytest_subprocess("-q", "-o", "addopts=")
+    result.assert_outcomes(passed=1)
+
+
+def test_identity_cleanup_failure_still_restores_the_held_context(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makeconftest(
+        """
+from types import ModuleType, SimpleNamespace
+import pytest
+
+pytest_plugins = ["tests.fixtures.identity_restore"]
+sdk = ModuleType("synthetic_sdk")
+class HeldClients:
+    def close(self):
+        raise AssertionError("borrowed-clients-must-stay-open")
+
+held = SimpleNamespace(clients=HeldClients())
+sdk.context = held
+
+@pytest.fixture
+def sdk_identity():
+    return sdk
+"""
+    )
+    pytester.makepyfile(
+        """
+from types import SimpleNamespace
+from conftest import sdk, held
+
+class BrokenClients:
+    def close(self):
+        raise RuntimeError("owned-client-close-failed")
+
+def test_1_owns_new_clients():
+    sdk.context = SimpleNamespace(clients=BrokenClients())
+
+def test_2_borrows_the_held_clients():
+    assert sdk.context is held
+    sdk.context = SimpleNamespace(clients=held.clients)
+
+def test_3_restored_context():
+    assert sdk.context is held
+"""
+    )
+    result = pytester.runpytest_subprocess("-q", "-o", "addopts=")
+    result.assert_outcomes(passed=3, errors=1)
+    assert "owned-client-close-failed" in result.stdout.str()

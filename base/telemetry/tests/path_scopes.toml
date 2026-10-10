@@ -3,3 +3,7 @@
 "tests.path_scoped.services_tests" = [
     "test_tracing.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_agent_attribution.py",
+    "test_telemetry_otlp_exit_delivery.py"
+]

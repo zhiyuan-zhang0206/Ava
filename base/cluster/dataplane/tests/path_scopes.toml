@@ -6,3 +6,7 @@
 "tests.path_scoped.integration_tests" = [
     "test_vendored_binaries.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_pooler_clients.py",
+    "test_vendored_binaries.py"
+]

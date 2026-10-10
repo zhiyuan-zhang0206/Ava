@@ -4,3 +4,7 @@
     "test_event_publisher_drop.py",
     "test_events_wire_format.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_event_publisher_drop.py",
+    "test_events_wire_format.py"
+]
