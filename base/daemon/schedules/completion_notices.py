@@ -6,18 +6,13 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
 from typing import Any, cast
 
 from base.config.service_read import ConfigAuthority
-
-
-class CompletionNoticePolicy(StrEnum):
-    """How admitted platform completions reach an agent."""
-
-    ALL = "all"
-    HOURLY = "hourly"
-
+from base.daemon.schedules.completion_policy import (
+    CompletionNoticePolicy,
+    validate_completion_notice_policy,
+)
 
 _MAX_DIGEST_LOGS = 20
 
@@ -43,17 +38,6 @@ class CompletionDigest:
     window_start: datetime
     event_ids: list[int]
     notices: list[CompletionNotice]
-
-
-def validate_completion_notice_policy(value: str) -> CompletionNoticePolicy:
-    """Return a supported policy or fail loudly on a stored invalid value."""
-    try:
-        return CompletionNoticePolicy(value)
-    except ValueError as exc:
-        raise ValueError(
-            f"completion_notice_policy must be one of "
-            f"{[policy.value for policy in CompletionNoticePolicy]!r}, got {value!r}"
-        ) from exc
 
 
 def current_default_completion_notice_policy(authority: ConfigAuthority) -> CompletionNoticePolicy:

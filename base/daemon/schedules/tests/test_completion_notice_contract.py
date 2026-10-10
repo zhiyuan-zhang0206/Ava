@@ -13,9 +13,11 @@ from pydantic_settings import DotEnvSettingsSource
 
 from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.daemon.schedules.completion_notices import (
-    CompletionNoticePolicy,
     effective_completion_notice_policy,
     pending_digests,
+)
+from base.daemon.schedules.completion_policy import (
+    CompletionNoticePolicy,
     validate_completion_notice_policy,
 )
 from base.host.env.config_registry import field_editor_type
@@ -56,6 +58,19 @@ def test_policy_config_env_overlay_and_editor_keep_exact_choices(
 @pytest.mark.parametrize("invalid", ["unknown", "failures"])
 def test_invalid_policy_is_rejected(invalid: str) -> None:
     with pytest.raises(ValueError, match="completion_notice_policy must be one of"):
+        validate_completion_notice_policy(invalid)
+    with pytest.raises(ValueError, match="completion_notice_policy must be one of"):
         effective_completion_notice_policy({"completion_notice_policy": invalid}, "all")
     with pytest.raises(ValidationError):
         AgentRuntimeSettings.model_validate({"completion_notice_policy": invalid})
+
+
+def test_runtime_and_config_share_the_policy_owner() -> None:
+    from base.daemon.schedules import completion_notices
+
+    field = AgentRuntimeSettings.model_fields["completion_notice_policy"]
+    assert completion_notices.CompletionNoticePolicy is CompletionNoticePolicy
+    assert completion_notices.validate_completion_notice_policy is validate_completion_notice_policy
+    assert all(
+        member is CompletionNoticePolicy(member.value) for member in get_args(field.annotation)
+    )
