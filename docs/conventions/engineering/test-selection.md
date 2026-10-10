@@ -205,6 +205,13 @@ the average present backend timing entry. A recorded zero remains zero. The
 same model estimates the complete collectable backend universe, and only
 subsets at or below 80% run.
 
+`scripts.ci.test_selector.load_durations` and `estimate_seconds` own this model
+for the selector and its reporting consumers. The read-only
+`scripts/audit/impact_census.py --json` command reports source reach and unbounded
+input consumers from the same impact graph, using these functions for estimated
+minutes. Census estimates describe static coupling; they are not measured CI
+execution times or proof that a selected subset is faster.
+
 ## Selection modes and artifacts
 
 `TEST_SELECTION_MODE` in [ci.yml](../../../.github/workflows/ci.yml) is the single
