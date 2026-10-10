@@ -11,7 +11,6 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent.hooks import compact
 from base.host.env.agent_slices import AgentSlices
-from base.lm.call import ProviderCallBinding
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 
@@ -39,8 +38,6 @@ async def test_compaction_programming_error_stops_once_without_history_change(
         slices: AgentSlices,
         *,
         catalog: ModelCatalog,
-        single_attempt: bool = False,
-        binding: ProviderCallBinding | None = None,
     ) -> compact.SummaryText:
         assert catalog is model_catalog
         calls.append(inputs)
@@ -74,11 +71,11 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
     expected = "summary " * compact.COMPACT_MIN_SUMMARY_CHARS
     invocation = AsyncMock(
         side_effect=[
-            (AIMessage(content=first_summary), False),
-            (AIMessage(content=expected), False),
+            AIMessage(content=first_summary),
+            AIMessage(content=expected),
         ]
     )
-    monkeypatch.setattr(compact, "ainvoke_with_cache_retry", invocation)
+    monkeypatch.setattr(compact, "ainvoke_tool_call", invocation)
     llm = cast(BaseChatModel, MagicMock())
     slices = AgentSlices.resolve()
     if emergency:

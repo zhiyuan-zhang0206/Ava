@@ -560,7 +560,6 @@ class AgentHost:
         ctx = AvaContext(
             ops_pool=self._pool,
             llm=runtime.llm,
-            llm_binding=runtime.binding,
             catalog=self._catalog,
             event_publisher=event_publisher,
             db=self._db,

@@ -127,7 +127,6 @@ async def _force_circuit_compact(
             state.messages,
             ctx.llm,
             ctx.require_agent(),
-            binding=ctx.llm_binding,
             catalog=ctx.require_catalog(),
         )
     except CompactionFailedError:

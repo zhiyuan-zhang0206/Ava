@@ -17,8 +17,7 @@ the agent's own effort), so the provider serves the prefix from cache.
 No staleness judgment: a claimed chunk is always described. A chunk whose
 checkpoint has not caught up (the writer persists every Nth super-step) goes
 back to the queue and is retried after a spacing; indices that drifted fail the
-job loudly; a Gemini model (explicit-cache path, which strips the head) is
-skipped with an event; a grouping reply still refused after the corrections is a
+job loudly; a grouping reply still refused after the corrections is a
 generation failure (retried, then failed). Each poll samples the queue's depth, with this
 runner's in-flight jobs, as the `understanding_backlog` event. A job that ends
 `done` is followed, in the same task, by the upper-level grouping checks of its agent
@@ -92,7 +91,6 @@ from base.db import Database
 from base.deploy.maintenance import admission
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-from base.lm.factory import provider_key_of_model
 from base.log import logger
 
 POLL_SECONDS = 2.0
@@ -104,10 +102,6 @@ GENERATION_MAX_ATTEMPTS = 3
 
 # A database error that a retry can outlive (a restart, a dropped connection, a pool wait).
 _TRANSIENT = (psycopg.OperationalError, psycopg.InterfaceError, PoolTimeout)
-
-# The provider key whose explicit-cache path strips the SystemMessage; only the
-# plain path is supported.
-_GEMINI = "gemini"
 
 
 @dataclass(frozen=True)
@@ -270,8 +264,6 @@ async def _run_job(
         fallback=settings.lm.hierarchy_model,
         catalog=models.catalog,
     )
-    if provider_key_of_model(model, catalog=models.catalog) == _GEMINI:
-        return Outcome("skipped", f"model {model} uses the Gemini explicit-cache path")
     try:
         history, closing_segment = await asyncio.to_thread(
             _load_segments, db, job.agent_id, job.boundary_checkpoint_id

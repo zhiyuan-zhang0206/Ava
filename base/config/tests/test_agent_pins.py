@@ -28,3 +28,11 @@ def test_unknown_and_plugin_keys_are_dropped() -> None:
 
 def test_none_maps() -> None:
     assert resolve_agent_config_pins(None, None) == {}
+
+
+def test_retired_gemini_cache_pins_do_not_reach_model_policy() -> None:
+    pins = resolve_agent_config_pins(
+        {"gemini_explicit_cache_enabled": True, "llm_model": "gemini-3.8-flash"},
+        {"gemini_cache_timeout_seconds": 99},
+    )
+    assert pins == {"llm_model": "gemini-3.8-flash"}

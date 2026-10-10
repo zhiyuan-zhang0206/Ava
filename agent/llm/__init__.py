@@ -11,9 +11,7 @@ chat-model factory that the schema is bound onto lives in `base/lm/factory.py`.
 The package holds the helpers around the agent's own model calls, outside
 the llm graph node (`agent/graph/llm/`) that drives them:
 
-  - `cache.py` — invocation prep shared by the llm node and compaction:
-    explicit Gemini cache binding with a plain-path fallback, and the
-    stale-cache retry for single-shot callers
+  - `invoke.py` — one tool-bound compaction call within its total deadline
   - `usage.py` — usage accounting for a completed llm-node call, over the
     canonical emitter in `base/lm/usage.py`
 

@@ -25,9 +25,8 @@ def log_llm_usage(
 
     `agent_id` is required accounting identity supplied by the completed turn.
     `cache_mechanism` / `cache_scope` label how much of the provider's
-    cache_read field covers (base/lm/usage.py constants): the llm node
-    passes mixed/explicit_block when the Gemini explicit cache carried the
-    request, because the API then reports only the explicit block.
+    cache_read field covers. Historical provenance values remain valid for
+    reading and replaying existing usage records.
     """
     if agent_id is None:
         raise ValueError("agent LLM usage requires an explicit agent id")

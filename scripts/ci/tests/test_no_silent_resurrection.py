@@ -551,7 +551,7 @@ def test_recent_main_incident_is_detected() -> None:
             "    state.messages, ctx.llm, ctx.require_agent().brain.llm_model\n)\n",
             "summary = await emergency_compact_summary(state.messages, ctx.llm, ctx.require_agent())\n",
             "summary = await emergency_compact_summary(\n"
-            "    state.messages, ctx.llm, ctx.require_agent(), binding=ctx.llm_binding\n)\n",
+            "    state.messages, ctx.llm, ctx.require_agent(), catalog=catalog\n)\n",
         ),
         (
             "def test_plugin_binding_effort_levels_reach_build_context(\n"

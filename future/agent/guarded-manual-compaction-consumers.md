@@ -81,20 +81,17 @@ monotonic order or treating checkpoint UUIDs as a history watermark.
 
 ### Nested provider retries (actual locked environment)
 
-`generate_summary` calls `agent.llm.cache.ainvoke_with_cache_retry`: it wraps the
-whole exchange in `llm_compact_timeout_seconds` and retries once on a specifically
-classified stale explicit-cache error; it does not broadly retry other failures.
-The legacy manual handler separately retries unknown exceptions. Do not reuse
-that loop or emergency no-LLM fallback for the guarded request.
+`generate_summary` calls `agent.llm.invoke.ainvoke_tool_call`, which binds
+`execute_code`, keeps the complete message prefix and invokes once within the
+compaction deadline. Guarded construction separately disables SDK retries.
 
 OpenAI/Anthropic provider constructors do not explicitly disable SDK retries.
 Locked model inspection found ChatOpenAI `max_retries=None` delegating to OpenAI's
 default 2, ChatAnthropic default 2 and ChatGoogleGenerativeAI default 6. Thus even
 one helper invocation is not proof of one vendor request. Before implementation,
 select a provider-owned single-attempt construction/invocation policy or reject
-providers that cannot express it, without modifying legacy models. Reuse the
-prompt/preparation owner; do not mutate a shared LLM instance. Classified explicit
-cache rejection must remain distinct from ambiguous timeout/response loss.
+providers that cannot express it, without modifying legacy models. Keep ordinary tool binding and the full prefix; do not mutate a shared LLM
+instance. Ambiguous timeout/response loss cannot establish a safe second attempt.
 
 Audit evidence: `where_used` for `post_compact` and `generate_summary`, plus actual
 route/UI/CLI/IM/MCP searches. Existing endpoint + hosted failure tests passed

@@ -76,12 +76,11 @@ from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks
-from base.lm.usage import CACHE_MECHANISM_MIXED, CACHE_SCOPE_EXPLICIT_BLOCK
 from base.log import logger
 
 from ._chunk import _assemble_final_message
 from ._retry import RETRY_REMAINING_ATTR, Attempt, retry_wait
-from ._stream import _stream_with_cache_retry
+from ._stream import _stream_llm
 
 # llm_node normal → BEFORE_EXEC; cancel / no-tool-call halt → AFTER_EXEC
 # (halted=True makes after_exec route back to claim). Type narrow catches illegal goto.
@@ -161,11 +160,6 @@ def _finalize_turn_observability(
         catalog=catalog,
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
-        # Gemini + explicit cachedContent reports only the explicit block in
-        # cache_read (implicit tail hits are billed but not reported), so the
-        # event carries the honest provenance instead of a bare number.
-        cache_mechanism=(CACHE_MECHANISM_MIXED if handler.used_explicit_cache else None),
-        cache_scope=(CACHE_SCOPE_EXPLICIT_BLOCK if handler.used_explicit_cache else None),
     )
     usage = final_msg.usage_metadata or {}
     from base.lm.reasoning import extract_reasoning_tokens
@@ -553,14 +547,13 @@ async def _llm_node_impl(
     cancelled_cmd = await _race_stream_vs_cancel(
         ctx,
         agent_id,
-        _stream_with_cache_retry(
+        _stream_llm(
             llm,
             list(state.messages),
             chunks=chunks,
             handler=handler,
             agent=ctx.require_agent(),
             catalog=ctx.require_catalog(),
-            binding=ctx.llm_binding,
         ),
         handler,
         ledger,
