@@ -85,7 +85,7 @@ from pathlib import Path
 from typing import cast
 
 from scripts.structure import imports, lint_common, placement_evidence, service_units
-from scripts.structure.imports import cache, executed
+from scripts.structure.imports import cache, executed, facts
 from scripts.structure.placement_evidence import (
     IncompleteReferenceEvidenceError as IncompleteReferenceEvidenceError,
 )
@@ -141,22 +141,6 @@ TOP_LEVEL_FILES = frozenset(
 )
 
 STRONG_KINDS = frozenset({"import", "string-target", "embedded-import", "path-file"})
-_STRING_TARGET_CALLEES = frozenset(
-    {
-        "setattr",
-        "delattr",
-        "patch",
-        "dict",
-        "multiple",
-        "import_module",
-        "importorskip",
-        "__import__",
-        "find_spec",
-        "run_module",
-        "resolve_name",
-        "reload",
-    }
-)
 # The subset of string-target callees whose target is *replaced*, not imported.
 _PATCH_CALLEES = frozenset({"setattr", "delattr", "patch", "dict", "multiple"})
 # `<receiver>.setattr(...)` is a monkeypatch call unless the receiver is one of these.
@@ -203,6 +187,15 @@ class ModuleIndex:
             found = "ns"
         self._kinds[dotted] = found
         return found
+
+    def file(self, dotted: str) -> str | None:
+        """Exact module source or package door; namespace packages have no file."""
+        kind = self.kind(dotted)
+        if kind == "file":
+            return dotted.replace(".", "/") + ".py"
+        if kind == "pkg":
+            return dotted.replace(".", "/") + "/__init__.py"
+        return None
 
     def resolve_prefix(self, dotted: str, tops: Sequence[str] = CODE_TOPS) -> str | None:
         """Longest dotted prefix that is a module; None if the top segment is not code."""
@@ -458,15 +451,10 @@ class _Collector(ast.NodeVisitor):
             self._add(line, kind, module, via, names)
 
     def visit_Import(self, node: ast.Import) -> None:
-        self._import(node)
+        pass  # Runtime clauses are collected by the shared facts owner.
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        self._import(node)
-
-    def _import(self, node: ast.Import | ast.ImportFrom) -> None:
-        clause = imports.normalize(node, self._rel_path)
-        for ref in imports.dependencies(clause, self.index, CODE_TOPS):
-            self._add(node.lineno, "import", ref.module, names=ref.names)
+        pass
 
     def visit_Call(self, node: ast.Call) -> None:
         callee = _callee(node.func)
@@ -482,7 +470,7 @@ class _Collector(ast.NodeVisitor):
             and self._roots.is_root(node.func.value)
         ):
             self._note_path(node.lineno, "/".join(c.strip("/") for c in constants))
-        if last in _STRING_TARGET_CALLEES and node.args:
+        if last in _PATCH_CALLEES and node.args:
             first = node.args[0]
             if (
                 isinstance(first, ast.Constant)
@@ -528,16 +516,6 @@ class _Collector(ast.NodeVisitor):
             is_file = rel.endswith(".py") and (self.index.repo_root / rel).is_file()
             self._add(line, "path-file" if is_file else "path-dir", module)
 
-    def executed_imports(self, source: executed.Source) -> list[executed.Unresolved]:
-        facts = executed.import_facts(source, self._rel_path)
-        for node in facts.clauses:
-            clause = imports.normalize(node, self._rel_path)
-            for dependency in imports.dependencies(clause, self.index, CODE_TOPS):
-                self._add(source.line, "embedded-import", dependency.module)
-        for target in facts.targets:
-            self._add_dotted(source.line, "embedded-import", target)
-        return facts.unresolved
-
 
 def collect_reference_evidence(
     tree: ast.AST, index: ModuleIndex, rel_path: str = ""
@@ -545,10 +523,19 @@ def collect_reference_evidence(
     """Actual source references and bounded Python -c evidence, without losing gaps."""
     collector = _Collector(index, tree, rel_path)
     collector.visit(tree)
-    inputs = executed.inputs(tree, rel_path)
-    unresolved = list(inputs.unresolved)
-    for source in inputs.sources:
-        unresolved.extend(collector.executed_imports(source))
+    evidence = facts.collect(tree, rel_path, index, tops=CODE_TOPS)
+    for fact in evidence.records:
+        if fact.kind == facts.FactKind.RESOURCE:
+            continue  # Resource ownership is independent of the legacy module-home query.
+        kind = "import" if fact.kind == facts.FactKind.IMPORT else "embedded-import"
+        if fact.kind == facts.FactKind.DYNAMIC_IMPORT:
+            kind = "string-target"
+        collector._add(fact.line, kind, fact.target, via=fact.via, names=fact.names)
+    unresolved = [
+        executed.Unresolved(u.path, u.line, u.reason)
+        for u in evidence.unknown
+        if u.kind != facts.FactKind.RESOURCE
+    ]
     return ReferenceEvidence(collector.refs, unresolved)
 
 
