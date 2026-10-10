@@ -288,6 +288,7 @@ def send_message(
         )
     elif resp.is_success:
         delivery_outbox.retire_send(
+            sender=sender,
             agent_id=agent_id,
             source=source,
             content=content,
@@ -296,6 +297,7 @@ def send_message(
         )
     else:
         delivery_outbox.retire_send(
+            sender=sender,
             agent_id=agent_id,
             source=source,
             content=content,

@@ -74,7 +74,7 @@ receipt and logical key remain available on `HTTPStatusError.response`.
 Logical-key construction errors stop before sending instead of producing an
 unkeyed message. Only named network failures enter transport/outbox recovery.
 A terminal wire failure also retires any existing automatic recovery record
-for that key. `retire_send(completed=False)` retains the sender's logical key
+for that key. `retire_send(sender=..., completed=False)` retains the sender's logical key
 within its existing dedup window, so an explicit caller retry can recover the
 receipt; only a completed send retires that key. No new journal state is added.
 
@@ -83,3 +83,11 @@ without SQLSTATE, class 08 errors, or PoolTimeout) through its existing backoff
 and budget. Other errors propagate to the ops service with the journal intact.
 A commit followed by an unknown wake error remains committed: explicit replay
 with the stored key recovers that inbound without repeating its body effects.
+
+The existing `DeliverySenderConfig` owns both its first-send enabled/dedup snapshot
+and the pending fingerprint keys. SDK sends reuse the Installation's sender; a
+surface replacement transfers that same sender explicitly when its authority is
+unchanged. Programmatic CLI retry chains pass one sender through `cmd_agents_send`
+/ `send_agent_message`; a single CLI invocation constructs its own sender. A late
+completion retires only its matching key, preserving a newer logical message.
+Independent senders do not share mutable pending state.

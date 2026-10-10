@@ -601,11 +601,14 @@ def emit(
     target_agent_id: int | None = None,
     attributes: dict[str, Any] | None = None,
     ts: datetime | None = None,
+    capture: Callable[[Event], Event] | None = None,
 ) -> None:
     """Enqueue one event into the unified stream. Never raises — except for a
     contract violation (R2-C): an `event_name` with no `EventSpec` in
     `base/events/declarations`, or a category that contradicts the
     declaration, raises `ValueError` (AGENTS.md "explode on unknown enums").
+    An explicitly supplied producer capture callback also propagates its errors
+    before observation delivery; no current participant is inferred.
     The loguru adapter wraps its call with `catch=True`, so a logging line
     that drifts off-contract stays visible (JSONL mirror) without crashing
     the producer.
@@ -635,7 +638,7 @@ def emit(
         attributes=attributes,
         ts=ts,
     )
-    emit_prepared(event)
+    emit_prepared(event, **({"capture": capture} if capture is not None else {}))
 
 
 def prepare_event(
@@ -686,15 +689,11 @@ def prepare_event(
     )
 
 
-def emit_prepared(event: Event) -> None:
-    """Enqueue an already constructed event without changing its identity."""
+def emit_prepared(event: Event, *, capture: Callable[[Event], Event] | None = None) -> None:
+    """Capture through an explicit producer dependency, then enqueue that exact event."""
+    if capture is not None:
+        event = capture(event)
     with failure_isolated("emit"):
-        # The external-controller recorder is deliberately at the producer
-        # seam, before this bounded queue can shed the event.  Its import stays
-        # lazy to preserve telemetry's standalone startup path.
-        from base.agents.impersonation.manifest import capture_local_event
-
-        event = capture_local_event(event)
         pipeline = _ensure_pipeline()
         if pipeline is not None:
             pipeline.enqueue(event)

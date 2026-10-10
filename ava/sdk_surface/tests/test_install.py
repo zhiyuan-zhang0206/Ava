@@ -28,6 +28,7 @@ from ava.sdk_surface.plugins import (
 from ava.sdk_surface.sdk_disable import _DisabledSDKModule
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
+from base.config.service_read import ConfigAuthority
 from base.packages.plugin_config_images import PluginConfigChangedError
 from base.packages.plugins import flags, load_report
 from base.packages.plugins.config_registration import DuplicateRegistration
@@ -594,3 +595,28 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
     assert load_failures == []
     assert install.installed() is None
     assert _surface_snapshot() == before
+
+
+def test_reinstall_transfers_sender_keys_and_first_send_snapshot(
+    config_authority: ConfigAuthority,
+) -> None:
+    from base.agents.messages.delivery_outbox import logical_key, retire_send
+
+    install.install(_registry(), authority=config_authority)
+    original = install.installed()
+    assert original is not None and original.delivery_sender is not None
+    sender = original.delivery_sender
+    key = logical_key(sender=sender, agent_id=7, source="watcher:7", content="notice")
+    first_settings = sender.settings()
+    assert install.uninstall() is original
+    install.install(
+        _registry(),
+        authority=config_authority,
+        delivery_sender=original.delivery_sender,
+    )
+    restored = install.installed()
+    assert restored is not None and restored.delivery_sender is sender
+    assert sender.settings() is first_settings
+    assert logical_key(sender=sender, agent_id=7, source="watcher:7", content="notice") == key
+    retire_send(sender=sender, agent_id=7, source="watcher:7", content="notice", key=key)
+    assert logical_key(sender=sender, agent_id=7, source="watcher:7", content="notice") != key

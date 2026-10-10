@@ -30,6 +30,11 @@ from tests.factories.external_attachment import ExampleMessagesPlugin, ExamplePl
 from tests.factories.external_attachment import attached_runtime as attached_runtime
 
 
+def _skip_local_capture(event: telemetry.Event, **_kwargs: Any) -> telemetry.Event:
+    """The symbolic-lease harness leaves receipt writes to the real SQL suite."""
+    return event
+
+
 def test_attach_borrows_identity_even_with_explicit_external_profile(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
@@ -290,8 +295,8 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
     participant = manifest.LocalParticipant(
         "lease", attachment.agent_id, 0, "post-close-sdk", database
     )
-    manifest.bind_local_participant(participant)
-    attachment._event_participant = participant
+    attachment._event_gate = manifest.LocalCaptureGate(participant)
+    monkeypatch.setattr(manifest, "capture_local_event", _skip_local_capture)
     delivered: list[tuple[int, str]] = []
 
     def record_send(agent_id: int, *, content: str, source: str) -> None:
@@ -302,7 +307,7 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
         with pytest.raises(RuntimeError, match="closing"):
             ava.agents.send_message(99, "must not reach gateway")
 
-    def skip_seal(_participant: manifest.LocalParticipant) -> None:
+    def skip_seal(_gate: manifest.LocalCaptureGate) -> None:
         return None
 
     monkeypatch.setattr(gateway_client, "send_message", record_send)
@@ -324,8 +329,8 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     participant = manifest.LocalParticipant(
         "lease", attachment.agent_id, 0, "pre-close-sdk", database
     )
-    manifest.bind_local_participant(participant)
-    attachment._event_participant = participant
+    attachment._event_gate = manifest.LocalCaptureGate(participant)
+    monkeypatch.setattr(manifest, "capture_local_event", _skip_local_capture)
     entered, release = Event(), Event()
     delivered: list[tuple[int, str]] = []
 
@@ -337,7 +342,7 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
 
     monkeypatch.setattr(gateway_client, "send_message", held_send)
 
-    def skip_seal(_participant: manifest.LocalParticipant) -> None:
+    def skip_seal(_gate: manifest.LocalCaptureGate) -> None:
         return None
 
     monkeypatch.setattr(manifest, "seal_local_participant", skip_seal)
@@ -536,3 +541,56 @@ def test_external_controls_stay_out_of_native_prompt(
     assert "external" not in ava.__all_for_ava__
     assert "ava.external.attach" not in prompt
     assert "## ava.external" not in prompt
+
+
+def test_close_preserves_flush_error_when_receipt_cleanup_also_fails(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+) -> None:
+    from base.agents.impersonation import manifest
+
+    attachment = external.attach("lease")
+    attachment._event_gate = manifest.LocalCaptureGate(
+        manifest.LocalParticipant(
+            "lease",
+            attachment.agent_id,
+            0,
+            "close-failure",
+            database,
+        )
+    )
+    primary = ValueError("plugin flush failed")
+    secondary = RuntimeError("receipt seal failed")
+
+    def fail_flush() -> None:
+        raise primary
+
+    def fail_seal(_gate: manifest.LocalCaptureGate) -> None:
+        raise secondary
+
+    monkeypatch.setattr(attachment, "flush", fail_flush)
+    monkeypatch.setattr(manifest, "seal_local_participant", fail_seal)
+    with pytest.raises(ValueError) as raised:
+        attachment.close()
+    assert raised.value is primary
+    assert any("receipt seal failed" in note for note in primary.__notes__)
+    assert _borrowed_agent_id() is None
+
+
+def test_attachment_context_keeps_body_error_primary_when_close_fails(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attachment = external.attach("lease")
+    primary = LookupError("body failed")
+
+    def fail_flush() -> None:
+        raise RuntimeError("flush failed")
+
+    monkeypatch.setattr(attachment, "flush", fail_flush)
+    with pytest.raises(LookupError) as raised, attachment:
+        raise primary
+    assert raised.value is primary
+    assert any("flush failed" in note for note in primary.__notes__)
+    assert _borrowed_agent_id() is None

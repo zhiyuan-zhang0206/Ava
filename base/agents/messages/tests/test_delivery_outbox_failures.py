@@ -36,9 +36,7 @@ def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:
 @pytest.fixture()
 def journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    outbox._reset_caches_for_tests()
     yield tmp_path
-    outbox._reset_caches_for_tests()
 
 
 @pytest.fixture()
@@ -57,7 +55,6 @@ def _patch_limits(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
         return snapshot
 
     monkeypatch.setattr(outbox, "limits", read_limits)
-    outbox._reset_caches_for_tests()
 
 
 def _agent(db_conn: psycopg.Connection, status: str = "running") -> int:
