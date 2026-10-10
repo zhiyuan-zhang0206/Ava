@@ -12,6 +12,13 @@ tags:
 
 Three layers: `HomePage` (read-only toast) → `HomeShell` (`useAgents`, activeId, lifecycle actions) → `HomeContent` (in `AgentEventStreamProvider`, with `useTimeline`/`useTokenUsage`/`usePendingMessages`). `HomeLayout` mounts after breakpoint settlement, adds draggable Agent Tree/Inspector splits with isolated desktop/compact autosave keys, and keeps phone overlays.
 
+`HomeContent` keeps a failed timeline read visible with the original error and
+manual Retry after automatic retries finish. A cold failure stays an error;
+a failed refresh keeps loaded messages visible. Retry is disabled during the
+read. `useTimeline` exposes the query error and refetch action without replacing
+the cache or changing global retries. Separately retained checkpoint history
+does not enter the live conversation through this surface.
+
 - **AgentSidebar** — agent list, spawn tree / flat dual view (DB-backed user setting); search + terminated toggle + status-dot quick toggle + sorting merged into one toolbar; collapsed is a blank strip with only an expand button. Default silent (RCS): list stably sorted by agent ID descending (status/activity changes never re-sort); status dot, activity line, awaiting-reply badge are opt-in (`display.show_agent_status` / `display.show_activity_line` / `notification.awaiting_reply`, default off). SSE real-time status.
 - **TimelineView** (`components/timeline/`) — the conversation timeline renderer; item kinds, dividers, cross-compact paging and deep collapse have their own node: [[ui/web/src/docs/frontend-components/timeline-view.ava.okf.md|Timeline View]].
 - **Composer** — message input (file upload, content blocks, multimodal image_url); `disabled|idle|busy` states; busy reveals Stop (inserts a persistent cancel inbound). One logical submit owns one client message id across timeout/retry and tab persistence. An unresolved delivery preserves the editable draft and reports an unconfirmed receipt through the existing error toast. Normal Send reuses the client message id for an unchanged draft; editing the content or attachments starts a new logical submission; storage failures degrade to an in-memory identity instead of blocking the send/spinner cleanup.
