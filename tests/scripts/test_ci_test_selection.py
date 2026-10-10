@@ -64,7 +64,7 @@ def _backend_verdict(
 
 
 def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
-    results = dict.fromkeys(dependencies, "success")
+    results = dict.fromkeys(["test-select", *dependencies], "success")
     non_backend = dict.fromkeys(results, "skipped")
     for outcome in ("success", "failure", "cancelled", "skipped"):
         actual = _backend_verdict(script, "false", non_backend | {"backend-structure": outcome})
@@ -88,7 +88,11 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
         for outcome in ("failure", "cancelled", "skipped"):
             actual = _backend_verdict(script, "true", results | {job: outcome})
             # FULL has no enforced subset; every required dependency must succeed.
-            assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
+            assert actual.returncode == (
+                0
+                if job == "backend-selected" or (job == "test-select" and outcome == "skipped")
+                else 1
+            ), actual.stdout
 
 
 def test_enforce_is_the_default_and_test_select_republishes_the_mode() -> None:
@@ -98,12 +102,15 @@ def test_enforce_is_the_default_and_test_select_republishes_the_mode() -> None:
     assert document["env"]["TEST_SELECTION_MODE"] == "enforce"
 
     selector = _workflow_jobs()["test-select"]
-    # A selector failure keeps the job non-gating: its outputs stay empty and
-    # the routing expressions below fall through to the full fan-out.
-    assert selector["continue-on-error"] is True
+    # A parser failure retains the full net and fails the required backend gate.
+    assert selector.get("continue-on-error", False) is False
     assert selector["outputs"]["mode"] == "${{ steps.selector.outputs.mode }}"
-    selector_step = _step(selector, "Select direct-import test subset")
+    selector_step = _step(selector, "Select runtime-impact test subset")
     assert 'echo "mode=$TEST_SELECTION_MODE" >> "$GITHUB_OUTPUT"' in selector_step["run"]
+    assert '--base-ref "$(cat /tmp/test-selection-base.txt)"' in selector_step["run"]
+    changes = _step(selector, "List changed PR paths")["run"]
+    assert 'git merge-base "$BASE_SHA" HEAD > /tmp/test-selection-base.txt' in changes
+    assert '"$(cat /tmp/test-selection-base.txt)"...HEAD' in changes
 
 
 def test_shards_are_skipped_only_on_the_enforced_subset_path(tmp_path: Path) -> None:
