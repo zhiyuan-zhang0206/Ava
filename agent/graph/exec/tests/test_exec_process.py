@@ -39,7 +39,7 @@ from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import _collect_child
 from base.db import Database
 from base.native_process.ownership import OwnedProcess
-from base.native_process.turn_identity import HostedTurnResources
+from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.sessions.posixproc import _group_empty
 from tests.e2e._proc import kill_group_or_prove_already_gone
 from tests.fixtures.pin_agent import exec_context
@@ -503,6 +503,12 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         await asyncio.gather(root_exit, closer.task, reap, return_exceptions=True)
 
 
+async def _assert_unfinished_service_join(service: HostedServiceResources) -> None:
+    with pytest.raises(TimeoutError, match="hosted resource service join"):
+        await service.aclose(deadline=asyncio.get_running_loop().time() + 0.05)
+    assert not service.joined
+
+
 def test_cancelled_late_reader_does_not_block_runner_shutdown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -517,7 +523,8 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
     failures: list[BaseException] = []
     helper: list[OwnedProcess] = []
     main_done, runner_done = threading.Event(), threading.Event()
-    scope = HostedTurnResources()
+    service = HostedServiceResources()
+    scope = HostedTurnResources(service=service)
 
     def private_spawn(
         *_args: object, **_kwargs: object
@@ -533,6 +540,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
         return owned
 
     async def run() -> None:
+        await service.turn()
         outcome, _ = await _subprocess._run_legacy_subprocess(
             "private reader fixture",
             exec_context(None, resources=scope),
@@ -548,7 +556,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
         helper.append(OwnedProcess.capture(psutil.Process(int(pid_path.read_text()))))
         assert helper[0].live()
         assert scope.unresolved and scope.completions
-        await asyncio.sleep(0.05)
+        await _assert_unfinished_service_join(service)
         main_done.set()
 
     def run_in_thread() -> None:

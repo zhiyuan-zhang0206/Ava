@@ -14,6 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.interrupt import InterruptEvent
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 
 
 @pytest.fixture
@@ -27,6 +28,7 @@ def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
         *,
         incarnation: RuntimeIncarnation | None,
         work: NativeWorkTarget | None,
+        resources: HostedTurnResources | None,
     ) -> AsyncGenerator[InterruptEvent]:
         yield event
 

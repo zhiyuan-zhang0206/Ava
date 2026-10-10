@@ -97,6 +97,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
+from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -358,8 +359,11 @@ async def _close_host_runtime(
     closing the pools first strands ownership and active turns. Callbacks unwind
     in reverse.
     """
+    # Share the existing unwind allowance; late resource join must not add a
+    # second five-second window after the scheduler has spent its own budget.
+    resource_deadline = asyncio.get_running_loop().time() + CANCEL_UNWIND_TIMEOUT_S
     async with contextlib.AsyncExitStack() as cleanup:
-        cleanup.push_async_callback(host.aclose)
+        cleanup.push_async_callback(host.aclose, resource_deadline=resource_deadline)
         cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
         cleanup.push_async_callback(scheduler.aclose)
 
@@ -489,6 +493,17 @@ async def _close_host_pools(
         await workload_pool.close()
 
 
+async def _close_joined_host_pools(
+    host: AgentHost | None,
+    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+) -> None:
+    if host is None or host.resources_joined:
+        await _close_host_pools(workload_pool, control_pool)
+    else:
+        _log.error("[agent-host] resource join unfinished; keeping pools open until hard exit")
+
+
 def _is_running() -> bool:
     """Whether a host is already running. Pid-reuse-safe: a live pid whose argv
     does not name this module is a recycled pid, not an instance."""
@@ -569,6 +584,7 @@ async def run() -> None:
     beat: asyncio.Task[Exception | None] | None = None
     beat_tasks: asyncio.TaskGroup | None = None
     health = None
+    host: AgentHost | None = None
     try:
         local_machine = machine_name()
         await _open_host_pools(workload_pool, control_pool, local_machine)
@@ -651,7 +667,7 @@ async def run() -> None:
         # remove the pidfile, just as one raised after dispatch/drain does.
         async with contextlib.AsyncExitStack() as cleanup:
             cleanup.callback(remove_pidfile, _pidfile())
-            cleanup.push_async_callback(_close_host_pools, workload_pool, control_pool)
+            cleanup.push_async_callback(_close_joined_host_pools, host, workload_pool, control_pool)
             if health is not None:
                 cleanup.push_async_callback(stop_health_server, health)
             cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
