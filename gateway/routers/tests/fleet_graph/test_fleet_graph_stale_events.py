@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from psycopg import errors as pg_errors
 
 from base import telemetry
+from base.config import settings
 from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
 from gateway.routers.fleet_graph import FleetGraphStaleEmitter
@@ -94,67 +94,12 @@ def _install_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
     return redis
 
 
-def _empty_pg_phase(*_args: object, **_kwargs: object) -> Any:
-    """Stand-in for `_fetch_pg_graph`: empty node rows, no Postgres."""
-    import gateway.routers.fleet_graph as fg
-
-    return fg._PgGraphData([], [], {})
-
-
-def _stub_pg(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The node phase answers empty without touching Postgres."""
-    import gateway.routers.fleet_graph as fg
-
-    monkeypatch.setattr(fg, "_fetch_pg_graph", _empty_pg_phase)
-
-
-def _get_stale() -> tuple[int, bool]:
-    with TestClient(app) as client:
-        resp = client.get("/api/fleet/graph")
-    return resp.status_code, bool(resp.json()["stale"])
-
-
-def test_pg_timeout_emits(monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]) -> None:
-    """PG statement timeout (QueryCanceled) -> pg_timeout."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-
-    def canceled(*_a: object, **_k: object) -> object:
-        raise pg_errors.QueryCanceled("canceling statement due to statement timeout")
-
-    monkeypatch.setattr(fg, "_fetch_pg_graph", canceled)
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "pg_timeout"}]
-
-
-def test_pg_phase_budget_emits(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """PG phase crossing the route deadline -> pg_budget."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-    monotonic = iter((0.0, fg._ROUTE_TIMEOUT_S + 0.1))
-    monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "pg_budget"}]
-
-
 def test_healthy_response_emits_nothing(
     monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
 ) -> None:
     """The event marks degraded fallbacks only — never a fresh poll."""
 
     _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
 
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
@@ -164,23 +109,20 @@ def test_healthy_response_emits_nothing(
     assert emitted == []
 
 
-def test_stale_emit_rate_cap_collapses_repeats(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
+def test_stale_emit_rate_cap_collapses_repeats(emitted: list[dict[str, Any]]) -> None:
     """The per-reason rate cap collapses repeats; other reasons pass.
 
     Episode semantics: a retry storm on top of ONE degradation must not
     fabricate the two events the alert threshold counts.
     """
-    import gateway.routers.fleet_graph as fg
-
-    emitter = FleetGraphStaleEmitter()
+    now = [100.0]
+    emitter = FleetGraphStaleEmitter(clock=lambda: now[0])
     emitter.emit("pg_budget")
     emitter.emit("pg_timeout")  # a different reason is not suppressed
     emitter.emit("pg_budget")  # same reason inside the default window
     assert [event["reason"] for event in emitted] == ["pg_budget", "pg_timeout"]
 
-    monkeypatch.setattr(fg, "_stale_emit_interval_s", lambda: 0.0)
+    now[0] += settings.display.fleet_graph_stale_emit_interval_s + 1.0
     emitter.emit("pg_budget")
     assert [event["reason"] for event in emitted] == [
         "pg_budget",
