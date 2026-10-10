@@ -21,3 +21,9 @@ The gateway lifespan owns one `FleetGraphStaleEmitter` in
 reason for the configured warning interval. Requests in the same application
 share that budget; a separate application lifespan starts with its own budget.
 The emitter retains a lock because route workers can report concurrently.
+
+Route degradation tests mount only this router with explicit app-owned pool,
+bus, telemetry guard and stale emitter. They exercise the real PG read phase
+and substitute its pool failure or the router-local budget clock as needed.
+Full gateway lifespan tests retain the cache and heartbeat integration paths;
+emitter rate-cap tests use its existing clock parameter.

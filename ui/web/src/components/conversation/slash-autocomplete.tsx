@@ -60,7 +60,7 @@ export interface SlashToken {
  *
  *  A command only triggers as the message's FIRST token (user ruling
  *  #836): the `/` must be the first non-whitespace character of the value.
- *  Leading whitespace is fine (`  /plan`); a slash wedged mid-message —
+ *  Leading whitespace is fine (`  /recap`); a slash wedged mid-message —
  *  prose, a path, a later command — never opens the dropdown, and
  *  multi-command messages are no longer supported. Null also means the
  *  caret isn't on a `/...` run — plain prose, or the instruction that

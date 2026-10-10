@@ -515,7 +515,11 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
     primary = ValueError("body failed after commit")
     cause = LookupError("body cause")
     tally = SdkCallTally()
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     db_conn.execute("CREATE TEMP TABLE sdk_committed_effects(marker TEXT)")
     db_conn.commit()
     previous_gate = capture.LocalCaptureGate(previous)
@@ -551,6 +555,7 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
                     identity={"unexpected_identity": owner.agent_id},
                     tally=tally,
                     capture_owner=Owner(),
+                    sampling_owner=call_policy.SamplingPolicyOwner(),
                 )
             else:
                 sdk_usage.run_metered(
@@ -561,6 +566,7 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
                     identity={"unexpected_identity": owner.agent_id},
                     tally=tally,
                     capture_owner=Owner(),
+                    sampling_owner=call_policy.SamplingPolicyOwner(),
                 )
         if body_failed:
             assert raised.value is primary and primary.__cause__ is cause
@@ -616,7 +622,11 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
     namespace = SimpleNamespace(held=held, __all_for_ava__=["held"])
     monkeypatch.setattr(ava, "receipt_probe", namespace, raising=False)
     monkeypatch.setattr(ava, "__all_for_ava__", [*ava.__all_for_ava__, "receipt_probe"])
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     prior = getattr(ava, "context", None)
     tally = SdkCallTally()
     context = AvaContext(
@@ -625,7 +635,7 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         sdk_capture=_CaptureOwner(previous_gate),
     )
     ava.bind_context(context)
-    ledger = metering.install()
+    ledger = metering.install(call_policy.SamplingPolicyOwner())
     calls = [asyncio.create_task(namespace.held()) for _ in range(2)]
     try:
         await asyncio.wait_for(entered.wait(), timeout=2)

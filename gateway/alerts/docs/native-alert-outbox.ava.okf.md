@@ -62,12 +62,13 @@ maintenance admission to stop new provider attempts and drain active calls.
 
 ## Delivery and completion
 
-The same `IMOutboxWorker`, table and `4477/im-timeline-outbox` transaction gate
-own timeline, notice and alert sends. The gate holds across the external call;
-short independent transactions persist SENDING before provider access and commit
-attempt-CAS outcomes. Unresolved SENDING becomes UNCERTAIN, without TTL stealing
-or automatic replay. Any possible acknowledged prefix/ack loss is uncertain;
-only adapter proof of no effect may fail. Later recipient messages can continue.
+The same `IMOutboxWorker` and table own timeline, notice and alert sends.
+Short transactions persist SENDING before provider access and record outcomes
+with the original attempt/status CAS; no database lease spans the external call.
+Unresolved SENDING stays unconfirmed, without TTL stealing or automatic replay.
+A possible acknowledged prefix/transport error is uncertain; only adapter proof
+of no effect may fail. Later recipient messages can continue, including across
+daemons while an earlier send remains active. Cross-process order is not promised.
 No separate queue, worker, per-chunk retry or resend UI is introduced.
 
 Any real channel SENT commits `alerts.notified_revision` only if the source member

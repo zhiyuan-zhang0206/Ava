@@ -29,6 +29,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import _AgentRuntime
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 class SummaryModel(FakeListChatModel):
@@ -93,6 +94,7 @@ async def make_host(
         )
         await flush_checkpoint(saver, agent)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,

@@ -17,6 +17,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -82,6 +83,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
     )
     graph = MagicMock()
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
         graph=graph,

@@ -19,6 +19,7 @@ const unit = (
   start: "2026-10-04T12:00:00Z",
   end: "2026-10-04T12:01:00Z",
   source: null,
+  inbound_id: null,
   preview: "out",
   parent: null,
   ...tokens,
@@ -28,7 +29,7 @@ function readout(u: RunTimelineUnit): string | null {
   return readoutText(
     { kind: "unit", i0: u.i0, i1: u.i1, unitKind: u.kind } as never,
     {
-      data: { units: [u], nodes: [], events: [] } as unknown as RunTimelineResponse,
+      data: { units: [u], nodes: [] } as unknown as RunTimelineResponse,
       t,
       unitLabel: () => "Output",
       sourceLabel: (s) => s,

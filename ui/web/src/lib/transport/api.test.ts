@@ -150,6 +150,22 @@ describe("lifecycle endpoints", () => {
     expect(calls[0].url).toMatch(/\/api\/agents\/405\/run-timeline$/);
   });
 
+  it("getRunTimelineLinks GETs the events of a set of agents in a window", async () => {
+    await api.getRunTimelineLinks([405, 6657], { from: "2026-10-03T00:00:00.000Z", to: "2026-10-05T00:00:00.000Z" });
+
+    expect(calls[0].url).toMatch(
+      /\/api\/insights\/run-timeline\/links\?agents=405%2C6657&from=2026-10-03T00%3A00%3A00.000Z&to=2026-10-05T00%3A00%3A00.000Z$/,
+    );
+  });
+
+  it("getRunTimelineLinkContent GETs one message or notice by its reference", async () => {
+    await api.getRunTimelineLinkContent({ inbound_id: 31 });
+    await api.getRunTimelineLinkContent({ notice_id: 4 });
+
+    expect(calls[0].url).toMatch(/\/api\/insights\/run-timeline\/link-content\?inbound_id=31$/);
+    expect(calls[1].url).toMatch(/\/api\/insights\/run-timeline\/link-content\?notice_id=4$/);
+  });
+
   it("getRunTimelineMessages GETs an index range, uncut only when asked", async () => {
     await api.getRunTimelineMessages(405, { start: 8, end: 68, limit: 50 });
     await api.getRunTimelineMessages(405, { start: 8, end: 68, full: true });
@@ -891,4 +907,62 @@ it("submits distinct business operations on private HTTP without randomUUID", as
   for (const key of keys) {
     expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   }
+});
+
+describe("run timeline read ownership", () => {
+  it.each(["fetch", "body"] as const)("bounds a pending %s and aborts its network request", async (phase) => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | null | undefined;
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+      signal = init?.signal;
+      if (phase === "fetch") return new Promise<Response>(() => undefined);
+      return Promise.resolve({ ok: true, json: () => new Promise(() => undefined) } as Response);
+    }));
+    let failure: unknown;
+    void api.getRunTimeline(6111).catch((error: unknown) => { failure = error; });
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(failure).toMatchObject({ name: "TimeoutError" });
+    expect(signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("forwards caller cancellation to a pending fetch and preserves AbortError", async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    const original = new DOMException("selection left", "AbortError");
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+      signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(original), { once: true });
+      });
+    }));
+    const result = api.getRunTimeline(6111, { signal: caller.signal }).catch((error: unknown) => error);
+    caller.abort();
+    expect(await result).toBe(original);
+    expect(signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps caller cancellation connected while consuming the response body", async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const original = new DOMException("selection left during body", "AbortError");
+    let bodyStarted = false;
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => Promise.resolve({
+      ok: true,
+      json: () => {
+        bodyStarted = true;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(original), { once: true });
+        });
+      },
+    } as Response)));
+    const result = api.getRunTimeline(6111, { signal: caller.signal }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodyStarted).toBe(true);
+    caller.abort();
+    expect(await result).toBe(original);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

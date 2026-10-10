@@ -31,6 +31,7 @@ from base.agents.impersonation.terminal_notices import notice_text
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.log import logger
 
 from .impersonation_adapters import resolve_adapter
 
@@ -103,7 +104,7 @@ class WakeListener(Protocol):
 
     async def wait_one(self, timeout: float) -> None: ...
 
-    async def close(self) -> None: ...
+    async def stop(self) -> tuple[str, ...]: ...
 
 
 def ack_command(lease_id: int | UUID, ids: Sequence[int], agent_id: int | None = None) -> str:
@@ -463,7 +464,16 @@ class _InboxRelay:
                 # Redis wakes; final-window exhaustion pauses this message's delivery.
                 await self._wait(snapshot)
         finally:
-            await self.listener.close()
+            primary = sys.exception()
+            try:
+                await self.listener.stop()
+            except Exception as cleanup_error:
+                if primary is None:
+                    raise
+                primary.add_note(f"Redis listener stop also failed: {cleanup_error!r}")
+                logger.opt(exception=True).warning(
+                    "Redis listener stop failed during relay failure"
+                )
 
 
 async def relay_inbox(

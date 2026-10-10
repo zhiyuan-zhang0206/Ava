@@ -35,9 +35,13 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
-def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
+def _make_runtime(
+    hosted_resources: HostedTurnResources, *, llm=None, event_publisher=None
+) -> Runtime[AvaContext]:
     """test helper: assemble AvaContext into Runtime; ops_pool
     placeholders for nodes that don't actually borrow conns.
 
@@ -53,6 +57,7 @@ def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
     if isinstance(llm, MagicMock):
         llm.bind_tools.return_value = llm
     ctx = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
@@ -83,6 +88,7 @@ async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
 
 
 async def test_llm_node_collects_chunks_into_final_message(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """llm_node merges streaming chunks into AIMessage into state.messages.
@@ -109,7 +115,12 @@ async def test_llm_node_collects_chunks_into_final_message(
     state = AgentState(messages=[HumanMessage(content="hello")], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
-    result = await llm_node(state, _make_runtime(llm=fake_llm), config, ledger=LlmLedger())
+    result = await llm_node(
+        state,
+        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm),
+        config,
+        ledger=LlmLedger(),
+    )
 
     assert isinstance(result, Command)
     assert result.update["messages"][0].content == "hello from agent"  # pyright: ignore[reportUnknownMemberType]
@@ -121,6 +132,7 @@ def _executed_sql(ops_pool) -> list[str]:
 
 
 async def test_llm_node_stamps_last_active_at_with_text(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """A completed turn that produced text writes both last_active_at (the
@@ -140,6 +152,7 @@ async def test_llm_node_stamps_last_active_at_with_text(
     )
     ops_pool = make_fake_ops_pool()
     ctx = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=ops_pool,
         llm=fake_llm,
         event_publisher=MagicMock(),
@@ -163,6 +176,7 @@ async def test_llm_node_stamps_last_active_at_with_text(
 
 
 async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """A tool-only turn (code, no text) is still real work: it writes
@@ -187,6 +201,7 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
     )
     ops_pool = make_fake_ops_pool()
     ctx = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=ops_pool,
         llm=fake_llm,
         event_publisher=MagicMock(),
@@ -210,6 +225,7 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
 
 
 async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """ChatAnthropic + bind_tools real chunk shape (content is list-of-blocks,
@@ -264,7 +280,10 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
     await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=pub), config, ledger=LlmLedger()
+        state,
+        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        config,
+        ledger=LlmLedger(),
     )
 
     events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
@@ -284,6 +303,7 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
 
 
 async def test_llm_node_publishes_reasoning_tokens(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """usage_metadata.output_token_details.reasoning rides through to the
@@ -311,7 +331,10 @@ async def test_llm_node_publishes_reasoning_tokens(
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
     await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=pub), config, ledger=LlmLedger()
+        state,
+        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        config,
+        ledger=LlmLedger(),
     )
 
     events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
@@ -322,6 +345,7 @@ async def test_llm_node_publishes_reasoning_tokens(
 
 
 async def test_llm_node_preserves_usage_metadata(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """usage_metadata must be on the final AIMessage——evals / cost tracking all rely on this
@@ -347,7 +371,12 @@ async def test_llm_node_preserves_usage_metadata(
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
-    result = await llm_node(state, _make_runtime(llm=fake_llm), config, ledger=LlmLedger())
+    result = await llm_node(
+        state,
+        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm),
+        config,
+        ledger=LlmLedger(),
+    )
 
     assert isinstance(result, Command)
     msg = result.update["messages"][0]
@@ -356,6 +385,7 @@ async def test_llm_node_preserves_usage_metadata(
 
 
 async def test_exec_node_publishes_exec_start_and_output(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """exec_node's two events:
@@ -367,7 +397,9 @@ async def test_exec_node_publishes_exec_start_and_output(
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
     # exec_node actually runs subprocess (async) -- use simplest code to avoid side effects
-    await exec_node(state, _make_runtime(event_publisher=pub), config)
+    await exec_node(
+        state, _make_runtime(hosted_resources=hosted_resources, event_publisher=pub), config
+    )
 
     events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
     exec_starts = [e for e in events if isinstance(e, ExecStart)]
@@ -381,6 +413,7 @@ async def test_exec_node_publishes_exec_start_and_output(
 
 
 async def test_exec_node_output_uses_wrap_code_output_envelope(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """exec_node after normal completion, appended HumanMessage uses wrap_code_output
@@ -393,7 +426,13 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
     )
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
-    result = await exec_node(state, _make_runtime(), config)
+    result = await exec_node(
+        state,
+        _make_runtime(
+            hosted_resources=hosted_resources,
+        ),
+        config,
+    )
 
     assert isinstance(result, Command)
     msg = result.update["messages"][0]
@@ -413,7 +452,10 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
 
 
 async def test_exec_node_protects_archives_referenced_by_its_current_state(
-    fake_cancel_event: asyncio.Event, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: asyncio.Event,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A real child exec cannot evict the previous output still in native context."""
     from agent.graph.exec import output
@@ -448,7 +490,13 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         ],
         halted=False,
     )
-    result = await exec_node(state, _make_runtime(), {"configurable": {"thread_id": "7"}})
+    result = await exec_node(
+        state,
+        _make_runtime(
+            hosted_resources=hosted_resources,
+        ),
+        {"configurable": {"thread_id": "7"}},
+    )
 
     assert new_body in result.update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
     assert archive.read_text() == old_body

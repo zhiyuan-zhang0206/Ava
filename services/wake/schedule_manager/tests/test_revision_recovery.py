@@ -105,12 +105,15 @@ def test_acknowledgement_loss_adopts_session_across_manager_restart(
     ).fetchone() == (1, 1)
 
 
+@pytest.mark.parametrize(
+    "entrypoint", ["services.wake.schedule_manager.runner", "gateway.schedules.runner"]
+)
 def test_crash_after_session_birth_before_applied_write_adopts_provenance(
-    db_conn: psycopg.Connection, backend: Backend
+    db_conn: psycopg.Connection, backend: Backend, entrypoint: str
 ) -> None:
     sid = _insert(db_conn)
     backend.commands[session_name(f"schedule-{sid}")] = (
-        f".venv/bin/python -m gateway.schedules.runner {sid} 1; exit $?"
+        f".venv/bin/python -m {entrypoint} {sid} 1; exit $?"
     )
     with base.db.pool() as pool:
         assert manager.ScheduleManager(pool).sync_one(sid)
@@ -141,7 +144,7 @@ def test_reap_failure_keeps_convergence_pending(
 ) -> None:
     sid = _insert(db_conn)
     backend.commands[session_name(f"schedule-{sid}")] = (
-        f".venv/bin/python -m gateway.schedules.runner {sid} 0; exit $?"
+        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 0; exit $?"
     )
     backend.fail_reap = True
     with base.db.pool() as pool:
@@ -170,7 +173,7 @@ def test_an_uncertain_live_revision_is_never_blindly_replaced(
 ) -> None:
     sid = _insert(db_conn)
     backend.commands[session_name(f"schedule-{sid}")] = (
-        f".venv/bin/python -m gateway.schedules.runner {sid} 1; exit $?"
+        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 1; exit $?"
     )
 
     def unavailable(_prefix: str = "", **_kw: object) -> list[SessionInfo]:

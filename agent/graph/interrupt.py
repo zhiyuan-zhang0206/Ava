@@ -23,9 +23,9 @@ leaving an orphan holding the listener's `_wait_lock` (and its connection) for
 up to a full wait cycle while every pub/sub wake for fresh inbounds went
 unheard — the agent then only woke via the claim loop's 30s SELECT recheck,
 which is the user-visible "message stuck ~30s" symptom (2026-08-02, agent
-2476, live incident: 30.06s pickup). A polling watcher owns no shared
-resource, so even a cancellation-lost survivor is inert: it holds nothing and
-exits at its next loop check because `stop` is set.
+2476, live incident: 30.06s pickup). A polling watcher borrows its explicit interrupt pool. Its original service
+retains a cancellation-lost poll until it returns; stop prevents a later poll
+result from setting the old event. Finite caller return does not close its pool.
 
 Cancel latency trades from "instant (pub/sub)" to "≤ one poll interval" — 2s
 is well inside what a pause/terminate UI action tolerates, and the claim
@@ -51,6 +51,7 @@ from base.agents.incarnation.native_work_models import NativeCancelMarker, Nativ
 from base.agents.messages.inbound import InterruptReason
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 
 
 class InterruptEvent(asyncio.Event):
@@ -165,8 +166,8 @@ async def _watch_for_interrupt(
 # (a frozen Postgres host, a network blip) can sit for up to the kernel's TCP
 # retry budget (~2 min) — an unbounded `await watcher` then freezes the whole
 # turn for that long after the model already finished. The watcher does
-# nothing after cancel besides unwinding (the stop flag is already set), so
-# abandoning it is safe: it holds no shared resource anymore.
+# nothing after cancel besides unwinding (the stop flag is already set).
+# The original service still owns its actual task and eventual result.
 _WATCHER_EXIT_TIMEOUT_S = 5.0
 
 # Poll cadence for the interrupt watcher (see `_watch_for_interrupt`). 2s
@@ -176,6 +177,99 @@ _WATCHER_EXIT_TIMEOUT_S = 5.0
 _INTERRUPT_POLL_S = 2.0
 
 
+class _InterruptWatch:
+    """An invocation's watcher, retained by its original service after bounded exit."""
+
+    def __init__(self, resources: HostedTurnResources, agent_id: int) -> None:
+        self.resources = resources
+        self.agent_id = agent_id
+        self.event = InterruptEvent()
+        self.stop = asyncio.Event()
+        self.error: BaseException | None = None
+        self.late = False
+        self.retained_at = 0.0
+
+    async def run(
+        self,
+        pool: AsyncConnectionPool,
+        *,
+        incarnation: RuntimeIncarnation | None,
+        work: NativeWorkTarget | None,
+    ) -> None:
+        cancelled = False
+        try:
+            await _watch_for_interrupt(
+                pool, self.event, self.agent_id, self.stop, incarnation=incarnation, work=work
+            )
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+        except BaseException as error:
+            self.error = error
+            if self.late:
+                self.resources.require_service().record_failure(
+                    self.resources, error, name=f"interrupt-watcher-{self.agent_id}"
+                )
+            else:
+                logger.opt(exception=error).warning(
+                    "interrupt watcher failed during invocation (agent_id={})", self.agent_id
+                )
+                if not self.stop.is_set():
+                    self.event.set()
+        finally:
+            if self.late:
+                fate = (
+                    f"raised {self.error!r}"
+                    if self.error is not None
+                    else "cancelled"
+                    if cancelled
+                    else "returned normally"
+                )
+                logger.info(
+                    "retained interrupt watcher finished {elapsed:.1f}s after handoff "
+                    "(agent_id={agent_id}): {fate}",
+                    elapsed=asyncio.get_running_loop().time() - self.retained_at,
+                    agent_id=self.agent_id,
+                    fate=fate,
+                )
+
+    async def finish(self, task: asyncio.Task[None], primary: BaseException | None) -> None:
+        self.stop.set()
+        task.cancel()
+        # wait_for waits for cancelled cleanup; wait preserves the five-second return.
+        deadline = asyncio.get_running_loop().time() + _WATCHER_EXIT_TIMEOUT_S
+        cancellation: asyncio.CancelledError | None = None
+        while not task.done() and asyncio.get_running_loop().time() < deadline:
+            try:
+                await asyncio.wait(
+                    {task}, timeout=max(0, deadline - asyncio.get_running_loop().time())
+                )
+            except asyncio.CancelledError as error:
+                cancellation = error
+        if not task.done():
+            self.late = True
+            self.retained_at = asyncio.get_running_loop().time()
+            chain = "\n".join(awaiter_chain_lines(task)) or "  <no frames captured>"
+            logger.info(
+                "subscribe_interrupt watcher did not unwind {timeout}s after cancel "
+                "(agent_id={agent_id}) — retained by its service; wedged await chain:\n{chain}",
+                timeout=_WATCHER_EXIT_TIMEOUT_S,
+                agent_id=self.agent_id,
+                chain=chain,
+            )
+        elif self.error is not None:
+            primary = primary if primary is not None else cancellation
+            if primary is None:
+                raise self.error
+            primary.add_note(f"interrupt watcher cleanup also failed: {self.error!r}")
+            secondary = [self.error]
+            if primary.__cause__ is not None:
+                secondary.insert(0, primary.__cause__)
+            raise primary from BaseExceptionGroup("interrupt cleanup failures", secondary)
+        if primary is None and cancellation is not None:
+            raise cancellation
+
+
 @asynccontextmanager
 async def subscribe_interrupt(
     pool: AsyncConnectionPool | None,
@@ -183,14 +277,16 @@ async def subscribe_interrupt(
     *,
     incarnation: RuntimeIncarnation | None,
     work: NativeWorkTarget | None,
+    resources: HostedTurnResources | None,
 ) -> AsyncGenerator[InterruptEvent]:
     """RAII watch for a durable interrupt (cancel/terminate) on this agent.
 
     Yields an `asyncio.Event` the node races its work against. On body exit
     (completion / exception / cancel) the watcher task is cancelled; if it does
-    not unwind within `_WATCHER_EXIT_TIMEOUT_S` (wedged on a dead DB call) it
-    is abandoned at INFO instead of stalling the turn — the abandonment is a
-    companion of the host stall, not its own signal (2026-10-03 triage #13).
+    not unwind within `_WATCHER_EXIT_TIMEOUT_S`, its original service keeps
+    the task through stop/join before pool close. Unknown in-flight failure
+    reaches the caller; late failure is reported immediately and raised by
+    that service at stop/join, without cancelling sibling agents.
 
     `pool` None (container/eval, no inbound queue) -> yields an event that
     never fires; the wrapped action runs uninterruptibly.
@@ -199,56 +295,19 @@ async def subscribe_interrupt(
     if pool is None:
         yield event
         return
-    stop = asyncio.Event()
-    watcher = asyncio.create_task(
-        _watch_for_interrupt(pool, event, agent_id, stop, incarnation=incarnation, work=work),
+    if resources is None:
+        raise RuntimeError("a database interrupt watcher requires its explicit service resources")
+    service = resources.require_service()
+    owned = _InterruptWatch(resources, agent_id)
+    watcher = service.watch(
+        owned.run(pool, incarnation=incarnation, work=work),
         name=f"interrupt-watcher-{agent_id}",
     )
+    primary: BaseException | None = None
     try:
-        yield event
+        yield owned.event
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        stop.set()
-        watcher.cancel()
-        # asyncio.wait (not wait_for): wait_for would await the cancellation's
-        # completion, which is exactly the wedge being bounded here.
-        done, _ = await asyncio.wait({watcher}, timeout=_WATCHER_EXIT_TIMEOUT_S)
-        if not done:
-            # Name the exact line the watcher is wedged on — the live incident
-            # burned hours of forensics because the abandon report could not
-            # say WHERE the orphan sat (psycopg wait? lock acquire? pool
-            # checkout?). The await chain is a pure frame walk, no IO.
-            chain = "\n".join(awaiter_chain_lines(watcher)) or "  <no frames captured>"
-            logger.info(
-                "subscribe_interrupt watcher did not unwind {timeout}s after cancel "
-                "(agent_id={agent_id}) — abandoning it; wedged await chain:\n{chain}",
-                timeout=_WATCHER_EXIT_TIMEOUT_S,
-                agent_id=agent_id,
-                chain=chain,
-            )
-            # Record the orphan's eventual fate: whether (and when, and how)
-            # it actually finished is the difference between "wedged on IO"
-            # and "survived its cancellation and kept running" — unknowable
-            # in the live incident, one callback here.
-            abandoned_at = asyncio.get_running_loop().time()
-
-            def _log_orphan_fate(t: asyncio.Task, _abandoned_at: float = abandoned_at) -> None:
-                if t.cancelled():
-                    fate = "cancelled"
-                elif t.exception() is not None:
-                    fate = f"raised {t.exception()!r}"
-                else:
-                    fate = "returned normally (survived its cancellation)"
-                logger.info(
-                    "abandoned interrupt watcher finished {dt:.1f}s after abandonment "
-                    "(agent_id={agent_id}): {fate}",
-                    dt=asyncio.get_running_loop().time() - _abandoned_at,
-                    agent_id=agent_id,
-                    fate=fate,
-                )
-
-            watcher.add_done_callback(_log_orphan_fate)  # pyright: ignore[reportUnknownArgumentType]
-        elif not watcher.cancelled() and watcher.exception() is not None:
-            logger.opt(exception=watcher.exception()).warning(
-                "subscribe_interrupt watcher exited with exception (agent_id={})",
-                agent_id,
-            )
+        await owned.finish(watcher, primary)

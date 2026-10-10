@@ -27,6 +27,8 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -46,7 +48,9 @@ def _write_png(path: Path) -> None:
     Image.new("RGB", (1, 1)).save(path)
 
 
-def _make_runtime(model_name: str | None = None) -> Runtime[AvaContext]:
+def _make_runtime(
+    hosted_resources: HostedTurnResources, model_name: str | None = None
+) -> Runtime[AvaContext]:
     """Minimal runtime with fake ops_pool + event_publisher (mirrors
     agent/graph/exec/tests/test_exec_node_timeout.py). A model_name selects the media
     capability gate for attachment packing (None = configured turn model)."""
@@ -59,6 +63,7 @@ def _make_runtime(model_name: str | None = None) -> Runtime[AvaContext]:
     if model_name is not None:
         llm = cast("BaseChatModel", SimpleNamespace(model_name=model_name))
     ctx = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,
         event_publisher=MagicMock(),
@@ -71,7 +76,7 @@ def _make_runtime(model_name: str | None = None) -> Runtime[AvaContext]:
 
 
 async def test_exec_drains_attachment_right_after_output(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    hosted_resources: HostedTurnResources, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
@@ -90,7 +95,9 @@ async def test_exec_drains_attachment_right_after_output(
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", _fake_run_agent_code)
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
-    result = await _exec_node_impl(state, _make_runtime(model_name="glm-5.3-flash"), _CONFIG)
+    result = await _exec_node_impl(
+        state, _make_runtime(hosted_resources=hosted_resources, model_name="glm-5.3-flash"), _CONFIG
+    )
 
     update = result.update
     assert update is not None
@@ -117,6 +124,7 @@ async def test_exec_drains_attachment_right_after_output(
 
 
 async def test_exec_without_attachments_appends_no_attach_message(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _fake_run_agent_code(
@@ -127,7 +135,9 @@ async def test_exec_without_attachments_appends_no_attach_message(
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", _fake_run_agent_code)
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
-    result = await _exec_node_impl(state, _make_runtime(model_name="glm-5.3-flash"), _CONFIG)
+    result = await _exec_node_impl(
+        state, _make_runtime(hosted_resources=hosted_resources, model_name="glm-5.3-flash"), _CONFIG
+    )
 
     update = result.update
     assert update is not None

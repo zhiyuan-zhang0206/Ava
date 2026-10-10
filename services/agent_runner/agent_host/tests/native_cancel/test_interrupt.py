@@ -32,17 +32,22 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
 )
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from tests.fixtures.pin_agent import exec_context
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 async def test_real_managed_exec_abort_closes_resources_before_original_ack(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, tmp_path: Path, database: Database
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    tmp_path: Path,
+    database: Database,
+    hosted_resources: HostedTurnResources,
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool)
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 100, [])
-    scope = HostedTurnResources()
+    scope = hosted_resources
     async with subscribe_interrupt(
-        aops_pool, target.agent_id, incarnation=incarnation, work=target
+        aops_pool, target.agent_id, incarnation=incarnation, work=target, resources=scope
     ) as interrupted:
         execution = asyncio.create_task(
             _run_in_subprocess(
@@ -94,6 +99,7 @@ async def test_real_model_watcher_discards_partial_then_claim_attributes_origina
     aops_pool: AsyncConnectionPool,
     database: Database,
     model_catalog: ModelCatalog,
+    hosted_resources: HostedTurnResources,
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool)
@@ -107,7 +113,7 @@ async def test_real_model_watcher_discards_partial_then_claim_attributes_origina
         finally:
             unwound.set()
 
-    ctx = exec_context(target.agent_id)
+    ctx = exec_context(target.agent_id, resources=hosted_resources)
     model = MagicMock()
     model.bind_tools.return_value = model
     model.astream.return_value = stream()

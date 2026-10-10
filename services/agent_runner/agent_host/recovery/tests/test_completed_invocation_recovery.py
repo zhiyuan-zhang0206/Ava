@@ -22,6 +22,7 @@ from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoi
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 @pytest.mark.parametrize("site", ["before_flush", "after_flush", "before_idle", "after_idle"])
@@ -39,6 +40,7 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
     await graph.aupdate_state(config, {"halted": True}, as_node="claim")
     await flush_checkpoint(saver, agent)
     host = host_module.AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
@@ -122,6 +124,7 @@ async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
     incarnation = await _admit(aops_pool, agent)
     graph, saver, _config, _history = await _prepare_graph(aops_pool, agent, 100, [])
     host = host_module.AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,

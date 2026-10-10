@@ -143,7 +143,11 @@ def test_load_extensions_installs_metering(monkeypatch: pytest.MonkeyPatch):
     from ava.sdk_surface import metering
 
     installed: list[bool] = []
-    monkeypatch.setattr(metering, "install", lambda: installed.append(True))
+
+    def install_metering(_sampling: object) -> None:
+        installed.append(True)
+
+    monkeypatch.setattr(metering, "install", install_metering)
 
     _loader.load_extensions()
 

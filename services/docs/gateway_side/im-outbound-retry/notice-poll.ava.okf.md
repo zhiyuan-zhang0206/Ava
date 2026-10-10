@@ -29,7 +29,7 @@ original target under the shared worker's policy.
 `im_bridge_notice_acceptances` has no foreign-key pin or expiry. The provider
 worker never treats a poll retry as permission to resend an ambiguous operation.
 A provider acknowledgement lost, successful prefix followed by an error, or
-abandoned sending attempt remains uncertain; subsequent recipient messages may
+abandoned sending attempt remains unconfirmed; subsequent recipient messages may
 proceed. Acceptance is not proof of delivery.
 
 ## Cutover and late commits
@@ -56,18 +56,17 @@ all historical gaps.
 ## Generation compatibility and remaining producers
 
 The legacy daemon sends directly and only writes JSON cursor state. It cannot
-read or obey these database source receipts. The new schema and transaction
-gate cannot fence an old provider call: **mixed legacy and new IM generations
+read or obey these database source receipts. The new schema cannot fence an
+old provider call: **mixed legacy and new IM generations
 are not safe for either normal notices or the timeline Outbox cutover**.
 Before enabling the new generation, the authorized operator must stop all old
 IM daemons and drain their already-started provider calls, then enable the new
 generation with the matching schema. Do not re-enable a legacy sending binary
 as a rollback. This contribution performs no deployment.
 
-New workers share the existing `4477` / `im-timeline-outbox` transaction gate
-namespace; its historical name is deliberately preserved. Existing stored
-manifest JSON keys and adapter kinds remain readable after internal vocabulary
-renaming.
+Workers use short atomic claims and original-attempt completion CAS, without a
+cross-process chat gate. Existing stored manifest JSON keys and adapter kinds
+remain readable after internal vocabulary renaming.
 
 Explicit `/notice` listing and its replay callbacks retain their deliberate
 immediate-send behavior in this slice. Ops `/send` fan-out, alert-transition

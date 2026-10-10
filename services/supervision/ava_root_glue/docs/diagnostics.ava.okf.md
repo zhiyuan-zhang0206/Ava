@@ -21,6 +21,19 @@ mechanism and remains the sole application retry scheduler. Initial failures
 remain visible while each captured generation receives its declared startup
 grace; first readiness or the deadline ends that grace.
 
+Each observation owns its actual daemon Thread, completion Future, stop event,
+and original worker error. Its runner retains that observation until the worker
+really finishes, so completion of a result cannot replace a still-live worker.
+Service and diagnostic stop close admission before joining all retained probes
+within one 0.2-second budget per monitor. `unfinished_probes` records names still
+live at that stop; blocked native calls can outlast it without preventing process
+exit. Ordinary inspection Exceptions and invalid probe results still yield
+UNAVAILABLE. An unknown worker implementation failure is immediately recorded
+with its original exception object; a waiting caller receives it directly and
+the original runner raises it during stop, including after an earlier bounded
+stop returned. Root health rounds stop both observation owners even when one
+fails, and root teardown preserves its primary and secondary errors.
+
 | Diagnostic | Registration | Evidence |
 |---|---|---|
 | `brew-pin` | macOS | Bounded successful Homebrew installed/pinned queries; missing approved pins are DOWN, failed queries are unavailable. No package changes. |

@@ -172,7 +172,7 @@ Application service commands, admitted PATH and process ancestry belong to
 [root supervision](../../services/supervision/ava_root/docs/ava_root.ava.okf.md).
 Enumerate application services through `ava status`; persistent shells through
 `ava sessions list`. Idle and paused agent identities remain durable even when
-no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime.ava.okf.md).
+no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime/agent-runtime.ava.okf.md).
 
 PTY closure is best effort: known shells/terminals close with bounded signals;
 background or detached processes can remain. Known job leftovers are diagnostic.

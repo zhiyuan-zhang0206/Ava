@@ -46,6 +46,8 @@ import sys
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Agent-launch markers: with AVA_AGENT_ID forwarded, `import ava` self-loads
@@ -414,18 +416,20 @@ child = exec_child._import_runtime(0.0)  # the child boot's step that binds the 
 
 
 def _snap(tag):
+    # Child imports may continue while the report is filtered. Observe one table.
+    modules = sys.modules.copy()
     return {{
         "tag": tag,
         "state_is_none": not ava.in_exec_turn(),
-        "agent_state": "agent.state" in sys.modules,
+        "agent_state": "agent.state" in modules,
         "faces": any(
             name.endswith(".agent_runtime")
             and name.startswith(("ava_builtins.plugins.", "plugins."))
-            for name in sys.modules
+            for name in modules
         ),
         "heavy": sorted(
             name
-            for name in sys.modules
+            for name in modules
             if name.startswith(("langchain", "langgraph", "langsmith"))
         ),
     }}
@@ -442,8 +446,29 @@ print(json.dumps({{"boot": boot, "armed": armed, "touched": touched}}))
 """
 
 
-def test_stateful_child_arms_lazily_and_materializes_on_first_use(tmp_path: Path) -> None:
-    report = _run_clean_probe(_CHILD_STATE_LAZY.format(req=str(_craft_stateful_envelope(tmp_path))))
+@pytest.mark.parametrize("mutate_module_names", [False, True])
+def test_stateful_child_arms_lazily_and_materializes_on_first_use(
+    tmp_path: Path, mutate_module_names: bool
+) -> None:
+    body = _CHILD_STATE_LAZY.format(req=str(_craft_stateful_envelope(tmp_path)))
+    if mutate_module_names:
+        # Force an import-table change during filtering, without timing or retries.
+        body = body.replace(
+            'armed = _snap("armed")',
+            """
+class ImportingModuleName(str):
+    def startswith(self, prefix, *args):
+        sys.modules["lazy_child_snapshot_added"] = None
+        return super().startswith(prefix, *args)
+
+sys.modules[ImportingModuleName("lazy_child_snapshot_trigger")] = None
+armed = _snap("armed")
+assert "lazy_child_snapshot_added" in sys.modules
+del sys.modules["lazy_child_snapshot_trigger"]
+del sys.modules["lazy_child_snapshot_added"]
+""",
+        )
+    report = _run_clean_probe(body)
     boot = cast("dict[str, object]", report["boot"])
     armed = cast("dict[str, object]", report["armed"])
     touched = cast("dict[str, object]", report["touched"])

@@ -28,6 +28,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.tests.test_circuit_breaker import (
     _ancestor_halt_notes,
     _overflow_state,
@@ -36,6 +37,7 @@ from services.agent_runner.agent_host.tests.test_circuit_breaker import (
     _reject_turn,
     _spawn_child_under_idling_ancestor,
 )
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from tests.fixtures.units import spawn_agent
 
 
@@ -54,7 +56,9 @@ async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> Non
     assert llm.bind_tools.return_value.ainvoke.await_count == COMPACT_MAX_ATTEMPTS
 
 
-async def test_llm_node_closes_circuit_on_success() -> None:
+async def test_llm_node_closes_circuit_on_success(
+    hosted_resources: HostedTurnResources,
+) -> None:
     """A successful LLM call is the circuit-healed signal — the breaker closes
     so heartbeats resume routing normally."""
 
@@ -71,7 +75,7 @@ async def test_llm_node_closes_circuit_on_success() -> None:
 
     cmd = await llm_node(
         state,
-        _llm_make_runtime(llm=fake_llm, event_publisher=MagicMock()),
+        _llm_make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
         _LLM_CONFIG,
         ledger=LlmLedger(),
     )
@@ -80,7 +84,9 @@ async def test_llm_node_closes_circuit_on_success() -> None:
     assert cmd.update["circuit"].reason is None  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
 
 
-async def test_llm_node_cancel_does_not_close_circuit(fake_cancel_event) -> None:
+async def test_llm_node_cancel_does_not_close_circuit(
+    hosted_resources: HostedTurnResources, fake_cancel_event
+) -> None:
     """The cancel path discards the partial generation — no stream completed,
     so the breaker must stay open (closing it without a healed call would
     re-arm the doomed heartbeat calls)."""
@@ -101,7 +107,7 @@ async def test_llm_node_cancel_does_not_close_circuit(fake_cancel_event) -> None
     trigger = asyncio.create_task(_trigger())
     cmd = await llm_node(
         state,
-        _llm_make_runtime(llm=fake_llm, event_publisher=MagicMock()),
+        _llm_make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
         _LLM_CONFIG,
         ledger=LlmLedger(),
     )

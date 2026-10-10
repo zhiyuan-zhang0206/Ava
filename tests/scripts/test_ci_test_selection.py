@@ -64,12 +64,16 @@ def _backend_verdict(
 
 
 def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
-    results = dict.fromkeys(dependencies, "success")
-    non_backend = dict.fromkeys(results, "skipped")
+    results = dict.fromkeys(["classify", "test-select", *dependencies], "success")
+    non_backend = dict.fromkeys(results, "skipped") | {"classify": "success"}
     for outcome in ("success", "failure", "cancelled", "skipped"):
         actual = _backend_verdict(script, "false", non_backend | {"backend-structure": outcome})
         assert actual.returncode == (0 if outcome == "success" else 1), actual.stdout
         assert "backend-static:" not in actual.stdout
+        actual = _backend_verdict(
+            script, "false", non_backend | {"classify": outcome, "backend-structure": "success"}
+        )
+        assert actual.returncode == (0 if outcome == "success" else 1), actual.stdout
     for mode, decision, changes, expected in (
         ("enforce", "FULL", {}, 0),
         ("shadow", "SELECTED", {"backend-shard": "failure"}, 1),
@@ -88,7 +92,11 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
         for outcome in ("failure", "cancelled", "skipped"):
             actual = _backend_verdict(script, "true", results | {job: outcome})
             # FULL has no enforced subset; every required dependency must succeed.
-            assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
+            assert actual.returncode == (
+                0
+                if job == "backend-selected" or (job == "test-select" and outcome == "skipped")
+                else 1
+            ), actual.stdout
 
 
 def test_enforce_is_the_default_and_test_select_republishes_the_mode() -> None:
@@ -98,12 +106,15 @@ def test_enforce_is_the_default_and_test_select_republishes_the_mode() -> None:
     assert document["env"]["TEST_SELECTION_MODE"] == "enforce"
 
     selector = _workflow_jobs()["test-select"]
-    # A selector failure keeps the job non-gating: its outputs stay empty and
-    # the routing expressions below fall through to the full fan-out.
-    assert selector["continue-on-error"] is True
+    # A parser failure retains the full net and fails the required backend gate.
+    assert selector.get("continue-on-error", False) is False
     assert selector["outputs"]["mode"] == "${{ steps.selector.outputs.mode }}"
-    selector_step = _step(selector, "Select direct-import test subset")
+    selector_step = _step(selector, "Select runtime-impact test subset")
     assert 'echo "mode=$TEST_SELECTION_MODE" >> "$GITHUB_OUTPUT"' in selector_step["run"]
+    assert '--base-ref "$(cat /tmp/test-selection-base.txt)"' in selector_step["run"]
+    changes = _step(selector, "List changed PR paths")["run"]
+    assert 'git merge-base "$BASE_SHA" HEAD > /tmp/test-selection-base.txt' in changes
+    assert '"$(cat /tmp/test-selection-base.txt)"...HEAD' in changes
 
 
 def test_shards_are_skipped_only_on_the_enforced_subset_path(tmp_path: Path) -> None:
@@ -246,9 +257,9 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
         "helper-signing-smoke",
     ]
     assert aggregator["if"] == (
-        "${{ !cancelled() && needs.classify.result == 'success' && "
-        "(needs.classify.outputs.backend == 'true' || "
-        "needs.backend-structure.result != 'success') }}"
+        "${{ !cancelled() && (needs.classify.result == 'failure' || "
+        "(needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || "
+        "needs.backend-structure.result != 'success'))) }}"
     )
     verify = _step(aggregator, "Verify backend job results")["run"]
     assert '"$TEST_SELECTION_MODE" = "enforce"' in verify
@@ -259,6 +270,34 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
         verify.index('if [ "$TEST_SELECTION_MODE" = "enforce" ]')
     )
     _assert_backend_verdicts(verify, aggregator["needs"][2:])
+
+
+def test_backend_admission_preserves_draft_skip_and_propagates_classify_failure() -> None:
+    condition = _workflow_jobs()["backend"]["if"].removeprefix("${{").removesuffix("}}")
+    for classify, backend, structure, cancelled, expected in (
+        ("skipped", "", "skipped", False, False),  # draft PR
+        ("failure", "", "skipped", False, True),  # runtime analysis failure
+        ("success", "true", "success", False, True),
+        ("success", "false", "success", False, False),
+        ("success", "false", "failure", False, True),
+        ("failure", "", "skipped", True, False),
+    ):
+        closed = condition.replace("!cancelled()", "0 == 1" if cancelled else "1 == 1")
+        for key, value in (
+            ("needs.classify.result", classify),
+            ("needs.classify.outputs.backend", backend),
+            ("needs.backend-structure.result", structure),
+        ):
+            closed = closed.replace(key, repr(value))
+        assert "needs." not in closed
+        result = subprocess.run(  # noqa: S603 - repository predicate with closed test-owned values
+            ["bash", "--noprofile", "--norc", "-c", f"[[ {closed} ]]"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode in (0, 1), result.stderr
+        assert (result.returncode == 0) is expected, (classify, backend, structure, cancelled)
 
 
 def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
@@ -343,6 +382,8 @@ def _git(repo: Path, *args: str) -> str:
 def _changed_repo(repo: Path, paths: tuple[str, ...]) -> str:
     repo.mkdir()
     _git(repo, "init", "-q")
+    (repo / "pyproject.toml").write_text('[tool.pytest.ini_options]\ntestpaths = ["tests"]\n')
+    _git(repo, "add", ".")
     _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
     base = _git(repo, "rev-parse", "HEAD")
     for path in paths:
@@ -381,21 +422,64 @@ def test_native_classify_step_preserves_document_and_queue_routing(tmp_path: Pat
         repo = tmp_path / f"repo-{index}"
         base = _changed_repo(repo, paths)
         output = tmp_path / f"outputs-{index}"
-        environment = os.environ | {
-            "EVENT": event,
-            "HEAD_REF": head_ref,
-            "BASE_SHA": base,
-            "GITHUB_OUTPUT": str(output),
-            "PYTHONPATH": str(_REPO_ROOT),
-            "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
-        }
-        subprocess.run(  # noqa: S603 -- execute the checked-in workflow over test-owned inputs
-            ["bash", "-eu", "-c", step["run"]],
-            cwd=repo,
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        _run_classify(
+            step["run"], repo, base, output, event=event, head_ref=head_ref
+        ).check_returncode()
         values = dict(line.split("=", 1) for line in output.read_text().splitlines())
         assert (values["frontend"], values["backend"]) == expected, (event, head_ref, paths)
+
+
+def _run_classify(
+    script: str, repo: Path, base: str, output: Path, *, event: str, head_ref: str
+) -> subprocess.CompletedProcess[str]:
+    environment = os.environ | {
+        "EVENT": event,
+        "HEAD_REF": head_ref,
+        "BASE_SHA": base,
+        "GITHUB_OUTPUT": str(output),
+        "PYTHONPATH": str(_REPO_ROOT),
+        "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+    }
+    return subprocess.run(  # noqa: S603 -- checked-in workflow over test-owned inputs
+        ["bash", "-eu", "-c", script],
+        cwd=repo,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_native_classify_routes_document_resources_and_propagates_analysis_errors(
+    tmp_path: Path,
+) -> None:
+    step = _step(_workflow_jobs()["classify"], "Classify changed paths")
+    for index, source in enumerate(
+        (
+            'from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n(ROOT / "docs/runtime.md").read_text()\n',
+            "def syntax error\n",
+        )
+    ):
+        repo = tmp_path / f"repo-{index}"
+        _changed_repo(repo, ("docs/runtime.md",))
+        (repo / "tests").mkdir()
+        (repo / "tests/test_document.py").write_text(source)
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "base reader")
+        base = _git(repo, "rev-parse", "HEAD")
+        (repo / "docs/runtime.md").write_text("updated runtime input\n")
+        _git(repo, "commit", "-qam", "document input")
+        assert _git(repo, "diff", "--name-only", base, "HEAD") == "docs/runtime.md"
+        output = tmp_path / f"outputs-{index}"
+        result = _run_classify(
+            step["run"], repo, base, output, event="pull_request", head_ref="codex/docs"
+        )
+        if index == 0:
+            result.check_returncode()
+            assert dict(line.split("=", 1) for line in output.read_text().splitlines()) == {
+                "frontend": "false",
+                "backend": "true",
+            }
+        else:
+            assert result.returncode != 0
+            assert "SyntaxError" in result.stderr
