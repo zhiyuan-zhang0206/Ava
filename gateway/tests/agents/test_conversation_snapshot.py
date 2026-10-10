@@ -139,11 +139,10 @@ def test_snapshot_deserializes_the_checkpoint_once(
     assert body["token_usage"]["input_tokens"] == 42
 
 
-def test_snapshot_checkpoint_read_failure_matches_the_standalone_tolerance(
+def test_snapshot_checkpoint_read_failure_matches_timeline_unavailability(
     db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An unreadable checkpoint renders the same empty timeline and 0/0 usage
-    the standalone endpoints serve, rather than failing the snapshot."""
+    """An unreadable shared checkpoint fails the composed read as unavailable."""
     import base.agents.history.checkpoint_postgres_walks as ckpt_mod
 
     tid = create_agent(db_conn)
@@ -154,8 +153,11 @@ def test_snapshot_checkpoint_read_failure_matches_the_standalone_tolerance(
     monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
     resp = test_client.get(f"/api/agents/{tid}/conversation-snapshot")
 
-    assert resp.status_code == 200
-    snap = resp.json()
-    assert snap["timeline"] == {"items": [], "msg_count": 0, "has_more": False}
-    assert snap["token_usage"]["input_tokens"] == 0
-    assert snap["token_usage"] == test_client.get(f"/api/agents/{tid}/token-usage").json()
+    assert resp.status_code == 503
+    problem = resp.json()
+    assert problem["detail"] == f"Checkpoint history unavailable for agent {tid}"
+    assert problem["retryable"] is True
+    standalone = test_client.get(f"/api/agents/{tid}/timeline").json()
+    assert problem.pop("trace_id")
+    assert standalone.pop("trace_id")
+    assert problem == standalone
