@@ -226,6 +226,46 @@ def test_file_relative_resource_has_a_proven_checkout_anchor(tmp_path: Path) -> 
     assert found.unknown == ()
 
 
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "[importlib for importlib in []]",
+        "{importlib for importlib in []}",
+        "{importlib: None for importlib in []}",
+        "(importlib for importlib in [])",
+    ],
+)
+def test_comprehension_binding_does_not_hide_enclosing_import(
+    tmp_path: Path, expression: str
+) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        f"import importlib\n{expression}\nimportlib.import_module('base.net.retry')\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
+def test_comprehension_first_iterator_uses_parent_but_body_uses_local_scope(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\n[importlib.import_module('ava') "
+        "for importlib in importlib.import_module('base.net.retry')]\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
+def test_comprehension_does_not_hide_following_python_launcher(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import sys, subprocess\n[subprocess for subprocess in []]\n"
+        "subprocess.run([sys.executable, '-c', 'import base.net.retry'])\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
 def test_unsupported_path_operation_read_is_explicitly_unknown(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),

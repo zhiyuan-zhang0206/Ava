@@ -138,9 +138,7 @@ class _PrivateReach(ast.NodeVisitor):
         self.reach = reach
         self.scope = bindings.Scope(tree, reach.rel_path)
 
-    def _nested(
-        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
-    ) -> None:
+    def _nested(self, node: bindings.ScopeNode) -> None:
         parent = self.scope
         outer, inner = bindings.scope_parts(node)
         for expression in outer:
@@ -160,6 +158,18 @@ class _PrivateReach(ast.NodeVisitor):
         self._nested(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._nested(node)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._nested(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._nested(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._nested(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
         self._nested(node)
 
     def visit_Import(self, node: ast.Import) -> None:

@@ -192,9 +192,7 @@ class _Inputs(ast.NodeVisitor):
         self._template_launches: dict[int, tuple[int, ast.Call]] = {}
         self._used_functions: set[int] = set()
 
-    def _nested(
-        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
-    ) -> None:
+    def _nested(self, node: bindings.ScopeNode) -> None:
         parent = self.scope
         outer, inner = bindings.scope_parts(node)
         for expression in outer:
@@ -223,6 +221,18 @@ class _Inputs(ast.NodeVisitor):
         self._nested(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._nested(node)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._nested(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._nested(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._nested(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
         self._nested(node)
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -312,9 +322,7 @@ class _ImportFacts(ast.NodeVisitor):
         self.scope = bindings.Scope(tree, "")
         self.source, self.path, self.facts = source, path, facts
 
-    def _nested(
-        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
-    ) -> None:
+    def _nested(self, node: bindings.ScopeNode) -> None:
         parent = self.scope
         outer, inner = bindings.scope_parts(node)
         for expression in outer:
@@ -334,6 +342,18 @@ class _ImportFacts(ast.NodeVisitor):
         self._nested(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._nested(node)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._nested(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._nested(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._nested(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
         self._nested(node)
 
     def visit_Import(self, node: ast.Import) -> None:
