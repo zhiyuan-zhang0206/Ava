@@ -15,6 +15,7 @@ from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
@@ -47,6 +48,8 @@ async def test_replacement_host_adopts_held_agent_without_model(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from services.agent_runner.agent_host.host import AgentHost
 
@@ -89,7 +92,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
         graph=graph,
         machine=machine,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     assert agent_id in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}

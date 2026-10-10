@@ -12,7 +12,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
-from agent.tests.claim.test_inbound_ownership import _agent
+from agent.tests.claim.test_inbound_ownership import agent_row
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.incarnation.resources import ResourceBirth
@@ -23,6 +23,7 @@ from base.agents.messages.native_restart import (
 )
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.native_cancel.test_transfer import (
@@ -36,8 +37,10 @@ async def test_dead_original_host_is_superseded_without_new_restart_target(
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = agent_row(db_conn)
     db_conn.execute(
         "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
         (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), agent),
@@ -83,7 +86,7 @@ async def test_dead_original_host_is_superseded_without_new_restart_target(
                 agent,
                 "claim-test",
                 uuid4(),
-                db=Database.from_settings(),
+                db=Database.from_settings(gate=database_gate),
                 expected_from="running",
             )
             assert successor is not None and successor.generation != target.generation

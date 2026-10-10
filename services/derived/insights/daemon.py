@@ -24,19 +24,26 @@ import os
 import signal
 import socket
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import uvicorn
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.machine import validate_machine_name
 from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import insights_pidfile, insights_socket
+from base.telemetry import build_pipeline
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -76,14 +83,14 @@ def bind_socket(path: Path) -> socket.socket:
     return sock
 
 
-async def run(*, config: ConfigBoot) -> None:
+async def run(*, config: ConfigBoot, database: Callable[[], Database]) -> None:
     """Start the daemon: pidfile -> database -> socket -> serve until stopped."""
     pidfile = insights_pidfile()
     if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
         _log.info("[insights] daemon already running (pidfile=%s), exiting", pidfile)
         sys.exit(1)
     path = insights_socket()
-    db = Database.from_settings()
+    db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
         server = uvicorn.Server(
@@ -118,11 +125,24 @@ def main() -> None:
     """Entry point: schema check -> log init -> serve -> bounded exit."""
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     config = ConfigBoot()
     config.boot()
     assert_schema_current(config.view.data_plane.db_url)
-    init_gateway_process(name="insights")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="insights")
+
+    def database() -> Database:
+        return Database(db_config_from_boot(config), gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="insights",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        image=image,
+    )
     install_graceful_shutdown("insights")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that awaits
@@ -131,7 +151,7 @@ def main() -> None:
     # signal path uvicorn re-raises the signal after its own graceful stop, landing here.
     runner = asyncio.Runner()
     try:
-        runner.run(run(config=config))
+        runner.run(run(config=config, database=database))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[insights] interrupted, shutting down")

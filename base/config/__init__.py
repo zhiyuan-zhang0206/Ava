@@ -111,9 +111,7 @@ their settings carry that agent's overlay. Enforced by
 from __future__ import annotations
 
 import os
-import time
 from typing import TYPE_CHECKING, Any, cast
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from base.config import _lite
 from base.config._lite import (
@@ -300,18 +298,6 @@ def host_tz_name() -> str:
     return "UTC"
 
 
-def _tzset() -> None:
-    """Re-read the process TZ from ``os.environ["TZ"]`` where supported.
-
-    ``time.tzset`` is POSIX-only (Windows CPython reads the OS zone directly
-    and has no such function); the indirection exists so the Windows branch
-    is exercised in tests without mutating the ``time`` module.
-    """
-    tzset = getattr(time, "tzset", None)
-    if tzset is not None:
-        tzset()
-
-
 def apply_cluster_timezone() -> None:
     """Apply the cluster timezone to this process's wall clock (POSIX).
 
@@ -334,19 +320,9 @@ def apply_cluster_timezone() -> None:
     exist there, and the explicit ``Clock.zone()`` reads cover the display
     paths instead.
     """
-    _apply_timezone_name(cluster_tz_name())
+    from base.host.env.dotenv_boot import apply_process_timezone
 
-
-def _apply_timezone_name(name: str | None) -> None:
-    """Apply an explicitly resolved authoritative timezone to the process."""
-    if name is None:
-        return
-    try:
-        ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return
-    os.environ["TZ"] = name
-    _tzset()
+    apply_process_timezone(cluster_tz_name())
 
 
 # ── The stable `settings` object ──

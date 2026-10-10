@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineRoles
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
@@ -60,7 +61,7 @@ def _status_roster(roles: MachineRoles | None) -> tuple[tuple[ServiceSpec, str |
     )
 
 
-def cmd_status() -> int:
+def cmd_status(*, database_factory: DatabaseFactory) -> int:
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands._repo as _repo_commands
 
@@ -83,7 +84,7 @@ def cmd_status() -> int:
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
     if not runner_only:
         print("\ninfra (pg/redis):")
-        print_data_plane_status()
+        print_data_plane_status(database_factory=database_factory)
     else:
         print("\ninfra (pg/redis): skipped (agent-runner uses central node)")
 

@@ -17,6 +17,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from base.agents import AgentStatus
 from base.config import settings
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 from gateway.agents.delivery import deliver_chat_inbound
@@ -60,8 +61,7 @@ def _seed_idling_agent(conn: psycopg.Connection) -> int:
 
 
 async def test_deliver_survives_publish_failure(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """redis down (both the sync badge publish and the async InboundArrived) must
     not stop the inbound INSERT from committing, and nothing may escape."""
@@ -74,7 +74,7 @@ async def test_deliver_survives_publish_failure(
         # Must NOT raise despite every publish on the path throwing.
         await deliver_chat_inbound(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "hello there",
@@ -89,7 +89,7 @@ async def test_deliver_survives_publish_failure(
 
 
 async def test_unknown_badge_error_exposes_committed_delivery(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     tid = _seed_idling_agent(db_conn)
 
@@ -100,7 +100,7 @@ async def test_unknown_badge_error_exposes_committed_delivery(
     with _sync_pool() as pool, pytest.raises(RuntimeError, match="lifecycle hint failed"):
         await deliver_chat_inbound(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "hi",
@@ -113,14 +113,14 @@ async def test_unknown_badge_error_exposes_committed_delivery(
 
 
 async def test_unknown_live_publish_error_is_awaited_after_commit(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     tid = _seed_idling_agent(db_conn)
     patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(AttributeError("live bug")))
     with _sync_pool() as pool, pytest.raises(RuntimeError, match="live bug"):
         await deliver_chat_inbound(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "live committed",
@@ -132,8 +132,7 @@ async def test_unknown_live_publish_error_is_awaited_after_commit(
 
 
 async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """The durable chat id is the evidence the home runner re-checks before
     reviving; delivery must not fall back to an unguarded resurrect."""
@@ -158,7 +157,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "guard me",
@@ -176,8 +175,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
 
 
 async def test_retried_client_message_resurrects_terminated_agent_once(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """A same-key retry reuses one chat and cannot create two resurrection effects."""
     from gateway.agents import delivery
@@ -222,7 +220,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     with _sync_pool() as pool:
         first = await deliver_chat_inbound(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "wake once",
@@ -230,7 +228,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
         )
         second = await deliver_chat_inbound(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "wake once",
@@ -248,8 +246,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
 
 
 async def test_peer_message_queues_during_suppression_and_watchdog_recovers_after_expiry(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """Suppression gates automatic resurrection, never durable delivery."""
     from ops.cluster import rpc as cluster_rpc
@@ -276,7 +273,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             prepare=lambda _conn: "peer work",
@@ -312,8 +309,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
 
 
 async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """Two requests that both observe terminated create at most one wake effect.
 
@@ -372,7 +368,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
         first, second = await asyncio.gather(
             deliver_chat_inbound(
                 pool,
-                Database.from_settings(),
+                Database.from_settings(gate=database_gate),
                 EventBus.from_settings(),
                 tid,
                 prepare=lambda _c: "concurrent wake",
@@ -380,7 +376,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
             ),
             deliver_chat_inbound(
                 pool,
-                Database.from_settings(),
+                Database.from_settings(gate=database_gate),
                 EventBus.from_settings(),
                 tid,
                 prepare=lambda _c: "concurrent wake",
@@ -399,8 +395,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
 
 
 async def test_badge_publish_happens_after_commit(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """The refresh_badge publish must run only AFTER the delivery transaction
     commits: a separate connection must already see `prepare`'s write at the
@@ -434,7 +429,7 @@ async def test_badge_publish_happens_after_commit(
     with _sync_pool() as pool:
         await deliver_chat_inbound(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             prepare=_prepare,
@@ -452,7 +447,7 @@ async def test_badge_publish_happens_after_commit(
 
 
 async def test_cancelled_caller_stops_live_publish_and_reconciles_same_receipt(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     from gateway.agents import delivery
 
@@ -473,7 +468,7 @@ async def test_cancelled_caller_stops_live_publish_and_reconciles_same_receipt(
             caller = asyncio.create_task(
                 deliver_chat_inbound(
                     pool,
-                    Database.from_settings(),
+                    Database.from_settings(gate=database_gate),
                     EventBus.from_settings(),
                     tid,
                     prepare=lambda _c: "cancel after commit",
@@ -494,7 +489,7 @@ async def test_cancelled_caller_stops_live_publish_and_reconciles_same_receipt(
             assert exited.is_set()
         recovered = await delivery.reconcile_chat_delivery(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             tid,
             client_message_id="cancel-committed",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -13,6 +14,7 @@ from psycopg_pool import ConnectionPool
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_daemon import _stub_pool
 from services.agent_runner.agent_ops.tests.test_daemon import (
@@ -26,6 +28,8 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A readiness probe stays reachable while an unrelated worker is blocked."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -46,7 +50,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
             del mode
             return {"ready": True}
 
-    def _status(_db: Database, _pool: object) -> _Status:
+    def _status(_db: Database, _pool: object, *, image: LoadedCommit) -> _Status:
         return _Status()
 
     monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
@@ -61,6 +65,8 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
         )
     )
     await asyncio.to_thread(started.wait, 10)
@@ -74,6 +80,8 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert (status, result) == ("completed", {"ready": True})
 
@@ -87,6 +95,8 @@ async def test_two_config_writes_cannot_interleave(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """`config_write` is a read-modify-write: `write_fields` walks the requested
     keys through dotenv's `set_key`, rewriting the whole `.env` once per key. The
@@ -127,6 +137,8 @@ async def test_two_config_writes_cannot_interleave(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
         ),
         daemon._dispatch(
             "config_write",
@@ -137,6 +149,8 @@ async def test_two_config_writes_cannot_interleave(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
         ),
         daemon._dispatch(
             "inventory_write",
@@ -147,6 +161,8 @@ async def test_two_config_writes_cannot_interleave(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
         ),
     )
 
@@ -159,6 +175,8 @@ async def test_config_write_op_receives_actor_and_trace(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """The gateway-stamped actor/trace ride the payload into config_write_op."""
     captured: dict[str, object] = {}
@@ -182,6 +200,8 @@ async def test_config_write_op_receives_actor_and_trace(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert captured == {
@@ -197,6 +217,8 @@ async def test_config_audit_read_op_receives_last(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """The config_audit_read arm forwards `last` into config_audit_read_op."""
     captured: dict[str, object] = {}
@@ -220,6 +242,8 @@ async def test_config_audit_read_op_receives_last(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert captured == {"last": 7}
@@ -230,6 +254,8 @@ async def test_config_audit_read_rejects_out_of_range_last(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """`last` outside 1..200 fails payload validation before any read."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -242,6 +268,8 @@ async def test_config_audit_read_rejects_out_of_range_last(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "failed"
     assert "last" in str(result["error"])
@@ -253,6 +281,8 @@ async def test_op_arms_do_not_run_on_the_default_executor(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """`asyncio.run` closes by JOINING every default-executor thread, so an arm
     wedged there holds the interpreter's exit after everything else has cleaned up —
@@ -286,6 +316,8 @@ async def test_op_arms_do_not_run_on_the_default_executor(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
 
     assert seen and seen[0].startswith("ava-ops-arm"), f"arm ran on {seen!r}"

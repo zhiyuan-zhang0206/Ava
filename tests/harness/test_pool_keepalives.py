@@ -49,7 +49,7 @@ import base.log
 from base import db
 from base.config import settings
 from gateway.app import app
-from services.agent_runner.agent_ops import daemon
+from services.agent_runner.agent_ops import boot
 from tests.fixtures.gateway_config import gateway_test_client
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -218,12 +218,12 @@ def test_gateway_pool_carries_keepalives() -> None:
         assert pool.max_size == 8
 
 
-def test_ops_daemon_pool_carries_keepalives() -> None:
+def test_ops_daemon_pool_carries_keepalives(database: db.Database) -> None:
     """`services/agent_runner/agent_ops/daemon.py`'s dispatch pool — the longest-lived process
     on an agent-runner, i.e. the box most likely to have slept."""
-    pool = daemon._open_db_pool()
+    pool = boot.open_db_pool(database=lambda: database)
     try:
-        _assert_pool_posture(pool, "services/agent_runner/agent_ops/daemon.py:_open_db_pool")
+        _assert_pool_posture(pool, "services/agent_runner/agent_ops/boot.py:open_db_pool")
         assert pool.max_size == max(2, settings.services.ops_concurrency + 2)
         # Checkout-time dead-conn eviction (Task #1027): the ops daemon's
         # borrows are rare, so idle conns get server-closed; the check makes the

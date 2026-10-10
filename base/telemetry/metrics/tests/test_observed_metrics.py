@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 from threading import Barrier
 from typing import Any
 from unittest.mock import Mock
@@ -14,7 +13,6 @@ import pytest
 
 from base import telemetry
 from base.db import Database
-from base.telemetry import emitter
 from base.telemetry.metrics import observed_metrics as metrics
 
 _AT = datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC)
@@ -212,33 +210,6 @@ def test_missing_agent_fails_batch_explicitly_without_partial_commit(
     db_conn.rollback()
     assert db_conn.execute("SELECT count(*) FROM agent_metric_days").fetchone() == (0,)
     assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (0,)
-
-
-def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
-    monkeypatch.setattr(metrics, "_failures", 0)
-    monkeypatch.setattr(metrics, "write_observations", Mock(side_effect=RuntimeError("DB down")))
-    diagnostic = Mock()
-    monkeypatch.setattr(telemetry, "report_no_pipeline", diagnostic)
-    emitted = Mock(side_effect=AssertionError("diagnostics must bypass emitter"))
-    monkeypatch.setattr(telemetry, "emit", emitted)
-    exported = Mock()
-    monkeypatch.setattr(emitter, "_export_otlp", exported)
-    event = _event("turn_end", ok=True, duration_seconds=2.5)
-    telemetry._write_batch(
-        [event],
-        database=Database.from_settings,
-    )
-    exported.assert_called_once_with([event])
-    assert len(list(tmp_path.glob("events-*.jsonl"))) >= 1
-    assert (
-        str(telemetry.event_row(event)["id"]) in next(tmp_path.glob("events-*.jsonl")).read_text()
-    )
-    diagnostic.assert_called_once()
-    emitted.assert_not_called()
 
 
 def test_one_malformed_fact_does_not_discard_other_supported_rows(

@@ -25,6 +25,7 @@ from agent.tests.claim.claim_support import (
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
@@ -515,15 +516,15 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
 
 
 async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ):
     """Hosted restart: goto END with `restart_requested` (not `exit_requested`),
     leaves lifecycle application to the host after the acceptance checkpoint
     has been flushed."""
-    from agent.tests.claim.test_inbound_ownership import _admit, _agent
+    from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 
-    tid = _agent(db_conn)
-    owner = await _admit(aops_pool, tid)
+    tid = agent_row(db_conn)
+    owner = await _admit(aops_pool, tid, database_gate=database_gate)
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
 

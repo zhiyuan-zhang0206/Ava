@@ -22,6 +22,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -42,7 +43,7 @@ _TOOL_CALL_AIMESSAGE = AIMessage(
 
 
 def _make_runtime(
-    hosted_resources: HostedTurnResources,
+    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> Runtime[AvaContext]:
     """Minimal runtime with fake ops_pool + event_publisher."""
     ctx = AvaContext(
@@ -53,7 +54,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -64,6 +65,7 @@ def _make_runtime(
 async def test_exec_node_timeout_fires_asyncio_wait_for(
     hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """When _run_in_subprocess hangs longer than exec_node_timeout_seconds,
     the outer asyncio.wait_for inside _exec_node_impl fires.
@@ -90,9 +92,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
 
     result = await _exec_node_impl(
         state,
-        _make_runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _CONFIG,
     )
 
@@ -116,6 +116,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
 async def test_exec_node_timeout_does_not_fire_when_fast(
     hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """When _run_in_subprocess completes quickly, exec_node_timeout_seconds
     does NOT fire — the normal path returns _ExecDone."""
@@ -141,9 +142,7 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
 
     result = await _exec_node_impl(
         state,
-        _make_runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _CONFIG,
     )
 

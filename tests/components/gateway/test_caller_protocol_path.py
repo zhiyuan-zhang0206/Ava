@@ -24,6 +24,7 @@ from base.agents.messages.envelope import EnvelopeReadInputs
 from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.control import cmd_agents_send
@@ -37,7 +38,9 @@ _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
 
 
-async def _admit(db: psycopg.Connection, pool: AsyncConnectionPool) -> RuntimeIncarnation:
+async def _admit(
+    db: psycopg.Connection, pool: AsyncConnectionPool, database_gate: ProcessDbGate
+) -> RuntimeIncarnation:
     agent_id = create_agent(db)
     db.execute(
         "INSERT INTO agents_meta (id, status, machine) VALUES (%s, 'idling', 'host-test') "
@@ -51,7 +54,7 @@ async def _admit(db: psycopg.Connection, pool: AsyncConnectionPool) -> RuntimeIn
         "host-test",
         uuid4(),
         expected_from="idling",
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
     )
     assert incarnation is not None
     assert await settle_hosted_runtime(
@@ -83,8 +86,9 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database_gate=database_gate)
     _after_proven_old_writer_barrier(db_conn, incarnation)
     secret = "caller-path-test-secret"  # noqa: S105 — isolated test credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
@@ -185,8 +189,9 @@ async def test_unready_target_rejects_before_insert(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     invalid: str,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database_gate=database_gate)
     if invalid != "legacy":
         _after_proven_old_writer_barrier(db_conn, incarnation)
     from psycopg import sql
@@ -236,11 +241,11 @@ def test_unknown_target_refusal_names_the_missing_row(db_conn: psycopg.Connectio
 
 
 async def test_gate_holds_owner_lock_until_transaction_ends(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     from base.agents.messages.caller_protocol import require_caller_protocol
 
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database_gate=database_gate)
     _after_proven_old_writer_barrier(db_conn, incarnation)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as other:
         with db_conn.transaction():
@@ -258,14 +263,14 @@ async def test_gate_holds_owner_lock_until_transaction_ends(
 
 
 async def test_lease_expiring_while_waiting_for_unchanged_row_lock_is_rejected(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     from base.agents.messages.caller_protocol import (
         CallerProtocolUnavailableError,
         require_caller_protocol,
     )
 
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database_gate=database_gate)
     _after_proven_old_writer_barrier(db_conn, incarnation)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at = clock_timestamp() + interval '1 second' "

@@ -21,10 +21,11 @@ that reaches the drain thread; the mirror is replayed into `telemetry_events`).
 Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
-Import discipline: this module imports `base.log` and `base.db` lazily
+Import discipline: this module imports `base.log`, `base.db`, and `base.paths` lazily
 (inside functions) — `base/db/__init__.py` imports `base/log/__init__.py` at module scope
-for `logger`, so a top-level import of either from here is a circular-import
-failure for any process that reaches `base.db` first.
+for `logger`, so a top-level import of log or DB from here is a circular-import
+failure for any process that reaches `base.db` first. Mirror path resolution stays
+inside its write/prune operations so entry inputs can be typed before Settings admission.
 """
 
 from __future__ import annotations
@@ -41,7 +42,6 @@ from typing import Any
 
 from base.events.contract import EVENTS
 from base.events.contract import category_for_kind as registry_category
-from base.paths import logs_dir
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import (
     Category,
@@ -152,7 +152,7 @@ def _resolve_machine(name_reader: Callable[[], str] | None = None) -> str:
 
 # ── pipeline state (per-process singleton) ────────────────────────────────────
 
-# The emitter pipeline; None until first init/emit. Dict mutation avoids ruff
+# The emitter pipeline; None until explicit process initialization. Dict mutation avoids ruff
 # PLW0603 the same way base/telemetry/tracing.py does.
 _state: dict[str, Any] = {
     "pipeline": None,
@@ -171,6 +171,8 @@ def _prune_jsonl_mirror() -> None:
     durable fallback for audit events; log-stream lines are also held by the
     loguru file sinks, so the mirror's own retention is what bounds its disk
     footprint."""
+    from base.paths import logs_dir
+
     cutoff = (datetime.now(UTC) - timedelta(days=_JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
     # `.rollup.jsonl` is the retired filtered tier; leftovers age out with the full mirror.
     for path in (
@@ -196,6 +198,8 @@ def _append_jsonl(events: list[Event]) -> None:
     otherwise degrade it without a trace. Single write() per line with
     O_APPEND semantics (opened in append mode) keeps concurrent processes
     from interleaving."""
+    from base.paths import logs_dir
+
     day = datetime.now(UTC).strftime("%Y%m%d")
     try:
         lines = [
@@ -289,7 +293,7 @@ _sink_failures: dict[str, int] = {}
 
 def report_sink_failure(sink: str, exc: BaseException) -> None:
     """Report a failure of a best-effort side channel (an emitter sink export,
-    the lazy pipeline init, an exit-time close, SDK-call or billing telemetry)
+    a missing producer, an exit-time close, SDK-call or billing telemetry)
     with its traceback — the first and every 50th per `sink`, like the JSONL
     mirror: a seam that fails on every call must be loud without flooding the
     log. Goes through the `_no_emitter` path, so a failing telemetry pipeline
@@ -344,15 +348,6 @@ def build_pipeline(*, database: Callable[[], Any]) -> EventPipeline:
     return EventPipeline(writer=lambda events: _write_batch(events, database=database))
 
 
-def _open_pipeline() -> EventPipeline:
-    """Build the process pipeline: queue + drain thread. Startup does not depend on the
-    DB: the `telemetry_events` sink connects lazily on the drain thread and backs off
-    when the database does not answer, and the JSONL mirror is written first."""
-    from base.db import Database
-
-    return build_pipeline(database=Database.from_settings)
-
-
 def process_name() -> str:
     """This process's bound identity (`init_telemetry(process=...)`), the
     bounded dimension every telemetry record carries as `process`. The OTLP
@@ -366,7 +361,7 @@ def init_telemetry(
     *,
     process: str = "unknown",
     agent_id: int | None = None,
-    pipeline: EventPipeline | None = None,
+    pipeline: EventPipeline,
     machine_reader: Callable[[], str] | None = None,
 ) -> None:
     """Bind process identity and bring up the event pipeline. Idempotent.
@@ -374,12 +369,17 @@ def init_telemetry(
     Called from the loguru `init_*` entry points (the single boot seam every
     process shares): `init_gateway_process(name)` → process=name; the exec
     child's `add_postgres_sink` → process="agent-exec" plus its agent id. The
-    first call opens the drain thread; later calls only refresh the identity
-    binding. Startup never depends on the DB (the `telemetry_events` sink connects
+    entry supplies its owned writer; later calls reuse that same resource and
+    refresh the identity binding. Startup never depends on the DB (the `telemetry_events` sink connects
     lazily on the drain thread)."""
     bound = _state["pipeline"]
-    if pipeline is not None and bound is not None and bound is not pipeline:
-        raise RuntimeError("this process already binds another event pipeline")
+    if bound is not None and bound is not pipeline:
+        if not bound.stopped:
+            raise RuntimeError("this process already binds another event pipeline")
+        # A completed owner may leave its process binding behind. Collect its
+        # original failure before admitting the next concrete entry resource.
+        bound.stop(timeout=0)
+        _state["pipeline"] = pipeline
     _state["process"] = process
     _state["agent_id"] = agent_id
     if machine_reader is not None or _state["machine"] is None:
@@ -387,22 +387,12 @@ def init_telemetry(
     if _state["cluster"] is None:
         _state["cluster"] = cluster_label()
     if _state["pipeline"] is None:
-        _state["pipeline"] = pipeline if pipeline is not None else _open_pipeline()
+        _state["pipeline"] = pipeline
 
 
 def _ambient_agent_id() -> int | None:
     """Default identity established at process startup, if this process owns an agent."""
     return _state["agent_id"]
-
-
-def _ensure_pipeline() -> EventPipeline | None:
-    """Lazy-init fallback for emit-before-init callers. Best-effort: a process
-    whose pipeline init fails degrades to dropping (never raises, never
-    blocks)."""
-    if _state["pipeline"] is None:
-        with failure_isolated("pipeline init"):
-            init_telemetry()
-    return _state["pipeline"]
 
 
 def _as_utc(ts: datetime | None) -> datetime:
@@ -533,9 +523,12 @@ def emit_prepared(
     if capture is not None:
         event = capture(event)
     with failure_isolated("emit"):
-        pipeline = producer() if producer is not None else _ensure_pipeline()
-        if pipeline is not None:
-            pipeline.enqueue(event)
+        pipeline = producer() if producer is not None else _state["pipeline"]
+        if pipeline is None:
+            raise RuntimeError(
+                "event emission requires an initialized process pipeline or producer"
+            )
+        pipeline.enqueue(event)
 
 
 def flush() -> DrainResult:

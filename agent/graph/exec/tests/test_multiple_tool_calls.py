@@ -21,6 +21,7 @@ from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -108,7 +109,7 @@ def _state(*codes: str) -> AgentState:
 
 
 def _runtime(
-    hosted_resources: HostedTurnResources,
+    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> Runtime[AvaContext]:
     return Runtime(
         context=AvaContext(
@@ -118,7 +119,7 @@ def _runtime(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             clients=process_clients(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
@@ -148,13 +149,13 @@ def _node_runtime(
 
 
 async def test_real_children_do_not_share_globals(
-    hosted_resources: HostedTurnResources, fake_cancel_event: InterruptEvent
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: InterruptEvent,
+    database_gate: ProcessDbGate,
 ) -> None:
     result = await _run_calls(
         _state('shared_name = 42; print("first")', 'print("shared_name" in globals())'),
-        _runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         {"configurable": {"thread_id": "7"}},
     )
     assert result is not None
@@ -166,13 +167,13 @@ async def test_real_children_do_not_share_globals(
 
 
 async def test_exception_does_not_skip_later_call(
-    hosted_resources: HostedTurnResources, fake_cancel_event: InterruptEvent
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: InterruptEvent,
+    database_gate: ProcessDbGate,
 ) -> None:
     result = await _run_calls(
         _state('raise ValueError("first failed")', 'print("second ran")'),
-        _runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         {"configurable": {"thread_id": "7"}},
     )
     assert result is not None
@@ -300,6 +301,7 @@ async def test_findings_of_every_call_in_a_batch_reach_the_state(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: InterruptEvent,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Each real child commits its own findings delta and the channel's reducer
     concatenates them across the batch's passes; nothing is merged into the messages."""
@@ -309,9 +311,7 @@ async def test_findings_of_every_call_in_a_batch_reach_the_state(
 
     result = await _run_calls(
         _state(_scan("web.fetch") + "print('first')", _scan("shell.run") + "print('second')"),
-        _runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _config(),
     )
 
@@ -323,6 +323,7 @@ async def test_a_compacting_call_discards_the_findings_of_its_batch(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: InterruptEvent,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Claim wipes the history on a compact, so the findings that annotate it go too:
     those committed by earlier calls of the batch and the compacting call's own."""
@@ -335,9 +336,7 @@ async def test_a_compacting_call_discards_the_findings_of_its_batch(
             _scan("web.fetch"),
             _scan("shell.run") + "from base.agents.lifecycle import SystemHalt\nraise SystemHalt()",
         ),
-        _runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _config(),
     )
 
@@ -424,13 +423,12 @@ def test_normalize_recovers_each_content_call_without_merging() -> None:
 async def test_exec_recovers_missing_content_call_without_syntax_plugin(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: InterruptEvent,
+    database_gate: ProcessDbGate,
 ) -> None:
     state = AgentState(messages=[_ai_with_two_content_tool_uses()])
     result = await _run_calls(
         state,
-        _runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _config(),
     )
     assert result is not None
@@ -464,15 +462,13 @@ def _ai_with_hallucinated_tool_name() -> AIMessage:
 
 
 async def test_exec_node_feeds_back_on_unknown_tool_name(
-    hosted_resources: HostedTurnResources,
+    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
     state = AgentState(messages=[_ai_with_hallucinated_tool_name()])
 
     result = await _run_calls(
         state,
-        _runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _config(),
     )
 
@@ -485,7 +481,7 @@ async def test_exec_node_feeds_back_on_unknown_tool_name(
 
 
 async def test_exec_node_feeds_back_when_code_key_missing(
-    hosted_resources: HostedTurnResources,
+    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
     # execute_code name but malformed args ({} or missing "code" key) — same
     # KeyError path as the unknown-name case, must also feed back not crash.
@@ -500,9 +496,7 @@ async def test_exec_node_feeds_back_when_code_key_missing(
 
     result = await _run_calls(
         state,
-        _runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _config(),
     )
 

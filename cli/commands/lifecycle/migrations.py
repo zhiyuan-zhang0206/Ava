@@ -12,8 +12,10 @@ from typing import Any
 
 import psycopg
 
+from base.agents.context.clients import DatabaseFactory
 
-def cmd_migrations_apply() -> list[str]:
+
+def cmd_migrations_apply(*, database_factory: DatabaseFactory) -> list[str]:
     """Apply Ava migrations and verify checkpoint schema; `ava start` step 2.5.
 
     Ava SQL files run on every host (a runner normally has nothing pending and
@@ -33,7 +35,7 @@ def cmd_migrations_apply() -> list[str]:
     """
     from base import cluster
     from base.config import settings
-    from base.db import Database, pg_admin
+    from base.db import pg_admin
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
     # must first be mirrored in an Ava migration. Failing before
@@ -51,9 +53,9 @@ def cmd_migrations_apply() -> list[str]:
     # statement ceiling (large-table rebuilds, partition backfills).
     if settings.data_plane.is_remote:
         # A remote-managed plane's provider URL is its only authority.
-        with Database.from_settings().connect(direct=True, unbounded=True) as conn:
+        with database_factory().connect(direct=True, unbounded=True) as conn:
             done = _apply(conn)
-        cluster.assert_checkpoint_schema_current(Database.from_settings().direct_url())
+        cluster.assert_checkpoint_schema_current(database_factory().direct_url())
     else:
         # A locally owned plane migrates as the administrator acting as the
         # schema owner over the home's own socket: objects stay owner-owned and

@@ -593,19 +593,19 @@ def build_snapshot(
     }
 
 
-def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool) -> None:
+def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool, pipeline: Any) -> None:
     """Emit the daily + run events through the unified telemetry pipeline."""
     if dry_run:
         return
-    _emit_events(snapshot)
+    _emit_events(snapshot, pipeline=pipeline)
 
 
-def _emit_events(snapshot: dict[str, Any]) -> None:
+def _emit_events(snapshot: dict[str, Any], *, pipeline: Any) -> None:
     """The pipeline write (separate seam so tests can assert dry-run silence)."""
     from base import telemetry
     from base.telemetry.otlp import telemetry_otlp
 
-    telemetry.init_telemetry(process=PROCESS_NAME)
+    telemetry.init_telemetry(process=PROCESS_NAME, pipeline=pipeline)
     telemetry_otlp.warmup()
     for day, entry in sorted(snapshot["days"].items()):
         attributes = {key: value for key, value in entry.items() if value is not None}
@@ -644,6 +644,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.window_days < 1 or args.window_days > 90:
         parser.error("--window-days must be between 1 and 90")
+
+    image = None
+    if not args.dry_run:
+        from base.native_process.loaded_commit import LoadedCommit
+
+        image = LoadedCommit.capture(_REPO_ROOT)
 
     tz = cluster_tz()
     now = datetime.now(UTC)
@@ -694,7 +700,10 @@ def main(argv: list[str] | None = None) -> int:
             {"version": 1, "prs": {str(r.number): r.to_cache() for r in records}},
         )
         save_json(state_dir / "snapshot.json", snapshot)
-        emit_snapshot(snapshot, dry_run=False)
+        from scripts.ci.pull_requests.export_process import owned_event_pipeline
+
+        with owned_event_pipeline(PROCESS_NAME, image=image) as pipeline:
+            emit_snapshot(snapshot, dry_run=False, pipeline=pipeline)
 
     if args.print_snapshot:
         print(json.dumps(snapshot, indent=1, sort_keys=True))

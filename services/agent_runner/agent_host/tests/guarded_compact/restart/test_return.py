@@ -14,6 +14,7 @@ from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -32,6 +33,8 @@ async def test_original_compact_restart_without_second_ordinary_work(
     mode: str,
     lost: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     entered, release = asyncio.Event(), asyncio.Event()
     calls: list[str] = []
@@ -57,7 +60,9 @@ async def test_original_compact_restart_without_second_ordinary_work(
             )
         },
     )
-    injected = install_apply_loss(monkeypatch, aops_pool, db_conn, lost)
+    injected = install_apply_loss(
+        monkeypatch, aops_pool, db_conn, lost, database_gate=database_gate
+    )
     accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     running = asyncio.create_task(accepted.host.run_turn(accepted.agent))
     cancelled = None
@@ -132,6 +137,8 @@ def install_apply_loss(
     aops_pool: AsyncConnectionPool,
     db_conn: psycopg.Connection,
     lost: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> list[str]:
     from services.agent_runner.agent_host.invocation.compact import lifecycle
 
@@ -146,7 +153,7 @@ def install_apply_loss(
             if lost == "after_observe_cleanup":
                 from agent.tests.claim.test_inbound_ownership import _admit
 
-                await _admit(aops_pool, args[1].agent_id)
+                await _admit(aops_pool, args[1].agent_id, database_gate=database_gate)
                 db_conn.execute(
                     "DELETE FROM inbound_messages WHERE id=%s", (kwargs["expected_command_id"],)
                 )

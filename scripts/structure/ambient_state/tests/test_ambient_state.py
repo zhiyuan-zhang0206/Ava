@@ -218,6 +218,106 @@ def test_a_value_class_defined_in_another_module_is_resolved_through_the_import(
 
 
 @pytest.mark.parametrize(
+    "import_line", ["from base.policy import Policy as P", "from base import Policy as P"]
+)
+def test_a_direct_classmethod_value_factory_resolves_its_definition(
+    tmp_path: pathlib.Path, import_line: str
+) -> None:
+    policy = '''
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class Policy:
+            limit: int
+
+            @classmethod
+            def snapshot(bound, limit) -> object:
+                """The annotation is irrelevant to the concrete constructor."""
+                return bound(limit=limit)
+    '''
+    files = {"base/policy.py": policy, "base/__init__.py": "from base.policy import Policy\n"}
+    assert _sites(tmp_path, import_line + "\nVALUE = P.snapshot(3)\n", files=files) == {}
+
+
+@pytest.mark.parametrize(
+    ("decorators", "body"),
+    [
+        ("@classmethod", "return []"),
+        ("@classmethod", "return {}"),
+        ("@classmethod", "return set()"),
+        ("@classmethod", "return make_value()"),
+        ("@classmethod", "return cls.other()"),
+        ("@classmethod", "return cls(3) if flag else []"),
+        ("@classmethod", "cls = list\nreturn cls()"),
+        ("@classmethod", "def nested():\n    return cls(3)\nreturn nested()"),
+        ("@staticmethod", "return cls(3)"),
+        ("", "return cls(3)"),
+        ("@unknown\n@classmethod", "return cls(3)"),
+    ],
+)
+def test_factory_annotations_and_unknown_returns_do_not_prove_a_value(
+    tmp_path: pathlib.Path, decorators: str, body: str
+) -> None:
+    policy = (
+        "from dataclasses import dataclass\n@dataclass(frozen=True)\n"
+        "class Policy:\n    limit: int\n"
+        + textwrap.indent(decorators + "\n" if decorators else "", "    ")
+        + "    def capture(cls) -> Policy:\n"
+        + textwrap.indent(body, "        ")
+        + "\n"
+    )
+    assert _sites(
+        tmp_path,
+        "from base.policy import Policy\nVALUE = Policy.capture()\n",
+        files={"base/policy.py": policy},
+    ) == {"ambient-instance:VALUE": 1}
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "capture = make_value",
+        "classmethod = arbitrary_decorator",
+        "from external import classmethod",
+        "from external import capture",
+        "del capture",
+        "def classmethod(value):\n    return value",
+    ],
+)
+def test_a_rebound_factory_or_decorator_remains_unknown(tmp_path: pathlib.Path, extra: str) -> None:
+    policy = (
+        "from dataclasses import dataclass\n@dataclass(frozen=True)\nclass Policy:\n"
+        "    limit: int\n    @classmethod\n    def capture(cls):\n        return cls(3)\n"
+        + textwrap.indent(extra, "    ")
+        + "\n"
+    )
+    assert _sites(
+        tmp_path,
+        "from base.policy import Policy\nVALUE = Policy.capture()\n",
+        files={"base/policy.py": policy},
+    ) == {"ambient-instance:VALUE": 1}
+
+
+def test_a_classmethod_constructor_does_not_make_a_mutable_class_a_value(
+    tmp_path: pathlib.Path,
+) -> None:
+    policy = """
+        from dataclasses import dataclass
+        @dataclass
+        class Policy:
+            limit: int
+            @classmethod
+            def capture(cls):
+                return cls(3)
+    """
+    assert _sites(
+        tmp_path,
+        "from base.policy import Policy\nVALUE = Policy.capture()\n",
+        files={"base/policy.py": policy},
+    ) == {"ambient-instance:VALUE": 1}
+
+
+@pytest.mark.parametrize(
     "line",
     [
         "_RX = re.compile('a+')",

@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog.daemon import (
@@ -42,10 +43,10 @@ from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
 
 class TestDispatchBackoffAndPoison:
     @staticmethod
-    def _dispatch(pool: ConnectionPool) -> int:
+    def _dispatch(pool: ConnectionPool, *, database_gate: ProcessDbGate) -> int:
         return dispatch_wakes(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             _DISPATCH_THRESHOLD_S,
             _MAX_DISPATCH_COUNT,
@@ -71,11 +72,15 @@ class TestDispatchBackoffAndPoison:
         monkeypatch: pytest.MonkeyPatch,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
+        )
         calls: list[tuple[int, str]] = []
 
         def record_publish(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
@@ -84,7 +89,7 @@ class TestDispatchBackoffAndPoison:
 
         monkeypatch.setattr("base.db.publish_inbound_wake", record_publish)
 
-        assert self._dispatch(pool) == 1
+        assert self._dispatch(pool, database_gate=database_gate) == 1
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT dispatch_count, last_dispatch_at IS NOT NULL "
@@ -102,17 +107,21 @@ class TestDispatchBackoffAndPoison:
         monkeypatch: pytest.MonkeyPatch,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
+        )
 
         def accept_publish(_db: object, _bus: object, _agent_id: int, _payload: str) -> bool:
             return True
 
         monkeypatch.setattr("base.db.publish_inbound_wake", accept_publish)
-        assert self._dispatch(pool) == 1
+        assert self._dispatch(pool, database_gate=database_gate) == 1
 
         assert (
             select_pending_for_dispatch(
@@ -159,17 +168,21 @@ class TestDispatchBackoffAndPoison:
         monkeypatch: pytest.MonkeyPatch,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
+        )
 
         def fail_publish(_db: object, _bus: object, *_args: object) -> bool:
             return False
 
         monkeypatch.setattr("base.db.publish_inbound_wake", fail_publish)
-        assert self._dispatch(pool) == 0
+        assert self._dispatch(pool, database_gate=database_gate) == 0
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT dispatch_count, last_dispatch_at FROM inbound_messages WHERE id = %s",
@@ -185,11 +198,15 @@ class TestDispatchBackoffAndPoison:
         monkeypatch: pytest.MonkeyPatch,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
+        )
 
         def publish_and_claim(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
             with db_conn.cursor() as cur:
@@ -201,7 +218,7 @@ class TestDispatchBackoffAndPoison:
             return True
 
         monkeypatch.setattr("base.db.publish_inbound_wake", publish_and_claim)
-        assert self._dispatch(pool) == 1
+        assert self._dispatch(pool, database_gate=database_gate) == 1
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT status, dispatch_count, poisoned_at FROM inbound_messages WHERE id = %s",
@@ -217,11 +234,15 @@ class TestDispatchBackoffAndPoison:
         monkeypatch: pytest.MonkeyPatch,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
+        )
 
         def accept_publish(_db: object, _bus: object, _agent_id: int, _payload: str) -> bool:
             return True
@@ -230,7 +251,7 @@ class TestDispatchBackoffAndPoison:
 
         for _ in range(_MAX_DISPATCH_COUNT):
             self._set_last_dispatch_age(db_conn, iid, 1000.0)
-            assert self._dispatch(pool) == 1
+            assert self._dispatch(pool, database_gate=database_gate) == 1
 
         assert (
             select_pending_for_dispatch(
@@ -259,7 +280,7 @@ class TestDispatchBackoffAndPoison:
         assert attributes["inbound_id"] == iid
         assert attributes["dispatch_count"] == _MAX_DISPATCH_COUNT
 
-        assert self._dispatch(pool) == 0
+        assert self._dispatch(pool, database_gate=database_gate) == 0
         deadline = time.monotonic() + 0.5
         while time.monotonic() < deadline:
             telemetry.flush()
@@ -273,11 +294,15 @@ class TestDispatchBackoffAndPoison:
         monkeypatch: pytest.MonkeyPatch,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE inbound_messages SET poisoned_at = clock_timestamp(), "
@@ -296,7 +321,7 @@ class TestDispatchBackoffAndPoison:
 
         monkeypatch.setattr("base.db.publish_inbound_wake", record_unexpected_publish)
 
-        assert self._dispatch(pool) == 0
+        assert self._dispatch(pool, database_gate=database_gate) == 0
         assert calls == []
 
     def test_manual_reset_restores_dispatch(
@@ -306,11 +331,15 @@ class TestDispatchBackoffAndPoison:
         monkeypatch: pytest.MonkeyPatch,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE inbound_messages SET dispatch_count = %s, "
@@ -332,7 +361,7 @@ class TestDispatchBackoffAndPoison:
 
         monkeypatch.setattr("base.db.publish_inbound_wake", record_publish)
 
-        assert self._dispatch(pool) == 1
+        assert self._dispatch(pool, database_gate=database_gate) == 1
         assert calls == [(aid, str(iid))]
         with db_conn.cursor() as cur:
             cur.execute(
@@ -349,11 +378,15 @@ class TestDispatchBackoffAndPoison:
         monkeypatch: pytest.MonkeyPatch,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
+        )
         calls: list[tuple[int, str]] = []
 
         def record_publish(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
@@ -364,7 +397,7 @@ class TestDispatchBackoffAndPoison:
 
         for _ in range(20):
             self._set_last_dispatch_age(db_conn, iid, 1000.0)
-            self._dispatch(pool)
+            self._dispatch(pool, database_gate=database_gate)
 
         assert len(calls) <= _MAX_DISPATCH_COUNT
         with db_conn.cursor() as cur:

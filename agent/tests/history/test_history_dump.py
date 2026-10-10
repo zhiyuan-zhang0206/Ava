@@ -51,6 +51,7 @@ from base.config import settings
 from base.config.domains.agent.compaction import AgentCompactionSettings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -188,7 +189,7 @@ def _fake_llm(summary_text: str) -> Any:
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
-def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
+def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     return Runtime(
         context=AvaContext(
             ops_pool=None,
@@ -197,7 +198,7 @@ def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
@@ -223,6 +224,7 @@ def _make_runtime(
     *,
     ops_pool: AsyncConnectionPool | None = None,
     llm: Any | None = None,
+    database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
     ctx = AvaContext(
         ops_pool=ops_pool,
@@ -231,7 +233,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -402,7 +404,7 @@ def test_dump_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 
 async def test_auto_compact_injects_dump_note_after_summary(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, database_gate: ProcessDbGate
 ):
     """Enabled → the auto-compact hook dumps the pre-compact history and parks
     the note in the fresh-context tail AFTER the summary. The live `messages`
@@ -413,7 +415,9 @@ async def test_auto_compact_injects_dump_note_after_summary(
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
-        state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
+        state,
+        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _fake_config(),
     )
     assert result is not None
 
@@ -430,7 +434,9 @@ async def test_auto_compact_injects_dump_note_after_summary(
     assert dump_path.exists()
 
 
-async def test_auto_compact_no_note_when_disabled(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
+async def test_auto_compact_no_note_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, database_gate: ProcessDbGate
+):
     """Config off → the auto-compact transition is exactly the old shape:
     tail = the summary alone, no note (and no dump file)."""
     _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
@@ -438,7 +444,9 @@ async def test_auto_compact_no_note_when_disabled(monkeypatch: pytest.MonkeyPatc
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
-        state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
+        state,
+        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _fake_config(),
     )
     assert result is not None
     tail = _compact_tail(result)
@@ -446,7 +454,7 @@ async def test_auto_compact_no_note_when_disabled(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_auto_compact_proceeds_when_dump_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, database_gate: ProcessDbGate
 ):
     """A dump failure degrades to today's behavior: compaction still applies,
     no note is injected."""
@@ -460,7 +468,9 @@ async def test_auto_compact_proceeds_when_dump_fails(
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
-        state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
+        state,
+        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _fake_config(),
     )
     assert result is not None
     tail = _compact_tail(result)
@@ -478,6 +488,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Enabled → the claim-node compact path (agent-written summary) dumps the
     pre-compact state.messages and parks the note after the summary in the
@@ -500,6 +511,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
         _make_runtime(
             ops_pool=aops_pool,
             llm=_fake_llm("LLM should not be called"),
+            database_gate=database_gate,
         ),
         _config(tid),
     )
@@ -525,6 +537,7 @@ async def test_claim_compact_summary_no_note_when_disabled(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Config off → claim-path compact tail is exactly today's (summary only)."""
     _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
@@ -540,6 +553,7 @@ async def test_claim_compact_summary_no_note_when_disabled(
         _make_runtime(
             ops_pool=aops_pool,
             llm=_fake_llm("LLM should not be called"),
+            database_gate=database_gate,
         ),
         _config(tid),
     )

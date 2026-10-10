@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _agent, _insert
+from agent.tests.claim.test_inbound_ownership import _insert, agent_row
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
 from base.lm.catalog import ModelCatalog
@@ -36,7 +36,7 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
     model_catalog: ModelCatalog,
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    agent = _agent(db_conn)
+    agent = agent_row(db_conn)
     db_conn.execute(
         "UPDATE agents_meta SET incarnation_resources=%s,config_overlay=%s WHERE id=%s",
         (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -11,7 +12,9 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound import WakeTriggerKind
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_daemon import (
     _fake_spawn_factory,
@@ -28,6 +31,8 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
     ops_pool: ConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """The first dispatch with a key executes the op and stores its outcome in
     the shared api_idempotency table (method='ops' rows: path=kind,
@@ -45,6 +50,8 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
 
     assert status == "completed"
@@ -67,6 +74,8 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
     ops_pool: ConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A second dispatch with the same key replays the stored outcome — the op
     is NOT re-executed. This is what makes the gateway's retry of a non-
@@ -84,6 +93,8 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     second = await daemon._dispatch_idempotent(
         "spawn-launch-v2",
@@ -95,6 +106,8 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
 
     assert first == ("completed", {"id": 777})
@@ -109,6 +122,8 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
     ops_pool: ConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A duplicate lifecycle request waits within its bounded budget and replays its owner."""
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
@@ -126,6 +141,8 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
     ) -> tuple[str, dict[str, object]]:
         calls["n"] = calls.get("n", 0) + 1
         started.set()
@@ -144,6 +161,8 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
         )
     )
     await started.wait()
@@ -157,6 +176,8 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     first = await owner
 
@@ -171,6 +192,8 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
     ops_pool: ConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A duplicate wait expires without executing again or claiming completion."""
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
@@ -188,6 +211,8 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
     ) -> tuple[str, dict[str, object]]:
         calls["n"] = calls.get("n", 0) + 1
         started.set()
@@ -206,6 +231,8 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
         )
     )
     await started.wait()
@@ -219,6 +246,8 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     await owner
 
@@ -235,6 +264,8 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
     ops_pool: ConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """Different keys are different logical ops — each executes."""
     calls: dict[str, int] = {}
@@ -250,6 +281,8 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     await daemon._dispatch_idempotent(
         "spawn-launch-v2",
@@ -261,6 +294,8 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
 
     assert calls["n"] == 2
@@ -273,6 +308,8 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
     ops_pool: ConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A business-failed outcome is stored like a success and replayed on a
     same-key retry — a deterministic business failure must not re-run the op."""
@@ -302,6 +339,8 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     second = await daemon._dispatch_idempotent(
         "lifecycle",
@@ -313,6 +352,8 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
 
     assert first[0] == "failed"

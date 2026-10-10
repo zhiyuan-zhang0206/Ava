@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,7 +15,9 @@ from psycopg_pool import ConnectionPool
 import base.db
 import gateway.app
 from base.daemon.loop_health import LivenessGroup
+from base.db import Database
 from base.deploy.maintenance import admission
+from base.native_process.loaded_commit import LoadedCommit
 from services.wake.schedule_manager import daemon
 
 
@@ -95,6 +98,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
 
 async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     released: list[str] = []
 
@@ -136,13 +140,14 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch.setattr(daemon, "_run_loops", crashing_loops)
 
     with pytest.raises(ExceptionGroup):
-        await daemon.run()
+        await daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
 
     assert sorted(released) == ["health", "pidfile", "pool"]
 
 
 async def test_a_foreign_checkout_refuses_to_supervise_schedules(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """issue #194: a service running from a worktree against the prod home must not
     supervise schedules — it would run un-reviewed code and die with the worktree.
@@ -154,7 +159,7 @@ async def test_a_foreign_checkout_refuses_to_supervise_schedules(
     monkeypatch.setattr(daemon, "prod_service_checkout_error", foreign)
 
     with pytest.raises(RuntimeError, match="foreign checkout"):
-        await daemon.run()
+        await daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
 
 
 @pytest.mark.parametrize("quiesced", [True, False])

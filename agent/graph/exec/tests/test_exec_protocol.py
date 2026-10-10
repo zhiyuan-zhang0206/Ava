@@ -38,6 +38,7 @@ from agent.graph.exec.protocol import (
     write_request,
     write_result,
 )
+from base.db import Database
 from tests.fixtures.pin_agent import exec_context
 
 
@@ -144,14 +145,19 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
     assert payload.materialize_state() == state  # exact, typed (messages back as instances)
 
 
-def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path) -> None:
+def test_request_envelope_transfers_emit_size_and_serialize_time(
+    tmp_path: Path, database: Database
+) -> None:
     """Request writes and reads record the final envelope size and their own
     serialization cost in the durable event stream."""
     from base import telemetry
     from base.log import add_postgres_sink, logger
 
     events_before = len(_exec_envelope_events())
-    sink_id = add_postgres_sink(process="test-exec-envelope")
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    sink_id = add_postgres_sink(
+        process="test-exec-envelope", producer=lambda: pipeline, machine_reader=lambda: "test"
+    )
     try:
         path = make_request_path(tmp_path, agent_id=7)
         write_request(
@@ -172,6 +178,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path)
             time.sleep(0.05)
     finally:
         logger.remove(sink_id)
+        pipeline.stop(timeout=2)
 
     events = _exec_envelope_events()[events_before:]
     assert len(events) >= 2

@@ -22,9 +22,9 @@ from fastapi.testclient import TestClient
 from psycopg_pool import PoolTimeout
 
 from base.cluster.machine import machine_name
-from base.native_process import loaded_commit
 from base.paths import ava_home
 from gateway.app import app
+from gateway.cluster.process_boot import LOADED_IMAGE
 
 
 def _health() -> dict[str, object]:
@@ -50,7 +50,7 @@ def test_health_payload_carries_the_full_identity_set() -> None:
     differ on, all resolved against this process's own view."""
     payload = _health()
     assert isinstance(payload.pop("started_at"), float)
-    assert payload.pop("sha") == loaded_commit.get()
+    assert payload.pop("sha") == LOADED_IMAGE.sha
     assert payload == {
         "status": "ok",
         "name": "gateway",
@@ -94,7 +94,7 @@ def test_health_control_pool_timeout_returns_degraded_with_identity(
     assert resp.headers["Retry-After"] == "1"
     payload = resp.json()
     assert isinstance(payload.pop("started_at"), float)
-    assert payload.pop("sha") == loaded_commit.get()
+    assert payload.pop("sha") == LOADED_IMAGE.sha
     assert payload == {
         "status": "degraded",
         "name": "gateway",

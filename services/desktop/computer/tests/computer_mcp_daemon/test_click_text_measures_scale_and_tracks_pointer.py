@@ -382,6 +382,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
 
 async def test_run_raises_stream_limit_for_large_snapshots(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     d, sock, cleanup = short_sock_dir()
     server_options: dict[str, Any] = {}
@@ -399,7 +400,7 @@ async def test_run_raises_stream_limit_for_large_snapshots(
     try:
         # The failure leaves run()'s TaskGroup, so it arrives in an exception group.
         with pytest.RaisesGroup(pytest.RaisesExc(RuntimeError, match="server options captured")):
-            await daemon_mod.run(sock=str(sock))
+            await daemon_mod.run(sock=str(sock), database=lambda: database)
         assert server_options["limit"] == 64 * 1024 * 1024
     finally:
         cleanup(d)

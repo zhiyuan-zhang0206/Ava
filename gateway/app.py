@@ -58,7 +58,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -66,14 +66,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from base import paths
+from base import paths, telemetry
 from base.agents import AvaAgentError
 from base.cluster.auth import cookie_name
 from base.cluster.authority.api import AcceptanceCache
 from base.cluster.rate_limit import LoginRateLimiter
 from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
-from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import build_model_catalog
@@ -95,6 +94,7 @@ from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import ops_monitor as ops_monitor_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
+from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.server import main as _run_gateway
 from gateway.cluster.status import StatusCache
@@ -226,73 +226,86 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     The agent host handles native lifecycle work. Auto label generation
     runs in the separate services/derived/labeler daemon.
     """
-    config = ConfigBoot()
-    config.boot()
-    app.state.catalog = build_model_catalog()
-    app.state.config_authority = ConfigAuthority(
-        runtime=config.view,
-        all_domains=config.view if config.view.profile is None else Settings(profile=None),
-        env_path=paths.ava_home() / ".env",
-    )
-
-    # Runtime consumer -> `Database.pool()` dials the pooled URL (PgBouncer when
-    # enabled, else direct) and decides the connection kwargs in one place:
-    # prepare_threshold=None keeps every borrowed connection transaction-pooling-safe,
-    # and PG_KEEPALIVE_KWARGS bounds a borrow on a half-dead socket. The second
-    # matters here because this pool outlives everything — it is opened once per
-    # gateway process and serves every request, so a connection idle across a host
-    # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
-    # the request handler on the OS TCP-retransmit timeout.
-    app.state.started_at = time.time()
-    app.state.db = Database.from_settings()
-    app.state.bus = EventBus.from_settings()
-    _build_request_resources(app, config)
-    app.state.db_pool = app.state.db.pool(max_size=8)
-    app.state.sessions = SessionStore(app.state.db_pool)
-    app.state.session_keys = SessionKeys()
-    app.state.session_touch = SessionTouchThrottle()
-    app.state.page_host_cache = pages_router.PageHostCache()
-    app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
-    app.state.idempotency = idempotency.IdempotencyService(
-        idempotency.IdempotencyStore(app.state.db_pool)
-    )
-    # The control plane must never queue behind the saturated data-plane pool.
-    # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
-    # recovery reads need their own short, small reservation.
-    app.state.control_db_pool = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
-
-    # Shared upstream client for the Grafana reverse proxy — one connection
-    # pool across proxied requests instead of an AsyncClient per request.
-    # Cheap when the proxy is disabled: no connection exists until the first
-    # proxied request.
-    app.state.grafana_client = grafana_router.build_proxy_client()
-
-    # Register the OS-level health-probe cron (launchd plist on macOS, crontab
-    # on Linux). This is the primary registration path — every gateway start
-    # refreshes the health probe command on the next gateway restart
-    # without relying on the converge phase. Idempotent.
-    try:
-        await asyncio.to_thread(
-            register_os_cron, enabled_reader=lambda: config.view.general.os_jobs_enabled
+    process = getattr(app.state, "gateway_process_input", None)
+    owned = process is None
+    if owned:
+        config = ConfigBoot()
+        config.boot()
+        process = GatewayProcess(config=config, image=LOADED_IMAGE)
+    app.state.gateway_process = process
+    with process.lifetime() if owned else nullcontext(process):
+        config = process.config
+        app.state.process_image = process.image
+        telemetry.init_telemetry(
+            process="gateway",
+            pipeline=process.event_pipeline(),
+            machine_reader=lambda: config.view.general.machine_name,
         )
-    except Exception:
-        _log.warning("OS health-probe cron registration failed", exc_info=True)
+        app.state.catalog = build_model_catalog()
+        app.state.config_authority = ConfigAuthority(
+            runtime=config.view,
+            all_domains=config.view if config.view.profile is None else Settings(profile=None),
+            env_path=paths.ava_home() / ".env",
+        )
 
-    # Config migrations (the retired override layers -> .env) run in the converge
-    # phase before the gateway process starts, so by the time this Settings is
-    # built the .env is already complete; nothing to do at lifespan startup.
+        # Runtime consumer -> `Database.pool()` dials the pooled URL (PgBouncer when
+        # enabled, else direct) and decides the connection kwargs in one place:
+        # prepare_threshold=None keeps every borrowed connection transaction-pooling-safe,
+        # and PG_KEEPALIVE_KWARGS bounds a borrow on a half-dead socket. The second
+        # matters here because this pool outlives everything — it is opened once per
+        # gateway process and serves every request, so a connection idle across a host
+        # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
+        # the request handler on the OS TCP-retransmit timeout.
+        app.state.started_at = time.time()
+        app.state.db = process.database()
+        app.state.bus = EventBus.from_settings()
+        _build_request_resources(app, config)
+        app.state.db_pool = app.state.db.pool(max_size=8)
+        app.state.sessions = SessionStore(app.state.db_pool)
+        app.state.session_keys = SessionKeys()
+        app.state.session_touch = SessionTouchThrottle()
+        app.state.page_host_cache = pages_router.PageHostCache()
+        app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
+        app.state.idempotency = idempotency.IdempotencyService(
+            idempotency.IdempotencyStore(app.state.db_pool)
+        )
+        # The control plane must never queue behind the saturated data-plane pool.
+        # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
+        # recovery reads need their own short, small reservation.
+        app.state.control_db_pool = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
 
-    # Periodic telemetry emitters (latency / auth-401 / runtime): each
-    # drains its accumulator or DB sample once per 60s and emits ONE bounded
-    # event; the lifespan owns and stops every task or scheduled callback.
-    app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
-    upload_recovery = UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
-    # The lifespan owns this handle; app.state is only the HTTP exposure and
-    # can be replaced by a nested lifespan on the same app.
-    app.state.upload_recovery = upload_recovery
+        # Shared upstream client for the Grafana reverse proxy — one connection
+        # pool across proxied requests instead of an AsyncClient per request.
+        # Cheap when the proxy is disabled: no connection exists until the first
+        # proxied request.
+        app.state.grafana_client = grafana_router.build_proxy_client()
 
-    async with _background_lifetime(app, upload_recovery):
-        yield
+        # Register the OS-level health-probe cron (launchd plist on macOS, crontab
+        # on Linux). This is the primary registration path — every gateway start
+        # refreshes the health probe command on the next gateway restart
+        # without relying on the converge phase. Idempotent.
+        try:
+            await asyncio.to_thread(
+                register_os_cron, enabled_reader=lambda: config.view.general.os_jobs_enabled
+            )
+        except Exception:
+            _log.warning("OS health-probe cron registration failed", exc_info=True)
+
+        # Config migrations (the retired override layers -> .env) run in the converge
+        # phase before the gateway process starts, so by the time this Settings is
+        # built the .env is already complete; nothing to do at lifespan startup.
+
+        # Periodic telemetry emitters (latency / auth-401 / runtime): each
+        # drains its accumulator or DB sample once per 60s and emits ONE bounded
+        # event; the lifespan owns and stops every task or scheduled callback.
+        app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
+        upload_recovery = UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
+        # The lifespan owns this handle; app.state is only the HTTP exposure and
+        # can be replaced by a nested lifespan on the same app.
+        app.state.upload_recovery = upload_recovery
+
+        async with _background_lifetime(app, upload_recovery):
+            yield
 
 
 @asynccontextmanager
@@ -313,6 +326,7 @@ async def _background_lifetime(
             app.state.bus,
             catalog=app.state.catalog,
             authority=app.state.config_authority,
+            image=app.state.process_image,
         )
         app.state.mcp_manager = mcp_manager
 

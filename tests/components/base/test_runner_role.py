@@ -32,6 +32,7 @@ from base.cluster import (
 )
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
 from base.cluster.dataplane.pg_tools import throwaway_postgres
+from base.db.code_version_gate import ProcessDbGate
 from base.db.pg_admin import owner_conninfo
 from base.host.net.url_secret import url_with_userinfo
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
@@ -298,7 +299,7 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
 
 
 def test_checkpoint_reads_need_crud_not_schema_ddl(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
+    runner_db: str, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """Both checkpoint readers work as ``ava_runner`` without schema CREATE.
 
@@ -336,9 +337,9 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
         )
 
     monkeypatch.setattr(settings.data_plane, "db_url", _runner_url(runner_db))
-    current = load_checkpoint_messages(Database.from_settings(), 73)
+    current = load_checkpoint_messages(Database.from_settings(gate=database_gate), 73)
     checkpoint_id, traced = load_checkpoint_messages_by_trace(
-        Database.from_settings(), 73, trace_id
+        Database.from_settings(gate=database_gate), 73, trace_id
     )
 
     # This legacy checkpoint bypasses Pregel's ID assignment. Reading it

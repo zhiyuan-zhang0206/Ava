@@ -10,17 +10,22 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 
 
 async def test_stale_unapplied_pointer_closes_without_retargeting(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database: Database
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    old = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    old = await _admit(aops_pool, agent_id, database_gate=database_gate)
     first = _command(db_conn, agent_id, "restart")
     await claim_inbound_batch(aops_pool, agent_id, incarnation=old, work=None)
     db_conn.execute(
@@ -76,9 +81,11 @@ async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _command(db_conn, agent_id, "restart")
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch)
@@ -100,11 +107,13 @@ async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Fail fast: a caller that binds no killer cannot silently drop the
     request — the apply raises and rolls back, the termination stays pending."""
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     command = _terminate_command(db_conn, agent_id, kill=True)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     with pytest.raises(RuntimeError, match="no killer is bound"):

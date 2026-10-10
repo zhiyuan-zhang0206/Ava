@@ -206,7 +206,7 @@ def test_pipeline_mirror_survives_otlp_failure(
     def boom(endpoint: str, **_receipts: Any) -> tuple[Any, Any]:
         raise RuntimeError("collector unreachable")
 
-    monkeypatch.setattr("base.telemetry.emitter.logs_dir", lambda: tmp_path)
+    monkeypatch.setattr("base.paths.logs_dir", lambda: tmp_path)
     monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(telemetry_otlp, "backend", telemetry_otlp._OtlpBackend())  # pyright: ignore[reportUnknownMemberType]
     telemetry.emit("log", "log", agent_id=_AGENT, attributes={"msg": "boom"})

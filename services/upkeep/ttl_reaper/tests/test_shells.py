@@ -18,6 +18,7 @@ from base.agents import ShellKillMode
 from base.clock.tests.fakes import fix_zone
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops.rpc_schemas import ShellKillResult
 from services.upkeep.ttl_reaper import shells
@@ -28,9 +29,9 @@ def _progress() -> LoopProgress:
     return LoopProgress("test", 60.0)
 
 
-async def _reap(pool: ConnectionPool) -> list[tuple[int, int]]:
+async def _reap(pool: ConnectionPool, *, database_gate: ProcessDbGate) -> list[tuple[int, int]]:
     return await reap_expired_shells(
-        pool, Database.from_settings(), EventBus.from_settings(), _progress()
+        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), _progress()
     )
 
 
@@ -82,7 +83,11 @@ def _insert_shell_row(
 
 
 async def test_reap_expired_shells_deletes_on_killed(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid = _running_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -109,7 +114,7 @@ async def test_reap_expired_shells_deletes_on_killed(
         "dispatch_to_machine",
         _dispatch,
     )
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 3)]
     with db_conn.cursor() as cur:
@@ -124,7 +129,11 @@ async def test_reap_expired_shells_deletes_on_killed(
 
 
 async def test_reap_expired_shells_keeps_row_on_unreachable(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid = _running_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -146,7 +155,7 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
         "dispatch_to_machine",
         _dispatch,
     )
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == []
     with db_conn.cursor() as cur:
@@ -156,7 +165,11 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
 
 
 async def test_reap_expired_shells_absent_machine_terminalizes_row(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Task #4143: a machine absent from the registry is a definitive verdict —
     the expired row is dropped as an absent session instead of being deferred
@@ -185,7 +198,7 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
         emitted.append((args, kwargs))
 
     monkeypatch.setattr(shells.telemetry, "emit", _capture_emit)
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 8)]
     with db_conn.cursor() as cur:
@@ -205,7 +218,7 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
 
 
 async def test_reap_expired_shells_keeps_row_on_unknown_machine(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     aid = _running_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -216,7 +229,7 @@ async def test_reap_expired_shells_keeps_row_on_unknown_machine(
         )
     db_conn.commit()
 
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
     assert reaped == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
@@ -225,7 +238,11 @@ async def test_reap_expired_shells_keeps_row_on_unknown_machine(
 
 
 async def test_reap_expired_shells_idle_reaping_is_silent(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A killed shell that carried no running job is reclaimed without a
     notice — the user ruling: only a reap that interrupts running work
@@ -250,7 +267,7 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
         "dispatch_to_machine",
         _dispatch,
     )
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 4)]
     with db_conn.cursor() as cur:
@@ -261,7 +278,11 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
 
 
 async def test_reap_expired_shells_absent_reaping_is_silent(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A session already gone was not interrupted — reclaiming its row sends
     no notice (previously it notified; the 2026-08-27 ruling narrows shell
@@ -286,7 +307,7 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
         "dispatch_to_machine",
         _dispatch,
     )
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 5)]
     with db_conn.cursor() as cur:
@@ -297,7 +318,11 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
 
 
 async def test_reap_expired_shells_missing_interrupted_field_notifies(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A pre-policy runner's shell_kill result has no `interrupted` field —
     default to notifying (the old behavior) so a version-skewed fleet never
@@ -322,7 +347,7 @@ async def test_reap_expired_shells_missing_interrupted_field_notifies(
         "dispatch_to_machine",
         _dispatch,
     )
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 6)]
     msgs = _system_inbounds(db_conn, aid)
@@ -330,7 +355,11 @@ async def test_reap_expired_shells_missing_interrupted_field_notifies(
 
 
 async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A watcher (`ava.watcher.at/cron/launch`) is just an `agent_shell_ttls`
     row with no registry of its own (docs/decisions/2026-09-27-watchers-are-never-
@@ -359,7 +388,7 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
         ).model_dump()
 
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 7)]
     with db_conn.cursor() as cur:
@@ -372,7 +401,11 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
 
 
 async def test_reap_expired_shells_skips_row_renewed_after_select(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The race the claim closes: the expired-row select ran first, then the
     owner renewed (deadline now in the future). The pass must not kill —
@@ -412,7 +445,7 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
         return ShellKillResult(mode=ShellKillMode.KILLED, interrupted=True, name="x").model_dump()
 
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap(reaper_pool)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == []
     assert dispatched == []
@@ -537,6 +570,8 @@ async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     payload: dict[str, object],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Only local registry evidence proves machine absence; a runner cannot claim it."""
     aid = _running_agent(db_conn)
@@ -557,7 +592,7 @@ async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
 
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", dispatch)
     monkeypatch.setattr(shells.telemetry, "emit", emit)
-    assert await _reap(reaper_pool) == []
+    assert await _reap(reaper_pool, database_gate=database_gate) == []
     assert db_conn.execute(
         "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s", (aid,)
     ).fetchall() == [(3,)]

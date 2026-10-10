@@ -6,10 +6,14 @@ import io
 import os
 import sys
 from collections.abc import Callable, Iterator
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pytest
 
+from base.db import Database
+from base.native_process import code_version
+from base.native_process.loaded_commit import LoadedCommit
 from services.derived.memory_indexer import memory_search_reconcile as reconcile
 
 
@@ -201,3 +205,50 @@ def test_readonly_connection_mismatch_is_reported_without_traceback(
     assert "schema mismatch" in err
     assert "indexer daemon's cold-start reconcile" in err
     assert "Traceback" not in err
+
+
+def test_standalone_entry_shares_captured_gated_database_between_backends(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_reconcile_dependencies(monkeypatch, [_FakeBackend(), _FakeBackend()])
+    backend = Mock(side_effect=reconcile.get_backend_named)
+    create = Mock(side_effect=Database)
+    image = LoadedCommit(tmp_path, "captured-readonly-reconcile")
+    capture = Mock(return_value=image)
+    count = Mock(return_value=7)
+    monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector"])
+    monkeypatch.setattr(reconcile, "get_backend_named", backend)
+    monkeypatch.setattr(reconcile, "Database", create)
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(code_version, "first_parent_count", count)
+    monkeypatch.setattr(reconcile, "process_name", lambda: "readonly-probe")
+
+    assert reconcile.main() == 0
+    capture.assert_called_once_with()
+    create.assert_called_once()
+    assert (
+        backend.call_args_list[0].kwargs["database"] is backend.call_args_list[1].kwargs["database"]
+    )
+    assert all(call.kwargs["readonly"] for call in backend.call_args_list)
+    count.assert_not_called()
+    gate = create.call_args.kwargs["gate"]
+    assert gate.application_name() == "ava:readonly-probe:v7"
+    count.assert_called_once_with(tmp_path, image.sha)
+
+
+def test_empty_query_pool_returns_before_capture_or_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture = Mock(side_effect=AssertionError("no entry image needed without work"))
+    create = Mock(side_effect=AssertionError("empty query pool must not dial"))
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(reconcile, "Database", create)
+
+    def no_queries(limit: int) -> list[str]:
+        return []
+
+    monkeypatch.setattr(reconcile, "_sample_queries", no_queries)
+    monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector"])
+    assert reconcile.main() == 1
+    capture.assert_not_called()
+    create.assert_not_called()

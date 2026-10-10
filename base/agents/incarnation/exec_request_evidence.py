@@ -63,9 +63,13 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import exec_run_dir, quarantined_exec_requests_dir
+from base.telemetry import process_name
 
 # The envelope protocol's own ceiling (agent/graph/exec/protocol.py). The
 # typed state snapshot rides as one base64 field, so a legitimate envelope is
@@ -660,7 +664,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="quarantine a live or unattributable entry too, after manual review",
     )
     args = parser.parse_args(argv)
-    incumbent, resources = _row_identity(Database.from_settings(), args.agent)
+    version = CodeVersion(LoadedCommit.capture())
+    gate = ProcessDbGate(version=version.get, process=process_name())
+    db = Database.from_settings(gate=gate)
+    incumbent, resources = _row_identity(db, args.agent)
     entries = survey(args.agent, incumbent=incumbent, resources=resources)
     if not args.quarantine:
         _report(args.agent, entries)

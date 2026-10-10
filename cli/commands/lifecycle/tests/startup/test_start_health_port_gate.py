@@ -26,12 +26,16 @@ eagerly is worse than none:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
 from base.daemon.health import DaemonProbe
+from base.telemetry import EventPipeline
 from cli.commands.lifecycle import start as start_mod
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
@@ -39,6 +43,8 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 )
 from cli.commands.probe import ReadinessWait
 from ops.roster.service_spec import _AGENT_RUNNER, _GATEWAY, ServiceSpec
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # The gate IS the subject here, so stand the global autouse net down for this
 # module (cli/commands/tests/health_port_guard.py:_guard_health_port_gate reports every port free).
@@ -215,11 +221,20 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
 
 
 def test_start_refuses_and_launches_nothing(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _hermetic_start: None
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _hermetic_start: None,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("agent-host", 8113),))
     _verdicts(monkeypatch, {"agent-host": DaemonProbe.port_taken(_FOREIGN)})
-    assert _start_commands.cmd_start(retained_children=[]) == 1
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
     assert launched == []
     message = "".join(capsys.readouterr())
     assert "/home/ava/.ava" in message
@@ -228,29 +243,56 @@ def test_start_refuses_and_launches_nothing(
 
 
 def test_a_clear_roster_starts_normally(
-    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_start: None,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
     _verdicts(monkeypatch, {"ops": DaemonProbe.down("cold")})
-    assert _start_commands.cmd_start(retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert launched == ["ops"]
 
 
 def test_a_disabled_service_cannot_block_start(
-    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_start: None,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8113)))
     _verdicts(
         monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN), "ops": DaemonProbe.down("cold")}
     )
-    assert _start_commands.cmd_start(disabled_services=("labeler",), retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            disabled_services=("labeler",),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert launched == ["ops"]
 
 
 def test_optional_port_conflict_does_not_block_core_start(
-    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_start: None,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103),))
     _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
-    assert _start_commands.cmd_start(retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert launched == ["labeler"]

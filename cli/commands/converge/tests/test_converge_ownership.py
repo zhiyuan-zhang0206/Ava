@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from base.config import ConfigBoot
+from base.telemetry import EventPipeline
 from cli.commands.converge import _ownership_preflight as _ownership
 from cli.commands.converge import host as converge_host
 from cli.commands.converge.spec import ConvergeCtx
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
-def _ctx(tmp_path: Path) -> ConvergeCtx:
+def _ctx(
+    tmp_path: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
+) -> ConvergeCtx:
     home = tmp_path / "home"
     home.mkdir()
     for name in (".env", "logs", "configs", "secrets", "source"):
@@ -22,14 +29,22 @@ def _ctx(tmp_path: Path) -> ConvergeCtx:
         else:
             path.mkdir()
     return ConvergeCtx(
-        repo=tmp_path / "repo", ava_home=home, roles=frozenset({"gateway"}), config=ConfigBoot()
+        repo=tmp_path / "repo",
+        ava_home=home,
+        roles=frozenset({"gateway"}),
+        config=ConfigBoot(),
+        database_factory=operator_database,
+        producer=producer,
     )
 
 
 def test_collect_ownership_warnings_names_only_non_user_owned_key_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    ctx = _ctx(tmp_path)
+    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     foreign = ctx.ava_home / "source"
 
     def owner_uid(path: Path) -> int:
@@ -51,9 +66,12 @@ def test_collect_ownership_warnings_names_only_non_user_owned_key_paths(
 
 
 def test_collect_ownership_warnings_skips_a_missing_source_tree(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    ctx = _ctx(tmp_path)
+    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     (ctx.ava_home / "source").rmdir()
 
     def owner_uid(_path: Path) -> int:
@@ -66,9 +84,12 @@ def test_collect_ownership_warnings_skips_a_missing_source_tree(
 
 
 def test_collect_ownership_warnings_skips_non_posix_backends(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    ctx = _ctx(tmp_path)
+    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
 
     class Backend:
         def is_posix(self) -> bool:
@@ -80,9 +101,13 @@ def test_collect_ownership_warnings_skips_non_posix_backends(
 
 
 def test_ownership_preflight_prints_and_logs_without_blocking(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    ctx = _ctx(tmp_path)
+    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
 
     def warnings(_ctx: ConvergeCtx) -> list[str]:
         return ["/home/ava/source: owned by uid 0, current uid 501; repair with: sudo chown"]
@@ -100,9 +125,13 @@ def test_ownership_preflight_prints_and_logs_without_blocking(
 
 
 def test_ownership_preflight_never_fails_converge_when_its_scan_errors(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    ctx = _ctx(tmp_path)
+    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
 
     def explode(_ctx: ConvergeCtx) -> list[str]:
         raise RuntimeError("boom")

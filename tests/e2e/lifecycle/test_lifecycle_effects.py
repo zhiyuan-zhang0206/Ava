@@ -21,6 +21,7 @@ import psycopg
 import pytest
 
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
@@ -197,7 +198,7 @@ def _start_long_exec(agent_id: int) -> None:
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_cancel")
 def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
-    spawned_agent: int, clean_record: None
+    spawned_agent: int, clean_record: None, database_gate: ProcessDbGate
 ) -> None:
     agent = spawned_agent
     _start_long_exec(agent)
@@ -212,7 +213,10 @@ def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
         assert target is not None
         accepted = accept_native_cancel(command_pool, str(uuid4()), agent, target)
     publish_inbound_wake(
-        Database.from_settings(), EventBus.from_settings(), agent, str(accepted.command_id)
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(),
+        agent,
+        str(accepted.command_id),
     )
 
     def settled() -> tuple[bool, object]:

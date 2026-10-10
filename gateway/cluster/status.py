@@ -37,6 +37,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from base.host.resource_sample import ResourceSample
+from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins import stats
 from base.telemetry.observability import cluster_label
 from gateway.cluster import _roster_rows, _stats_events, roster_probe
@@ -429,13 +430,12 @@ def _local_machine_status_blocking(
     stopped_at: datetime | None,
     *,
     is_staging: bool = False,
+    image: LoadedCommit,
 ) -> MachineStatus:
     """Sync lightweight row for a local machine without the agent-runner
     capability (pure gateway) — via to_thread: the paused flag (file read),
     prod-source HEAD (git rev-parse subprocess), the frozen process commit and
     the psutil resource snapshot must not run on the event loop."""
-    from base.native_process import loaded_commit as _process_sha
-
     paused = cluster_is_paused(db)
     return MachineStatus(
         name=name,
@@ -453,7 +453,7 @@ def _local_machine_status_blocking(
         stopped_at=stopped_at,
         is_staging=is_staging,
         head_sha=prod_source_head_sha(),
-        running_sha=_process_sha.get(),
+        running_sha=image.sha,
         schema_mismatch=schema_mismatch_status(db),
         resource=_local_resource_sample(),
     )
@@ -465,6 +465,7 @@ async def gather_cluster_status(
     local_name: str,
     *,
     identity_log: roster_probe.IdentityMismatchLog,
+    image: LoadedCommit,
     snapshots: Mapping[str, Snapshot] | None = None,
 ) -> list[MachineStatus]:
     """The roster of the given machines.
@@ -508,6 +509,7 @@ async def gather_cluster_status(
                     description,
                     stopped_at,
                     is_staging=is_staging,
+                    image=image,
                 )
             )
         else:
@@ -547,7 +549,11 @@ async def gather_cluster_status(
 
 
 def _get_cluster_status(
-    db: Database, cur: Cursor, identity_log: roster_probe.IdentityMismatchLog
+    db: Database,
+    cur: Cursor,
+    identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    image: LoadedCommit,
 ) -> ClusterPanel:
     """Assemble the cluster sub-section: SELECT the machines table (paused rows
     excluded — the cluster panel shows only active members; `ava cluster resume`
@@ -576,7 +582,7 @@ def _get_cluster_status(
     machines = (
         asyncio.run(
             gather_cluster_status(
-                db, rows, local_name, identity_log=identity_log, snapshots=snapshots
+                db, rows, local_name, identity_log=identity_log, snapshots=snapshots, image=image
             )
         )
         if rows
@@ -621,7 +627,10 @@ def _compute_system_status(request: Request) -> SystemStatus:
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
             cluster = _get_cluster_status(
-                request.app.state.db, cur, request.app.state.identity_mismatch_log
+                request.app.state.db,
+                cur,
+                request.app.state.identity_mismatch_log,
+                image=request.app.state.process_image,
             )
     except Exception:
         _log.exception("GET /api/status: cluster query failed")

@@ -27,6 +27,7 @@ from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make
 from ava.sdk_surface.process_context import process_clients
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from tests.fixtures.units import spawn_agent
@@ -78,6 +79,7 @@ async def test_fork_end_to_end_single_copy_each_note(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The full fork claim with the real registry: the inherited head carries a
     source-id note, a source-memory note, a source-preloads note and the
@@ -103,7 +105,9 @@ async def test_fork_end_to_end_single_copy_each_note(
         _tagged(NoteTag.MEMORY, "shared pool index", "note-cluster-index"),
     ]
 
-    with closing(process_clients(database=Database.from_settings)) as clients:
+    with closing(
+        process_clients(database=lambda: Database.from_settings(gate=database_gate))
+    ) as clients:
         runtime = _make_runtime(
             ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid
         )
@@ -155,6 +159,7 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The cache contract (task #2694): everything in front of the first
     source-identity note survives the fork rebuild byte-identical — same
@@ -171,7 +176,9 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
         _fake_note(NoteTag.PRELOADED_SKILLS, "source's preloaded skills", "note-old-preload"),
         HumanMessage(content="conversation tail"),
     ]
-    with closing(process_clients(database=Database.from_settings)) as clients:
+    with closing(
+        process_clients(database=lambda: Database.from_settings(gate=database_gate))
+    ) as clients:
         runtime = _make_runtime(
             ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid
         )

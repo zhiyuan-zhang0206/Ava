@@ -4,4 +4,4 @@ endpoints = ["daemon.py"]
 
 # The only modules here that may build the `db` handle from the live settings; the rest takes it
 # from them.
-db = ["daemon.py"]
+db = ["daemon.py", "runner.py"]

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 SKILL_NAME = "ava-guide"
 
@@ -33,7 +38,11 @@ def _target(client_home: Path) -> Path:
 
 
 def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     module = _bridge_module()
     step = next(
@@ -54,11 +63,25 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
 
     dev_repo = tmp_path / ".worktrees" / "feature"
     _write_source(dev_repo)
-    converge_host.converge_host(dev_repo, None, ava_home=home / ".ava", steps=(step,))
+    converge_host.converge_host(
+        dev_repo,
+        None,
+        ava_home=home / ".ava",
+        steps=(step,),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
     assert not _target(home / ".codex").exists()
 
     prod_repo = tmp_path / "prod" / "source"
     _write_source(prod_repo)
     (home / ".ava" / "configs").mkdir(parents=True)
-    converge_host.converge_host(prod_repo, None, ava_home=home / ".ava", steps=(step,))
+    converge_host.converge_host(
+        prod_repo,
+        None,
+        ava_home=home / ".ava",
+        steps=(step,),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
     assert _target(home / ".codex").is_dir()

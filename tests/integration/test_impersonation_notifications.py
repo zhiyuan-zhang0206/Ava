@@ -29,6 +29,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, pool
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -132,6 +133,7 @@ async def _termination_session(
     status: str = "active",
     automatic: bool = False,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> tuple[RuntimeIncarnation, dict[str, Any]]:
     agent_id = create_agent(conn)
     conn.execute(
@@ -145,11 +147,11 @@ async def _termination_session(
         machine_name(),
         uuid4(),
         expected_from="idling",
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
     )
     assert owner is not None
     session = leases.request(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
@@ -164,7 +166,7 @@ async def _termination_session(
     )
     if status in ("accepted", "active"):
         leases.accept(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             session["id"],
             agent_id,
@@ -172,7 +174,12 @@ async def _termination_session(
             "Handoff brief",
         )
     if status == "active":
-        leases.activate(Database.from_settings(), EventBus.from_settings(), session["id"], owner)
+        leases.activate(
+            Database.from_settings(gate=database_gate),
+            EventBus.from_settings(),
+            session["id"],
+            owner,
+        )
     return owner, session
 
 
@@ -191,6 +198,7 @@ async def _terminate_native(
     session: dict[str, Any],
     runtime: Runtime[AvaContext],
     mode: str,
+    database_gate: ProcessDbGate,
 ) -> None:
     config: RunnableConfig = {"configurable": {"thread_id": str(owner.agent_id)}}
     state = BaseAgentState(impersonation_request_id=f"{session['id']}:1")
@@ -208,7 +216,7 @@ async def _terminate_native(
             )
         else:
             terminate_id, _cutoff = _enqueue_termination_inbounds(
-                Database.from_settings(),
+                Database.from_settings(gate=database_gate),
                 EventBus.from_settings(),
                 owner.agent_id,
                 ops_pool,
@@ -251,12 +259,14 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner, session = await _termination_session(
         db_conn,
         aops_pool,
         status="requested" if mode == "live" else "active",
         config_authority=config_authority,
+        database_gate=database_gate,
     )
     runtime = Runtime(
         context=AvaContext(
@@ -265,14 +275,16 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             identity=AgentIdentity(agent_id=owner.agent_id, owns_loop=True),
             original_incarnation=owner,
             clock_factory=Clock.from_settings,
         )
     )
-    await _terminate_native(db_conn, aops_pool, owner, session, runtime, mode)
+    await _terminate_native(
+        db_conn, aops_pool, owner, session, runtime, mode, database_gate=database_gate
+    )
     if mode == "delayed_resurrection":
         _age_and_sweep_notices(db_conn, owner.agent_id)
     resurrect_agent(database, event_bus, owner.agent_id, resurrected_by="user")
@@ -328,9 +340,15 @@ async def test_termination_closes_automatic_preparation_and_dismisses_reminders(
     status: str,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner, session = await _termination_session(
-        db_conn, aops_pool, status=status, automatic=True, config_authority=config_authority
+        db_conn,
+        aops_pool,
+        status=status,
+        automatic=True,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
@@ -356,9 +374,10 @@ async def test_termination_notice_rollback_and_repeated_status_writes(
     aops_pool: AsyncConnectionPool,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner, session = await _termination_session(
-        db_conn, aops_pool, config_authority=config_authority
+        db_conn, aops_pool, config_authority=config_authority, database_gate=database_gate
     )
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
@@ -378,9 +397,10 @@ async def test_restart_and_termination_without_a_lease_add_no_notices(
     aops_pool: AsyncConnectionPool,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner, session = await _termination_session(
-        db_conn, aops_pool, config_authority=config_authority
+        db_conn, aops_pool, config_authority=config_authority, database_gate=database_gate
     )
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
@@ -408,12 +428,13 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     transport_dead: bool,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     from cli.commands.agents import impersonation as cli_impersonation
     from cli.parsers import build_parser
 
     owner, session = await _termination_session(
-        db_conn, aops_pool, config_authority=config_authority
+        db_conn, aops_pool, config_authority=config_authority, database_gate=database_gate
     )
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
@@ -470,9 +491,10 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner, session = await _termination_session(
-        db_conn, aops_pool, config_authority=config_authority
+        db_conn, aops_pool, config_authority=config_authority, database_gate=database_gate
     )
     reads = 0
     emitted: list[str] = []
@@ -535,10 +557,11 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
 
     owner, _session = await _termination_session(
-        db_conn, aops_pool, config_authority=config_authority
+        db_conn, aops_pool, config_authority=config_authority, database_gate=database_gate
     )
     started = db_conn.execute("SELECT transaction_timestamp()").fetchone()
     assert started is not None

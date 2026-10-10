@@ -31,6 +31,7 @@ dependency-free: no build output, no network fetch, everything inlined.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -360,19 +362,7 @@ def _gateway_base() -> str:
     return f"http://{host}:{settings.gateway.gateway_port}"
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Fleet UI entry service")
-    parser.add_argument("--port", type=int, default=None, help="bind port (default: entry port)")
-    parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
-    args = parser.parse_args()
-
-    from base.daemon.shutdown import install_graceful_shutdown
-    from base.log import init_gateway_process
-
-    init_gateway_process("gate")
-    # Root sends SIGTERM and waits for this captured process tree to exit.
-    # The handler interrupts serve_forever so the listener closes on shutdown.
-    install_graceful_shutdown("gate")
+def _serve_http(args: argparse.Namespace) -> None:
     static_dir = args.static_dir or (Path(__file__).parent / "static")
     port = args.port or entry_port()
     gate = Gate(
@@ -383,14 +373,65 @@ def main() -> None:
     )
     server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)  # noqa: S104 — the entry must be reachable off-box
     server.gate = gate  # type: ignore[attr-defined]  # handler reads it off the instance
-    _log.info("gate serving on :%d (app %s, gateway %s)", port, gate.app_base, gate.gateway_base)
-    import contextlib
-
+    primary: BaseException | None = None
     try:
+        _log.info(
+            "gate serving on :%d (app %s, gateway %s)", port, gate.app_base, gate.gateway_base
+        )
         with contextlib.suppress(KeyboardInterrupt):
             server.serve_forever()
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
-        server.server_close()
+        try:
+            server.server_close()
+        except BaseException as cleanup:
+            if primary is None:
+                raise
+            primary.add_note(f"Gate HTTP close also failed: {cleanup!r}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Fleet UI entry service")
+    parser.add_argument("--port", type=int, default=None, help="bind port (default: entry port)")
+    parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
+    args = parser.parse_args()
+
+    from base.cluster.machine import machine_name
+    from base.daemon.shutdown import install_graceful_shutdown
+    from base.db import Database
+    from base.db.code_version_gate import ProcessDbGate
+    from base.log import init_gateway_process
+    from base.native_process.code_version import CodeVersion
+    from base.native_process.loaded_commit import LoadedCommit
+    from base.telemetry.delivery.receipts import DrainStatus
+    from base.telemetry.emitter import build_pipeline, report_no_pipeline
+
+    image = LoadedCommit.capture()
+    gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
+    database = partial(Database.from_settings, gate=gate)
+    pipeline = build_pipeline(database=database)
+    primary: BaseException | None = None
+    try:
+        init_gateway_process(
+            "gate", producer=lambda: pipeline, machine_reader=machine_name, image=image
+        )
+        # Root's signal interrupts serving, then closes HTTP before the writer.
+        install_graceful_shutdown("gate")
+        _serve_http(args)
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        try:
+            drain = pipeline.stop(timeout=2)
+            if drain.status is DrainStatus.UNFINISHED:
+                report_no_pipeline("[gate] event pipeline stop unfinished: {drain}", drain=drain)
+        except BaseException as cleanup:
+            if primary is None:
+                raise
+            primary.add_note(f"Gate event pipeline stop also failed: {cleanup!r}")
 
 
 if __name__ == "__main__":

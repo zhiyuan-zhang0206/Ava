@@ -16,6 +16,8 @@ import pytest
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, component
 from base.daemon.tests._health_helpers import _find_free_port, _http_get, _probe_url
+from base.daemon.tests.health_support import unknown_image
+from base.native_process import loaded_commit
 from base.paths import ava_home
 
 # ─── probe_daemon: a 200 is believed only from a verified identity ───────────
@@ -47,7 +49,7 @@ async def _probe(name: str, port: int, pidfile: Path, **kw: object) -> health.Da
 async def test_healthz_body_carries_home(tmp_path: Path) -> None:
     """`home` is in the payload at all — the field the cross-cluster check reads."""
     port = _find_free_port()
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
         _status, body = await _http_get(port, "/healthz")
         assert json.loads(body)["home"] == str(ava_home())
@@ -61,16 +63,20 @@ async def test_healthz_body_carries_the_daemons_own_commit(monkeypatch: pytest.M
     daemon still holding pre-rollout code from one that restarted onto it — the
     per-daemon view the machine-level roster row cannot give (it speaks only for
     whichever process answers the status probe)."""
-    monkeypatch.setattr(health.loaded_commit, "get", lambda: "c0ffee1234")
+    image = loaded_commit.LoadedCommit(Path.cwd(), "c0ffee1234")
     port = _find_free_port()
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=image)
     try:
         _status, body = await _http_get(port, "/healthz")
         assert json.loads(body)["sha"] == "c0ffee1234"
-        monkeypatch.setattr(health.loaded_commit, "get", lambda: "legacy-updated")
+
+        def later_capture(_root: Path) -> str:
+            return "checkout-advanced"
+
+        monkeypatch.setattr(loaded_commit, "capture_commit", later_capture)
         status, body = await _http_get(port, "/healthz")
         assert status == 200
-        assert json.loads(body)["sha"] == "legacy-updated"
+        assert json.loads(body)["sha"] == "c0ffee1234"
     finally:
         await health.stop_health_server(server)
 
@@ -82,9 +88,9 @@ async def test_healthz_reports_an_unfrozen_process_as_unknown(
     """A daemon that froze no commit says so rather than omitting the key — an
     absent field reads to a probe as an old daemon that predates this payload,
     a null reads as "this process cannot vouch for its code"."""
-    monkeypatch.setattr(health.loaded_commit, "get", lambda: None)
+    image = unknown_image()
     port = _find_free_port()
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=image)
     try:
         _status, body = await _http_get(port, "/healthz")
         assert json.loads(body)["sha"] is None
@@ -103,28 +109,19 @@ async def test_healthz_retains_explicit_loaded_image_after_source_changes(
         assert source_root == tmp_path
         return sha
 
-    monkeypatch.setattr(health.loaded_commit, "capture_commit", initial_capture)
-    image = health.loaded_commit.LoadedCommit.capture(tmp_path)
-    legacy_calls = 0
-    legacy_sha = ["legacy-before"]
-
-    def legacy_commit() -> str:
-        nonlocal legacy_calls
-        legacy_calls += 1
-        return legacy_sha[0]
+    monkeypatch.setattr(loaded_commit, "capture_commit", initial_capture)
+    image = loaded_commit.LoadedCommit.capture(tmp_path)
 
     def unexpected_capture(_root: Path) -> str | None:
         raise AssertionError("health requests must not reread the checkout")
 
-    monkeypatch.setattr(health.loaded_commit, "get", legacy_commit)
-    monkeypatch.setattr(health.loaded_commit, "capture_commit", unexpected_capture)
+    monkeypatch.setattr(loaded_commit, "capture_commit", unexpected_capture)
     port = _find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await health.start_health_server("agent_host", port=port, image=image)
     try:
-        for next_sha in ("checkout-advanced", "legacy-replaced"):
-            legacy_sha[0] = next_sha
+        for _ in range(2):
             status, body = await _http_get(port, "/healthz")
             payload = json.loads(body)
             assert status == 200
@@ -135,7 +132,6 @@ async def test_healthz_retains_explicit_loaded_image_after_source_changes(
         assert probe.detail == (
             f"pid {os.getpid()}, code {sha[:7]}" if sha is not None else f"pid {os.getpid()}"
         )
-        assert legacy_calls == 0
         assert image.source_root == tmp_path
         assert image.sha == sha
     finally:
@@ -151,11 +147,11 @@ async def test_probe_reports_the_commit_without_judging_it(
     A daemon on stale code is alive. Failing the probe on a commit mismatch
     would have every watchdog respawn its daemon the moment a rollout advances
     the checkout, racing the orchestrated restart it is supposed to leave alone."""
-    monkeypatch.setattr(health.loaded_commit, "get", lambda: "c0ffee1234")
+    image = loaded_commit.LoadedCommit(Path.cwd(), "c0ffee1234")
     port = _find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=image)
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.alive is True, probe.detail
@@ -170,7 +166,7 @@ async def test_probe_alive_when_name_home_and_pid_all_match(tmp_path: Path) -> N
     port = _find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.alive is True, probe.detail
@@ -190,7 +186,7 @@ async def test_probe_rejects_200_from_a_process_that_is_not_ours(tmp_path: Path)
     port = _find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid() + 1))  # our daemon's pid, not the responder's
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is health.ProbeVerdict.DOWN
@@ -216,7 +212,7 @@ async def test_probe_rejects_daemon_from_another_home(
     port = _find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
         # The server answered with the real home; make the PROBE side believe it
         # belongs to a different unit — the same asymmetry a foreign daemon has.
@@ -238,7 +234,7 @@ async def test_probe_rejects_a_different_daemon_kind(tmp_path: Path) -> None:
     port = _find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("labeler", port=port)
+    server = await health.start_health_server("labeler", port=port, image=unknown_image())
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
@@ -256,7 +252,7 @@ async def test_probe_rejects_200_when_no_pidfile_exists(tmp_path: Path) -> None:
     DOWN rather than terminal: name and home matched first, so the answerer is a
     stray of this same cluster, which the respawn's kill-session clears."""
     port = _find_free_port()
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
         probe = await _probe("agent_host", port, tmp_path / "absent.pid")
         assert probe.verdict is health.ProbeVerdict.DOWN
@@ -310,7 +306,9 @@ async def test_probe_dead_when_liveness_is_stale(tmp_path: Path) -> None:
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     stale = health.Liveness(timeout_s=-1.0)
-    server = await health.start_health_server("agent_host", port=port, liveness=stale)
+    server = await health.start_health_server(
+        "agent_host", port=port, liveness=stale, image=unknown_image()
+    )
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is health.ProbeVerdict.DOWN
@@ -328,6 +326,7 @@ async def test_probe_includes_degraded_component_reasons(tmp_path: Path) -> None
         "agent_host",
         port=port,
         components=[component("ops", DEGRADED, detail="update-lock held 7200s")],
+        image=unknown_image(),
     )
     try:
         probe = await _probe("agent_host", port, pidfile)

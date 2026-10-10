@@ -19,6 +19,7 @@ import json
 import queue
 import socket
 import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,8 @@ import pytest
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
-from base import telemetry
+from base import paths, telemetry
+from base.db import Database
 from base.telemetry import emitter, observability
 
 _AGENT = 8901
@@ -66,9 +68,14 @@ def _mirror_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
 
 
 @pytest.fixture(autouse=True)
-def _bind_telemetry() -> None:
-    """Bind a stable process identity for every test in this module."""
-    telemetry.init_telemetry(process="test-proc")
+def _bind_telemetry(database: Database) -> Iterator[None]:
+    """Bind a stable identity to this test's explicit native writer owner."""
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    try:
+        telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
+        yield
+    finally:
+        pipeline.stop(timeout=2)
 
 
 # ── the unified event shape ──────────────────────────────────────────────────
@@ -213,7 +220,7 @@ def test_jsonl_mirror_holds_every_event() -> None:
 def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
     now = datetime.now(UTC)
     event_names = ["llm_usage", "turn_end", "exec", "exec_failed", "exec(timeout)", "fork"]
     events = [
@@ -247,7 +254,7 @@ def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
 def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_leftovers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(emitter, "_JSONL_RETENTION_DAYS", 2)
     today = datetime.now(UTC)
     full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
@@ -397,14 +404,10 @@ def test_loguru_adapter_sets_source_from_extra(
 def test_drain_on_exit_lands_queued_events() -> None:
     """The atexit hook must land events still queued (or in the drain thread's
     in-flight batch) — the `process_exit` event's own survival depends on it.
-    Runs last-ish: it stops the shared pipeline, so a fresh one is brought up
-    afterwards for the rest of the session."""
+    This test stops its own writer; the next test owns its own fresh writer."""
     telemetry.emit("telemetry", "process_exit", agent_id=_AGENT)
     telemetry._drain_on_exit()  # flush + stop — no explicit telemetry.flush() here
     assert _mirror_rows("process_exit", _AGENT), "process_exit must land in the mirror"
-    # _drain_on_exit stopped the shared pipeline — bring a fresh one up
-    telemetry._state["pipeline"] = None  # type: ignore[attr-defined]
-    telemetry.init_telemetry(process="test-proc")
 
 
 def test_resolve_machine_falls_back_only_on_documented_absence(

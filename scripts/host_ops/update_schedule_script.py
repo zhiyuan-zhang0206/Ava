@@ -94,11 +94,21 @@ def repair_script(
     """Run one script-only edit without releasing or progressing maintenance."""
     load_installed_runtime(home, source)
     from base.db import Database
+    from base.db.code_version_gate import ProcessDbGate
     from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
+    from base.native_process.code_version import CodeVersion
+    from base.native_process.loaded_commit import LoadedCommit
+    from base.telemetry import process_name
+
+    # The installed source supplied by the operator owns this image. A copied
+    # adapter's __file__ must not lend its checkout identity to the installed writer.
+    image = LoadedCommit.capture(source_root=source)
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process=process_name())
 
     with resource_lock(purpose="operator.update_schedule_script"):
         before = require_stopped_hold()
-        with Database.from_settings().pool() as pool:
+        with Database.from_settings(gate=gate).pool() as pool:
             result = replace_script(pool, schedule_id, script, expected_sha256)
         if require_stopped_hold() != before:
             raise RuntimeError("maintenance generation changed during script repair")

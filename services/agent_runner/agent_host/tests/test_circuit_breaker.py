@@ -44,6 +44,7 @@ from base.agents.context import AvaContext
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
@@ -94,7 +95,7 @@ def _overflow_state(breaker_reason: str | None = None) -> AgentState:
     )
 
 
-def _breaker_ctx() -> AvaContext:
+def _breaker_ctx(*, database_gate: ProcessDbGate) -> AvaContext:
     """An AvaContext for `_handle_fatal_llm_error` — no ops_pool, so the
     best-effort event-log write is skipped (unit tests have no DB)."""
     return AvaContext(
@@ -102,7 +103,7 @@ def _breaker_ctx() -> AvaContext:
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
@@ -112,7 +113,9 @@ def _breaker_ctx() -> AvaContext:
 # ── breaker open (runloop `_handle_fatal_llm_error`) ──
 
 
-async def test_fatal_provider_error_opens_circuit_breaker(loguru_records) -> None:
+async def test_fatal_provider_error_opens_circuit_breaker(
+    loguru_records, *, database_gate: ProcessDbGate
+) -> None:
     """A permanent context-overflow rejection opens the breaker with the
     context_overflow reason and keeps halted=True — the next wake must not
     re-fire the doomed call."""
@@ -123,7 +126,9 @@ async def test_fatal_provider_error_opens_circuit_breaker(loguru_records) -> Non
         status=400,
         context_overflow=True,
     )
-    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42)
+    update = await _handle_fatal_llm_error(
+        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+    )
 
     assert update["halted"] is True
     circuit = update["circuit"]
@@ -136,7 +141,7 @@ async def test_fatal_provider_error_opens_circuit_breaker(loguru_records) -> Non
     assert records[0]["extra"]["reason"] == "context_overflow"
 
 
-async def test_fatal_provider_error_billing_reason() -> None:
+async def test_fatal_provider_error_billing_reason(*, database_gate: ProcessDbGate) -> None:
     """A 402 billing rejection opens the breaker too (heartbeat re-fires stop),
     but with the billing reason — no forced compact is armed for it."""
     exc = FatalProviderError(
@@ -145,7 +150,9 @@ async def test_fatal_provider_error_billing_reason() -> None:
         provider="anthropic",
         status=402,
     )
-    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42)
+    update = await _handle_fatal_llm_error(
+        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+    )
 
     circuit = update["circuit"]
     assert isinstance(circuit, CircuitState)
@@ -153,7 +160,9 @@ async def test_fatal_provider_error_billing_reason() -> None:
     assert circuit.reason == "billing"
 
 
-async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
+async def test_fatal_provider_error_emits_blocked_recovery_details(
+    *, database_gate: ProcessDbGate
+) -> None:
     """The live error tells the user that a permanent rejection blocked retries.
 
     Regression for #5759: an opaque error plus an ``idling`` status made a
@@ -165,7 +174,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
         llm=MagicMock(),
         event_publisher=cast(AgentEventPublisher, publisher),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
@@ -197,6 +206,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A blocked descendant reports only metadata through immutable SPAWN lineage.
 
@@ -246,7 +256,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
@@ -284,6 +294,7 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Forced compaction is a healthy recovery path, not an ancestor escalation."""
     ancestor_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
@@ -311,7 +322,7 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
@@ -324,16 +335,22 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
         assert cur.fetchone() == (0,)
 
 
-async def test_fatal_llm_stream_error_does_not_open_breaker() -> None:
+async def test_fatal_llm_stream_error_does_not_open_breaker(
+    *, database_gate: ProcessDbGate
+) -> None:
     """FatalLLMStreamError (retry cap) is not a permanent provider rejection —
     it only halts the turn; the breaker stays untouched."""
     exc = FatalLLMStreamError("retry cap exhausted")
-    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42)
+    update = await _handle_fatal_llm_error(
+        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+    )
 
     assert update == {"halted": True}
 
 
-async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> None:
+async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
+    *, database_gate: ProcessDbGate
+) -> None:
     """A second failure while the breaker is already open for the same reason
     skips the duplicate open write + event (the original opened_at survives) —
     one open event per incident, not one per failed wake."""
@@ -348,7 +365,9 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> No
     async def _reader() -> CircuitState | None:
         return CircuitState(open=True, reason="billing", opened_at=opened_at)
 
-    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42, circuit_reader=_reader)
+    update = await _handle_fatal_llm_error(
+        exc, _breaker_ctx(database_gate=database_gate), agent_id=42, circuit_reader=_reader
+    )
 
     assert update == {"halted": True}, (
         "the breaker is already open — the duplicate write must be skipped"
@@ -701,6 +720,7 @@ async def _reject_turn(
     *,
     publisher: _RecordingPublisher,
     exc: FatalProviderError | None = None,
+    database_gate: ProcessDbGate,
 ) -> None:
     await _handle_fatal_llm_error(
         exc if exc is not None else _permanent_rejection(),
@@ -709,7 +729,7 @@ async def _reject_turn(
             llm=MagicMock(),
             event_publisher=cast(AgentEventPublisher, publisher),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=configured_policy().clock_factory,

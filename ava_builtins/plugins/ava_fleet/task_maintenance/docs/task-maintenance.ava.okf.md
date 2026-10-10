@@ -29,6 +29,11 @@ A gateway-owned daemon — every Fleet `task_maintenance_interval_seconds` (defa
 - Health: the standard `/healthz` identity probe on :8108, built by `ops/roster/healthz.py:healthz_daemon` and centrally bound to captured root ancestry (no module of its own)
 
 ## Notes
+- Entry captures one `LoadedCommit` for logging, health and the `CodeVersion`
+  behind its non-exempt `ProcessDbGate`. Logging and `run(config, database=...,
+  image=...)` share one live-settings database factory. Unknown image stays
+  unknown. The original Fleet service packet/disk admission, schema check,
+  pidfile, health-before-pool startup and pool/health/pidfile cleanup remain.
 - Fleet owns the host gate (default on) and cluster-pinned interval/backoff/escalation policy in `default_config.py`. Roster composition captures one typed image for the gate and daemon launch; its canonical non-secret packet is included in `unit.env` and the existing generation digest. Later image edits do not change that running generation. Core retains health port/pidfile and notification TTL responsibilities.
 - The plugin ServiceSpec selects task-maintenance into the gateway root manifest. Root health probes that exact unit and owns verified recovery; the plugin probe has no independent launch authority.
 - Difference from [[services/docs/gateway_side/heartbeat.ava.okf.md]]: heartbeat wakes idle agents to work, task-maintenance reminds overdue tasks; both only INSERT inbound, both are one per cluster on gateway.

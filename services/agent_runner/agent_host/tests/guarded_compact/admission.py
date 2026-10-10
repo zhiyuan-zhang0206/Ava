@@ -12,7 +12,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _agent
+from agent.tests.claim.test_inbound_ownership import agent_row
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
 from base.lm.catalog import ModelCatalog
@@ -50,7 +50,7 @@ async def admit(
     catalog: ModelCatalog,
 ) -> AcceptedHost:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    agent = _agent(conn)
+    agent = agent_row(conn)
     conn.execute(
         "UPDATE agents_meta SET incarnation_resources=%s,config_overlay=%s WHERE id=%s",
         (

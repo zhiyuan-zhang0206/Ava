@@ -22,6 +22,7 @@ from base.agents import ResurrectResult, TerminateResult
 from base.agents.messages.inbound import InboundKind
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -37,8 +38,8 @@ from ops.rpc_schemas import (
 )
 
 
-def _db() -> Database:
-    return Database.from_settings()
+def _db(*, database_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(gate=database_gate)
 
 
 class TestSpawnAgentRequestSourceValidation:

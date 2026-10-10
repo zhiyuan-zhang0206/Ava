@@ -19,7 +19,7 @@ import os
 import shutil
 import socket
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -40,6 +40,7 @@ from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from services.backup.artifact import passphrase
 from tests.fixtures.env_bootstrap import distinct_free_ports
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = pytest.mark.skipif(
     not (Path(pooler.pgbouncer_bin()).exists() or shutil.which(pooler.pgbouncer_bin())),
@@ -204,11 +205,16 @@ def test_configured_roster_survives_kernel_reuse_of_closed_ports(
     assert not held
 
 
-def _birth(born: Born) -> None:
-    assert bringup.ensure_gateway_data_plane(retained_children=born.retained_children) == 0
+def _birth(born: Born, *, operator_database: Callable[[], Any]) -> None:
+    assert (
+        bringup.ensure_gateway_data_plane(
+            retained_children=born.retained_children, database_factory=operator_database
+        )
+        == 0
+    )
     bringup.prepare_gateway_schema()
-    cmd_migrations_apply()
-    bringup.complete_gateway_data_plane()
+    cmd_migrations_apply(database_factory=operator_database)
+    bringup.complete_gateway_data_plane(database_factory=operator_database)
 
 
 @pytest.fixture
@@ -223,8 +229,8 @@ def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Born
 
 
 @pytest.fixture
-def born(configured: Born) -> Born:
-    _birth(configured)
+def born(configured: Born, *, operator_database: Callable[[], Any]) -> Born:
+    _birth(configured, operator_database=operator_database)
     return configured
 
 
@@ -348,20 +354,24 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(born: Born) -
     _refused(host="127.0.0.1", port=born.pooler_port, user=name, password=password, dbname="ava")
 
 
-def test_unchanged_userlist_reloads_without_restart(born: Born) -> None:
+def test_unchanged_userlist_reloads_without_restart(
+    born: Born, operator_database: Callable[[], Any]
+) -> None:
     before = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
-    bringup.complete_gateway_data_plane()
+    bringup.complete_gateway_data_plane(database_factory=operator_database)
     after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert before is not None and after is not None and before.pid == after.pid
 
 
-def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(born: Born) -> None:
+def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
+    born: Born, operator_database: Callable[[], Any]
+) -> None:
     with born.admin() as conn:
         conn.execute(
             "CREATE ROLE ava_g7_runner LOGIN PASSWORD 'stale-password-xyz' IN ROLE ava_runner"
         )
     with pytest.raises(authority.CatalogRefusedError, match="ava_g7_runner"):
-        bringup.complete_gateway_data_plane()
+        bringup.complete_gateway_data_plane(database_factory=operator_database)
     with born.admin() as conn:
         assert conn.execute(
             "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'ava_g7_runner'"
@@ -369,29 +379,36 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(bor
     assert authority.active_generation(born.home).number == 0
 
 
-def test_ordinary_start_holds_on_an_invariant_violation(born: Born) -> None:
+def test_ordinary_start_holds_on_an_invariant_violation(
+    born: Born, operator_database: Callable[[], Any]
+) -> None:
     with born.admin() as conn:
         conn.execute("CREATE ROLE foreign_writer LOGIN PASSWORD 'foreign-password'")
         conn.execute("GRANT INSERT ON agents TO foreign_writer")
     with pytest.raises(authority.CatalogRefusedError, match="foreign_writer"):
-        bringup.complete_gateway_data_plane()
+        bringup.complete_gateway_data_plane(database_factory=operator_database)
 
 
 def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
-    configured: Born, capsys: pytest.CaptureFixture[str]
+    configured: Born, capsys: pytest.CaptureFixture[str], operator_database: Callable[[], Any]
 ) -> None:
     intent = json.loads((configured.home / "start-intent.json").read_text())
     intent["phase"] = "provisioned"
     (configured.home / "start-intent.json").write_text(json.dumps(intent))
-    assert bringup.ensure_gateway_data_plane(retained_children=configured.retained_children) == 1
+    assert (
+        bringup.ensure_gateway_data_plane(
+            retained_children=configured.retained_children, database_factory=operator_database
+        )
+        == 1
+    )
     assert "no conversion exists" in capsys.readouterr().err
     assert not (configured.home / "pg").exists()
     with pytest.raises(RuntimeError, match="no database authority ledger"):
-        bringup.complete_gateway_data_plane()
+        bringup.complete_gateway_data_plane(database_factory=operator_database)
 
 
 def test_interrupted_birth_retries_to_the_same_generation(
-    configured: Born, monkeypatch: pytest.MonkeyPatch
+    configured: Born, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     calls: list[int] = []
     real = bringup.prove_generation_logins
@@ -402,11 +419,11 @@ def test_interrupted_birth_retries_to_the_same_generation(
 
     monkeypatch.setattr(bringup, "prove_generation_logins", failing)
     with pytest.raises(RuntimeError, match="injected crash"):
-        _birth(configured)
+        _birth(configured, operator_database=operator_database)
     ledger = authority.require_ledger(configured.home)
     assert ledger.active is None and ledger.pending is not None and ledger.pending.number == 0
     monkeypatch.setattr(bringup, "prove_generation_logins", real)
-    bringup.complete_gateway_data_plane()
+    bringup.complete_gateway_data_plane(database_factory=operator_database)
     ledger = authority.require_ledger(configured.home)
     assert calls == [0] and ledger.active is not None and ledger.active.number == 0
 
@@ -450,7 +467,9 @@ def test_launched_services_receive_their_class_login_only(
 _ROLES = frozenset({"gateway", "agent-runner"})
 
 
-def _collector_postgres_receiver(born: Born, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def _collector_postgres_receiver(
+    born: Born, monkeypatch: pytest.MonkeyPatch, *, operator_database: Callable[[], Any]
+) -> dict[str, Any]:
     """The rendered collector config's PostgreSQL receiver; the whole rendered
     text carries no credential of the data plane."""
     import yaml
@@ -459,7 +478,7 @@ def _collector_postgres_receiver(born: Born, monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(settings.observability, "telemetry_otlp_enabled", True)
     monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-machine")
-    rendered = oc.generate_config(_REPO, born.home, _ROLES)
+    rendered = oc.generate_config(_REPO, born.home, _ROLES, database_factory=operator_database)
     secret = authority.read_secret(born.home, authority.active_generation(born.home))
     credentials = {
         "gateway generation": secret.roles.gateway.password,
@@ -519,12 +538,12 @@ def _scrape_like_the_receiver(receiver: dict[str, Any]) -> None:
 
 
 def test_collector_postgres_receiver_keeps_no_credential(
-    born: Born, monkeypatch: pytest.MonkeyPatch
+    born: Born, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """The collector's PostgreSQL receiver logs in as the stable monitoring
     role by `peer` over the owner-only socket: no password at rest in its
     config and no application data."""
-    receiver = _collector_postgres_receiver(born, monkeypatch)
+    receiver = _collector_postgres_receiver(born, monkeypatch, operator_database=operator_database)
     assert receiver["username"] == authority.MONITOR_ROLE
     assert receiver["transport"] == "unix"
     assert receiver["databases"] == ["ava"]
@@ -548,7 +567,10 @@ def test_collector_postgres_receiver_keeps_no_credential(
             conn, born.home, database="ava", readonly_grantees=bringup.READONLY_GRANTEES
         )
     # The unchanged config keeps scraping.
-    assert _collector_postgres_receiver(born, monkeypatch) == receiver
+    assert (
+        _collector_postgres_receiver(born, monkeypatch, operator_database=operator_database)
+        == receiver
+    )
     _scrape_like_the_receiver(receiver)
 
 

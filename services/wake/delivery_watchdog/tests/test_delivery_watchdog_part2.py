@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog.daemon import (
@@ -68,7 +69,9 @@ def _make_running_agent(
     return aid
 
 
-def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) -> int:
+def _insert_old_inbound(
+    db: psycopg.Connection, agent_id: int, *, age_s: float, database_gate: ProcessDbGate
+) -> int:
     """Insert a chat inbound backdated `age_s` (timestamp-only UPDATE — the
     inbound table has no triggers on created_at). Returns the inbound id."""
     iid = insert_inbound_message(
@@ -77,7 +80,7 @@ def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) 
         "stale",
         source="user",
         bus=EventBus.from_settings(),
-        database=Database.from_settings(),
+        database=Database.from_settings(gate=database_gate),
     )
     with db.cursor() as cur:
         cur.execute(
@@ -249,11 +252,12 @@ class TestAlertDedupPersistence:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
 
         # First daemon life: alert once, persist the delta.
         newly, alerted = scan_once(pool, _THRESHOLD_S, set())
@@ -274,13 +278,18 @@ class TestAlertDedupPersistence:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         # FK -> inbound_messages: only real inbound ids can be persisted.
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid_a = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-        iid_b = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid_a = _insert_old_inbound(
+            db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate
+        )
+        iid_b = _insert_old_inbound(
+            db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate
+        )
         persist_alerted(pool, {iid_a, iid_b})
         assert select_alerted_ids(pool) == {iid_a, iid_b}
         # A second persist of the same ids is a no-op (ON CONFLICT DO NOTHING).
@@ -294,11 +303,12 @@ class TestAlertDedupPersistence:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         _, alerted = scan_once(pool, _THRESHOLD_S, set())
         persist_alerted(pool, alerted)
 
@@ -328,11 +338,12 @@ class TestAlertDedupPersistence:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         persist_alerted(pool, {iid})
         # Backdate the row beyond the TTL (2h) — as if it were alerted long ago
         # and the inbound left pending while the daemon was down.
@@ -369,17 +380,20 @@ class TestStalledCrashMarkedRecovery:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         from services.wake.delivery_watchdog import stall_recovery as sr
 
         zombie = _make_crash_marked_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        zombie_inbound = _insert_old_inbound(db_conn, zombie, age_s=_THRESHOLD_S + 5)
+        zombie_inbound = _insert_old_inbound(
+            db_conn, zombie, age_s=_THRESHOLD_S + 5, database_gate=database_gate
+        )
         healthy = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        _insert_old_inbound(db_conn, healthy, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(db_conn, healthy, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         running = _make_running_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
@@ -388,11 +402,11 @@ class TestStalledCrashMarkedRecovery:
                 "UPDATE agents_meta SET last_turn_fatal_at = now() WHERE id = %s", (running,)
             )
         db_conn.commit()
-        _insert_old_inbound(db_conn, running, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(db_conn, running, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         fresh = _make_crash_marked_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        _insert_old_inbound(db_conn, fresh, age_s=1.0)
+        _insert_old_inbound(db_conn, fresh, age_s=1.0, database_gate=database_gate)
 
         rows = sr.select_stalled_crash_marked(pool, _THRESHOLD_S)
         assert [(r[0], r[1]) for r in rows] == [(zombie_inbound, zombie)]
@@ -404,6 +418,7 @@ class TestStalledCrashMarkedRecovery:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A tripped recovery breaker (durable streak) or a live suppression
         window keeps the scan from starting a recovery — task #3617's halt."""
@@ -412,11 +427,13 @@ class TestStalledCrashMarkedRecovery:
         tripped = _make_crash_marked_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        _insert_old_inbound(db_conn, tripped, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(db_conn, tripped, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         suppressed = _make_crash_marked_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        _insert_old_inbound(db_conn, suppressed, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(
+            db_conn, suppressed, age_s=_THRESHOLD_S + 5, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET permanent_reject_streak = 2 WHERE id = %s", (tripped,)

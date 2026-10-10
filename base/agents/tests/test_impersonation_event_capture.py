@@ -45,6 +45,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
@@ -77,8 +78,10 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
 
 
 @pytest.fixture
-def lease(owner: RuntimeIncarnation, *, config_authority: ConfigAuthority) -> dict[str, Any]:
-    return history_cases.start(owner, authority=config_authority)
+def lease(
+    owner: RuntimeIncarnation, *, config_authority: ConfigAuthority, database_gate: ProcessDbGate
+) -> dict[str, Any]:
+    return history_cases.start(owner, authority=config_authority, database_gate=database_gate)
 
 
 def _sdk_event(agent_id: int, marker: str) -> Event:
@@ -109,12 +112,21 @@ def _send_event(actor_id: int, target_id: int) -> Event:
     )
 
 
-def _open(lease: dict[str, Any], agent_id: int, key: str) -> LocalParticipant:
+def _open(
+    lease: dict[str, Any], agent_id: int, key: str, database_gate: ProcessDbGate
+) -> LocalParticipant:
     participant = LocalParticipant(
-        str(lease["id"]), agent_id, lease["session_id"], key, Database.from_settings()
+        str(lease["id"]),
+        agent_id,
+        lease["session_id"],
+        key,
+        Database.from_settings(gate=database_gate),
     )
     assert open_local_participant(
-        Database.from_settings(), participant.lease_id, agent_id=agent_id, source_key=key
+        Database.from_settings(gate=database_gate),
+        participant.lease_id,
+        agent_id=agent_id,
+        source_key=key,
     )
     return participant
 
@@ -144,9 +156,12 @@ def test_central_events_belong_to_the_asserted_actor_not_the_recipient(
     lease: dict[str, Any],
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     recipient = _owner(db_conn)
-    recipient_lease = history_cases.start(recipient, authority=config_authority)
+    recipient_lease = history_cases.start(
+        recipient, authority=config_authority, database_gate=database_gate
+    )
     tagged = record_central_event(db_conn, _send_event(owner.agent_id, recipient.agent_id))
     assert tagged.attributes["impersonation_session"] == f"{owner.agent_id}:0"
     assert _rows(db_conn, lease["id"], capture.CENTRAL_SOURCE) == 1
@@ -252,8 +267,9 @@ def test_a_held_sdk_call_keeps_its_admission_and_seals_its_source_when_it_drains
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
+    database_gate: ProcessDbGate,
 ) -> None:
-    participant = _open(lease, owner.agent_id, "held-call")
+    participant = _open(lease, owner.agent_id, "held-call", database_gate=database_gate)
     gate = capture.LocalCaptureGate(participant)
     with capture.admitted_local_sdk_call(gate.admit) as admission:
         # Closing while the admitted call is in flight cannot finish until it releases.
@@ -273,9 +289,10 @@ def test_receipt_owner_retains_its_exact_gate_despite_equal_participant_values(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
+    database_gate: ProcessDbGate,
 ) -> None:
-    participant = _open(lease, owner.agent_id, "equal-participant")
-    equivalent = dataclasses.replace(participant, db=Database.from_settings())
+    participant = _open(lease, owner.agent_id, "equal-participant", database_gate=database_gate)
+    equivalent = dataclasses.replace(participant, db=Database.from_settings(gate=database_gate))
     assert equivalent == participant and equivalent is not participant
     gate = capture.LocalCaptureGate(participant)
     with capture.admitted_local_sdk_call(gate.admit) as admission:
@@ -292,9 +309,10 @@ def test_rebinding_does_not_redirect_an_unbound_held_admission(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
+    database_gate: ProcessDbGate,
 ) -> None:
-    previous = _open(lease, owner.agent_id, "previous-gate")
-    current = _open(lease, owner.agent_id, "current-gate")
+    previous = _open(lease, owner.agent_id, "previous-gate", database_gate=database_gate)
+    current = _open(lease, owner.agent_id, "current-gate", database_gate=database_gate)
     previous_gate = capture.LocalCaptureGate(previous)
     current_gate = capture.LocalCaptureGate(current)
     with capture.admitted_local_sdk_call(previous_gate.admit) as admission:
@@ -319,8 +337,9 @@ def test_a_direct_audit_event_after_close_refuses_and_fails_the_source(
     lease: dict[str, Any],
     database: Database,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
-    participant = _open(lease, owner.agent_id, "closed-direct")
+    participant = _open(lease, owner.agent_id, "closed-direct", database_gate=database_gate)
     gate = capture.LocalCaptureGate(participant)
     assert close_local_participant_admission(gate, timeout=0)
     with pytest.raises(RuntimeError, match="Impersonation event capture is closed"):
@@ -346,9 +365,10 @@ def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A failed writer cannot turn a lost event into a seal."""
-    participant = _open(lease, owner.agent_id, "sticky")
+    participant = _open(lease, owner.agent_id, "sticky", database_gate=database_gate)
     gate = capture.LocalCaptureGate(participant)
     original_lock = capture.locked_receipt_state
     locks = 0
@@ -381,8 +401,9 @@ def restricted_source(
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> Iterator[LocalParticipant]:
-    participant = _open(lease, owner.agent_id, "restricted-runner")
+    participant = _open(lease, owner.agent_id, "restricted-runner", database_gate=database_gate)
     owner_url = settings.data_plane.db_url
     runner_url = grant_runner_login(
         owner_url,
@@ -408,7 +429,7 @@ def restricted_source(
             "'events_completed_at', 'UPDATE')"
         ).fetchone() == (False,)
     monkeypatch.setattr(settings.data_plane, "db_url", runner_url)
-    participant = dataclasses.replace(participant, db=Database.from_settings())
+    participant = dataclasses.replace(participant, db=Database.from_settings(gate=database_gate))
     try:
         yield participant
     finally:
@@ -505,13 +526,14 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
     monkeypatch: pytest.MonkeyPatch,
     body_failed: bool,
     async_call: bool,
+    database_gate: ProcessDbGate,
 ) -> None:
     from base.agents.sdk import call_policy
     from base.agents.sdk import telemetry as sdk_usage
     from base.agents.sdk.tally import SdkCallTally
 
-    previous = _open(lease, owner.agent_id, "emit-failed-original")
-    current = _open(lease, owner.agent_id, "emit-new-receipt")
+    previous = _open(lease, owner.agent_id, "emit-failed-original", database_gate=database_gate)
+    current = _open(lease, owner.agent_id, "emit-new-receipt", database_gate=database_gate)
     primary = ValueError("body failed after commit")
     cause = LookupError("body cause")
     tally = SdkCallTally()
@@ -601,10 +623,11 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Real recorders retain separate admissions, despite detach and a new context."""
-    previous = _open(lease, owner.agent_id, "concurrent-original")
-    current = _open(lease, owner.agent_id, "concurrent-replacement")
+    previous = _open(lease, owner.agent_id, "concurrent-original", database_gate=database_gate)
+    current = _open(lease, owner.agent_id, "concurrent-replacement", database_gate=database_gate)
     previous_gate = capture.LocalCaptureGate(previous)
     current_gate = capture.LocalCaptureGate(current)
 
@@ -669,10 +692,11 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    database_gate: ProcessDbGate,
 ) -> None:
     from base.agents.context.identity import ExternalLease
 
-    participant = _open(lease, owner.agent_id, "explicit-skill-audit")
+    participant = _open(lease, owner.agent_id, "explicit-skill-audit", database_gate=database_gate)
     gate = capture.LocalCaptureGate(participant)
     (tmp_path / "SKILL.md").write_text("# Capture test\n")
     skill = ava.skills.Skill(
@@ -725,8 +749,9 @@ def test_known_capture_database_outage_retains_the_failed_receipt_recovery(
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
-    participant = _open(lease, owner.agent_id, "known-capture-outage")
+    participant = _open(lease, owner.agent_id, "known-capture-outage", database_gate=database_gate)
     gate = capture.LocalCaptureGate(participant)
 
     def unavailable(*_args: Any, **_kwargs: Any) -> None:
@@ -742,5 +767,8 @@ def test_known_capture_database_outage_retains_the_failed_receipt_recovery(
     assert _state(db_conn, participant) == ("failed",)
     assert _rows(db_conn, lease["id"], participant.source_key) == 0
     assert (
-        history.resolve(Database.from_settings(), owner.agent_id, 0)["events_completed_at"] is None
+        history.resolve(Database.from_settings(gate=database_gate), owner.agent_id, 0)[
+            "events_completed_at"
+        ]
+        is None
     )

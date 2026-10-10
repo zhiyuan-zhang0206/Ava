@@ -8,12 +8,15 @@ and the replacement is reported (local copies are never hand-edited).
 
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.skill import cmd_skill_update, cmd_skill_upgrade
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare
@@ -209,10 +212,12 @@ def _skill_git_repo(tmp_path: Path, name: str = "ext-skill") -> str:
     return str(r)
 
 
-def _install_skill(url: str, name: str = "ext-skill") -> None:
+def _install_skill(
+    url: str, name: str = "ext-skill", *, operator_database: Callable[[], Any]
+) -> None:
     from cli.commands.extensions.skill import cmd_skill_install
 
-    assert cmd_skill_install(url, None, None) == 0
+    assert cmd_skill_install(url, None, None, database_factory=operator_database) == 0
     assert _entry(name).installed_hash is not None
 
 
@@ -223,9 +228,11 @@ def test_upgrade_skips_unupdatable(unit_home: Path, capsys) -> None:
     assert "no recorded source" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path) -> None:
+def test_upgrade_refetches_from_source(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     url = _skill_git_repo(tmp_path)
-    _install_skill(url)
+    _install_skill(url, operator_database=operator_database)
     r = Path(url)
     (r / "SKILL.md").write_text(
         "---\nname: ext-skill\ndescription: d\n---\n\n# v2\n", encoding="utf-8"
@@ -237,14 +244,16 @@ def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path) -> None:
     assert "# v2" in body
 
 
-def test_upgrade_local_source_is_copied_never_moved(unit_home: Path, tmp_path: Path) -> None:
+def test_upgrade_local_source_is_copied_never_moved(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     """A local-path source is read in place (never moved): upgrade must not
     relocate the user's own directory or delete its .git (install's docstring
     promises 'never moved' — the old upgrade moved it into $AVA_HOME/skills
     and rmtree'd the checkout's .git). The installed copy updates; the source
     stays put."""
     src_dir = Path(_skill_git_repo(tmp_path))  # a local dir WITH .git
-    _install_skill(str(src_dir))
+    _install_skill(str(src_dir), operator_database=operator_database)
 
     (src_dir / "SKILL.md").write_text(
         "---\nname: ext-skill\ndescription: d\n---\n\n# v2\n", encoding="utf-8"
@@ -260,9 +269,11 @@ def test_upgrade_local_source_is_copied_never_moved(unit_home: Path, tmp_path: P
     assert "# v2" in body
 
 
-def test_upgrade_replaces_a_local_edit(unit_home: Path, tmp_path: Path, capsys) -> None:
+def test_upgrade_replaces_a_local_edit(
+    unit_home: Path, tmp_path: Path, capsys, operator_database: Callable[[], Any]
+) -> None:
     url = _skill_git_repo(tmp_path)
-    _install_skill(url)
+    _install_skill(url, operator_database=operator_database)
     copy = unit_home / "skills" / "ext-skill" / "SKILL.md"
     copy.write_text("---\nname: ext-skill\ndescription: d\n---\n\n# hacked\n", encoding="utf-8")
     r = Path(url)

@@ -37,6 +37,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -68,7 +69,11 @@ async def _one_try(
 
 
 def _make_runtime(
-    hosted_resources: HostedTurnResources, llm: MagicMock, *, model_catalog: ModelCatalog
+    hosted_resources: HostedTurnResources,
+    llm: MagicMock,
+    *,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
     """Same pattern as test_cancel.py: fake llm returns itself via bind_tools (chain method)."""
     llm.bind_tools.return_value = llm
@@ -80,7 +85,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=Clock.from_settings,
@@ -94,6 +99,7 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Server completely unresponsive (zero bytes emitted) → raise LLMStreamStallTimeoutError containing 'TTFT'."""
 
@@ -120,7 +126,10 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
         await _one_try(
             state,
             _make_runtime(
-                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                hosted_resources=hosted_resources,
+                llm=fake_llm,
+                model_catalog=model_catalog,
+                database_gate=database_gate,
             ),
         )
 
@@ -131,6 +140,7 @@ async def test_stall_mid_stream_raises_with_chunk_count(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Emits N chunks then hangs → raise LLMStreamStallTimeoutError containing
     'mid-stream after N chunks'. Triage split: TTFT = server never connected,
@@ -159,7 +169,10 @@ async def test_stall_mid_stream_raises_with_chunk_count(
         await _one_try(
             state,
             _make_runtime(
-                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                hosted_resources=hosted_resources,
+                llm=fake_llm,
+                model_catalog=model_catalog,
+                database_gate=database_gate,
             ),
         )
 
@@ -170,6 +183,7 @@ async def test_normal_stream_completes_no_stall_timeout(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Normal stream completes within timeout → no raise, llm_node finishes and
     returns Command. Locks the "chunk interval < timeout" path against accidental regression."""
@@ -197,7 +211,12 @@ async def test_normal_stream_completes_no_stall_timeout(
     # killed by stall timeout"
     result = await _one_try(
         state,
-        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog),
+        _make_runtime(
+            hosted_resources=hosted_resources,
+            llm=fake_llm,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+        ),
     )
     assert result is not None
 
@@ -326,6 +345,7 @@ async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The post-stall fallback is bounded by the SAME key/value as its stream
     segment — a hanging fallback with a tiny segment bound must be cut at that
@@ -351,7 +371,10 @@ async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
         await _one_try(
             state,
             _make_runtime(
-                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                hosted_resources=hosted_resources,
+                llm=fake_llm,
+                model_catalog=model_catalog,
+                database_gate=database_gate,
             ),
         )
     elapsed = time.monotonic() - started
@@ -377,6 +400,7 @@ async def test_overload_fallback_timeout_is_not_a_stall_pair(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The pair contract covers stalls only: an overload-triggered fallback
     that times out keeps its own (long) ceiling and propagates as the plain
@@ -400,7 +424,10 @@ async def test_overload_fallback_timeout_is_not_a_stall_pair(
         await _one_try(
             state,
             _make_runtime(
-                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                hosted_resources=hosted_resources,
+                llm=fake_llm,
+                model_catalog=model_catalog,
+                database_gate=database_gate,
             ),
         )
     assert not isinstance(exc_info.value, LLMStreamStallPairError)
@@ -414,6 +441,7 @@ async def test_stall_events_carry_provider_health_fields(
     add_models: AddModels,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The stall + pair events carry vendor/model/stage (the 09-14/15 wave was
     100% api.deepseek.com yet nothing in the telemetry said so) plus the
@@ -446,7 +474,10 @@ async def test_stall_events_carry_provider_health_fields(
             await _one_try(
                 state,
                 _make_runtime(
-                    hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                    hosted_resources=hosted_resources,
+                    llm=fake_llm,
+                    model_catalog=model_catalog,
+                    database_gate=database_gate,
                 ),
             )
     finally:
@@ -473,6 +504,7 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     fake_cancel_event: asyncio.Event,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The transient wall-clock budget must not end a delayed stall sequence at
     node entry (its own streak bounds it); without an active streak the same
@@ -494,7 +526,12 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     ledger.record_stall_pair_streak("7", 1)
     result = await _one_try(
         state,
-        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog),
+        _make_runtime(
+            hosted_resources=hosted_resources,
+            llm=fake_llm,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+        ),
         attempt=2,
         started_ago=spent,
         ledger=ledger,
@@ -507,7 +544,10 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
         await _one_try(
             state,
             _make_runtime(
-                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                hosted_resources=hosted_resources,
+                llm=fake_llm,
+                model_catalog=model_catalog,
+                database_gate=database_gate,
             ),
             attempt=2,
             started_ago=spent,

@@ -17,6 +17,7 @@ from base import telemetry
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.lm.catalog import ModelCatalog
@@ -70,7 +71,9 @@ def _make_running_agent(
     return aid
 
 
-def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) -> int:
+def _insert_old_inbound(
+    db: psycopg.Connection, agent_id: int, *, age_s: float, database_gate: ProcessDbGate
+) -> int:
     """Insert a chat inbound backdated `age_s` (timestamp-only UPDATE — the
     inbound table has no triggers on created_at). Returns the inbound id."""
     iid = insert_inbound_message(
@@ -79,7 +82,7 @@ def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) 
         "stale",
         source="user",
         bus=EventBus.from_settings(),
-        database=Database.from_settings(),
+        database=Database.from_settings(gate=database_gate),
     )
     with db.cursor() as cur:
         cur.execute(
@@ -133,12 +136,15 @@ class TestSelectStalePending:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        old = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-        _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S - 10)  # fresh — excluded
+        old = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
+        _insert_old_inbound(
+            db_conn, aid, age_s=_THRESHOLD_S - 10, database_gate=database_gate
+        )  # fresh — excluded
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source) "
@@ -160,11 +166,12 @@ class TestSelectStalePending:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE inbound_messages SET status = 'claimed' WHERE id = %s", (iid,))
         db_conn.commit()
@@ -177,11 +184,12 @@ class TestSelectStalePending:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S - 1)
+        _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S - 1, database_gate=database_gate)
         assert select_stale_pending(pool, _THRESHOLD_S) == []
 
     def test_running_owner_queues_are_not_stalls(
@@ -191,6 +199,7 @@ class TestSelectStalePending:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A chat inbound queued behind a long in-flight turn (owner
         status='running') is normal, not a delivery stall — the turn-end SELECT
@@ -198,7 +207,7 @@ class TestSelectStalePending:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
         db_conn.commit()
@@ -213,11 +222,12 @@ class TestScanOnce:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
 
         newly, alerted = scan_once(pool, _THRESHOLD_S, set())
         assert newly == 1
@@ -235,11 +245,12 @@ class TestScanOnce:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         _, alerted = scan_once(pool, _THRESHOLD_S, set())
 
         with db_conn.cursor() as cur:
@@ -262,6 +273,7 @@ class TestScanOnce:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The alert emits through the unified emitter: the canonical
         `events` row (telemetry/delivery_stalled). The legacy agent_events
@@ -269,7 +281,7 @@ class TestScanOnce:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         scan_once(pool, _THRESHOLD_S, set())
         # The emitter drains asynchronously (0.5s cadence) — flush() can race
         # the drain thread for the queue, so poll briefly for the line. The
@@ -328,6 +340,7 @@ class TestDispatchWakes:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """dispatch_wakes re-publishes one wake (payload = inbound id) per
         stale pending row of an idling owner — the lost-wake recovery."""
@@ -336,7 +349,9 @@ class TestDispatchWakes:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
+        iid = _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5, database_gate=database_gate
+        )
 
         calls: list[tuple[int, str]] = []
         monkeypatch.setattr(
@@ -366,6 +381,7 @@ class TestDispatchWakes:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A failing publish is logged, not raised — the alert path and the
         claim loop's 30s recheck remain as backstops."""
@@ -374,7 +390,9 @@ class TestDispatchWakes:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
+        _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5, database_gate=database_gate
+        )
 
         def boom(_db: object, _bus: object, *_a, **_k) -> bool:
             return False
@@ -403,6 +421,7 @@ class TestDispatchWakes:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """End-to-end: dispatch_wakes publishes on the agent's Redis channel,
         so a listener subscribed to it wakes immediately — the lost-wake window
@@ -412,7 +431,9 @@ class TestDispatchWakes:
         aid = _make_idling_agent(
             db_conn, model_catalog=model_catalog, config_authority=config_authority
         )
-        _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
+        _insert_old_inbound(
+            db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5, database_gate=database_gate
+        )
         # The shared fixture listener is bound to the pseudo-agent-0 channel;
         # build one on THIS agent's channel.
         listener = RedisInboundListener(settings.data_plane.redis_url, aid)

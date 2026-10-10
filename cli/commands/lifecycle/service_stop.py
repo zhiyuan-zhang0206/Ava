@@ -23,12 +23,13 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from base import telemetry
+from base.agents.context.clients import DatabaseFactory
 from base.cluster import postgres as owned_postgres
-from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
+from base.telemetry import EventPipeline
 from cli.commands.lifecycle._maintenance_stop_report import (
     StopIncompleteError,
     SurvivorInventory,
@@ -212,7 +213,11 @@ def _await_no_terminals(until: float, stage: str) -> None:
 
 
 def _record_close_notices(
-    closed: tuple[closure.ClosedSession, ...], notice: _Notice, *, direct_db: bool
+    closed: tuple[closure.ClosedSession, ...],
+    notice: _Notice,
+    *,
+    direct_db: bool,
+    database_factory: DatabaseFactory,
 ) -> None:
     """Write one closure notice per closed busy session to the database (issue #2044).
 
@@ -229,7 +234,7 @@ def _record_close_notices(
         closed, reason=notice.reason, operation=notice.operation, acquired_at=notice.acquired_at
     )
     for unwritten, exc in pty_close_notices.write_notices(
-        Database.from_settings(), EventBus.from_settings(), notices, direct=direct_db
+        database_factory(), EventBus.from_settings(), notices, direct=direct_db
     ):
         # The side-channel notice must never fail a closure; stay loud so the
         # gap is visible either way.
@@ -241,7 +246,12 @@ def _record_close_notices(
 
 
 def close_terminals(
-    deadline: float, operation: str, acquired_at: datetime, *, direct_db: bool
+    deadline: float,
+    operation: str,
+    acquired_at: datetime,
+    *,
+    direct_db: bool,
+    database_factory: DatabaseFactory,
 ) -> None:
     """Close this unit's terminals at `ava stop`: HUP/TERM, a bounded grace, then SIGKILL.
 
@@ -269,6 +279,7 @@ def close_terminals(
         outcome.closed,
         _Notice(operation, acquired_at, reason),
         direct_db=direct_db,
+        database_factory=database_factory,
     )
     _report_terminal_job_leftovers(outcome)
     if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):
@@ -291,7 +302,10 @@ def force_close_terminals() -> None:
 
 
 def report_postgres_stop_escalation(
-    escalation: owned_postgres.Escalation, notes: list[str] | None = None
+    escalation: owned_postgres.Escalation,
+    notes: list[str] | None = None,
+    *,
+    producer: Callable[[], EventPipeline],
 ) -> None:
     """Report a Postgres shutdown that had to be ended by an immediate one.
 
@@ -312,6 +326,7 @@ def report_postgres_stop_escalation(
     telemetry.emit(
         "telemetry",
         "postgres_stop_escalated",
+        producer=producer,
         level="error",
         source="stop",
         attributes={"detail": escalation.detail, "killed": list(escalation.killed)},
@@ -327,6 +342,7 @@ def stop_data_plane(
     notes: list[str] | None = None,
     clients: list[str] | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> list[str]:
     """Stop this home's native data plane; never stop a remote-managed plane.
 
@@ -337,5 +353,10 @@ def stop_data_plane(
     from cli.commands.data_plane.maintenance_stop import stop
 
     return stop(
-        timeout, save=save, notes=notes, clients=clients, retained_children=retained_children
+        timeout,
+        save=save,
+        notes=notes,
+        clients=clients,
+        retained_children=retained_children,
+        producer=producer,
     )

@@ -20,6 +20,7 @@ from typing import Any, cast
 import pytest
 
 import services.desktop.computer.mcp_daemon as daemon_mod
+from base.db import Database
 from services.desktop.computer.tests.slices import short_sock_dir
 
 # ── loop-liveness watchdog (2026-10-04 wedged-loop regression) ─────────────
@@ -88,7 +89,7 @@ async def test_guard_loop_liveness_beats_from_the_loop() -> None:
     assert not watchdog.is_alive()
 
 
-async def test_run_arms_loop_watchdog(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_arms_loop_watchdog(monkeypatch: pytest.MonkeyPatch, database: Database) -> None:
     """run() starts the watchdog with the configured window and stops it on
     the shutdown path — without this wiring the stall guardrail is inert."""
     d, sock, cleanup = short_sock_dir()
@@ -134,7 +135,7 @@ async def test_run_arms_loop_watchdog(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(daemon_mod.asyncio, "Event", StopEvent)
 
     try:
-        await daemon_mod.run(sock=str(sock))
+        await daemon_mod.run(sock=str(sock), database=lambda: database)
     finally:
         cleanup(d)
 

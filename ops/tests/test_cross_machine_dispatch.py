@@ -24,6 +24,7 @@ import psycopg
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from ops.cluster.rpc import ClusterOpFailed, dispatch_to_machine
 
 
@@ -108,7 +109,7 @@ def ops_stub() -> Iterator[_OpsStub]:
 
 
 async def test_dispatch_resolves_registered_url_and_round_trips(
-    db_conn: psycopg.Connection, ops_stub: _OpsStub
+    db_conn: psycopg.Connection, ops_stub: _OpsStub, *, database_gate: ProcessDbGate
 ) -> None:
     """The real path: register a runner's ops URL, then dispatch_to_machine
     resolves it from the machines table and POSTs `{kind, payload}` to `/ops`,
@@ -116,7 +117,7 @@ async def test_dispatch_resolves_registered_url_and_round_trips(
     _register(db_conn, "runner-x", ops_stub.url)
 
     result = await dispatch_to_machine(
-        Database.from_settings(), "runner-x", "status_probe", {"foo": "bar"}
+        Database.from_settings(gate=database_gate), "runner-x", "status_probe", {"foo": "bar"}
     )
 
     assert ops_stub.received == [{"kind": "status_probe", "payload": {"foo": "bar"}}]
@@ -124,18 +125,20 @@ async def test_dispatch_resolves_registered_url_and_round_trips(
 
 
 async def test_dispatch_failed_status_raises_cluster_op_failed(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
     """A runner that ran the op but reports status=failed surfaces as
     ClusterOpFailed (the gateway re-raises the runner's error), over the real wire."""
     with _OpsStub(status="failed") as stub:
         _register(db_conn, "runner-y", stub.url)
         with pytest.raises(ClusterOpFailed):
-            await dispatch_to_machine(Database.from_settings(), "runner-y", "status_probe", {})
+            await dispatch_to_machine(
+                Database.from_settings(gate=database_gate), "runner-y", "status_probe", {}
+            )
 
 
 async def test_dispatch_retries_transient_503_over_real_wire(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
     """The retry loop over a real socket: an ops server that answers 503 on the
     first dial (server mid-restart) is re-dialed and the op completes on the
@@ -143,7 +146,11 @@ async def test_dispatch_retries_transient_503_over_real_wire(
     with _OpsStub(fail_first=1) as stub:
         _register(db_conn, "runner-z", stub.url)
         result = await dispatch_to_machine(
-            Database.from_settings(), "runner-z", "status_probe", {"ping": 1}, retries=2
+            Database.from_settings(gate=database_gate),
+            "runner-z",
+            "status_probe",
+            {"ping": 1},
+            retries=2,
         )
 
     assert result == {

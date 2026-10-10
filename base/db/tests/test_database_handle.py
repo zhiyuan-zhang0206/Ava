@@ -11,6 +11,7 @@ import pytest
 
 from base.config import get_field, settings
 from base.db import Database, DbConfig, connect, connections
+from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 
 _URL = "postgresql://handle_user:pw@db.example:5432/handle_db"
@@ -60,47 +61,55 @@ class _FakeConn:
 
 
 @pytest.fixture
-def dialed(monkeypatch: pytest.MonkeyPatch) -> _Dialed:
+def dialed(database_gate: ProcessDbGate, monkeypatch: pytest.MonkeyPatch) -> _Dialed:
     rec = _Dialed()
     monkeypatch.setattr(connections.psycopg, "connect", rec.connect)
 
-    def no_restore(_conn: object) -> None:
-        return None
+    def no_restore(_conn: object, *, gate: ProcessDbGate) -> None:
+        assert gate is database_gate
 
     monkeypatch.setattr(connections, "_restore_pooled_session", no_restore)
     return rec
 
 
-def test_a_handle_dials_its_own_config_not_the_settings(dialed: _Dialed) -> None:
-    Database(_config()).connect()
+def test_a_handle_dials_its_own_config_not_the_settings(
+    database_gate: ProcessDbGate, dialed: _Dialed
+) -> None:
+    Database(_config(), gate=database_gate).connect()
     assert dialed.urls == [_URL]
     assert settings.data_plane.db_url != _URL
 
 
-def test_a_handle_applies_its_sslmode_when_the_url_is_silent(dialed: _Dialed) -> None:
-    Database(_config(db_sslmode="require")).connect()
+def test_a_handle_applies_its_sslmode_when_the_url_is_silent(
+    database_gate: ProcessDbGate, dialed: _Dialed
+) -> None:
+    Database(_config(db_sslmode="require"), gate=database_gate).connect()
     assert dialed.kwargs[0]["sslmode"] == "require"
 
 
 def test_the_module_level_connect_builds_the_live_settings_each_call(
-    dialed: _Dialed, monkeypatch: pytest.MonkeyPatch
+    database_gate: ProcessDbGate, dialed: _Dialed, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@first.example:1/x")
-    connect()
+    connect(gate=database_gate)
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@second.example:2/y")
-    connect()
+    connect(gate=database_gate)
     assert dialed.urls == [
         "postgresql://u:p@first.example:1/x",
         "postgresql://u:p@second.example:2/y",
     ]
 
 
-def test_the_direct_url_of_a_handle_without_a_pooler_is_its_url() -> None:
-    assert Database(_config()).direct_url() == _URL
+def test_the_direct_url_of_a_handle_without_a_pooler_is_its_url(
+    database_gate: ProcessDbGate,
+) -> None:
+    assert Database(_config(), gate=database_gate).direct_url() == _URL
 
 
-def test_a_write_transaction_declares_itself_writable(dialed: _Dialed) -> None:
-    with Database(_config()).write_transaction() as conn:
+def test_a_write_transaction_declares_itself_writable(
+    database_gate: ProcessDbGate, dialed: _Dialed
+) -> None:
+    with Database(_config(), gate=database_gate).write_transaction() as conn:
         assert isinstance(conn, _FakeConn)
     assert dialed.urls == [_URL]
 
@@ -117,12 +126,15 @@ def test_the_config_carries_the_live_value_of_every_field(monkeypatch: pytest.Mo
 
 
 @pytest.mark.parametrize("operation", ["connect", "direct", "pool", "direct_pool", "async_pool"])
-def test_all_handle_dials_use_their_retained_authority_refusal(operation: str) -> None:
+def test_all_handle_dials_use_their_retained_authority_refusal(
+    database_gate: ProcessDbGate, operation: str
+) -> None:
     """Every configured connection entry point refuses before opening a client."""
     from psycopg_pool import AsyncConnectionPool
 
     handle = Database(
-        _config(db_url="postgresql://ava@127.0.0.1:1/x", db_authority_refusal="unadmitted runtime")
+        _config(db_url="postgresql://ava@127.0.0.1:1/x", db_authority_refusal="unadmitted runtime"),
+        gate=database_gate,
     )
     with pytest.raises(connections.NoDatabaseAuthorityError, match="unadmitted runtime"):
         if operation == "connect":

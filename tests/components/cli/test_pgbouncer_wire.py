@@ -27,6 +27,7 @@ import tempfile
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -36,9 +37,11 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.cluster.authority import POOLER_ADMIN
 from base.db import Database
+from base.db.code_version_gate import MIN_REFRESH_INTERVAL_S, ProcessDbGate
 from base.events.live.bus import EventBus
 from cli.commands.data_plane.pgbouncer import pgbouncer_bin
 from tests._containers import _free_port, _wait_port, postgres
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _SECRET = "pgbouncerwiretestsecret"  # noqa: S105 — test fixture, not a real credential
 
@@ -242,7 +245,7 @@ def _insert_agent(pg_url: str) -> int:
 
 
 def test_write_transaction_overrides_a_read_only_default_on_connect(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """Rule A writes (`set_posture`'s upsert, opened by `Database.write_transaction()` on its
     own dial) land in sessions that default to read-only."""
@@ -251,7 +254,7 @@ def test_write_transaction_overrides_a_read_only_default_on_connect(
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        host_deploy_state.set_posture(Database.from_settings(), "paused")
+        host_deploy_state.set_posture(Database.from_settings(gate=database_gate), "paused")
 
         with psycopg.connect(pg_url) as verify:
             row = verify.execute("SELECT posture FROM host_deploy_state").fetchone()
@@ -259,7 +262,7 @@ def test_write_transaction_overrides_a_read_only_default_on_connect(
 
 
 def test_schedule_provision_overrides_a_read_only_default(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """R3 Rule A schedule provisioning declares direct writes read-write."""
     from base import config
@@ -267,7 +270,7 @@ def test_schedule_provision_overrides_a_read_only_default(
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        assert cmd_schedules_provision() == 0
+        assert cmd_schedules_provision(database_factory=operator_database) == 0
 
         with psycopg.connect(pg_url) as verify:
             row = verify.execute("SELECT count(*) FROM schedules").fetchone()
@@ -278,6 +281,8 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Rule B's pool-borrow DELETE declares its transaction writable first."""
     from base import config
@@ -293,7 +298,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
                 "VALUES (%s, %s, now())",
                 (agent_id, 7),
             )
-        db_pool = pool(min_size=1, max_size=2)
+        db_pool = pool(min_size=1, max_size=2, gate=database_gate)
         try:
             delete_shell_row(db_pool, database, event_bus, agent_id, 7, interrupted=False)
         finally:
@@ -423,7 +428,7 @@ def test_connect_query_bounds_pooled_backends_at_birth() -> None:
 
 
 def test_base_connect_applies_statement_timeout_on_pooled_dial(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """base.db.connect() delivers the statement ceiling through the pooler: the
     `options` startup parameter is dropped by PgBouncer, so the pooled dial runs
@@ -442,12 +447,12 @@ def test_base_connect_applies_statement_timeout_on_pooled_dial(
 
         import base.db
 
-        with base.db.connect() as conn:
+        with base.db.connect(gate=database_gate) as conn:
             assert _statement_timeout(conn) == "1min"
 
 
 def test_base_pool_applies_statement_timeout_on_pooled_dial(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """base.db.pool() applies the SET on every new backend via the pool's
     configure hook — a borrowed connection through PgBouncer is bounded."""
@@ -459,7 +464,7 @@ def test_base_pool_applies_statement_timeout_on_pooled_dial(
 
         import base.db
 
-        pool = base.db.pool(min_size=1, max_size=2)
+        pool = base.db.pool(min_size=1, max_size=2, gate=database_gate)
         try:
             with pool.connection() as conn:
                 assert _statement_timeout(conn) == "1min"
@@ -550,7 +555,7 @@ def _poison_backend(pooled: str) -> None:
 
 
 def test_pooled_borrow_scrubs_a_poisoned_backend(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """Pool-level regression: a borrower must never inherit another client's
     session-level SET. The pool's `check` hook (every borrow) restores the
@@ -561,7 +566,7 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        pool = base_db.pool(min_size=1, max_size=1)
+        pool = base_db.pool(min_size=1, max_size=1, gate=database_gate)
         try:
             # Force the pool's physical backend into existence (creation runs the
             # configure hook) BEFORE poisoning, so the borrow-time check hook —
@@ -583,6 +588,8 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
 def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     monkeypatch: pytest.MonkeyPatch,
     publish_wake: Callable[[int, str], bool],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """P0 batch-5 regression: the agent message INSERT and the schedule stop
     UPDATE — the two API writes the user saw 500 — succeed when pgbouncer hands
@@ -612,7 +619,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
             ).fetchone()
             assert row is not None
             schedule_id: int = row[0]
-        pool = base_db.pool(min_size=1, max_size=1)
+        pool = base_db.pool(min_size=1, max_size=1, gate=database_gate)
         try:
             with pool.connection() as conn:
                 conn.execute("SELECT 1")
@@ -645,27 +652,22 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
     the pooler's own client list names the connection `ava:<process>:v<version>`:
     the observability half of the code-version gate."""
     from base import config
-    from base.db import code_version_gate as gate
-    from base.native_process import code_version
     from base.telemetry import process_name
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        monkeypatch.setattr(code_version, "get", lambda: 4321)
-        monkeypatch.setattr(code_version, "db_gate_applies", lambda: True)
-        gate.observe_minimum(0)
-        assert gate.min_read_due() is False
-
-        import base.db
+        owner = ProcessDbGate(version=lambda: 4321, process=process_name())
+        owner.observe_minimum(0)
+        assert owner.min_read_due() is False
 
         monotonic = time.monotonic
         try:
             with monkeypatch.context() as clock:
                 # Advance the refresh clock without rewriting the gate's cache.
-                clock.setattr(time, "monotonic", lambda: monotonic() + gate.MIN_REFRESH_INTERVAL_S)
-                assert gate.min_read_due() is True
-                with base.db.connect() as conn:
-                    assert gate.min_read_due() is False  # the dial did read it
+                clock.setattr(time, "monotonic", lambda: monotonic() + MIN_REFRESH_INTERVAL_S)
+                assert owner.min_read_due() is True
+                with Database.from_settings(gate=owner).connect() as conn:
+                    assert owner.min_read_due() is False  # the dial did read it
                     assert _statement_timeout(conn) == "1min"
                     with psycopg.connect(_admin_console_url(pooled), autocommit=True) as console:
                         cursor = console.execute("SHOW CLIENTS")
@@ -675,5 +677,5 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
                         }
         finally:
             # Restore a real observation after the advanced clock is removed.
-            gate.observe_minimum(0)
+            owner.observe_minimum(0)
     assert f"ava:{process_name()}:v4321" in names

@@ -331,6 +331,11 @@ class Module:
 
     def find_class(self, full: str, hops: int = 0) -> ast.ClassDef | None:
         """The repo class a resolved callee names, following re-exports through `__init__`s."""
+        definition = self.class_definition(full, hops)
+        return definition[1] if definition is not None else None
+
+    def class_definition(self, full: str, hops: int = 0) -> tuple[Module, ast.ClassDef] | None:
+        """The defining module and class, using the same bounded import resolution."""
         owner, _, name = full.rpartition(".")
         if not owner:
             return None
@@ -340,8 +345,8 @@ class Module:
         found = module.classes().get(name)
         if found is None and hops < _MAX_REEXPORT_HOPS and name in module.imports:
             origin, attr = module.imports[name]
-            return module.find_class(".".join(filter(None, [origin, attr])), hops + 1)
-        return found
+            return module.class_definition(".".join(filter(None, [origin, attr])), hops + 1)
+        return (module, found) if found is not None else None
 
 
 def load(repo_root: Path, dotted_name: str) -> Module | None:
@@ -363,6 +368,72 @@ def load(repo_root: Path, dotted_name: str) -> Module | None:
 
 
 def is_value_class(callee: str, module: Module) -> bool:
-    """`callee` names a repo class whose instances hold no mutable state."""
+    """A repo value constructor, or its body-proven direct classmethod constructor.
+
+    Factory proof uses the existing value-class form, not a return annotation or
+    a method name. It does not prove constructor argument purity or deep immutability.
+    """
     cls = module.find_class(callee)
-    return cls is not None and _is_value_class(cls)
+    if cls is not None:
+        return _is_value_class(cls)
+    receiver, _, method_name = callee.rpartition(".")
+    definition = module.class_definition(receiver)
+    if definition is None or not _is_value_class(definition[1]):
+        return False
+    owner, cls = definition
+    method = _direct_classmethod(owner, cls, method_name)
+    return method is not None and _returns_bound_class(method)
+
+
+def _class_binding_names(st: ast.stmt) -> set[str]:
+    if isinstance(st, ast.Assign | ast.Delete):
+        return {name for target in st.targets for name in target_names(target)}
+    if isinstance(st, ast.AnnAssign | ast.AugAssign):
+        return set(target_names(st.target))
+    if isinstance(st, ast.Import | ast.ImportFrom):
+        return {alias.asname or alias.name.split(".")[0] for alias in st.names}
+    if isinstance(st, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        return {st.name}
+    return set()
+
+
+def _direct_classmethod(
+    owner: Module, cls: ast.ClassDef, method_name: str
+) -> ast.FunctionDef | None:
+    members = [st for st in cls.body if getattr(st, "name", None) == method_name]
+    if len(members) != 1 or not isinstance(members[0], ast.FunctionDef):
+        return None
+    method = members[0]
+    if any(
+        _class_binding_names(st) & {method_name, "classmethod"}
+        for st in module_statements(cls.body)
+        if st is not method
+    ):
+        return None
+    if (
+        len(method.decorator_list) != 1
+        or owner.full_name(method.decorator_list[0]) != "classmethod"
+    ):
+        return None
+    return method
+
+
+def _returns_bound_class(method: ast.FunctionDef) -> bool:
+    """Accept only a single return of the classmethod's untouched bound class."""
+    body = method.body
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    args = [*method.args.posonlyargs, *method.args.args]
+    return (
+        bool(args)
+        and len(body) == 1
+        and isinstance(body[0], ast.Return)
+        and isinstance(body[0].value, ast.Call)
+        and isinstance(body[0].value.func, ast.Name)
+        and body[0].value.func.id == args[0].arg
+    )

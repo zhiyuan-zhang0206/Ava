@@ -19,6 +19,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -50,7 +51,7 @@ class _NamedHook(Hook):
         return None
 
 
-def _runtime() -> Runtime[AvaContext]:
+def _runtime(database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     ctx = AvaContext(
         ops_pool=make_fake_ops_pool(),
         llm=MagicMock(),
@@ -58,7 +59,7 @@ def _runtime() -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -92,12 +93,12 @@ def test_subclass_without_call_cannot_be_instantiated():
     raise AssertionError("subclass missing __call__ should be abstract")
 
 
-async def test_concrete_hook_is_callable_and_returns_update():
+async def test_concrete_hook_is_callable_and_returns_update(database_gate: ProcessDbGate):
     hook = _OkHook()
     assert isinstance(hook, Hook)
     result = await hook(
         AgentState(messages=[], halted=False),
-        _runtime(),
+        _runtime(database_gate=database_gate),
         {"configurable": {"thread_id": "1"}},
     )
     assert result == {"halted": True}

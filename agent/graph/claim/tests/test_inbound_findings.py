@@ -32,6 +32,7 @@ from base.clock import Clock
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -56,7 +57,9 @@ def _scan_on_with_fresh_snapshot_cursor(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(_node_log, "_SNAPSHOT_CURSOR", {})
 
 
-async def _claim(pool: AsyncConnectionPool, agent_id: int) -> Command[Any]:
+async def _claim(
+    pool: AsyncConnectionPool, agent_id: int, database_gate: ProcessDbGate
+) -> Command[Any]:
     return await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
         Runtime(
@@ -67,7 +70,7 @@ async def _claim(pool: AsyncConnectionPool, agent_id: int) -> Command[Any]:
                 agent=AgentSlices.resolve(
                     default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
                 ),
-                db=Database.from_settings(),
+                db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),
                 catalog=build_model_catalog(),
                 clock_factory=Clock.from_settings,
@@ -97,6 +100,7 @@ async def test_flagged_chat_note_rides_right_behind_its_message(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The note names where the flagged inbound came from and what matched, and
     carries no message body; nothing is left in process state."""
@@ -105,7 +109,7 @@ async def test_flagged_chat_note_rides_right_behind_its_message(
         db_conn, agent_id, _HOSTILE_USER, source="user", bus=event_bus, database=database
     )
 
-    inbound, note = _delta(await _claim(aops_pool, agent_id))
+    inbound, note = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
 
     assert read_ava_kwargs(inbound).get("ava_msg_type") == AvaMsgType.INBOUND.value
     assert _HOSTILE_USER in str(inbound.content)
@@ -122,6 +126,7 @@ async def test_flagged_system_note_inbound_note_rides_behind_it(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A peer-authored system-note inbound (a task note) is scanned like chat."""
     agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
@@ -136,7 +141,7 @@ async def test_flagged_system_note_inbound_note_rides_behind_it(
         database=database,
     )
 
-    task_note, note = _delta(await _claim(aops_pool, agent_id))
+    task_note, note = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
 
     assert read_ava_kwargs(task_note).get("ava_note_tag") == NoteTag.TASK.value
     assert _is_security_note(note)
@@ -151,6 +156,7 @@ async def test_each_flagged_message_in_a_batch_gets_its_own_note(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """One batch of three chats: a note behind each flagged message, none behind
     the clean one, in batch order."""
@@ -165,7 +171,7 @@ async def test_each_flagged_message_in_a_batch_gets_its_own_note(
         db_conn, agent_id, _HOSTILE_PEER, source="agent:7", bus=event_bus, database=database
     )
 
-    delta = _delta(await _claim(aops_pool, agent_id))
+    delta = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
 
     assert [_is_security_note(m) for m in delta] == [False, True, False, False, True]
     assert "inbound.chat:user" in str(delta[1].content)
@@ -190,12 +196,13 @@ async def test_unflagged_inbound_gets_no_note(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(settings.agent, "security_scan_enabled", scan_enabled)
     agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     insert_inbound_message(db_conn, agent_id, text, source="user", bus=event_bus, database=database)
 
-    delta = _delta(await _claim(aops_pool, agent_id))
+    delta = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
 
     assert len(delta) == 1
     assert isinstance(delta[0], HumanMessage)
@@ -209,6 +216,7 @@ async def test_compact_batch_defers_the_flagged_chat_together_with_its_note(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A chat sharing a batch with a compaction is deferred and re-delivered in
     the fresh context: its note goes with it, and is raised once when the chat is
@@ -227,12 +235,12 @@ async def test_compact_batch_defers_the_flagged_chat_together_with_its_note(
         database=database,
     )
 
-    compacted = await _claim(aops_pool, agent_id)
+    compacted = await _claim(aops_pool, agent_id, database_gate=database_gate)
 
     assert compacted.goto == "init_context"
     assert not any(_is_security_note(m) for m in _delta(compacted))
     assert all(_HOSTILE_USER not in str(m.content) for m in _delta(compacted))
 
-    redelivered = _delta(await _claim(aops_pool, agent_id))
+    redelivered = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
 
     assert [_is_security_note(m) for m in redelivered] == [False, True]

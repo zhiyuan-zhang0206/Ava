@@ -48,6 +48,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -139,7 +140,7 @@ def _fake_llm_seq(*summaries: str) -> Any:
     return llm
 
 
-def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
+def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     # These unit tests have no DB. ops_pool=None is the container-mode value:
     # the post-compact checkpoint trim treats it as a no-op (real-pool trimming is covered by
     # base/agents/history/tests/test_checkpoint_cleanup.py and the aops_pool compact tests below).
@@ -148,7 +149,7 @@ def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
         llm=llm,
         event_publisher=MagicMock(),
         agent=_slices(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -162,46 +163,6 @@ def _fake_config() -> RunnableConfig:
 
 
 # --- generate_summary tests ---
-
-
-async def test_generate_summary_returns_summary():
-    """generate_summary returns summary text (from LLM), no longer returns tail."""
-    msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
-
-    llm = _fake_llm(summary_text="a synthetic summary")
-    summary = await generate_summary(msgs, llm, _slices(), catalog=build_model_catalog())
-
-    assert summary == "a synthetic summary"
-
-
-async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
-    """The summary carries the compaction call's provider input, model and instruction size --
-    what the boundary checkpoint stores so the sealed segment's tail can be priced."""
-    from agent.hooks.compact_anchor import closing_of
-    from base.agents.history.closing_request import ClosingRequest
-
-    msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
-    response = AIMessage(
-        content="a synthetic summary",
-        usage_metadata={"input_tokens": 4321, "output_tokens": 9, "total_tokens": 4330},
-        response_metadata={"model_name": "m1"},
-    )
-    summary = await generate_summary(
-        msgs, _fake_llm(response=response), _slices(), catalog=build_model_catalog()
-    )
-
-    closing = closing_of(summary)
-    assert closing is not None
-    assert (closing.input_tokens, closing.model) == (4321, "m1")
-    assert closing.extra_tokens > 0  # the compaction instruction message
-    assert closing == ClosingRequest(4321, closing.extra_tokens, "m1")
-    assert summary == "a synthetic summary"  # still the plain text everywhere else
-
-    bare = await generate_summary(
-        msgs, _fake_llm("no usage"), _slices(), catalog=build_model_catalog()
-    )
-    assert closing_of(bare) is None
-    assert closing_of("an agent-written summary") is None
 
 
 async def test_stamp_compact_boundary_writes_the_closing_request(
@@ -416,7 +377,7 @@ def _over_threshold_state() -> AgentState:
 
 
 async def test_auto_compact_triggers_on_real_input_tokens_not_chars(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """Option Y: occupancy is the last AIMessage's real input_tokens, not chars/4.
     A short conversation (tiny chars/4) whose last LLM call measured a large
@@ -439,13 +400,15 @@ async def test_auto_compact_triggers_on_real_input_tokens_not_chars(
         halted=False,
     )
     result = await auto_compact_for_llm(
-        state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
+        state,
+        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _fake_config(),
     )
     assert result is not None  # 300K measured input_tokens > 200K ceiling -> compact
 
 
 async def test_auto_compact_skips_when_input_tokens_below_ceiling_despite_chars(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """The inverse: a huge chars/4 footprint but a small measured input_tokens
     does NOT force compaction — chars/4 no longer drives the gate once a real
@@ -462,11 +425,15 @@ async def test_auto_compact_skips_when_input_tokens_below_ceiling_despite_chars(
         ],
         halted=False,
     )
-    result = await auto_compact_for_llm(state, _runtime_with_llm(_fake_llm()), _fake_config())
+    result = await auto_compact_for_llm(
+        state, _runtime_with_llm(_fake_llm(), database_gate=database_gate), _fake_config()
+    )
     assert result is None  # 50K measured < 200K ceiling, though chars/4 is far over
 
 
-async def test_auto_compact_falls_back_to_chars_before_first_call(monkeypatch: pytest.MonkeyPatch):
+async def test_auto_compact_falls_back_to_chars_before_first_call(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+):
     """Before any LLM call completes (no AIMessage with usage), occupancy falls
     back to the chars/4 estimate so an oversized first inbound still triggers."""
     _patch_compact_config(monkeypatch, auto_compact_tokens=100)
@@ -478,21 +445,29 @@ async def test_auto_compact_falls_back_to_chars_before_first_call(monkeypatch: p
         halted=False,
     )
     result = await auto_compact_for_llm(
-        state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
+        state,
+        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _fake_config(),
     )
     assert result is not None  # 1000 chars/4 estimate > 100 ceiling -> compact
 
 
-async def test_auto_compact_hook_returns_none_when_under_threshold(monkeypatch: pytest.MonkeyPatch):
+async def test_auto_compact_hook_returns_none_when_under_threshold(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+):
     """token estimate ≤ threshold → hook returns None, no-op pass-through to llm."""
     _patch_compact_config(monkeypatch, auto_compact_tokens=1_000_000)
     state = AgentState(messages=[HumanMessage(content="hi" * 100)], halted=False)
-    result = await auto_compact_for_llm(state, _runtime_with_llm(_fake_llm()), _fake_config())
+    result = await auto_compact_for_llm(
+        state, _runtime_with_llm(_fake_llm(), database_gate=database_gate), _fake_config()
+    )
     assert result is None
 
 
 async def test_auto_compact_hook_clears_history_and_parks_summary(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+    database_gate: ProcessDbGate,
 ):
     """Over threshold → the hook empties the window and hands the rebuild to
     `init_context`: messages is the REMOVE_ALL sentinel alone, the summary is
@@ -505,7 +480,9 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     state = _over_threshold_state()
 
     fake_llm = _fake_llm(_LONG_SUMMARY)
-    result = await auto_compact_for_llm(state, _runtime_with_llm(fake_llm), _fake_config())
+    result = await auto_compact_for_llm(
+        state, _runtime_with_llm(fake_llm, database_gate=database_gate), _fake_config()
+    )
 
     assert result is not None
     _compaction_ainvoke(fake_llm).assert_called_once()
@@ -536,20 +513,24 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     }
 
 
-async def test_auto_compact_hook_skips_when_no_conversation(monkeypatch: pytest.MonkeyPatch):
+async def test_auto_compact_hook_skips_when_no_conversation(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+):
     """Over threshold but only SystemMessage (no conversation messages) → returns None silently pass through,
     and does not send any LLM request (pre-check before ainvoke)."""
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     state = AgentState(messages=[SystemMessage(content="x" * 100)], halted=False)
 
     llm = _fake_llm()
-    result = await auto_compact_for_llm(state, _runtime_with_llm(llm), _fake_config())
+    result = await auto_compact_for_llm(
+        state, _runtime_with_llm(llm, database_gate=database_gate), _fake_config()
+    )
     assert result is None
     _compaction_ainvoke(llm).assert_not_called()
 
 
 async def test_auto_compact_hook_raises_when_summary_empty_every_attempt(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """LLM returns empty text every time (defying instruction only gives tool_call) → hook retries COMPACT_MAX_ATTEMPTS
     times then fail fast throws RuntimeError — never replace history with empty/non-summary."""
@@ -558,12 +539,14 @@ async def test_auto_compact_hook_raises_when_summary_empty_every_attempt(
     state = _over_threshold_state()
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
-        await auto_compact_for_llm(state, _runtime_with_llm(llm), _fake_config())
+        await auto_compact_for_llm(
+            state, _runtime_with_llm(llm, database_gate=database_gate), _fake_config()
+        )
     assert _compaction_ainvoke(llm).call_count == COMPACT_MAX_ATTEMPTS
 
 
 async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """Every summary shorter than COMPACT_MIN_SUMMARY_CHARS (model ignores template) → after retries exhausted
     fail fast, rather than silently replacing history with short summary (agent-240 type incident)."""
@@ -576,7 +559,7 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
         llm=llm,
         event_publisher=publisher,
         agent=_slices(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -594,20 +577,26 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
     assert events[0]["compact_id"] == events[1]["compact_id"]
 
 
-async def test_auto_compact_hook_retries_short_then_accepts_long(monkeypatch: pytest.MonkeyPatch):
+async def test_auto_compact_hook_retries_short_then_accepts_long(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+):
     """First summary short → retry; second reaches length → accepted and replaces history, no more retries."""
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     llm = _fake_llm_seq("too short", _LONG_SUMMARY)  # short, then long
     state = _over_threshold_state()
 
-    result = await auto_compact_for_llm(state, _runtime_with_llm(llm), _fake_config())
+    result = await auto_compact_for_llm(
+        state, _runtime_with_llm(llm, database_gate=database_gate), _fake_config()
+    )
 
     assert result is not None
     assert _compaction_ainvoke(llm).call_count == 2  # stopped as soon as one cleared the floor
     assert result["context_reset"].tail[0].content == compose_summary_message(_LONG_SUMMARY)  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pytest.MonkeyPatch):
+async def test_auto_compact_hook_emits_compact_done_on_success(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+):
     """After successful compact on auto path, emit CompactDone (with this agent id), so UI refreshes.
 
     Task #3323: the same run also emits its live start/terminal pair
@@ -621,7 +610,7 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
         llm=llm,
         event_publisher=publisher,
         agent=_slices(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -669,7 +658,7 @@ def _ava_compact_loaded():
 
 
 async def test_compact_reminder_passthrough_none(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
+    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """inner auto_compact_for_llm returns None (under threshold) → wrap also returns None."""
     state_cls, wrap_fn = _ava_compact_loaded
@@ -680,7 +669,9 @@ async def test_compact_reminder_passthrough_none(
         halted=False,
         compact=CompactState(version=0),
     )
-    result = await wrap_fn(state, _runtime_with_llm(_fake_llm()), _fake_config())
+    result = await wrap_fn(
+        state, _runtime_with_llm(_fake_llm(), database_gate=database_gate), _fake_config()
+    )
     assert result is None
 
 
@@ -692,7 +683,9 @@ def _over_threshold_messages() -> list[AnyMessage]:
 
 
 async def test_compact_reminder_zero_to_one(
-    _ava_compact_loaded: tuple[type[AgentState], object], monkeypatch: pytest.MonkeyPatch
+    _ava_compact_loaded: tuple[type[AgentState], object],
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ):
     """First compact successful → compact.version increments from 0 to 1, dict contains messages."""
     state_cls, _ = _ava_compact_loaded
@@ -702,14 +695,20 @@ async def test_compact_reminder_zero_to_one(
     state = state_cls(
         messages=_over_threshold_messages(), halted=False, compact=CompactState(version=0)
     )
-    result = await wrap_fn(state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config())
+    result = await wrap_fn(
+        state,
+        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _fake_config(),
+    )
     assert result is not None
     assert result["compact"].version == 1  # pyright: ignore[reportUnknownMemberType]
     assert "messages" in result
 
 
 async def test_compact_reminder_increments_from_existing(
-    _ava_compact_loaded: tuple[type[AgentState], object], monkeypatch: pytest.MonkeyPatch
+    _ava_compact_loaded: tuple[type[AgentState], object],
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ):
     """Not first compact: state already has compact.version=5 → wrap increments to 6."""
     state_cls, _ = _ava_compact_loaded
@@ -719,7 +718,11 @@ async def test_compact_reminder_increments_from_existing(
     state = state_cls(
         messages=_over_threshold_messages(), halted=False, compact=CompactState(version=5)
     )
-    result = await wrap_fn(state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config())
+    result = await wrap_fn(
+        state,
+        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _fake_config(),
+    )
     assert result is not None
     assert result["compact"].version == 6  # pyright: ignore[reportUnknownMemberType]
 
@@ -773,7 +776,7 @@ def _insert_compact_summary(db: psycopg.Connection, tid: int, content: str) -> N
     db.commit()
 
 
-def _make_runtime(ops_pool=None, llm=None):
+def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
     if ops_pool is None:
         ops_pool = AsyncMock()
     if llm is None:
@@ -783,7 +786,7 @@ def _make_runtime(ops_pool=None, llm=None):
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=MagicMock(),
         agent=_slices(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -16,10 +17,13 @@ import cli.commands.probe as _probe_commands
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.telemetry import EventPipeline
 from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from ops.roster.service_spec import _GATEWAY
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 pytestmark = pytest.mark.real_service_readiness_gate
 
@@ -78,12 +82,12 @@ def _hermetic_start(
     monkeypatch.setattr(start, "_ensure_gateway_data_plane", _ignoring_retention(lambda: 0))
     monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda: None)
     monkeypatch.setattr(bringup, "complete_gateway_data_plane", _ignoring_args(lambda: None))
-    monkeypatch.setattr(materialize, "adopt_local_extensions", lambda: None)
-    monkeypatch.setattr(materialize, "materialize_cluster_extensions", lambda: None)
+    monkeypatch.setattr(materialize, "adopt_local_extensions", _ignoring_args(lambda: None))
+    monkeypatch.setattr(materialize, "materialize_cluster_extensions", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "cmd_migrations_apply", _ignoring_args(list[str]))
     monkeypatch.setattr(start, "_refuse_occupied_health_ports", _ignoring_args(lambda: 0))
     monkeypatch.setattr(start, "_record_running_sha", _ignoring_args(lambda: None))
-    monkeypatch.setattr(start, "cmd_status", lambda: 0)
+    monkeypatch.setattr(start, "cmd_status", _ignoring_args(lambda: 0))
     monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
         _setup_commands,
@@ -122,16 +126,31 @@ def _hermetic_start(
     _roster(monkeypatch, (("gateway", None), ("frontend", None)))
 
 
-def test_unready_frontend_is_failure_and_never_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unready_frontend_is_failure_and_never_serving(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
+
     def probe(spec: ServiceSpec) -> _probe_commands.ServiceProbe:
         return _probe_commands.ServiceProbe(spec.session != "frontend", "root", "unready")
 
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
-    assert _start_commands.cmd_start(retained_children=[]) == SERVICES_NOT_READY_EXIT_CODE
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == SERVICES_NOT_READY_EXIT_CODE
+    )
     assert not start_serving.is_serving()
 
 
-def test_live_repeat_start_never_runs_mutating_preparation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_live_repeat_start_never_runs_mutating_preparation(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
+
     def no_prepare(*_args: object, **_kwargs: object) -> None:
         pytest.fail("live repeat start must not converge or migrate")
 
@@ -140,29 +159,48 @@ def test_live_repeat_start_never_runs_mutating_preparation(monkeypatch: pytest.M
     monkeypatch.setattr(
         "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
     )
-    assert _start_commands.cmd_start(retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
 
 
 @pytest.mark.parametrize("live", [False, True])
 def test_start_marks_serving_for_live_and_cold_admission(
-    monkeypatch: pytest.MonkeyPatch, live: bool
+    monkeypatch: pytest.MonkeyPatch,
+    live: bool,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: live))
     monkeypatch.setattr(
         "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
     )
-    assert _start_commands.cmd_start(retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert start_serving.is_serving()
 
 
 @pytest.mark.parametrize("argument", ["release_receipt", "updater_telemetry"])
-def test_start_rejects_removed_updater_arguments(argument: str) -> None:
+def test_start_rejects_removed_updater_arguments(
+    argument: str, operator_database: Callable[[], Any]
+) -> None:
     with pytest.raises(TypeError, match="unexpected keyword argument"):
-        _start_commands.cmd_start(**{argument: True}, retained_children=[])  # pyright: ignore[reportArgumentType] — rejected API input
+        cast(Callable[..., int], _start_commands.cmd_start)(
+            **{argument: True}, retained_children=[], database_factory=operator_database
+        )
 
 
 def test_changed_live_generation_refuses_before_selection_or_converge(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from base.deploy.lifecycle import service_selection
 
@@ -181,12 +219,22 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
     monkeypatch.setattr(
         start, "cmd_migrations_apply", _ignoring_args(lambda: pytest.fail("no live DDL"))
     )
-    assert _start_commands.cmd_start(all_services=True, retained_children=[]) == 1
+    assert (
+        _start_commands.cmd_start(
+            all_services=True,
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 1
+    )
     assert service_selection.selection_path().read_bytes() == before
 
 
 def test_live_schema_mismatch_refuses_without_applying_migrations(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: True))
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 1)
@@ -198,10 +246,19 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
         "_launch_service_tree",
         _ignoring_args(lambda: pytest.fail("no launch")),
     )
-    assert _start_commands.cmd_start(retained_children=[]) == 1
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
 
 
-def test_failed_launch_never_becomes_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failed_launch_never_becomes_serving(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     monkeypatch.setattr(
         "cli.commands.lifecycle.root_driver.complete_boot_start",
         lambda: pytest.fail("not ready for boot handoff"),
@@ -211,12 +268,19 @@ def test_failed_launch_never_becomes_serving(monkeypatch: pytest.MonkeyPatch) ->
         return LaunchOutcome(roster, ("ava-gateway",))
 
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", failed)
-    assert _start_commands.cmd_start(retained_children=[]) == SERVICES_NOT_READY_EXIT_CODE
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == SERVICES_NOT_READY_EXIT_CODE
+    )
     assert not start_serving.is_serving()
 
 
 def test_cold_preparation_receives_candidate_selection_before_publication(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from base.cluster.machine import MachineRoles
     from base.deploy.lifecycle import service_selection
@@ -224,22 +288,52 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
     prepared: list[frozenset[str]] = []
     _roster(monkeypatch, (("gateway", None), ("otel-collector", None)))
 
-    def prepare(_repo: Path, _roles: MachineRoles, *, services: frozenset[str]) -> None:
+    def prepare(
+        _repo: Path,
+        _roles: MachineRoles,
+        *,
+        services: frozenset[str],
+        database_factory: Callable[[], Any],
+        producer: Callable[[], EventPipeline],
+    ) -> None:
+        assert database_factory is operator_database
+        assert producer is operator_pipeline
         assert not service_selection.selection_path().exists()
         prepared.append(services)
 
     monkeypatch.setattr(converge_host, "converge_host", prepare)
-    assert _start_commands.cmd_start(only_services=("gateway",), retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            only_services=("gateway",),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert prepared == [frozenset({"gateway"})]
     assert service_selection.read_selection().names == frozenset({"gateway"})
 
 
-def test_lost_generation_never_reports_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lost_generation_never_reports_serving(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     monkeypatch.setattr(start_serving, "mark_serving", _ignoring_args(lambda: False))
-    assert _start_commands.cmd_start(retained_children=[]) == 1
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
 
 
-def test_only_service_persists_for_repeated_start(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_only_service_persists_for_repeated_start(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     launched: list[tuple[str, ...]] = []
 
     def launch(roster: tuple[ServiceSpec, ...], *_args: object, **_kwargs: object):
@@ -247,23 +341,47 @@ def test_only_service_persists_for_repeated_start(monkeypatch: pytest.MonkeyPatc
         return LaunchOutcome(roster, ())
 
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
-    assert _start_commands.cmd_start(only_services=("gateway",), retained_children=[]) == 0
-    assert _start_commands.cmd_start(retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            only_services=("gateway",),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert launched == [("gateway",), ("gateway",)]
 
 
-def test_invalid_selection_never_launches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_invalid_selection_never_launches(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     monkeypatch.setattr(
         _root_driver_commands,
         "_launch_service_tree",
         _ignoring_args(lambda: pytest.fail("launched invalid roster")),
     )
     with pytest.raises(ValueError, match="unknown"):
-        _start_commands.cmd_start(only_services=("typo",), retained_children=[])
+        _start_commands.cmd_start(
+            only_services=("typo",),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
 
 
 def test_storage_schema_migration_grants_pooler_precede_application(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from cli.commands.data_plane import bringup
 
@@ -290,13 +408,21 @@ def test_storage_schema_migration_grants_pooler_precede_application(
         return LaunchOutcome(roster, ())
 
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
-    assert _start_commands.cmd_start(retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert steps == ["storage", "baseline-checkpoints", "migrate", "grants-pooler-consumer", "root"]
 
 
 @pytest.mark.parametrize("ready", [False, True])
 def test_internal_start_leaves_boot_publication_to_public_dispatch(
-    monkeypatch: pytest.MonkeyPatch, ready: bool
+    monkeypatch: pytest.MonkeyPatch,
+    ready: bool,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from cli.commands.lifecycle import root_driver
 
@@ -309,9 +435,9 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
     monkeypatch.setattr(
         root_driver, "complete_boot_start", lambda: pytest.fail("public dispatch owns publication")
     )
-    assert _start_commands.cmd_start(retained_children=[]) == (
-        0 if ready else SERVICES_NOT_READY_EXIT_CODE
-    )
+    assert _start_commands.cmd_start(
+        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+    ) == (0 if ready else SERVICES_NOT_READY_EXIT_CODE)
 
 
 def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:

@@ -20,6 +20,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
@@ -170,6 +171,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
         aops_pool, model_catalog=model_catalog, config_authority=config_authority
@@ -187,7 +189,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
         graph=graph,
         machine=machine_name(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     host._owner = incarnation.owner

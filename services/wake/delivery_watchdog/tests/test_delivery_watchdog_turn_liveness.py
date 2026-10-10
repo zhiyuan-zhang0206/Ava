@@ -17,6 +17,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog import attempts, resurrect_retry, rounds
@@ -259,6 +260,7 @@ async def test_recovery_commits_the_marked_wake_with_the_termination(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent_id = _make_hosted_running_agent(
         db_conn, model_catalog=model_catalog, config_authority=config_authority
@@ -268,7 +270,7 @@ async def test_recovery_commits_the_marked_wake_with_the_termination(
 
     await watchdog._recover_hosted_turn(
         pool,
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         event_bus,
         watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
     )
@@ -297,6 +299,8 @@ async def test_recovery_emits_evidence_then_terminates_with_its_wake_and_resurre
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from ops import lifecycle
 
@@ -348,7 +352,9 @@ async def test_recovery_emits_evidence_then_terminates_with_its_wake_and_resurre
     monkeypatch.setattr(lifecycle, "resurrect_if_terminated", fake_resurrect)
     wedge = watchdog._HostedTurnWedge(42, "runner-a", 2500.0, (1.0, 2.0, 3.0), False)
 
-    await watchdog._recover_hosted_turn(pool, Database.from_settings(), event_bus, wedge)
+    await watchdog._recover_hosted_turn(
+        pool, Database.from_settings(gate=database_gate), event_bus, wedge
+    )
 
     assert calls == ["event", "terminate", "trigger", "resurrect"]
 
@@ -361,6 +367,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """BLOCK regression (Ava #3242): the queued recovery trigger is
     source='system', so the plain notice guard used to cut the chain before
@@ -385,7 +392,9 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)
 
     wedge = watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), False)
-    await watchdog._recover_hosted_turn(pool, Database.from_settings(), event_bus, wedge)
+    await watchdog._recover_hosted_turn(
+        pool, Database.from_settings(gate=database_gate), event_bus, wedge
+    )
 
     row = db_conn.execute(
         "SELECT id, payload FROM inbound_messages "
@@ -419,6 +428,7 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The force terminate used to commit alone and the wake was queued by a
     separate later step; a process death or a failed insert between them left
@@ -452,7 +462,7 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
     with contextlib.suppress(_ProcessKilled):
         await watchdog._recover_hosted_turn(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             event_bus,
             watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
         )
@@ -465,7 +475,7 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
     # The watchdog's existing terminated-owner retry takes it from here.
     await resurrect_retry.resurrect_round(
         pool,
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         event_bus,
         LoopProgress("resurrect", rounds.loop_liveness_timeout_s()),
         5,
@@ -482,6 +492,7 @@ async def test_a_committed_recovery_is_never_recovered_twice(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Idempotency by state: the recovery's terminate takes the row out of the
     `running` set the wedge scan selects from, so a re-scan finds nothing to
@@ -493,7 +504,7 @@ async def test_a_committed_recovery_is_never_recovered_twice(
     _stub_resurrect(monkeypatch)
     await watchdog._recover_hosted_turn(
         pool,
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         event_bus,
         watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
     )
@@ -531,6 +542,7 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The clock is a database row, so a watchdog restart resumes the cooldown
     instead of recovering the same agent again at once."""
@@ -549,17 +561,29 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
     progress = LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s())
 
     await watchdog.hosted_turn_recovery_round(
-        pool, Database.from_settings(), EventBus.from_settings(), progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(),
+        progress,
+        _THRESHOLD_S,
     )
     await watchdog.hosted_turn_recovery_round(
-        pool, Database.from_settings(), EventBus.from_settings(), progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(),
+        progress,
+        _THRESHOLD_S,
     )
     assert recovered == [agent_id]
     assert watchdog.HOSTED_TURN_RECOVERY_COOLDOWN_S == 600.0
 
     _expire_recovery_cooldown(db_conn, agent_id)
     await watchdog.hosted_turn_recovery_round(
-        pool, Database.from_settings(), EventBus.from_settings(), progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(),
+        progress,
+        _THRESHOLD_S,
     )
     assert recovered == [agent_id, agent_id]
 
@@ -571,6 +595,7 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent_id = _make_hosted_running_agent(
         db_conn, model_catalog=model_catalog, config_authority=config_authority
@@ -585,7 +610,7 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
 
     await watchdog.hosted_turn_recovery_round(
         pool,
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
         _THRESHOLD_S,
@@ -602,6 +627,7 @@ async def test_a_slow_recovery_is_never_started_twice(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Single flight is the loop's sequencing: while a recovery spans many
     intervals the loop is inside the round, and afterwards inside the cooldown."""
@@ -622,7 +648,7 @@ async def test_a_slow_recovery_is_never_started_twice(
     loop_task = asyncio.create_task(
         watchdog.hosted_turn_recovery_loop(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
             0.01,

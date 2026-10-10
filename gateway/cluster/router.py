@@ -30,6 +30,7 @@ from base.config import settings
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.git.cluster_drift import prod_source_head_sha
+from base.native_process.loaded_commit import LoadedCommit
 from gateway.cluster import snapshots
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
@@ -46,13 +47,11 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 
-def _local_snapshot_blocking(db: Database) -> ClusterStatus:
+def _local_snapshot_blocking(db: Database, *, image: LoadedCommit) -> ClusterStatus:
     """Sync local snapshot for a pure gateway (no ops server) — via to_thread:
     paused flag (file), orchestration liveness (session probe) and the
     prod-source HEAD (git rev-parse) are all child-process / disk reads that
     must not run on the event loop."""
-    from base.native_process import loaded_commit as _process_sha
-
     paused = cluster_is_paused(db)
     return ClusterStatus(
         machine_name=machine_name(),
@@ -67,7 +66,7 @@ def _local_snapshot_blocking(db: Database) -> ClusterStatus:
         # This gateway process's own frozen commit — not a disk bookmark, so a
         # gateway that outlived a checkout advance reports the old commit and the
         # roster shows the drift.
-        running_sha=_process_sha.get(),
+        running_sha=image.sha,
         schema_mismatch=schema_mismatch_status(db),
     )
 
@@ -88,6 +87,7 @@ async def _roster_statuses(
     identity_log: IdentityMismatchLog,
     *,
     fresh: bool,
+    image: LoadedCommit,
 ) -> list[MachineStatus]:
     """The roster of every unpaused machine: from the heartbeat liveness pass's
     snapshot, or — when `fresh` — by dialing every runner now."""
@@ -96,7 +96,7 @@ async def _roster_statuses(
         return []
     found = None if fresh else await asyncio.to_thread(snapshots.read_all_blocking, pool)
     return await gather_cluster_status(
-        db, rows, machine_name(), identity_log=identity_log, snapshots=found
+        db, rows, machine_name(), identity_log=identity_log, snapshots=found, image=image
     )
 
 
@@ -163,15 +163,17 @@ async def get_cluster_status(request: Request) -> ClusterStatus:
     roster use `/api/cluster/roster`. Bypasses 503 mode so status stays visible
     during pause — observability is always online.
     """
-    return await cluster_status_snapshot(request.app.state.db)
+    return await cluster_status_snapshot(
+        request.app.state.db, image=request.app.state.process_image
+    )
 
 
-async def cluster_status_snapshot(db: Database) -> ClusterStatus:
+async def cluster_status_snapshot(db: Database, *, image: LoadedCommit) -> ClusterStatus:
     """The `/api/cluster/status` body, also read by the MCP `cluster_status` tool."""
     if is_agent_runner():
         result = await _dispatch_op(db, machine_name(), "status_probe", {})
         return ClusterStatus.model_validate(result)
-    return await asyncio.to_thread(_local_snapshot_blocking, db)
+    return await asyncio.to_thread(_local_snapshot_blocking, db, image=image)
 
 
 @router.get("/api/cluster/roster", response_model=list[MachineStatus])
@@ -198,6 +200,7 @@ async def get_cluster_roster(
         request.app.state.db,
         request.app.state.identity_mismatch_log,
         fresh=fresh,
+        image=request.app.state.process_image,
     )
 
 
@@ -359,6 +362,7 @@ async def get_cluster_machines(
         request.app.state.db,
         request.app.state.identity_mismatch_log,
         fresh=fresh,
+        image=request.app.state.process_image,
     )
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally

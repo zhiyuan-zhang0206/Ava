@@ -2,9 +2,11 @@
 
 import asyncio
 
+import pytest
+
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
-from services.agent_runner.agent_host.tests.lifecycle.test_hosted_force_quiescence import (
-    _host_wakes_need_no_provider_credentials as _host_wakes_need_no_provider_credentials,
+from services.agent_runner.agent_host.tests.lifecycle.force_host_setup import (
+    host_wakes_need_no_provider_credentials,
 )
 
 
@@ -45,3 +47,6 @@ async def test_cancel_validation_spanning_task_handoff_never_cancels_new_turn() 
     finally:
         second_release.set()
         await scheduler.aclose()
+
+
+pytestmark = pytest.mark.usefixtures(host_wakes_need_no_provider_credentials.__name__)

@@ -57,6 +57,12 @@ The native OS unit supervises the application root, which owns its service
 subprocesses. Agent shells are held by the `pty-sessions` service. Stop verifies captured
 process identity before signalling.
 
+The `ops.pty_close_notices` one-shot child reads its staged batch before
+constructing any database handle or capturing its source image. A nonempty batch
+uses one captured image and a nonexempt process database gate; an unknown image
+stays unknown rather than using the checkout's current HEAD. The child retains
+failed notices for the next start and clears only a successfully written batch.
+
 The import boundary is `base < ops < {gateway, cli}`. The supported RPC
 vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
 its `terminate`, `content`, and `billing_recovery` submodules. Gateway-only

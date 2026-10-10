@@ -67,3 +67,12 @@ one code path with two callers.
 - Scope: the database under the same home identity. Rebuilding a lost host's identity state is not covered.
 - The directory a restore leaves is a promoted database on a new timeline; before it backs a new
   primary, start a new WAL-G prefix and take a new full backup.
+
+## Restored checkpoint reader
+
+The tick and manual drill receive a required database-for-URL callback from
+their entry owner. They pass it unchanged to the restored-checkpoint reader,
+which uses the scratch URL and retains that owner's gate and connection
+posture. Direct administration, recovery-target checks and scratch teardown
+keep their existing ownership. The standalone logical drill captures its own
+loaded image after argument parsing and remains subject to database admission.

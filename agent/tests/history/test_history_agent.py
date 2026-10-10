@@ -16,6 +16,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
@@ -44,10 +45,14 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
 
 
 def start(
-    owner: RuntimeIncarnation, *, active: bool = True, config_authority: ConfigAuthority
+    owner: RuntimeIncarnation,
+    *,
+    active: bool = True,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> dict[str, Any]:
     result = sessions.request(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         owner.agent_id,
         name="Fix login",
@@ -57,18 +62,27 @@ def start(
         process_metadata=recorded_tree(),
         authority=config_authority,
     )
-    lease = history.resolve(Database.from_settings(), owner.agent_id, result["session_id"])
+    lease = history.resolve(
+        Database.from_settings(gate=database_gate), owner.agent_id, result["session_id"]
+    )
     if active:
         leases.accept(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             str(lease["id"]),
             owner.agent_id,
             owner,
             "Continue the login fix",
         )
-        leases.activate(Database.from_settings(), EventBus.from_settings(), str(lease["id"]), owner)
-        lease = history.resolve(Database.from_settings(), owner.agent_id, result["session_id"])
+        leases.activate(
+            Database.from_settings(gate=database_gate),
+            EventBus.from_settings(),
+            str(lease["id"]),
+            owner,
+        )
+        lease = history.resolve(
+            Database.from_settings(gate=database_gate), owner.agent_id, result["session_id"]
+        )
     return lease
 
 
@@ -80,6 +94,7 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     config_authority: ConfigAuthority,
     database: Database,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     from psycopg.types.json import Jsonb
 
@@ -88,7 +103,7 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     from base.agents.impersonation.timeline import hydrate
     from base.agents.upload_delivery.paths import upload_url
 
-    lease = start(owner, config_authority=config_authority)
+    lease = start(owner, config_authority=config_authority, database_gate=database_gate)
     db_conn.execute(
         "UPDATE agent_impersonations SET automatic=%s WHERE id=%s", (automatic, lease["id"])
     )

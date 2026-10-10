@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,6 +12,7 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance.hold_driver import HoldDriver
 from cli.commands.lifecycle import _temporary_stop as stop
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _port_always_free(_port: int) -> bool:
@@ -68,7 +70,7 @@ def test_any_application_evidence_refuses_partial_shortcut(
 
 
 def test_partial_stop_uses_native_cleanup_without_database_drain(
-    partial_home: Path, monkeypatch: pytest.MonkeyPatch
+    partial_home: Path, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     steps: list[str] = []
 
@@ -121,6 +123,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
             announce=False,
             teardown_extras=True,
             timeout=3,
+            database_factory=operator_database,
         )
         == 0
     )

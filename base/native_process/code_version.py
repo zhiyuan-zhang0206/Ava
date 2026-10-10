@@ -7,10 +7,9 @@ so a larger number is always newer code. It needs no release process and no
 bump discipline, the same property `base.deploy.git.host_version` has, but it
 orders commits inside one day, which a `YYYY.M.D` date cannot.
 
-It is computed from the commit `loaded_commit.freeze()` captured at boot, never
-from whatever the checkout has become since: a daemon that outlived a checkout
-move must report the code it executes, or the gate that reads this would let it
-through. The result is cached for the process lifetime.
+An entry passes its immutable `LoadedCommit` to `CodeVersion`. It computes and
+caches the count for that captured SHA, never for whatever the checkout became
+since. Database factories share the same owner throughout their entry lifetime.
 
 It fails fast. A tree that is not a git checkout (a wheel, a tarball) has no
 version, and a missing version is not `0`: substituting one would make every
@@ -18,11 +17,9 @@ process look older than every minimum, or newer than none. A shallow clone
 counts only the commits it holds; that under-reports and can only make the
 process look older, which the gate then refuses loudly.
 
-This module also holds the process's posture toward the database gate
-(`base.db.code_version_gate`): every process is subject to it unless its entry
-point calls `exempt_from_db_gate()`. It lives here, not beside the gate,
-because the operator CLI entry point must declare its posture before it builds
-Settings, and importing `base.db` builds them.
+The database gate's admission posture belongs to its entry-owned `ProcessDbGate`.
+Operator factories are explicitly exempt; this module holds no mutable process
+posture or cached process-global version.
 """
 
 from __future__ import annotations
@@ -33,13 +30,7 @@ from pathlib import Path
 from base.native_process import loaded_commit
 from base.native_process.os_platform import CREATE_NO_WINDOW
 
-# The tree this module was loaded from (not the cwd), the same anchor
-# `loaded_commit` freezes.
-_SOURCE_ROOT = Path(__file__).resolve().parents[2]
 _GIT_TIMEOUT_S = 10
-
-_version: int | None = None
-_db_gate_exempt = False
 
 
 class CodeVersionError(RuntimeError):
@@ -77,41 +68,6 @@ def first_parent_count(repo: Path, rev: str = "HEAD") -> int:
         raise CodeVersionError(
             f"`{' '.join(argv)}` in {repo} did not print a commit count: {result.stdout!r}"
         ) from exc
-
-
-def get() -> int:
-    """This process's code version, computed once and cached.
-
-    Raises:
-        CodeVersionError: the process's source tree is not a git checkout.
-    """
-    global _version  # noqa: PLW0603 — process-lifetime cache, one per process by design
-    if _version is None:
-        sha = loaded_commit.freeze()
-        if sha is None:
-            raise CodeVersionError(
-                f"cannot resolve the commit of {_SOURCE_ROOT}: the code version is the "
-                "first-parent commit count, so the process must run from a git checkout"
-            )
-        _version = first_parent_count(_SOURCE_ROOT, sha)
-    return _version
-
-
-def exempt_from_db_gate() -> None:
-    """Declare this process an operator tool that the database gate must not stop.
-
-    Only the `ava` CLI entry point calls this. `ava stop` writes to the
-    database to drain agents, so a gate that also stopped it would leave a
-    host running stale code unable to run the very command that stops it.
-    Service processes never call it: they are the writers the gate exists to stop.
-    """
-    global _db_gate_exempt  # noqa: PLW0603 — process posture, declared once at the entry point
-    _db_gate_exempt = True
-
-
-def db_gate_applies() -> bool:
-    """Whether this process's pooled database sessions enforce the cluster minimum."""
-    return not _db_gate_exempt
 
 
 class CodeVersion:

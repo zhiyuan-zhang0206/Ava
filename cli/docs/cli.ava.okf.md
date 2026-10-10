@@ -1,7 +1,7 @@
 ---
 type: doc
 title: CLI
-description: '`ava init` records a home''s identity once; `ava start` owns native provisioning and root-owned readiness; argparse dispatches lifecycle operations to cli/commands/.'
+description: 'Settings-free syntax and home admission dispatch lifecycle and operator commands.'
 tags:
 - gateway
 - tool
@@ -17,6 +17,7 @@ aliases. Parsing preserves caller-owned children. Agents/notices
 and impersonation builders live in `cli.commands.agents`, extensions in
 `cli.commands.extensions.parsers`, others in `cli/parsers/`. Adapters lazy-import
 `cmd_*` at dispatch; `pyproject.toml` installs `.venv/bin/ava` via `uv sync`.
+Operator inputs are described in [[cli/docs/database.ava.okf.md]].
 
 ## Top-Level Commands
 

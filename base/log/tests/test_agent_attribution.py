@@ -74,19 +74,20 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
         mock.patch.object(slog, "_add_file_sink"),
         mock.patch.object(slog, "add_postgres_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
-        mock.patch.object(slog.loaded_commit, "freeze") as freeze,
-        mock.patch.object(slog.loaded_commit, "get", return_value="loaded-generation"),
         mock.patch.object(slog, "_machine_name_lazy", return_value="machine-a"),
         mock.patch.object(slog.logger, "info") as boot_log,
         mock.patch.object(slog.logger, "configure") as configure,
     ):
         slog.init_gateway_process(
             name="agent_host",
+            producer=lambda: None,
+            machine_reader=lambda: "machine-a",
+            image=cast(Any, SimpleNamespace(sha="loaded-generation")),
         )
 
     configure.assert_called_once_with(extra={"agent_id": "-"})
-    init_pipeline.assert_called_once_with(process="agent_host")
-    freeze.assert_called_once_with()
+    assert init_pipeline.call_args.kwargs["process"] == "agent_host"
+    assert init_pipeline.call_args.kwargs["machine_reader"]() == "machine-a"
     fields = boot_log.call_args.kwargs
     assert fields["event"] == "service_started"
     assert fields["name"] == "agent_host"
@@ -109,8 +110,9 @@ def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
         mock.patch.object(slog, "_add_file_sink"),
         mock.patch.object(slog, "add_postgres_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
-        mock.patch.object(slog.loaded_commit, "freeze") as freeze,
-        mock.patch.object(slog.loaded_commit, "get") as read_late_version,
+        mock.patch.object(
+            slog.loaded_commit, "capture_commit", side_effect=AssertionError("no recapture")
+        ) as read_late_version,
         mock.patch.object(slog.logger, "info") as boot_log,
     ):
         slog.init_gateway_process(
@@ -120,7 +122,6 @@ def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
         process="agent_host", producer=producer, machine_reader=machine
     )
     producer.assert_not_called()
-    freeze.assert_not_called()
     read_late_version.assert_not_called()
     assert boot_log.call_args.kwargs["sha"] == "already-loaded"
     assert boot_log.call_args.kwargs["host"] == "owned-machine"

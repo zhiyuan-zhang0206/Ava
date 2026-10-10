@@ -15,12 +15,13 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from base.agents.context.clients import DatabaseFactory
 from base.config import settings
 from base.host.atomic_io import write_text_atomic
 from base.telemetry.station_endpoint import validated_observability_base
 
 
-def _observability_datasource_urls() -> tuple[str, str, str]:
+def _observability_datasource_urls(*, database_factory: DatabaseFactory) -> tuple[str, str, str]:
     """The (loki, prometheus, pg) datasource URLs for the rendered Grafana tree.
 
     Two-state on AVA_OBSERVABILITY_URL: empty (default) keeps the current
@@ -34,7 +35,7 @@ def _observability_datasource_urls() -> tuple[str, str, str]:
 
     obs = settings.observability
     base = validated_observability_base(obs.observability_url)
-    pg = _pg_datasource_host_port(remote_observatory=bool(base))
+    pg = _pg_datasource_host_port(remote_observatory=bool(base), database_factory=database_factory)
     if base:
         return f"{base}:3100", f"{base}:9090", pg
     return (
@@ -50,7 +51,7 @@ def _host_port(host: str, port: int | str) -> str:
     return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
-def _pg_datasource_host_port(*, remote_observatory: bool) -> str:
+def _pg_datasource_host_port(*, remote_observatory: bool, database_factory: DatabaseFactory) -> str:
     """The cluster's own PG host:port for the rendered Grafana SQL datasource.
 
     PG externalization (#1752) is an independent track from the observatory
@@ -66,9 +67,7 @@ def _pg_datasource_host_port(*, remote_observatory: bool) -> str:
     """
     from psycopg.conninfo import conninfo_to_dict
 
-    from base.db import Database
-
-    connection = conninfo_to_dict(Database.from_settings().direct_url())
+    connection = conninfo_to_dict(database_factory().direct_url())
     host = str(connection.get("host") or "127.0.0.1")
     if host.startswith("/"):
         host = "127.0.0.1"

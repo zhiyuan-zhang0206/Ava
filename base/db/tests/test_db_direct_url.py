@@ -16,6 +16,7 @@ from base import db as db_module
 from base.cluster import ClusterPorts, ClusterRecord
 from base.config.domains.storage.data_plane import DataPlaneSettings
 from base.db import Database, DbConfig
+from base.db.code_version_gate import ProcessDbGate
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 _POOLED = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"
@@ -58,6 +59,7 @@ _PG_REC = _rec(_HOME, {"gateway": 8000, "postgres": 5433, "redis": 6380, "pgboun
 
 
 def test_direct_handle_uses_owned_lazy_host_and_preserves_short_circuits(
+    database_gate: ProcessDbGate,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set(monkeypatch, db_url=_POOLED, rec=_PG_REC)
@@ -77,6 +79,7 @@ def test_direct_handle_uses_owned_lazy_host_and_preserves_short_circuits(
                 pgbouncer_enabled=True,
             ),
             local_host=local_host,
+            gate=database_gate,
         )
 
     assert handle(PLACEHOLDER_DB_URL).direct_url() == PLACEHOLDER_DB_URL

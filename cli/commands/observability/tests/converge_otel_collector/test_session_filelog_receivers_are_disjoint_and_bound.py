@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import platform
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,17 +15,21 @@ from cli.commands.observability.tests.test_converge_otel_collector import (
     _ChunkedResp,
     _render_real_template,
 )
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """Shell transcripts and service output use disjoint file sets.
 
     Agent main logs begin with identical telemetry banners, so admitting them
     to either receiver would restore the fingerprint-collision re-watch storm.
     """
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+    cfg = _render_real_template(
+        monkeypatch, frozenset({"gateway", "agent-runner"}), operator_database=operator_database
+    )
 
     sessions = cfg["receivers"]["filelog/sessions"]
     assert sessions == {
@@ -56,11 +62,14 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
 
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A pure runner relays all signals to the gateway collector, never to
     loopback backends. Exporter IDs stay byte-for-byte stable so a converge
     adopts the existing file_storage queues instead of orphaning their backlog."""
-    cfg = _render_real_template(monkeypatch, frozenset({"agent-runner"}))
+    cfg = _render_real_template(
+        monkeypatch, frozenset({"agent-runner"}), operator_database=operator_database
+    )
 
     assert set(cfg["receivers"]) >= {"otlp", "host_metrics", "prometheus/otelcol"}
     assert "otlp/remote" not in cfg["receivers"]
@@ -82,10 +91,13 @@ def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queue
 
 def test_gateway_has_separate_authenticated_reachable_receiver(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A split gateway keeps local producers on loopback/no-auth and accepts
     remote relays only on its declared reachable address with bearer auth."""
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    cfg = _render_real_template(
+        monkeypatch, frozenset({"gateway"}), operator_database=operator_database
+    )
 
     assert cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4318"}
     assert cfg["receivers"]["otlp/remote"]["protocols"]["http"] == {
@@ -111,11 +123,14 @@ def test_gateway_has_separate_authenticated_reachable_receiver(
 
 def test_station_has_separate_authenticated_reachable_receiver(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A pure observability-station exposes the same bearer-authenticated
     remote OTLP ingress a gateway does — the surface remote gateway
     collectors relay to (WP4, task #1946)."""
-    cfg = _render_real_template(monkeypatch, frozenset({"observability-station"}))
+    cfg = _render_real_template(
+        monkeypatch, frozenset({"observability-station"}), operator_database=operator_database
+    )
 
     assert cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4318"}
     assert cfg["receivers"]["otlp/remote"]["protocols"]["http"] == {
@@ -143,6 +158,7 @@ def test_station_has_separate_authenticated_reachable_receiver(
 
 def test_remote_observatory_gateway_relays_to_station_single_ingress(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A gateway consuming a remote observatory (AVA_OBSERVABILITY_URL set)
     relays every signal to the station's single bearer-authenticated OTLP
@@ -152,6 +168,7 @@ def test_remote_observatory_gateway_relays_to_station_single_ingress(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         observability_url="http://10.0.0.46",
+        operator_database=operator_database,
     )
     exporters = cfg["exporters"]
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
@@ -169,6 +186,7 @@ def test_remote_observatory_gateway_relays_to_station_single_ingress(
 
 def test_remote_observatory_relay_without_secret_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A remote observatory with no cluster secret cannot authenticate the
     relay — converge must fail, not ship an unauthenticated fan-out."""
@@ -178,17 +196,21 @@ def test_remote_observatory_relay_without_secret_fails_closed(
             frozenset({"gateway", "agent-runner"}),
             cluster_secret="",
             observability_url="http://10.0.0.46",
+            operator_database=operator_database,
         )
 
 
 def test_station_otlp_ingress_port_follows_single_source(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """The station's advertised unit url (base.cluster.machines.unit_dial_url) and
     its remote receiver bind the SAME port — AVA_TELEMETRY_OTLP_PORT is the
     single knob for both (WP4, task #1946)."""
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_port", 4321)
-    cfg = _render_real_template(monkeypatch, frozenset({"observability-station"}))
+    cfg = _render_real_template(
+        monkeypatch, frozenset({"observability-station"}), operator_database=operator_database
+    )
     assert cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == ("10.0.0.10:4321")
     from base.cluster.machines import unit_dial_url
 
@@ -197,25 +219,33 @@ def test_station_otlp_ingress_port_follows_single_source(
 
 def test_local_ingress_port_does_not_change_gateway_projection(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """Local receivers follow this unit's port; relay targets follow bootstrap."""
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_port", 4319)
-    gateway_cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    gateway_cfg = _render_real_template(
+        monkeypatch, frozenset({"gateway"}), operator_database=operator_database
+    )
     assert gateway_cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4319"}
     assert gateway_cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == (
         "10.0.0.10:4319"
     )
-    runner_cfg = _render_real_template(monkeypatch, frozenset({"agent-runner"}))
+    runner_cfg = _render_real_template(
+        monkeypatch, frozenset({"agent-runner"}), operator_database=operator_database
+    )
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         assert runner_cfg["exporters"][exporter_id]["endpoint"] == "http://10.0.0.10:4318"
 
 
 def test_hybrid_gateway_runner_still_serves_remote_runners(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """Gateway capability plus a non-empty secret is the cross-machine posture
     even when the same host also runs agents (the production Mac mini shape)."""
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+    cfg = _render_real_template(
+        monkeypatch, frozenset({"gateway", "agent-runner"}), operator_database=operator_database
+    )
     remote = cfg["receivers"]["otlp/remote"]["protocols"]["http"]
     assert remote["endpoint"] == "10.0.0.10:4318"
     assert remote["auth"] == {"authenticator": "bearertokenauth/cluster"}
@@ -223,12 +253,14 @@ def test_hybrid_gateway_runner_still_serves_remote_runners(
 
 def test_gateway_ipv6_receiver_uses_unambiguous_bracketed_bind(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     cfg = _render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         gateway_url="http://[fd7a:115c:a1e0::10]:8000",
         machine_host="fd7a:115c:a1e0::10",
+        operator_database=operator_database,
     )
     assert (
         cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"]
@@ -238,12 +270,14 @@ def test_gateway_ipv6_receiver_uses_unambiguous_bracketed_bind(
 
 def test_runner_ipv6_gateway_url_uses_unambiguous_bracketed_exporter_endpoint(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     cfg = _render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),
         gateway_url="http://[fd7a:115c:a1e0::10]:8000",
         machine_host="fd7a:115c:a1e0::20",
+        operator_database=operator_database,
     )
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         assert cfg["exporters"][exporter_id]["endpoint"] == "http://[fd7a:115c:a1e0::10]:4318"
@@ -251,6 +285,7 @@ def test_runner_ipv6_gateway_url_uses_unambiguous_bracketed_exporter_endpoint(
 
 def test_single_box_keeps_every_otlp_listener_on_loopback(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """The zero-config combined role has no cross-machine ingress or secret."""
     cfg = _render_real_template(
@@ -259,6 +294,7 @@ def test_single_box_keeps_every_otlp_listener_on_loopback(
         gateway_url="http://localhost:8000",
         machine_host="localhost",
         cluster_secret="",
+        operator_database=operator_database,
     )
     assert "otlp/remote" not in cfg["receivers"]
     assert "bearertokenauth/cluster" not in cfg["extensions"]
@@ -272,6 +308,7 @@ def test_single_box_keeps_every_otlp_listener_on_loopback(
 
 def test_secret_set_single_box_still_collapses_remote_ingress_to_loopback(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A secret can be enabled on a combined single box. Its loopback machine
     host still means there are no remote runners, so converge must not invent
@@ -282,6 +319,7 @@ def test_secret_set_single_box_still_collapses_remote_ingress_to_loopback(
         gateway_url="http://localhost:8000",
         machine_host="localhost",
         cluster_secret="cluster-token",  # noqa: S106 — fixture token
+        operator_database=operator_database,
     )
     assert "otlp/remote" not in cfg["receivers"]
     assert "bearertokenauth/cluster" not in cfg["extensions"]
@@ -290,6 +328,7 @@ def test_secret_set_single_box_still_collapses_remote_ingress_to_loopback(
 
 def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """QA #1156 NIT-1: the converge guard matches the registration guard. A
     pure gateway or pure station with an EMPTY secret or a LOOPBACK reachable
@@ -302,6 +341,7 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
             roles,
             cluster_secret="",
             machine_host="10.0.0.10",
+            operator_database=operator_database,
         )
         assert "otlp/remote" not in no_secret["receivers"]
         assert "bearertokenauth/cluster" not in no_secret["extensions"]
@@ -311,6 +351,7 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
             roles,
             cluster_secret="cluster-token",  # noqa: S106 — fixture token
             machine_host="localhost",
+            operator_database=operator_database,
         )
         assert "otlp/remote" not in loopback["receivers"]
         assert "bearertokenauth/cluster" not in loopback["extensions"]
@@ -378,6 +419,7 @@ def test_split_topology_fails_closed_when_ingress_identity_is_incomplete(
     machine_host: str,
     cluster_secret: str,
     message: str,
+    operator_database: Callable[[], Any],
 ) -> None:
     with pytest.raises(RuntimeError, match=message):
         _render_real_template(
@@ -386,15 +428,19 @@ def test_split_topology_fails_closed_when_ingress_identity_is_incomplete(
             gateway_url=gateway_url,
             machine_host=machine_host,
             cluster_secret=cluster_secret,
+            operator_database=operator_database,
         )
 
 
 def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """The collector's own queue depth/capacity/enqueue-failure counters ride
     the infra pipeline, so a recovered path carries evidence of the outage."""
-    cfg = _render_real_template(monkeypatch, frozenset({"agent-runner"}))
+    cfg = _render_real_template(
+        monkeypatch, frozenset({"agent-runner"}), operator_database=operator_database
+    )
     scrape = cfg["receivers"]["prometheus/otelcol"]["config"]["scrape_configs"]
     assert scrape == [
         {
@@ -405,7 +451,9 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
     ]
 
 
-def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_config_file_is_owner_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     """Every split role's config carries the telemetry bearer (never the secret) and a gateway's
     the Redis admin password; the file is 0600 from creation, not chmod-ed after."""
     if platform.system() == "Windows":
@@ -431,7 +479,9 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         return replace(source, target)
 
     monkeypatch.setattr(Path, "replace", _record_replace)
-    oc.ensure_otel_collector(repo, tmp_path, frozenset({"agent-runner"}))
+    oc.ensure_otel_collector(
+        repo, tmp_path, frozenset({"agent-runner"}), database_factory=operator_database
+    )
     config = tmp_path / "otel-collector/config.yaml"
     assert modes_before_publish == [0o600]
     assert config.stat().st_mode & 0o777 == 0o600
@@ -486,6 +536,7 @@ def test_stream_download_honors_socket_timeout(
 def test_gateway_and_runner_exporters_drop_newest_after_bounded_retry(
     monkeypatch: pytest.MonkeyPatch,
     roles: frozenset[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     """Every collector-to-downstream hop fails fast when its queue is full.
 
@@ -495,7 +546,7 @@ def test_gateway_and_runner_exporters_drop_newest_after_bounded_retry(
     retry exhaustion drops the batch through the collector's counted failure
     path. Metrics keep their existing 15-minute retry policy in memory.
     """
-    cfg = _render_real_template(monkeypatch, roles)
+    cfg = _render_real_template(monkeypatch, roles, operator_database=operator_database)
     exporters = cfg["exporters"]
 
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki"):

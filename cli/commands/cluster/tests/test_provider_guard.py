@@ -12,6 +12,7 @@ next to the other checks' integration tests.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -20,6 +21,7 @@ from pydantic import SecretStr
 from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli.commands.cluster import _provider_guard
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _secret(value: str) -> SecretStr:
@@ -176,7 +178,9 @@ def test_fetch_balance_maps_http_failure_to_a_sanitized_read_error(
 
 
 def test_blocked_agents_at_threshold_reports_a_stable_message(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_min", 3)
     counts = iter([3, 7])
@@ -186,8 +190,8 @@ def test_blocked_agents_at_threshold_reports_a_stable_message(
 
     monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
 
-    first = _provider_guard._blocked_agents_failure()
-    second = _provider_guard._blocked_agents_failure()
+    first = _provider_guard._blocked_agents_failure(database_factory=operator_database)
+    second = _provider_guard._blocked_agents_failure(database_factory=operator_database)
 
     assert first is not None
     assert first == second
@@ -197,7 +201,9 @@ def test_blocked_agents_at_threshold_reports_a_stable_message(
 
 
 def test_blocked_agents_below_threshold_is_silent(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_min", 3)
 
@@ -206,23 +212,28 @@ def test_blocked_agents_below_threshold_is_silent(
 
     monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
 
-    assert _provider_guard._blocked_agents_failure() is None
+    assert _provider_guard._blocked_agents_failure(database_factory=operator_database) is None
     assert capsys.readouterr().err == ""
 
 
 def test_blocked_agents_unreadable_table_is_fail_open(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
+
     def _count(_window_hours: float) -> int | None:
         return None
 
     monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
 
-    assert _provider_guard._blocked_agents_failure() is None
+    assert _provider_guard._blocked_agents_failure(database_factory=operator_database) is None
     assert "agent table unreachable" in capsys.readouterr().err
 
 
-def test_blocked_agents_disabled_skips_before_the_query(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_blocked_agents_disabled_skips_before_the_query(
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+) -> None:
     monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_enabled", False)
 
     def _count(_window_hours: float) -> int | None:
@@ -230,11 +241,11 @@ def test_blocked_agents_disabled_skips_before_the_query(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
 
-    assert _provider_guard._blocked_agents_failure() is None
+    assert _provider_guard._blocked_agents_failure(database_factory=operator_database) is None
 
 
 def test_halted_agents_count_reads_the_recovery_breaker_halt(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """`permanent_reject_streak` is the durable halt flag (task #3617) and the
     window bounds the count to the active wave."""
@@ -267,28 +278,30 @@ def test_halted_agents_count_reads_the_recovery_breaker_halt(
 
     patch_database(monkeypatch, connect=_Connection)
 
-    assert _provider_guard._halted_agents_count(24) == 4
+    assert _provider_guard._halted_agents_count(24, database_factory=operator_database) == 4
     query, params = queries[0]
     assert "permanent_reject_streak >= %s" in query
     assert "last_turn_fatal_at > now() - make_interval" in query
     assert params == (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, 24 * 3600.0)
 
 
-def test_halted_agents_count_db_error_is_fail_open(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_halted_agents_count_db_error_is_fail_open(
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+) -> None:
 
     def _down(*_args: object, **_kwargs: object) -> object:
         raise ConnectionError("db down")
 
     patch_database(monkeypatch, connect=_down)
 
-    assert _provider_guard._halted_agents_count(24) is None
+    assert _provider_guard._halted_agents_count(24, database_factory=operator_database) is None
 
 
 # ─── the combined entry point ────────────────────────────────────────────────
 
 
 def test_provider_guard_failure_reports_balance_before_blocked(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """One failure at a time, root cause first: a drained balance IS the cause
     of the halted agents, and funding the account is what unsticks them."""
@@ -302,7 +315,7 @@ def test_provider_guard_failure_reports_balance_before_blocked(
     monkeypatch.setattr(_provider_guard, "_balance_failure", _balance)
     monkeypatch.setattr(_provider_guard, "_blocked_agents_failure", _blocked)
 
-    assert _provider_guard.provider_guard_failure() == (
+    assert _provider_guard.provider_guard_failure(database_factory=operator_database) == (
         "provider_balance",
         "FAIL: provider balance \u2014 balance detail",
     )
@@ -311,14 +324,14 @@ def test_provider_guard_failure_reports_balance_before_blocked(
         return None
 
     monkeypatch.setattr(_provider_guard, "_balance_failure", _fine)
-    assert _provider_guard.provider_guard_failure() == (
+    assert _provider_guard.provider_guard_failure(database_factory=operator_database) == (
         "provider_blocked_agents",
         "FAIL: provider blocked agents \u2014 blocked detail",
     )
 
 
 def test_run_provider_guard_reports_the_failing_check(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """A failure is handed to the probe's report seam with its check name; a pass reports nothing."""
     reported: list[tuple[str, str]] = []
@@ -327,12 +340,22 @@ def test_run_provider_guard_reports_the_failing_check(
         return "provider_balance", "FAIL: provider balance \u2014 low"
 
     monkeypatch.setattr(_provider_guard, "provider_guard_failure", _failing)
-    assert _provider_guard.run_provider_guard(report=lambda c, m: reported.append((c, m))) == 1
+    assert (
+        _provider_guard.run_provider_guard(
+            report=lambda c, m: reported.append((c, m)), database_factory=operator_database
+        )
+        == 1
+    )
     assert reported == [("provider_balance", "FAIL: provider balance \u2014 low")]
 
     def _passing() -> None:
         return None
 
     monkeypatch.setattr(_provider_guard, "provider_guard_failure", _passing)
-    assert _provider_guard.run_provider_guard(report=lambda c, m: reported.append((c, m))) is None
+    assert (
+        _provider_guard.run_provider_guard(
+            report=lambda c, m: reported.append((c, m)), database_factory=operator_database
+        )
+        is None
+    )
     assert len(reported) == 1

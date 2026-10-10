@@ -3,25 +3,33 @@
 import asyncio
 import json
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.runtime import Runtime
 
 from agent.graph.exec._result import _ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
-from agent.graph.exec.node import _run_agent_code
+from agent.graph.exec.node import _run_agent_code, exec_node
 from agent.state import AgentState
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.messages.kwargs import ExecStatus, read_ava_kwargs
 from base.clock import Clock
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from base.paths import workspace_dir_readonly
+from tests.fixtures.configuration import snapshot_process_config
 
 
 def _plugin(unit_home: Path) -> None:
@@ -119,65 +127,182 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     ]
 
 
-async def test_exec_shield_reads_each_owner_at_the_existing_timeout_points() -> None:
-    from agent.graph.exec._result import _ExecTimedOut
-    from agent.graph.exec.node import _exec_with_node_shield
-    from base.config import ConfigBoot
+def _execution_context(
+    owner: ConfigBoot,
+    read: Callable[[str, str], Any],
+    agent_id: int,
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    request: pytest.FixtureRequest,
+) -> AvaContext:
+    context = AvaContext(
+        agent=AgentSlices.resolve(default_reader=read),
+        db=database,
+        bus=event_bus,
+        clients=process_clients(config=owner, database=lambda: database),
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
+        event_publisher=MagicMock(),
+        catalog=model_catalog,
+        clock_factory=Clock.from_settings,
+    )
+    request.addfinalizer(context.clients.close)
+    return context
 
-    first, second = ConfigBoot(), ConfigBoot()
+
+async def _execution_message(context: AvaContext, code: str) -> ToolMessage:
+    agent_id = context.require_identity().agent_id
+    state = AgentState(
+        messages=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "execute_code",
+                        "args": {"code": code},
+                        "id": "call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    command = await exec_node(
+        state, Runtime(context=context), {"configurable": {"thread_id": str(agent_id)}}
+    )
+    update = cast(dict[str, Any], command.update)
+    assert update["halted"] is False
+    message = update["messages"][0]
+    assert isinstance(message, ToolMessage)
+    return message
+
+
+@pytest.mark.usefixtures("fake_cancel_event")
+async def test_exec_shield_reads_each_owner_at_the_existing_timeout_points(
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    request: pytest.FixtureRequest,
+) -> None:
+    first, second = snapshot_process_config(), snapshot_process_config()
     first.set_field("exec_node_timeout_seconds", 0.002)
     second.set_field("exec_node_timeout_seconds", 30)
     first_reads: list[float] = []
     second_reads: list[float] = []
 
-    def first_timeout() -> float:
-        value = first.view.sandbox.exec_node_timeout_seconds
-        first_reads.append(value)
+    def read(owner: ConfigBoot, reads: list[float], domain: str, field: str) -> Any:
+        value = getattr(getattr(owner.view, domain), field)
+        if field == "exec_node_timeout_seconds":
+            reads.append(value)
         return value
 
-    def second_timeout() -> float:
-        value = second.view.sandbox.exec_node_timeout_seconds
-        second_reads.append(value)
-        return value
+    contexts = [
+        _execution_context(
+            first,
+            lambda domain, field: read(first, first_reads, domain, field),
+            424204,
+            database,
+            event_bus,
+            model_catalog,
+            request,
+        ),
+        _execution_context(
+            second,
+            lambda domain, field: read(second, second_reads, domain, field),
+            424205,
+            database,
+            event_bus,
+            model_catalog,
+            request,
+        ),
+    ]
+    wait_for = asyncio.wait_for
 
-    async def stalled():
-        first.set_field("exec_node_timeout_seconds", 5)
-        await asyncio.Future()
-        raise AssertionError("The stalled coroutine must be cancelled")
+    async def wait(awaitable: Awaitable[Any], timeout: float | None) -> Any:
+        try:
+            return await wait_for(awaitable, timeout)
+        except TimeoutError:
+            if timeout == 0.002:
+                # The real framework wait has already requested and joined cancellation.
+                # A changed owner must be read afresh at timeout logging and feedback.
+                first.set_field("exec_node_timeout_seconds", 5)
+            raise
 
-    async def completed():
-        return _ExecDone(output="done"), None
-
+    monkeypatch.setattr(asyncio, "wait_for", wait)
     timed_out, fast = await asyncio.gather(
-        _exec_with_node_shield(stalled(), 1, read_timeout=first_timeout),
-        _exec_with_node_shield(completed(), 2, read_timeout=second_timeout),
+        _execution_message(contexts[0], "import time; time.sleep(60)"),
+        _execution_message(contexts[1], "print('done')"),
     )
-    assert isinstance(timed_out[0], _ExecTimedOut)
-    assert "timeout after 5s" in timed_out[0].output
-    assert isinstance(fast[0], _ExecDone)
+    assert read_ava_kwargs(timed_out).get("ava_exec_status") == ExecStatus.TIMED_OUT
+    assert "timeout after 5s" in timed_out.text
+    assert read_ava_kwargs(fast).get("ava_exec_status") == ExecStatus.COMPLETED
+    assert "done" in fast.text
     assert first_reads == [0.002, 5, 5]
     assert second_reads == [30]
 
 
-def test_crop_inputs_are_lazy_and_keep_two_live_readers_separate() -> None:
-    from agent.graph.exec._crop import CropInputs
-    from base.config import ConfigBoot
-
-    first, second = ConfigBoot(), ConfigBoot()
+@pytest.mark.usefixtures("fake_cancel_event")
+async def test_crop_inputs_are_lazy_and_keep_two_live_readers_separate(
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    request: pytest.FixtureRequest,
+) -> None:
+    first, second = snapshot_process_config(), snapshot_process_config()
+    for owner in (first, second):
+        owner.set_field("exec_output_crop_head_lines", 1)
+        owner.set_field("exec_output_crop_tail_lines", 1)
     first.set_field("exec_output_crop_after_lines", 2)
     second.set_field("exec_output_crop_after_lines", 7)
-    reads: list[str] = []
+    reads: dict[str, list[int]] = {"first": [], "second": []}
 
-    def first_read(field: str) -> int:
-        reads.append(field)
-        return getattr(first.view.sandbox, field)
+    def read(owner: ConfigBoot, name: str, domain: str, field: str) -> Any:
+        value = getattr(getattr(owner.view, domain), field)
+        if field == "exec_output_crop_after_lines":
+            reads[name].append(value)
+        return value
 
-    first_crop = CropInputs(first_read)
-    second_crop = CropInputs(lambda field: getattr(second.view.sandbox, field))
-    assert reads == []
-    assert first_crop.exec_output_crop_after_lines == 2
-    assert second_crop.exec_output_crop_after_lines == 7
+    contexts = [
+        _execution_context(
+            first,
+            lambda domain, field: read(first, "first", domain, field),
+            424206,
+            database,
+            event_bus,
+            model_catalog,
+            request,
+        ),
+        _execution_context(
+            second,
+            lambda domain, field: read(second, "second", domain, field),
+            424207,
+            database,
+            event_bus,
+            model_catalog,
+            request,
+        ),
+    ]
+    assert reads == {"first": [], "second": []}
+    code = "for index in range(6): print(f'line {index} ' + 'content ' * 40)"
+    body = "".join(f"line {index} " + "content " * 40 + "\n" for index in range(6))
+    first_result, second_result = await asyncio.gather(
+        _execution_message(contexts[0], code),
+        _execution_message(contexts[1], code),
+    )
+    assert "[output cropped:" in first_result.text
+    assert "[output cropped:" not in second_result.text
+    assert body in second_result.text
+    archives = list((workspace_dir_readonly(424206) / ".exec_output").glob("crop_*.txt"))
+    assert len(archives) == 1 and archives[0].read_text() == body
+    assert str(archives[0]) in first_result.text
     first.set_field("exec_output_crop_after_lines", 9)
-    assert first_crop.exec_output_crop_after_lines == 9
-    assert second_crop.exec_output_crop_after_lines == 7
-    assert reads == ["exec_output_crop_after_lines"] * 2
+    updated, unchanged = await asyncio.gather(
+        _execution_message(contexts[0], code),
+        _execution_message(contexts[1], code),
+    )
+    assert "[output cropped:" not in updated.text and body in updated.text
+    assert "[output cropped:" not in unchanged.text and body in unchanged.text
+    assert reads == {"first": [2, 2, 9], "second": [7, 7]}
+    assert list((workspace_dir_readonly(424206) / ".exec_output").glob("crop_*.txt")) == archives
+    assert list((workspace_dir_readonly(424207) / ".exec_output").glob("crop_*.txt")) == []

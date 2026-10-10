@@ -43,6 +43,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 import psycopg
@@ -50,6 +51,7 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base import telemetry
+from base.cluster.machine import validate_machine_name
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
@@ -59,10 +61,13 @@ from base.daemon.health import (
 )
 from base.daemon.shutdown import install_graceful_shutdown
 from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.config_registration import (
     disk_image_path,
     read_authority_config,
@@ -300,7 +305,9 @@ async def _dispatch_loop(
         await _sleep_with_liveness(liveness, interval)
 
 
-async def run(config: FleetConfig) -> None:
+async def run(
+    config: FleetConfig, *, database: Callable[[], Database], image: LoadedCommit
+) -> None:
     if _is_running():
         _log.info(
             "[task-maintenance] daemon already running (pidfile=%s), exiting",
@@ -314,10 +321,12 @@ async def run(config: FleetConfig) -> None:
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint()
-    health = await start_health_server("task_maintenance", endpoint.health_port, liveness=liveness)
+    health = await start_health_server(
+        "task_maintenance", endpoint.health_port, liveness=liveness, image=image
+    )
     _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
 
-    db = Database.from_settings()
+    db = database()
     pool = db.pool()
     try:
         await _dispatch_loop(pool, db, EventBus.from_settings(), liveness, config=config)
@@ -331,14 +340,27 @@ async def run(config: FleetConfig) -> None:
 def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="task_maintenance")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="task_maintenance", exempt=False)
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = telemetry.build_pipeline(database=database)
+    init_gateway_process(
+        name="task_maintenance",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        image=image,
+    )
     install_graceful_shutdown("task_maintenance")
     try:
         config = read_service_config("ava_fleet", FleetConfig)
         if config is None:
             config = read_authority_config("ava_fleet", FleetConfig, disk_image_path("ava_fleet"))
-        asyncio.run(run(config))
+        asyncio.run(run(config, database=database, image=image))
     except KeyboardInterrupt:
         _log.info("[task-maintenance] interrupted, shutting down")
     except Exception:

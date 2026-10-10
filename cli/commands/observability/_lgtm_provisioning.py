@@ -12,10 +12,12 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from base import telemetry
-from base.db import Database
+from base.agents.context.clients import DatabaseFactory
+from base.telemetry import EventPipeline
 from cli.commands.converge.rendered_file import write_rendered_guarded
 
 from .observatory_urls import _atomic_write
@@ -26,7 +28,14 @@ from .observatory_urls import _atomic_write
 _RENDERED_DASHBOARD_REL = "dashboards/ava-ops-main.json"
 
 
-def _render_ava_ops_dashboard(dest: Path, hashes_path: Path, key: str) -> None:
+def _render_ava_ops_dashboard(
+    dest: Path,
+    hashes_path: Path,
+    key: str,
+    *,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+) -> None:
     """Render the ava-ops dashboard into the native provisioning tree.
 
     Task #3697 slice S3: the dashboard's provisioning content is generated
@@ -45,7 +54,7 @@ def _render_ava_ops_dashboard(dest: Path, hashes_path: Path, key: str) -> None:
     from base.telemetry.metrics.grafana_dashboard_supply import render_dashboard_json
 
     try:
-        rendered, failed = render_dashboard_json(Database.from_settings())
+        rendered, failed = render_dashboard_json(database_factory())
     except Exception as exc:
         print(
             f"  ! lgtm native: ava-ops dashboard render failed ({exc}); keeping the previous file",
@@ -54,6 +63,7 @@ def _render_ava_ops_dashboard(dest: Path, hashes_path: Path, key: str) -> None:
         telemetry.emit(
             "telemetry",
             "lgtm_dashboard_render_failed",
+            producer=producer,
             level="warning",
             source="converge",
             attributes={"error": str(exc)[:300]},
@@ -89,7 +99,13 @@ def _record_rendered_hash(hashes_path: Path, key: str, digest: str) -> None:
     hashes_path.write_text(json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
 
 
-def _render_provisioning(repo: Path, native_dir: Path) -> None:
+def _render_provisioning(
+    repo: Path,
+    native_dir: Path,
+    *,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+) -> None:
     """Render the Grafana provisioning tree into the native config dir.
 
     Every provisioning file (datasources, alert rules, READMEs) is copied
@@ -138,7 +154,11 @@ def _render_provisioning(repo: Path, native_dir: Path) -> None:
     # generation fails (the previous file must survive).
     rendered_relative.add(_RENDERED_DASHBOARD_REL)
     _render_ava_ops_dashboard(
-        dest_dir / _RENDERED_DASHBOARD_REL, hashes_path, _RENDERED_DASHBOARD_REL
+        dest_dir / _RENDERED_DASHBOARD_REL,
+        hashes_path,
+        _RENDERED_DASHBOARD_REL,
+        database_factory=database_factory,
+        producer=producer,
     )
     # Remove rendered files whose source template vanished (web-sources
     # _cleanup_gone_sources): untouched copies are pure derived state; a copy

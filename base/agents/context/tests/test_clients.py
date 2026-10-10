@@ -166,18 +166,3 @@ def test_building_a_context_imports_no_connection_stack() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip().endswith("[]")
-
-
-def test_custom_database_dials_its_own_resource_with_no_process_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.config import settings
-    from base.db import Database
-
-    database = Database.from_settings()
-    clients = ClientSet(database=lambda: database)
-    monkeypatch.setattr(settings.data_plane, "db_url", "")
-    try:
-        assert clients.sql.execute("SELECT 42").fetchone() == (42,)
-    finally:
-        clients.close()

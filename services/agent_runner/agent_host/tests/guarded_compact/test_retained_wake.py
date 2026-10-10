@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _agent, _insert
+from agent.tests.claim.test_inbound_ownership import _insert, agent_row
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -19,9 +19,9 @@ async def test_actual_scan_keeps_pending_compact_and_later_chat_on_work_lane(
     model_catalog: ModelCatalog,
 ) -> None:
     accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
-    other = _agent(db_conn)
+    other = agent_row(db_conn)
     _insert(db_conn, other)
-    quiet = _agent(db_conn)
+    quiet = agent_row(db_conn)
     rows = await accepted.host.pending_inbound_wakes(180)
     work = {row.agent_id: row for row in rows}
     assert set(work) == {accepted.agent, other} and quiet not in work

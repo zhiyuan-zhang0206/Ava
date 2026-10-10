@@ -9,11 +9,16 @@ leading `db` and the hierarchy-worker's `prepare` moved; the stored scripts stil
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from base.telemetry import EventPipeline
 from cli.commands.management import schedules_verify as _verify
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # The hierarchy-worker script as stored before the library layer took `db` from its caller.
 _OLD_HIERARCHY = """\
@@ -114,16 +119,26 @@ def test_a_class_constructor_is_checked_too() -> None:
 
 
 def test_check_file_prints_the_call_signature_verdict(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     stale = tmp_path / "stale.py"
     stale.write_text(_OLD_HIERARCHY, encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(stale)) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(stale), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
     assert "CHECK-RED missing=call-signature:L15 catch_up()" in capsys.readouterr().out
 
 
 def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
     capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The sweep reads every row of the table; a script an agent wrote is no exception."""
     rows = [(1, "built-in", _NEW_HIERARCHY), (9, "agent-made-poller", _OLD_HIERARCHY)]
@@ -134,7 +149,15 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
     ports = _verify.VerifyPorts(
         read_rows=lambda: rows, check_script=_verify._check_script, report=no_alert
     )
-    assert _verify.cmd_schedules_verify(notify=False, ports=ports) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            notify=False,
+            ports=ports,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 1
+    )
     out = capsys.readouterr().out
     assert "checked=2 green=1 red=1 rc=1" in out
     assert "RED id=9 name=agent-made-poller missing=call-signature:" in out
@@ -256,9 +279,17 @@ def test_a_star_import_disables_the_check() -> None:
 
 
 def test_check_file_prints_the_undefined_name_verdict(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     stale = tmp_path / "stale.py"
     stale.write_text("from base.config import settings\nroot = base.__file__\n", encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(stale)) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(stale), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
     assert "CHECK-RED missing=undefined-name:L2 base" in capsys.readouterr().out

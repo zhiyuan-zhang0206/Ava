@@ -22,13 +22,13 @@ import pytest
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.tests._health_helpers import _find_free_port, _http_get
-from base.daemon.tests.health_support import token_digest
+from base.daemon.tests.health_support import token_digest, unknown_image
 
 
 @pytest.mark.asyncio
 async def test_healthz_returns_200_with_json_body() -> None:
     port = _find_free_port()
-    server = await health.start_health_server("agent_host", port=port)
+    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
         status, body = await _http_get(port, "/healthz")
         assert status == 200
@@ -138,7 +138,9 @@ async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> No
     trim = group.register("trim", timeout_s=60.0)
     dispatch.fail("dispatch exceeded hard deadline")
     trim.beat()
-    server = await health.start_health_server("events_maintenance", port=port, liveness=group)
+    server = await health.start_health_server(
+        "events_maintenance", port=port, liveness=group, image=unknown_image()
+    )
     try:
         status, body = await _http_get(port, "/healthz")
         payload = json.loads(body)
@@ -156,7 +158,9 @@ async def test_healthz_503_when_liveness_stale() -> None:
     timeout_s=-1.0 keeps stale_for() (always >= 0) permanently over the bound."""
     port = _find_free_port()
     stale = health.Liveness(timeout_s=-1.0)
-    server = await health.start_health_server("agent_host", port=port, liveness=stale)
+    server = await health.start_health_server(
+        "agent_host", port=port, liveness=stale, image=unknown_image()
+    )
     try:
         status, body = await _http_get(port, "/healthz")
         assert status == 503
@@ -175,7 +179,9 @@ async def test_healthz_200_when_liveness_fresh() -> None:
     """A beating loop keeps /healthz at 200, with stale_for reported."""
     port = _find_free_port()
     fresh = health.Liveness(timeout_s=1e9)
-    server = await health.start_health_server("agent_host", port=port, liveness=fresh)
+    server = await health.start_health_server(
+        "agent_host", port=port, liveness=fresh, image=unknown_image()
+    )
     try:
         status, body = await _http_get(port, "/healthz")
         assert status == 200
@@ -191,6 +197,7 @@ async def test_healthz_component_failure_surfaces_the_component_reason() -> None
         "agent_host",
         port=port,
         components=[component("worker", DEGRADED, detail="job stuck")],
+        image=unknown_image(),
     )
     try:
         status, body = await _http_get(port, "/healthz")
@@ -218,6 +225,7 @@ async def test_healthz_evaluates_component_provider_for_each_request() -> None:
         port=port,
         components=components,
         extra=lambda: {"saturation": calls},
+        image=unknown_image(),
     )
     try:
         _first_status, first = await _http_get(port, "/healthz")
@@ -232,7 +240,7 @@ async def test_healthz_evaluates_component_provider_for_each_request() -> None:
 @pytest.mark.asyncio
 async def test_unknown_path_returns_404() -> None:
     port = _find_free_port()
-    server = await health.start_health_server("labeler", port=port)
+    server = await health.start_health_server("labeler", port=port, image=unknown_image())
     try:
         status, _ = await _http_get(port, "/garbage")
         assert status == 404
@@ -272,6 +280,7 @@ async def test_extra_route_requires_auth_when_token_set() -> None:
         port=port,
         extra_routes={("POST", "/ops"): _ok_route},
         auth_digests=frozenset({token_digest("s3cret")}),
+        image=unknown_image(),
     )
     try:
         s_none, _ = await _http_request(port, "POST", "/ops", body=b"{}")
@@ -295,6 +304,7 @@ async def test_healthz_unauthenticated_even_with_auth_token() -> None:
         port=port,
         extra_routes={("POST", "/ops"): _ok_route},
         auth_digests=frozenset({token_digest("s3cret")}),
+        image=unknown_image(),
     )
     try:
         status, _ = await _http_get(port, "/healthz")  # no Authorization header
@@ -308,7 +318,10 @@ async def test_extra_route_open_when_no_auth_token() -> None:
     """No auth_digests (the loopback daemons): extra routes need no bearer."""
     port = _find_free_port()
     server = await health.start_health_server(
-        "memory_indexer", port=port, extra_routes={("POST", "/ops"): _ok_route}
+        "memory_indexer",
+        port=port,
+        extra_routes={("POST", "/ops"): _ok_route},
+        image=unknown_image(),
     )
     try:
         status, _ = await _http_request(port, "POST", "/ops", body=b"{}")
@@ -320,7 +333,7 @@ async def test_extra_route_open_when_no_auth_token() -> None:
 @pytest.mark.asyncio
 async def test_stop_idempotent() -> None:
     port = _find_free_port()
-    server = await health.start_health_server("labeler", port=port)
+    server = await health.start_health_server("labeler", port=port, image=unknown_image())
     await health.stop_health_server(server)
     # Second stop does not raise
     await health.stop_health_server(server)

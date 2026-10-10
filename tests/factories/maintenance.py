@@ -8,9 +8,11 @@ from unittest.mock import MagicMock
 import psycopg
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import machine_name
 from base.db import create_agent
 from base.deploy.maintenance import admission, pause_owner
+from cli.database import operator_database_factory
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
@@ -32,6 +34,7 @@ def maintenance_agent(conn: psycopg.Connection[Any]) -> int:
 
 
 def start_cluster_through_ready_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    database_factory = operator_database_factory()
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle._pause_resume import resume_after_start
 
@@ -40,9 +43,11 @@ def start_cluster_through_ready_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
     @resume_after_start
-    def ready_start(operation: pause_owner.PauseOwnerSnapshot | None) -> int:
+    def ready_start(
+        operation: pause_owner.PauseOwnerSnapshot | None, database_factory: DatabaseFactory
+    ) -> int:
         admission.require_start_allowed(operation)
         return 0
 
-    assert ready_start(None) == 0
+    assert ready_start(None, database_factory) == 0
     assert not admission.held()

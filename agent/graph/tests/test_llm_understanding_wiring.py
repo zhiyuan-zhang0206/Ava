@@ -24,6 +24,7 @@ from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -35,7 +36,7 @@ async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
         yield c
 
 
-def _runtime(chunks: list[AIMessageChunk]) -> Runtime[AvaContext]:
+def _runtime(chunks: list[AIMessageChunk], database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     llm = MagicMock()
     llm.bind_tools.return_value = llm
     llm.astream.return_value = _aiter(chunks)
@@ -47,7 +48,7 @@ def _runtime(chunks: list[AIMessageChunk]) -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
             catalog=build_model_catalog(),
@@ -110,11 +111,14 @@ def enqueued(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 
 @pytest.mark.parametrize("tool", [True, False])
 async def test_cut_rides_the_tool_and_the_idle_command(
-    fake_cancel_event: asyncio.Event, enqueued: list[dict], tool: bool
+    fake_cancel_event: asyncio.Event,
+    enqueued: list[dict],
+    tool: bool,
+    database_gate: ProcessDbGate,
 ) -> None:
     result = await llm_node(
         _state(),
-        _runtime(_turn(2500, tool=tool)),
+        _runtime(_turn(2500, tool=tool), database_gate=database_gate),
         {"configurable": {"thread_id": "7"}},
         ledger=LlmLedger(),
     )
@@ -128,11 +132,11 @@ async def test_cut_rides_the_tool_and_the_idle_command(
 
 
 async def test_turn_under_the_threshold_leaves_the_state_alone(
-    fake_cancel_event: asyncio.Event, enqueued: list[dict]
+    fake_cancel_event: asyncio.Event, enqueued: list[dict], database_gate: ProcessDbGate
 ) -> None:
     result = await llm_node(
         _state(),
-        _runtime(_turn(10, tool=True)),
+        _runtime(_turn(10, tool=True), database_gate=database_gate),
         {"configurable": {"thread_id": "7"}},
         ledger=LlmLedger(),
     )

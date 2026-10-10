@@ -13,8 +13,13 @@ the desired service file. Service-specific steps require a selected consumer;
 host wiring and private data-plane preparation remain shared dependencies.
 Standalone converge resolves the persisted selection and capability gates.
 Each converge operation creates one lazy `ConfigBoot` and passes it through the
-required `ConvergeCtx.config` field. OS job registrations use live readers from
-that owner's view, including the package refresh cadence and WAL-G schedule.
+required `ConvergeCtx.config` field. Its required `producer` borrows the entry's
+same lazy event-pipeline owner; LGTM render failures use that writer without
+constructing another pipeline. Its required `database_factory` borrows the
+entry's operator owner across all selected steps. Host capability steps and OS
+job registrations read that owner's live view
+at each existing step boundary, including browser, permission helpers, memory,
+transfer, GitHub PR checks, the package refresh cadence and WAL-G schedule.
 The WAL-G preparation and job steps read the same `view.walg.walg_config_file`;
 clearing it still retires the existing job without an OS registration gate.
 Creating the context does not deliver configuration or register an OS job.

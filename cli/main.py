@@ -21,21 +21,23 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from base.host.env.bootstrap import BootstrapFetchError
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
-from base.native_process import code_version
 from base.native_process.os_platform import (
     LockTimeoutError,
     ensure_line_buffered_stdio,
 )
+from base.telemetry import EventPipeline
 
 # Only the settings-free parser composition entry is imported here. Domain
 # adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli import parsers
+from cli.database import OperatorEventPipeline
 
 __all__ = ["main"]
 
@@ -55,7 +57,7 @@ _CLI_LOG_NAMES: dict[tuple[str, ...], str] = {
 }
 
 
-def _init_cli_logging(args_in: list[str]) -> None:
+def _init_cli_logging(args_in: list[str], *, producer: Callable[[], EventPipeline]) -> None:
     """Open this verb's sinks, once its Settings may be built.
 
     Building them builds Settings, so `ava start` calls this only after the home
@@ -66,8 +68,13 @@ def _init_cli_logging(args_in: list[str]) -> None:
     name = _CLI_LOG_NAMES.get(tuple(args_in[:1])) or _CLI_LOG_NAMES.get(tuple(args_in[:2]))
     if name is not None:
         from base.log import init_cli_process
+        from cli.database import operator_machine_name
 
-        init_cli_process(name=name)
+        init_cli_process(
+            name=name,
+            producer=producer,
+            machine_reader=operator_machine_name,
+        )
 
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
@@ -203,6 +210,22 @@ def _deliver_lite_api_token() -> None:
         os.environ[API_TOKEN_ENV] = capability.api.token
 
 
+def _close_command_pipeline(
+    producer: OperatorEventPipeline, *, primary: BaseException | None
+) -> None:
+    try:
+        result = producer.close(timeout=5.0)
+        if result is not None:
+            from base.telemetry import DrainStatus
+
+            if result.status is DrainStatus.UNFINISHED:
+                print("ava: command telemetry writer did not finish before exit", file=sys.stderr)
+    except BaseException as cleanup:
+        if primary is None:
+            raise
+        primary.add_note(f"command telemetry shutdown failed: {cleanup!r}")
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -212,12 +235,6 @@ def main(
     # updater session) streams its own progress in real time instead of block-buffering
     # it to the end of the log, out of order against its children's unbuffered output.
     ensure_line_buffered_stdio()
-    # The operator CLI is exempt from the database code-version gate: `ava stop`
-    # writes to drain agents, so a host left behind by an update must still be able
-    # to run it. Service processes are launched with `python -m <module>`, never
-    # through here, so every one of them stays gated. Declared first, before any
-    # verb can dial the database.
-    code_version.exempt_from_db_gate()
     _normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
     # The checkout gate comes first, before `boot` and before anything loads a
@@ -242,9 +259,16 @@ def main(
 
     children = [] if retained_children is None else retained_children
     args = parsers.parse_args(argv, retained_children=children)
+    from cli.database import operator_database_factory, operator_event_pipeline
+
+    database_factory = operator_database_factory()
+    args.database_factory = database_factory
+    args.database_for_url = database_factory.for_url
+    producer = operator_event_pipeline(database_factory)
+    args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
-            _init_cli_logging(args_in)
+            _init_cli_logging(args_in, producer=producer)
         return args.func(args)
     except LockTimeoutError as exc:
         print(
@@ -268,6 +292,7 @@ def main(
         if telemetry is not None:
             with telemetry.failure_isolated("CLI telemetry drain"):
                 telemetry.sync(timeout=5.0, bounded=True)
+        _close_command_pipeline(producer, primary=sys.exception())
 
 
 if __name__ == "__main__":

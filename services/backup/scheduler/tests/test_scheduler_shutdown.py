@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -25,6 +25,8 @@ import psutil
 import pytest
 
 from base.config import ConfigBoot, ensure_eager, settings
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.backup.scheduler import daemon, worker
 from services.backup.scheduler.operation.worker_process import CompletedOperation, StopSignal
 
@@ -113,7 +115,9 @@ def _exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
     """The operation worker's real entry, with only its external effects patched."""
     from scripts.data_plane_ops import restore_drill
 
-    def restore(*, foreground: bool, scratch_root: Path) -> None:
+    def restore(
+        *, database_for_url: Callable[[str], Database], foreground: bool, scratch_root: Path
+    ) -> None:
         assert foreground
         (scratch_root / "backup.dump").write_bytes(b"PLAINTEXT")
         _restore(root, "stubborn" if mode == "restore-stubborn" else mode, postgres_base)
@@ -203,7 +207,7 @@ def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
 def _run_daemon() -> None:
     daemon.install_graceful_shutdown("backup-shutdown-test")
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(daemon.run(config=ConfigBoot()))
+        asyncio.run(daemon.run(config=ConfigBoot(), image=LoadedCommit(Path(), None)))
 
 
 def _wait_file(path: Path, process: subprocess.Popen[str]) -> None:

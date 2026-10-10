@@ -18,6 +18,7 @@ import tempfile
 import time
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlparse
@@ -25,7 +26,9 @@ from urllib.parse import urlparse
 import yaml
 from dotenv import dotenv_values
 
+from base.agents.context.clients import DatabaseFactory
 from base.host.net.resilience import Policy, retry
+from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from base.telemetry.lgtm_local import storage_dir as _storage_dir
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
@@ -329,7 +332,14 @@ def _warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
         )
 
 
-def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
+def _render_configs(
+    repo: Path,
+    native_dir: Path,
+    ava_home: Path,
+    *,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+) -> None:
     """Render native templates from this checkout and host configuration."""
     from base.config import settings
 
@@ -364,7 +374,9 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
             "AVA_LGTM_GRAFANA_PORT": str(settings.observability.lgtm_grafana_port),
         },
     )
-    loki_url, prometheus_url, pg_url = _observability_datasource_urls()
+    loki_url, prometheus_url, pg_url = _observability_datasource_urls(
+        database_factory=database_factory
+    )
     substitutions = {
         "AVA_HOME": str(ava_home),
         "LGTM_STORAGE_DIR": str(_storage_dir(ava_home)),
@@ -422,7 +434,7 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     rendered_run_script = native_dir / "grafana" / "run.sh"
     _write_if_changed(rendered_run_script, run_script)
     rendered_run_script.chmod(0o755)
-    _render_provisioning(repo, native_dir)
+    _render_provisioning(repo, native_dir, database_factory=database_factory, producer=producer)
 
 
 def _render_grafana_admin_password(native_dir: Path) -> None:
@@ -457,7 +469,14 @@ def _render_grafana_telegram_env(native_dir: Path) -> None:
     _write_if_changed(env_file, content, mode=0o600)
 
 
-def ensure_lgtm_native(repo: Path, ava_home: Path, *, services: frozenset[str]) -> None:
+def ensure_lgtm_native(
+    repo: Path,
+    ava_home: Path,
+    *,
+    services: frozenset[str],
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+) -> None:
     """Prepare selected pinned binaries and config; lifecycle belongs to ava-root."""
     if not services or services - set(BACKENDS):
         raise ValueError("native LGTM preparation requires selected backend names")
@@ -485,7 +504,9 @@ def ensure_lgtm_native(repo: Path, ava_home: Path, *, services: frozenset[str]) 
             continue
         _download_and_verify(name, asset["version"], asset, native_dir)
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
-    _render_configs(repo, native_dir, ava_home)
+    _render_configs(
+        repo, native_dir, ava_home, database_factory=database_factory, producer=producer
+    )
     if "grafana" in services:
         _render_grafana_admin_password(native_dir)
         _render_grafana_telegram_env(native_dir)
@@ -523,4 +544,10 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
     selected = ctx.services.intersection(BACKENDS)
     if not is_station_ctx(ctx) or not selected:
         return
-    ensure_lgtm_native(ctx.repo, ctx.ava_home, services=selected)
+    ensure_lgtm_native(
+        ctx.repo,
+        ctx.ava_home,
+        services=selected,
+        database_factory=ctx.database_factory,
+        producer=ctx.producer,
+    )

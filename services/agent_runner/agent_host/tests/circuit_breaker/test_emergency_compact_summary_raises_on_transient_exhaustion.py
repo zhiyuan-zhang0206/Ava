@@ -24,6 +24,7 @@ from agent.hooks.compact import (
 from base.agents.context import AvaContext
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -61,7 +62,7 @@ async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> Non
 
 
 async def test_llm_node_closes_circuit_on_success(
-    hosted_resources: HostedTurnResources,
+    hosted_resources: HostedTurnResources, *, database_gate: ProcessDbGate
 ) -> None:
     """A successful LLM call is the circuit-healed signal — the breaker closes
     so heartbeats resume routing normally."""
@@ -79,7 +80,12 @@ async def test_llm_node_closes_circuit_on_success(
 
     cmd = await llm_node(
         state,
-        _llm_make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _llm_make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _LLM_CONFIG,
         ledger=LlmLedger(),
     )
@@ -89,7 +95,7 @@ async def test_llm_node_closes_circuit_on_success(
 
 
 async def test_llm_node_cancel_does_not_close_circuit(
-    hosted_resources: HostedTurnResources, fake_cancel_event
+    hosted_resources: HostedTurnResources, fake_cancel_event, *, database_gate: ProcessDbGate
 ) -> None:
     """The cancel path discards the partial generation — no stream completed,
     so the breaker must stay open (closing it without a healed call would
@@ -111,7 +117,12 @@ async def test_llm_node_cancel_does_not_close_circuit(
     trigger = asyncio.create_task(_trigger())
     cmd = await llm_node(
         state,
-        _llm_make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _llm_make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _LLM_CONFIG,
         ledger=LlmLedger(),
     )
@@ -127,6 +138,8 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     loguru_records: list[dict[str, Any]],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Two consecutive permanent rejections with no successful turn between
     them halt automatic recovery: the durable streak reaches the threshold,
@@ -138,14 +151,14 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     )
     publisher = _RecordingPublisher()
 
-    await _reject_turn(aops_pool, child_id, publisher=publisher)
+    await _reject_turn(aops_pool, child_id, publisher=publisher, database_gate=database_gate)
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
         (child_id,),
     ).fetchone()
     assert row == (1, None)  # one rejection is not a halt
 
-    await _reject_turn(aops_pool, child_id, publisher=publisher)
+    await _reject_turn(aops_pool, child_id, publisher=publisher, database_gate=database_gate)
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason, "
         "EXTRACT(EPOCH FROM (wake_suppressed_until - clock_timestamp())) "
@@ -177,6 +190,7 @@ async def test_transient_rejection_does_not_count_or_trip(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Only the PERMANENT class counts: a configured-fatal/transient rejection
     aborts the turn but never arms the recovery breaker."""
@@ -185,7 +199,13 @@ async def test_transient_rejection_does_not_count_or_trip(
         "rate limited", error_class="transient", provider="deepseek", status=429
     )
     for _ in range(3):
-        await _reject_turn(aops_pool, child_id, publisher=_RecordingPublisher(), exc=exc)
+        await _reject_turn(
+            aops_pool,
+            child_id,
+            publisher=_RecordingPublisher(),
+            exc=exc,
+            database_gate=database_gate,
+        )
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
         (child_id,),
@@ -199,6 +219,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The completed-turn UPDATE is the single reset: it clears the corpse
     marker, the recovery-breaker streak, and the recorded reject reason
@@ -220,7 +241,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=configured_policy().clock_factory,

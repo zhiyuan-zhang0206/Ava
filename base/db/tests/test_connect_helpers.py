@@ -34,7 +34,6 @@ from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.config import settings
 from base.db import Database, connections
 from base.db import code_version_gate as gate
-from base.native_process import code_version
 from base.telemetry import process_name
 
 
@@ -42,19 +41,23 @@ def _session_direct_url(_config: object = None, **_kwargs: object) -> str:
     return settings.data_plane.db_url
 
 
-def test_connect_runs_a_query() -> None:
-    with db.connect() as conn, conn.cursor() as cur:
+def test_connect_runs_a_query(
+    process_gate: gate.ProcessDbGate,
+) -> None:
+    with db.connect(gate=process_gate) as conn, conn.cursor() as cur:
         cur.execute("SELECT 1")
         assert cur.fetchone() == (1,)
 
 
-def test_connect_autocommit_passthrough() -> None:
-    with db.connect(autocommit=True) as conn:
+def test_connect_autocommit_passthrough(process_gate: gate.ProcessDbGate) -> None:
+    with db.connect(autocommit=True, gate=process_gate) as conn:
         assert conn.autocommit is True
 
 
-def test_connect_defaults_to_manual_commit() -> None:
-    with db.connect() as conn:
+def test_connect_defaults_to_manual_commit(
+    process_gate: gate.ProcessDbGate,
+) -> None:
+    with db.connect(gate=process_gate) as conn:
         assert conn.autocommit is False
 
 
@@ -69,8 +72,10 @@ def test_connect_url_bounds_statements_unless_unbounded() -> None:
         assert conn.execute("SHOW statement_timeout").fetchone() == ("0",)
 
 
-def test_pool_hands_out_working_connections() -> None:
-    pool = db.pool(min_size=1, max_size=2)
+def test_pool_hands_out_working_connections(
+    process_gate: gate.ProcessDbGate,
+) -> None:
+    pool = db.pool(gate=process_gate, min_size=1, max_size=2)
     try:
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute("SELECT 1")
@@ -113,13 +118,16 @@ def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     monkeypatch.setattr(os, "_exit", fake_exit)
     monkeypatch.setattr(loguru_logger, "remove", keep)
     monkeypatch.setattr(logging, "shutdown", keep)
-    monkeypatch.setattr(code_version, "get", lambda: _VERSION)
-    monkeypatch.setattr(code_version, "db_gate_applies", lambda: True)
-    monkeypatch.setattr(gate, "_last_read_at", None)
     return exits
 
 
-# every test here runs as a gated process, as the fixture was autouse
+@pytest.fixture
+def process_gate(_gated_process: list[int]) -> gate.ProcessDbGate:
+    """The test process's explicit budget, with the original fixed version and identity."""
+    return gate.ProcessDbGate(version=lambda: _VERSION, process=process_name())
+
+
+# Every test retains the original observable hard-exit instrumentation.
 pytestmark = pytest.mark.usefixtures("_gated_process")
 
 
@@ -134,21 +142,24 @@ def _clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 
 def test_the_first_borrow_reads_and_the_next_thirty_seconds_do_not(
+    process_gate: gate.ProcessDbGate,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = _clock(monkeypatch)
-    assert gate.min_read_due() is True
-    gate.observe_minimum(0)
-    assert gate.min_read_due() is False
+    assert process_gate.min_read_due() is True
+    process_gate.observe_minimum(0)
+    assert process_gate.min_read_due() is False
     now[0] += gate.MIN_REFRESH_INTERVAL_S - 0.1
-    assert gate.min_read_due() is False
+    assert process_gate.min_read_due() is False
     now[0] += 0.1
-    assert gate.min_read_due() is True
+    assert process_gate.min_read_due() is True
 
 
 def test_an_exempt_process_never_reads_the_minimum(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(code_version, "db_gate_applies", lambda: False)
-    assert gate.min_read_due() is False
+    process_gate = gate.ProcessDbGate(
+        process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
+    )
+    assert process_gate.min_read_due() is False
 
 
 # ── the verdict ──────────────────────────────────────────────────────────────
@@ -156,13 +167,14 @@ def test_an_exempt_process_never_reads_the_minimum(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.parametrize("minimum", [0, _VERSION - 1, _VERSION])
 def test_a_process_at_or_above_the_minimum_carries_on(
-    minimum: int, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate, minimum: int, _gated_process: list[int]
 ) -> None:
-    gate.observe_minimum(minimum)
+    process_gate.observe_minimum(minimum)
     assert _gated_process == []
 
 
 def test_a_process_below_the_minimum_logs_critical_and_exits(
+    process_gate: gate.ProcessDbGate,
     _gated_process: list[int],
 ) -> None:
     rendered: list[str] = []
@@ -173,7 +185,7 @@ def test_a_process_below_the_minimum_logs_critical_and_exits(
     sink_id = loguru_logger.add(capture, level="CRITICAL", diagnose=False)
     try:
         with pytest.raises(_Exited) as exited:
-            gate.observe_minimum(_VERSION + 1)
+            process_gate.observe_minimum(_VERSION + 1)
     finally:
         type(loguru_logger).remove(loguru_logger, sink_id)  # the fixture stubbed the instance's
 
@@ -186,12 +198,14 @@ def test_a_process_below_the_minimum_logs_critical_and_exits(
 
 
 def test_a_process_that_dials_before_opening_its_sinks_still_says_why(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    process_gate: gate.ProcessDbGate,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """loguru discards a record no handler receives; the refusal then goes to stderr."""
     monkeypatch.setattr(gate, "_has_log_sink", lambda: False)
     with pytest.raises(_Exited):
-        gate.observe_minimum(_VERSION + 1)
+        process_gate.observe_minimum(_VERSION + 1)
     assert f"below the cluster minimum {_VERSION + 1}" in capsys.readouterr().err
 
 
@@ -236,6 +250,7 @@ class _FakeConn:
 
 
 def test_the_restore_reads_the_minimum_at_most_every_interval(
+    process_gate: gate.ProcessDbGate,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two statements per borrow, always; the second is the plain statement ceiling
@@ -244,12 +259,12 @@ def test_the_restore_reads_the_minimum_at_most_every_interval(
     conn = _FakeConn(minimum=0)
     restore: Any = connections._restore_pooled_session
 
-    restore(conn)
-    restore(conn)
+    restore(conn, gate=process_gate)
+    restore(conn, gate=process_gate)
     now[0] += gate.MIN_REFRESH_INTERVAL_S
-    restore(conn)
+    restore(conn, gate=process_gate)
 
-    name = (gate.application_name(),)
+    name = (process_gate.application_name(),)
     reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
     combined = connections.PG_POOLED_RESTORE_WITH_MIN_SQL
     assert conn.executed == [
@@ -264,12 +279,13 @@ def test_the_restore_reads_the_minimum_at_most_every_interval(
 
 
 def test_the_restore_refuses_when_the_read_minimum_is_above_this_process(
+    process_gate: gate.ProcessDbGate,
     _gated_process: list[int],
 ) -> None:
     conn = _FakeConn(minimum=_VERSION + 10)
     restore: Any = connections._restore_pooled_session
     with pytest.raises(_Exited):
-        restore(conn)
+        restore(conn, gate=process_gate)
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
     assert conn.commits == 0
 
@@ -301,18 +317,18 @@ class _FakeAsyncConn(_FakeConn):
 
 
 async def test_the_async_restore_follows_the_same_schedule_and_verdict(
-    monkeypatch: pytest.MonkeyPatch, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate, monkeypatch: pytest.MonkeyPatch, _gated_process: list[int]
 ) -> None:
     now = _clock(monkeypatch)
     conn = _FakeAsyncConn(minimum=0)
     restore: Any = connections._restore_pooled_session_async
 
-    await restore(conn)
-    await restore(conn)
+    await restore(conn, gate=process_gate)
+    await restore(conn, gate=process_gate)
     now[0] += gate.MIN_REFRESH_INTERVAL_S
-    await restore(conn)
+    await restore(conn, gate=process_gate)
 
-    name = (gate.application_name(),)
+    name = (process_gate.application_name(),)
     reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
     combined = connections.PG_POOLED_RESTORE_WITH_MIN_SQL
     assert conn.executed == [
@@ -327,16 +343,18 @@ async def test_the_async_restore_follows_the_same_schedule_and_verdict(
     conn.minimum = _VERSION + 1
     now[0] += gate.MIN_REFRESH_INTERVAL_S
     with pytest.raises(_Exited):
-        await restore(conn)
+        await restore(conn, gate=process_gate)
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
 
 
 def test_an_exempt_process_keeps_the_plain_restore(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(code_version, "db_gate_applies", lambda: False)
+    process_gate = gate.ProcessDbGate(
+        process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
+    )
     conn = _FakeConn(minimum=10**9)
     restore: Any = connections._restore_pooled_session
 
-    restore(conn)
+    restore(conn, gate=process_gate)
 
     reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
     assert conn.executed == [(reset, ()), (plain, ("ava:cli",))]
@@ -376,18 +394,18 @@ def _read_minimum() -> int:
 
 
 def test_gateway_start_raises_the_minimum_to_its_version(
-    stored_minimum: int, database: Database
+    process_gate: gate.ProcessDbGate, stored_minimum: int, database: Database
 ) -> None:
     _set_minimum(0)
-    assert gate.raise_min_code_version(database) == _VERSION
+    assert process_gate.raise_min_code_version(database) == _VERSION
     assert _read_minimum() == _VERSION
 
 
 def test_a_repeat_start_at_the_same_version_changes_nothing(
-    stored_minimum: int, database: Database
+    process_gate: gate.ProcessDbGate, stored_minimum: int, database: Database
 ) -> None:
     _set_minimum(_VERSION)
-    assert gate.raise_min_code_version(database) == _VERSION
+    assert process_gate.raise_min_code_version(database) == _VERSION
     assert _read_minimum() == _VERSION
 
 
@@ -398,21 +416,26 @@ def test_the_raise_is_greatest_and_never_lowers_the_minimum(
     closes (two gateways starting at once) is reproduced by an exempt dial, which
     skips the read, carrying an older version."""
     _set_minimum(_VERSION + 25)
-    monkeypatch.setattr(code_version, "db_gate_applies", lambda: False)
-    monkeypatch.setattr(code_version, "get", lambda: _VERSION)
+    process_gate = gate.ProcessDbGate(
+        process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
+    )
 
-    assert gate.raise_min_code_version(database) == _VERSION + 25
+    process_gate = gate.ProcessDbGate(process="cli", version=lambda: _VERSION, exempt=True)
+    assert (
+        process_gate.raise_min_code_version(Database.from_settings(gate=process_gate))
+        == _VERSION + 25
+    )
     assert _read_minimum() == _VERSION + 25
 
 
 def test_the_raise_refuses_when_the_singleton_row_is_missing(
-    stored_minimum: int, database: Database
+    process_gate: gate.ProcessDbGate, stored_minimum: int, database: Database
 ) -> None:
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
         conn.execute("DELETE FROM deployment_state")
         try:
             with pytest.raises(RuntimeError, match="singleton row is missing"):
-                gate.raise_min_code_version(database)
+                process_gate.raise_min_code_version(database)
         finally:
             conn.execute(
                 "INSERT INTO deployment_state (id, min_code_version) VALUES (1, %s)",
@@ -421,21 +444,21 @@ def test_the_raise_refuses_when_the_singleton_row_is_missing(
 
 
 def test_a_pooled_dial_below_the_stored_minimum_ends_the_process(
-    stored_minimum: int, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate, stored_minimum: int, _gated_process: list[int]
 ) -> None:
     _set_minimum(_VERSION + 1)
     with pytest.raises(_Exited):
-        db.connect()
+        db.connect(gate=process_gate)
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
 
 
 def test_a_pooled_dial_at_the_stored_minimum_works_and_keeps_the_ceiling(
-    stored_minimum: int, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate, stored_minimum: int, _gated_process: list[int]
 ) -> None:
     """The combined statement is `SET statement_timeout` as an expression: after the
     read, the session carries the same 60s ceiling the plain restore gives."""
     _set_minimum(_VERSION)
-    with db.connect() as conn:
+    with db.connect(gate=process_gate) as conn:
         row = conn.execute("SHOW statement_timeout").fetchone()
         assert row is not None and row[0] == "1min"
         row = conn.execute("SHOW application_name").fetchone()
@@ -444,14 +467,14 @@ def test_a_pooled_dial_at_the_stored_minimum_works_and_keeps_the_ceiling(
 
 
 def test_a_dict_row_pool_borrows_through_the_gate(
-    stored_minimum: int, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate, stored_minimum: int, _gated_process: list[int]
 ) -> None:
     """The read builds its own tuple cursor, so a pool whose connections return
     dicts is not broken by it."""
     from psycopg.rows import dict_row
 
     _set_minimum(_VERSION)
-    pool = db.pool(min_size=1, max_size=1, row_factory=dict_row, autocommit=True)
+    pool = db.pool(gate=process_gate, min_size=1, max_size=1, row_factory=dict_row, autocommit=True)
     try:
         with pool.connection() as conn:
             row = conn.execute("SELECT 1 AS one").fetchone()
@@ -462,33 +485,39 @@ def test_a_dict_row_pool_borrows_through_the_gate(
 
 
 async def test_the_async_restore_reads_the_stored_minimum(
-    monkeypatch: pytest.MonkeyPatch, stored_minimum: int, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate,
+    monkeypatch: pytest.MonkeyPatch,
+    stored_minimum: int,
+    _gated_process: list[int],
 ) -> None:
     now = _clock(monkeypatch)
     _set_minimum(_VERSION)
     restore: Any = connections._restore_pooled_session_async
     async with await psycopg.AsyncConnection.connect(settings.data_plane.db_url) as aconn:
-        await restore(aconn)
+        await restore(aconn, gate=process_gate)
         cur = await aconn.execute("SHOW statement_timeout")
         row = await cur.fetchone()
         assert row is not None and row[0] == "1min"
     assert _gated_process == []
 
     _set_minimum(_VERSION + 1)
-    assert gate.min_read_due() is False  # the read above is still fresh
+    assert process_gate.min_read_due() is False  # the read above is still fresh
     now[0] += gate.MIN_REFRESH_INTERVAL_S
-    assert gate.min_read_due() is True
+    assert process_gate.min_read_due() is True
     async with await psycopg.AsyncConnection.connect(settings.data_plane.db_url) as aconn:
         with pytest.raises(_Exited):
-            await restore(aconn)
+            await restore(aconn, gate=process_gate)
 
 
 def test_direct_dials_are_not_gated_and_carry_no_process_name(
-    monkeypatch: pytest.MonkeyPatch, stored_minimum: int, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate,
+    monkeypatch: pytest.MonkeyPatch,
+    stored_minimum: int,
+    _gated_process: list[int],
 ) -> None:
     _set_minimum(_VERSION + 1)
     monkeypatch.setattr(connections, "direct_db_url", _session_direct_url)
-    with db.connect(direct=True) as conn:
+    with db.connect(direct=True, gate=process_gate) as conn:
         params = conn.info.get_parameters()
         assert not params.get("application_name", "").startswith("ava:")
     assert _gated_process == []
@@ -498,17 +527,21 @@ def test_an_exempt_process_dials_as_the_cli_without_a_version(
     monkeypatch: pytest.MonkeyPatch, stored_minimum: int, _gated_process: list[int]
 ) -> None:
     _set_minimum(_VERSION + 1)
-    monkeypatch.setattr(code_version, "db_gate_applies", lambda: False)
-    monkeypatch.setattr(code_version, "get", lambda: pytest.fail("the CLI needs no version"))
+    process_gate = gate.ProcessDbGate(
+        process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
+    )
 
-    with db.connect() as conn:
+    with db.connect(gate=process_gate) as conn:
         row = conn.execute("SHOW application_name").fetchone()
         assert row is not None and row[0] == "ava:cli"
     assert _gated_process == []
 
 
 def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
-    monkeypatch: pytest.MonkeyPatch, stored_minimum: int, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate,
+    monkeypatch: pytest.MonkeyPatch,
+    stored_minimum: int,
+    _gated_process: list[int],
 ) -> None:
     """The gate needs no new grant: the runner group's blanket `SELECT` covers the
     column, and its inability to `UPDATE` the row (only the gateway raises the
@@ -519,8 +552,8 @@ def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
     runner_url = runner_projection()
     monkeypatch.setattr(settings.data_plane, "db_url", runner_url)
 
-    with db.connect() as conn:
-        assert gate.min_read_due() is False  # this dial read the minimum
+    with db.connect(gate=process_gate) as conn:
+        assert process_gate.min_read_due() is False  # this dial read the minimum
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE deployment_state SET min_code_version = 0")
     assert _gated_process == []

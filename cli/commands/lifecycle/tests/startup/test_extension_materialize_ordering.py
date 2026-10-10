@@ -23,9 +23,15 @@ which one works.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
+
+from base.telemetry import EventPipeline
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_materialization_is_not_a_converge_step() -> None:
@@ -56,26 +62,30 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     def skip_converge(*_args: object, **_kwargs: object) -> None:
         return None
 
-    def ensure_gateway_data_plane(*, retained_children: object) -> int:
+    def ensure_gateway_data_plane(
+        *, retained_children: object, database_factory: Callable[[], Any]
+    ) -> int:
         return 0
 
     def prepare_gateway_schema() -> None:
         return None
 
-    def migrate() -> None:
+    def migrate(*, database_factory: Callable[[], Any]) -> None:
         calls.append("migrate")
 
-    def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
+    def complete_gateway_data_plane(
+        *, refresh_schema: bool = True, database_factory: Callable[[], Any]
+    ) -> None:
         del refresh_schema
 
     def schema_check() -> int:
         calls.append("schema-check")
         return 0
 
-    def adopt() -> None:
+    def adopt(*, database_factory: Callable[[], Any]) -> None:
         calls.append("adopt")
 
-    def record_materialize() -> None:
+    def record_materialize(*, database_factory: Callable[[], Any]) -> None:
         calls.append("materialize")
 
     monkeypatch.setattr(converge_host, "converge_host", skip_converge)
@@ -88,7 +98,11 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     monkeypatch.setattr(materialize, "materialize_cluster_extensions", record_materialize)
 
 
-def test_start_materializes_after_the_schema_check(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_materializes_after_the_schema_check(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """The ordering inside `_prepare_cold_start`, asserted via monkeypatched seams.
 
     Brittle-looking on purpose: the invariant IS the order of three calls, and
@@ -103,7 +117,13 @@ def test_start_materializes_after_the_schema_check(monkeypatch: pytest.MonkeyPat
     calls: list[str] = []
     _instrument_cold_start_seams(monkeypatch, calls)
 
-    rc = _prepare_cold_start(Path("/repo"), frozenset({"gateway"}), ())
+    rc = _prepare_cold_start(
+        Path("/repo"),
+        frozenset({"gateway"}),
+        (),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
 
     assert rc == 0
     assert calls.index("migrate") < calls.index("materialize"), (
@@ -123,7 +143,9 @@ def test_standalone_converge_materializes_too() -> None:
     expects the machine to end up caught up."""
     from cli.commands.converge.host import cmd_converge
 
-    assert "materialize_cluster_extensions()" in inspect.getsource(cmd_converge)
+    assert "materialize_cluster_extensions(database_factory=database_factory)" in inspect.getsource(
+        cmd_converge
+    )
 
 
 def test_the_materializer_lives_beside_its_siblings() -> None:
@@ -135,7 +157,11 @@ def test_the_materializer_lives_beside_its_siblings() -> None:
     assert hasattr(materialize, "materialize_cluster_extensions")
 
 
-def test_start_adopts_before_it_materializes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_adopts_before_it_materializes(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """Both orders are correct, and one of them is tidier.
 
     An unclaimed local name is invisible to the materializer (it has no row) and
@@ -149,7 +175,13 @@ def test_start_adopts_before_it_materializes(monkeypatch: pytest.MonkeyPatch) ->
     calls: list[str] = []
     _instrument_cold_start_seams(monkeypatch, calls)
 
-    rc = _prepare_cold_start(Path("/repo"), frozenset({"gateway"}), ())
+    rc = _prepare_cold_start(
+        Path("/repo"),
+        frozenset({"gateway"}),
+        (),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
 
     assert rc == 0
     assert calls.index("adopt") < calls.index("materialize")
@@ -160,4 +192,6 @@ def test_standalone_converge_adopts_too() -> None:
     restarting it, and a machine holding un-adopted installs is not correct."""
     from cli.commands.converge.host import cmd_converge
 
-    assert "adopt_local_extensions()" in inspect.getsource(cmd_converge)
+    assert "adopt_local_extensions(database_factory=database_factory)" in inspect.getsource(
+        cmd_converge
+    )

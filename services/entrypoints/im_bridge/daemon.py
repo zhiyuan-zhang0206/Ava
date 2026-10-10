@@ -23,15 +23,19 @@ from typing import Any
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import PoolTimeout
 
-from base.cluster.machine import daemon_acceptance, gateway_auth_headers
+from base.cluster.machine import daemon_acceptance, gateway_auth_headers, validate_machine_name
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.emitter import build_pipeline
 from services.entrypoints.im_bridge.alert_outbound import AlertOutboundBridge
 from services.entrypoints.im_bridge.config import (
     FeishuCredentialsConfig,
@@ -274,7 +278,7 @@ async def _stop_resources(
     return errors
 
 
-async def run() -> None:
+async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     """Start the daemon: healthz -> pidfile -> load adapters -> serve."""
     if _is_running():
         _log.info("[im_bridge] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -288,7 +292,7 @@ async def run() -> None:
     # delivery); the pool is created here and owned by the daemon.
     from services.entrypoints.im_bridge.core import IMBridgeCore
 
-    db_pool = Database.from_settings().pool()
+    db_pool = database().pool()
     core = None
     health = None
     adapters: list[Any] = []
@@ -314,6 +318,7 @@ async def run() -> None:
                         ("POST", "/send/alert-outbound-v1"): alerts.handle,
                     },
                     auth_digests=daemon_acceptance(),
+                    image=image,
                 )
                 _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)
                 adapters = _load_adapters(core, frozenset(config.im_disabled_adapters))
@@ -357,7 +362,20 @@ def _gate_httpx_info_logs() -> None:
 
 
 def main() -> None:
-    init_gateway_process("im_bridge")
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="im_bridge")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="im_bridge",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        image=image,
+    )
     _gate_httpx_info_logs()
     install_graceful_shutdown("im_bridge")
     code = 0
@@ -369,7 +387,7 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(database=database, image=image))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[im_bridge] interrupted")

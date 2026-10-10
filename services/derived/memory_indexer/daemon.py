@@ -1,42 +1,16 @@
 """Memory indexer daemon — `watchdog` Observer + Gemini embed + backend upsert.
 
-After startup:
-  1. Cold start: full scan `~/.ava/memory/**/*.md`, diff against the
-     backend index (mtime + content_hash + provider fingerprint), embed
-     missing / changed files, prune deleted entries.
-  2. Start watchdog Observer to monitor fs events, push dirty paths to
-     a queue.
-  3. Main loop drains the queue every second (set dedup), batch
-     embed + upsert / delete.
+Cold-start reconciliation embeds missing or changed Markdown rows and prunes
+removed entries. A watchdog Observer feeds a deduplicated dirty queue; failed
+reconciles retry with bounded backoff. Rows contain a description and body
+chunks, aggregated back to paths by search. Backend changes require restart.
 
-An incomplete reconcile retries on bounded backoff and never needs a restart.
+The gateway checkout refreshes hourly to bound stale indexing after missed
+arbiter refreshes. Failed refreshes log ERROR and retry on the next cycle.
+API key and provider configuration belong to the process configuration owner.
 
-Backed by `AVA_MEMORY_SEARCH_BACKEND` (default `numpy`). Switching
-backends takes a restart; the cold-start scan rebuilds the new index.
-
-Each file indexes as 0-or-1 description row (frontmatter `description`,
-embedded on its own so short entity-bearing lines are not diluted by a
-long body) + N body-chunk rows (~1800 chars each, ~200-char overlap,
-paragraph-boundary aware). The backend's `search_topk` aggregates chunk
-hits back to paths, so search callers see no difference.
-
-API key comes from env `GEMINI_API_KEY`. `~/.ava/.env` is already the
-single source of secrets.
-
-Usage:
-    .venv/bin/python -m services.derived.memory_indexer.daemon
-
-Kept alive by the watchdog via `services.derived.memory_indexer.healthcheck`
-(HTTP /healthz on :8105).
-
-Refresh safety net: once an hour the daemon fast-forwards the gateway
-checkout to origin/main itself. The intended path is the arbiter's
-post-merge `ava memory refresh` (bundled into `ava memory arbiter merge`),
-but when that step is skipped or fails, the checkout — and therefore the
-search index — silently rots (the 2026-06-22 → 2026-08-01 staleness
-incident: 6 weeks of merged notes never searchable). Fetch + fast-forward
-is cheap; when HEAD moves, the fs observer below re-embeds the changed
-files, and a pull failure is logged at ERROR and retried next cycle.
+Run: python -m services.derived.memory_indexer.daemon
+Health: HTTP /healthz on :8105.
 """
 
 from __future__ import annotations
@@ -58,17 +32,24 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from base.cluster.machine import validate_machine_name
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import gateway_memory_dir
+from base.telemetry.delivery.receipts import DrainStatus
+from base.telemetry.emitter import build_pipeline
 from services.derived.memory_indexer import config as indexer_config
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.backends.factory import get_backend
@@ -654,7 +635,7 @@ def _close_backend(backend: MemorySearchBackend) -> None:
         _log.warning("[indexer] backend close failed during shutdown", exc_info=True)
 
 
-async def run(*, config: ConfigBoot) -> None:
+async def run(*, config: ConfigBoot, database: Callable[[], Database], image: LoadedCommit) -> None:
     """Write pidfile -> start healthz server -> cold-start -> drain loop.
 
     Both before cold-start — cold-start may take tens of seconds
@@ -700,6 +681,7 @@ async def run(*, config: ConfigBoot) -> None:
         endpoint.health_port,
         liveness=liveness,
         extra=lambda: _reconcile_health(retry),
+        image=image,
     )
     _log.info("[indexer] healthz listening on :%s", endpoint.health_port)
 
@@ -709,8 +691,8 @@ async def run(*, config: ConfigBoot) -> None:
     # never work (fatal) fails fast with the actionable fix instead of a 30s
     # retry storm; a merely-unreachable one rides into the retry loop with its
     # message attached to the terminal error (CTO ruling 2026-08-30 direction ②).
-    database = Database.from_settings()
-    preflight = probe_backend(inputs.backend_name(), database, uri_reader=inputs.search_uri)
+    db = database()
+    preflight = probe_backend(inputs.backend_name(), db, uri_reader=inputs.search_uri)
     if preflight.fatal:
         _log.critical(
             "[indexer] %s backend preflight FAILED: %s",
@@ -726,7 +708,7 @@ async def run(*, config: ConfigBoot) -> None:
             preflight.message,
         )
     backend = await _connect_backend_with_retry(
-        database,
+        db,
         provider,
         name=inputs.backend_name(),
         uri_reader=inputs.search_uri,
@@ -763,34 +745,52 @@ def main() -> None:
     """
     config = ConfigBoot()
     config.boot()
-    init_gateway_process(name="memory_indexer")
-    install_graceful_shutdown("memory_indexer")
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="memory_indexer")
+
+    def database() -> Database:
+        return Database(db_config_from_boot(config), gate=gate)
+
+    pipeline = build_pipeline(database=database)
     code = 0
-    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
-    # awaits `shutdown_default_executor`, joining the default executor's
-    # workers — a reconcile pass or embed batch among them — and a stop
-    # signal must never wait on those (see `_hard_exit`). The runner is
-    # therefore never closed: after the explicit drain below, teardown is
-    # skipped by the hard exit.
-    runner = asyncio.Runner()
     try:
-        runner.run(run(config=config))
-    except KeyboardInterrupt:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
-        _log.info("[indexer] received interrupt, shutting down")
-        # The signal path skips Runner's own cancellation, so drain the loop's
-        # tasks explicitly: run()'s finally still stops the observer, closes
-        # the backend and removes the pidfile. The executor is deliberately
-        # NOT drained.
-        failures = cancel_and_drain(runner)
-        if failures:
-            _log.error("[indexer] async shutdown failed: %r", failures)
+        init_gateway_process(
+            name="memory_indexer",
+            producer=lambda: pipeline,
+            machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+            image=image,
+        )
+        install_graceful_shutdown("memory_indexer")
+        # Keep executor joins outside the stop path: drain tasks explicitly,
+        # then hard-exit without closing Runner and its default executor.
+        runner = asyncio.Runner()
+        try:
+            runner.run(run(config=config, database=database, image=image))
+        except KeyboardInterrupt:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
+            _log.info("[indexer] received interrupt, shutting down")
+            # The signal path skips Runner's own cancellation, so drain the loop's
+            # tasks explicitly: run()'s finally still stops the observer, closes
+            # the backend and removes the pidfile. The executor is deliberately
+            # NOT drained.
+            failures = cancel_and_drain(runner)
+            if failures:
+                _log.error("[indexer] async shutdown failed: %r", failures)
+                code = 1
+        except Exception:
+            _log.exception("[indexer] daemon crashed — uncaught exception escaped run()")
             code = 1
-    except Exception:
-        _log.exception("[indexer] daemon crashed — uncaught exception escaped run()")
-        code = 1
+        finally:
+            _remove_pidfile()
     finally:
-        _remove_pidfile()
+        try:
+            drain = pipeline.stop(timeout=2)
+            if drain.status is DrainStatus.UNFINISHED:
+                _log.warning("event pipeline stop unfinished: %s", drain)
+        except Exception:
+            _log.exception("event pipeline stop failed")
+            code = 1
     _hard_exit(code)
 
 

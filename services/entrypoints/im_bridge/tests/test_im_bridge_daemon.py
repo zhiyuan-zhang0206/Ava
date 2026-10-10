@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import dataclasses
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -19,6 +20,8 @@ import pytest
 
 from base.config import get_field, settings
 from base.daemon.health import Liveness
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.entrypoints.im_bridge import daemon
 from services.entrypoints.im_bridge.config import (
     FeishuCredentialsConfig,
@@ -63,7 +66,7 @@ def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> No
     asyncio.run(scenario())
 
 
-def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch, database: Database) -> None:
     """run() hands the health server a Liveness that keeps getting beaten: the
     beat task is actually created and running, not merely defined."""
     captured: list[Liveness] = []
@@ -76,9 +79,11 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
         *,
         liveness: Liveness | None = None,
         auth_digests: frozenset[str] | None = None,
+        image: LoadedCommit,
         **_kwargs: Any,
     ) -> _FakeServer:
         assert liveness is not None
+        assert image.sha is None
         created_cores[-1].notice_bridge.initialize_poll.assert_called_once()
         captured.append(liveness)
         send_auth.append(auth_digests)
@@ -144,7 +149,9 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(daemon, "_LIVENESS_BEAT_INTERVAL_S", 0.02)
 
     async def scenario() -> None:
-        task = asyncio.create_task(daemon.run())
+        task = asyncio.create_task(
+            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
+        )
         try:
             await asyncio.sleep(0.5)
             assert captured, "run() never started the health server"
@@ -283,6 +290,7 @@ def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
 @pytest.mark.parametrize("fault", [RuntimeError("poll bug"), KeyError("missing config")])
 async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
     fault: Exception,
     cleanup_owner: str | None,
 ) -> None:
@@ -293,9 +301,11 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
     sibling_started = asyncio.Event()
     pool = MagicMock()
     pool.close.side_effect = lambda: events.append("pool_closed")
-    monkeypatch.setattr(
-        daemon.Database, "from_settings", lambda: SimpleNamespace(pool=lambda: pool)
-    )
+
+    def make_pool(_self: Database) -> MagicMock:
+        return pool
+
+    monkeypatch.setattr(daemon.Database, "pool", make_pool)
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
     monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pid_removed"))
@@ -357,7 +367,9 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
 
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     with pytest.raises(ExceptionGroup) as caught:
-        await asyncio.wait_for(daemon.run(), timeout=3)
+        await asyncio.wait_for(
+            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=3
+        )
     if cleanup_owner is None:
         assert caught.value.exceptions == (fault,)
     else:
@@ -432,6 +444,7 @@ def test_cleanup_group_with_cancellation_uses_the_bounded_failure_exit(
     exit_process = MagicMock()
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
     monkeypatch.setattr(daemon, "init_gateway_process", MagicMock())
+    monkeypatch.setattr(daemon, "build_pipeline", MagicMock(return_value=object()))
     monkeypatch.setattr(daemon, "install_graceful_shutdown", MagicMock())
     monkeypatch.setattr(daemon, "_gate_httpx_info_logs", lambda: None)
     monkeypatch.setattr(daemon, "_hard_exit", exit_process)

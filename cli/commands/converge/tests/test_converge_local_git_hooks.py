@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,11 +13,21 @@ import cli.commands.converge._brew_pin as cbp
 import cli.commands.converge._steps as csteps
 import cli.commands.converge.host as cv
 from base.config import ConfigBoot
+from base.telemetry import EventPipeline
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
-def _ctx(tmp_path: Path) -> cv.ConvergeCtx:
+def _ctx(
+    tmp_path: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
+) -> cv.ConvergeCtx:
     return cv.ConvergeCtx(
-        repo=Path("/repo"), ava_home=tmp_path, roles=cv.ALL_ROLES, config=ConfigBoot()
+        repo=Path("/repo"),
+        ava_home=tmp_path,
+        roles=cv.ALL_ROLES,
+        config=ConfigBoot(),
+        database_factory=operator_database,
+        producer=producer,
     )
 
 
@@ -55,11 +67,15 @@ def test_clean_machine_is_silent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     _with_script(monkeypatch, tmp_path)
     _fake_scan(monkeypatch, "hook check: OK (3 clone(s))\n", 0)
 
-    csteps.ensure_local_git_hooks(_ctx(tmp_path))
+    csteps.ensure_local_git_hooks(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     assert capsys.readouterr().err == ""
 
@@ -68,6 +84,8 @@ def test_drifted_machine_warns(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     _with_script(monkeypatch, tmp_path)
     _fake_scan(
@@ -77,7 +95,9 @@ def test_drifted_machine_warns(
         1,
     )
 
-    csteps.ensure_local_git_hooks(_ctx(tmp_path))
+    csteps.ensure_local_git_hooks(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     err = capsys.readouterr().err
     assert err.startswith("  ! hooks: ")
@@ -88,6 +108,8 @@ def test_missing_script_is_silent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     def fake_repo_root() -> Path:
         return tmp_path
@@ -99,7 +121,9 @@ def test_missing_script_is_silent(
 
     monkeypatch.setattr(csteps.subprocess, "run", fail)
 
-    csteps.ensure_local_git_hooks(_ctx(tmp_path))
+    csteps.ensure_local_git_hooks(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     assert capsys.readouterr().err == ""
 
@@ -108,11 +132,15 @@ def test_usage_error_from_pre_flag_checkout_is_silent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     _with_script(monkeypatch, tmp_path)
     _fake_scan(monkeypatch, "usage: check_git_hooks.py [-h] [--scan-machine]\n", 2)
 
-    csteps.ensure_local_git_hooks(_ctx(tmp_path))
+    csteps.ensure_local_git_hooks(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     assert capsys.readouterr().err == ""
 
@@ -121,6 +149,8 @@ def test_subprocess_failure_is_silent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     _with_script(monkeypatch, tmp_path)
 
@@ -129,6 +159,8 @@ def test_subprocess_failure_is_silent(
 
     monkeypatch.setattr(csteps.subprocess, "run", boom)
 
-    csteps.ensure_local_git_hooks(_ctx(tmp_path))
+    csteps.ensure_local_git_hooks(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     assert capsys.readouterr().err == ""

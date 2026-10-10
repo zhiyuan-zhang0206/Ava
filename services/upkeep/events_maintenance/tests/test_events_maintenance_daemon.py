@@ -29,6 +29,8 @@ from pydantic import SecretStr
 from base.config.domains.daemon.settings import DaemonSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.tests.slices import (
@@ -354,7 +356,9 @@ def test_deadline_settings_defaults_and_env_aliases() -> None:
     assert configured.events_maintenance_resolution_deadline_s == 35.5
 
 
-def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_gives_each_loop_its_own_progress_tracker(
+    monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     """The two concurrent loops cannot share a progress stamp at the run boundary."""
 
     class _RunPool:
@@ -370,7 +374,9 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     health_components: list[Callable[[], list[dict[str, object]]]] = []
     received: dict[str, LoopProgress] = {}
 
-    async def fake_start(_name: str, _port: int, *, liveness: object, components: Any) -> object:
+    async def fake_start(
+        _name: str, _port: int, *, liveness: object, components: Any, image: LoadedCommit
+    ) -> object:
         health_liveness.append(liveness)
         health_components.append(components)
         return health
@@ -419,7 +425,11 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     monkeypatch.setattr(daemon, "_resolution_loop", resolution)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", gauge)
 
-    asyncio.run(asyncio.wait_for(daemon.run(), timeout=2.0))
+    asyncio.run(
+        asyncio.wait_for(
+            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=2.0
+        )
+    )
 
     assert pool.closed
     assert len(health_liveness) == 1
@@ -442,7 +452,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
 
 @pytest.mark.parametrize("crashing", ["dispatch", "resolution", "registry_gauge"])
 def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
-    monkeypatch: pytest.MonkeyPatch, crashing: str
+    monkeypatch: pytest.MonkeyPatch, database: Database, crashing: str
 ) -> None:
     """The three loops share one TaskGroup: one that raises cancels the others and
     `run` leaves with the error, so the supervisor restarts the service."""
@@ -488,14 +498,20 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", loop("registry_gauge"))
 
     with pytest.raises(ExceptionGroup) as raised:
-        asyncio.run(asyncio.wait_for(daemon.run(), timeout=5.0))
+        asyncio.run(
+            asyncio.wait_for(
+                daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=5.0
+            )
+        )
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} crashed"]
     assert sorted(cancelled) == sorted({"dispatch", "resolution", "registry_gauge"} - {crashing})
     assert sorted(closed) == ["health", "pidfile", "pool"]
 
 
-def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -> dict[str, object]:
+def _run_with_alert_loop(
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, configured: bool
+) -> dict[str, object]:
     seen: dict[str, object] = {"alert_loop": False, "trackers": []}
 
     class _RunPool:
@@ -512,7 +528,7 @@ def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -
         seen["alert_loop"] = True
 
     async def fake_start(
-        _name: str, _port: int, *, liveness: LivenessGroup, components: Any
+        _name: str, _port: int, *, liveness: LivenessGroup, components: Any, image: LoadedCommit
     ) -> object:
         seen["trackers"] = sorted(liveness.snapshot())
         return object()
@@ -546,17 +562,22 @@ def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -
         return config
 
     monkeypatch.setattr(daemon, "events_maintenance_config", build_config)
-    asyncio.run(asyncio.wait_for(daemon.run(), timeout=5.0))
+    asyncio.run(
+        asyncio.wait_for(
+            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=5.0
+        )
+    )
     return seen
 
 
 def test_the_alert_reconciliation_loop_runs_only_with_the_grafana_credential(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
-    on = _run_with_alert_loop(monkeypatch, configured=True)
+    on = _run_with_alert_loop(monkeypatch, database, configured=True)
     assert on["alert_loop"] is True
     assert "alert_reconciliation" in cast(list[str], on["trackers"])
 
-    off = _run_with_alert_loop(monkeypatch, configured=False)
+    off = _run_with_alert_loop(monkeypatch, database, configured=False)
     assert off["alert_loop"] is False
     assert "alert_reconciliation" not in cast(list[str], off["trackers"])

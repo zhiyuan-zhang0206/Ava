@@ -31,6 +31,7 @@ from base.agents.messages.security_finding import SecurityFindingEntry
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -124,7 +125,7 @@ async def test_findings_flow_through_a_real_graph_and_are_consumed_once() -> Non
 
 
 async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
-    fake_cancel_event: InterruptEvent,
+    fake_cancel_event: InterruptEvent, database_gate: ProcessDbGate
 ) -> None:
     """End to end on real graph state: agent code in a real exec child scans flagged content,
     the exec node commits the finding to `state.security_findings`, and the framework's
@@ -137,7 +138,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             clients=process_clients(),
             identity=AgentIdentity(agent_id=1042, owns_loop=True),

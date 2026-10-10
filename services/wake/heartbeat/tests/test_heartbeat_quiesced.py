@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from services.wake.heartbeat import completion_digest, daemon
@@ -42,13 +43,13 @@ async def _run_briefly(
 
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_sends_no_check_in_pass(
-    monkeypatch: pytest.MonkeyPatch, quiesced: bool
+    monkeypatch: pytest.MonkeyPatch, quiesced: bool, *, database_gate: ProcessDbGate
 ) -> None:
     pool = MagicMock()
     await _run_briefly(
         monkeypatch,
         lambda pool, progress: daemon._dispatch_loop(
-            pool, Database.from_settings(), EventBus.from_settings(), progress
+            pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
         ),
         pool,
         quiesced=quiesced,
@@ -58,7 +59,7 @@ async def test_a_quiesced_unit_sends_no_check_in_pass(
 
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_runs_no_liveness_pass(
-    monkeypatch: pytest.MonkeyPatch, quiesced: bool
+    monkeypatch: pytest.MonkeyPatch, quiesced: bool, *, database_gate: ProcessDbGate
 ) -> None:
     passes: list[object] = []
 
@@ -69,7 +70,9 @@ async def test_a_quiesced_unit_runs_no_liveness_pass(
     bus = cast("EventBus", MagicMock())
     await _run_briefly(
         monkeypatch,
-        lambda pool, liveness: daemon._liveness_loop(Database.from_settings(), pool, bus, liveness),
+        lambda pool, liveness: daemon._liveness_loop(
+            Database.from_settings(gate=database_gate), pool, bus, liveness
+        ),
         MagicMock(),
         quiesced=quiesced,
     )
@@ -78,7 +81,7 @@ async def test_a_quiesced_unit_runs_no_liveness_pass(
 
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_flushes_no_completion_digest(
-    monkeypatch: pytest.MonkeyPatch, quiesced: bool
+    monkeypatch: pytest.MonkeyPatch, quiesced: bool, *, database_gate: ProcessDbGate
 ) -> None:
     flushes: list[object] = []
 
@@ -92,7 +95,7 @@ async def test_a_quiesced_unit_flushes_no_completion_digest(
     await _run_briefly(
         monkeypatch,
         lambda pool, progress: completion_digest.completion_digest_loop(
-            pool, Database.from_settings(), bus, progress
+            pool, Database.from_settings(gate=database_gate), bus, progress
         ),
         MagicMock(),
         quiesced=quiesced,

@@ -7,9 +7,10 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -20,12 +21,23 @@ from psycopg.conninfo import conninfo_to_dict
 
 from base import cluster
 from base.config import settings
+from base.telemetry import EventPipeline
 from cli.commands.observability import lgtm_native, observatory_urls
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
-def _render(tmp_path: Path) -> dict[str, str | None]:
+def _render(
+    tmp_path: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
+) -> dict[str, str | None]:
     native = tmp_path / "native"
-    lgtm_native._render_configs(Path(__file__).resolve().parents[4], native, tmp_path)
+    lgtm_native._render_configs(
+        Path(__file__).resolve().parents[4],
+        native,
+        tmp_path,
+        database_factory=operator_database,
+        producer=producer,
+    )
     return dotenv_values(native / "config/runtime.env")
 
 
@@ -49,11 +61,13 @@ def test_rendered_pg_endpoint_follows_connection_config(
     observatory: str,
     db_url: str,
     expected: str,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(settings.observability, "observability_url", observatory)
     monkeypatch.setattr(settings.data_plane, "db_url", db_url)
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://gateway.test:20016")
-    values = _render(tmp_path)
+    values = _render(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     assert values["AVA_PG_URL"] == expected
     assert "synthetic-secret" not in (tmp_path / "native/config/runtime.env").read_text()
     captured = capsys.readouterr()
@@ -64,7 +78,10 @@ def test_rendered_pg_endpoint_follows_connection_config(
 
 
 def test_registered_pooler_is_rendered_as_direct_postgres(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     home = str(tmp_path / "home")
     record = cluster.ClusterRecord(
@@ -82,7 +99,12 @@ def test_registered_pooler_is_rendered_as_direct_postgres(
     monkeypatch.setattr(cluster, "get_record", _record)
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:20029/ava")
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
-    assert _render(tmp_path)["AVA_PG_URL"] == "127.0.0.1:20027"
+    assert (
+        _render(tmp_path, operator_database=operator_database, producer=operator_pipeline)[
+            "AVA_PG_URL"
+        ]
+        == "127.0.0.1:20027"
+    )
 
 
 @pytest.mark.parametrize(
@@ -135,14 +157,24 @@ def test_webhook_rejects_url_credentials_without_reporting_them(
 
 @pytest.mark.parametrize("path", ["$AVA_REVIEW_LITERAL", "$(touch${IFS}webhook-command-ran)"])
 def test_real_grafana_launcher_preserves_webhook_url_literal(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, path: str
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    path: str,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The actual launcher sources runtime.env without expanding URL path code."""
     base = f"https://gateway.test:20016/tenant/{path}"
     monkeypatch.setattr(settings.observability, "observability_url", "http://observatory.test")
     monkeypatch.setattr(settings.gateway, "gateway_url", base)
     native = tmp_path / "lgtm/native"
-    lgtm_native._render_configs(Path(__file__).resolve().parents[4], native, tmp_path)
+    lgtm_native._render_configs(
+        Path(__file__).resolve().parents[4],
+        native,
+        tmp_path,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
     executable = native / "grafana-home/bin/grafana"
     executable.parent.mkdir(parents=True)
     executable.write_text(
@@ -167,7 +199,11 @@ def test_real_grafana_launcher_preserves_webhook_url_literal(
 
 @pytest.mark.parametrize("observatory", ["", "http://observatory.test"])
 def test_rendered_endpoints_reach_private_postgres_and_http_listener(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, observatory: str
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    observatory: str,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Verify the rendered destinations on real ephemeral TCP listeners."""
     pg = conninfo_to_dict(settings.data_plane.db_url)
@@ -190,7 +226,9 @@ def test_rendered_endpoints_reach_private_postgres_and_http_listener(
             monkeypatch.setattr(settings.observability, "observability_url", observatory)
             monkeypatch.setattr(settings.gateway, "gateway_port", port)
             monkeypatch.setattr(settings.gateway, "gateway_url", f"http://127.0.0.1:{port}")
-            rendered = _render(tmp_path)
+            rendered = _render(
+                tmp_path, operator_database=operator_database, producer=operator_pipeline
+            )
             # Assert identity before dialing: even the regressed renderer must
             # never send this private test to the operator's default ports.
             assert rendered["AVA_PG_URL"] == f"127.0.0.1:{pg['port']}"

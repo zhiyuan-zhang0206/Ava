@@ -30,6 +30,7 @@ from agent.state import build_agent_state
 from base.agents.context import AvaContext
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -56,7 +57,7 @@ def _state(messages: list[AnyMessage]):
     return build_agent_state(EMPTY)(messages=messages)
 
 
-def _runtime(catalog: ModelCatalog) -> Runtime[AvaContext]:
+def _runtime(catalog: ModelCatalog, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     ctx = AvaContext(
         ops_pool=MagicMock(),
         llm=MagicMock(),
@@ -65,7 +66,7 @@ def _runtime(catalog: ModelCatalog) -> Runtime[AvaContext]:
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
         catalog=catalog,
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
     )
     return Runtime(context=ctx)
@@ -82,11 +83,11 @@ def _reasoning_only_ai() -> AIMessage:
 
 
 async def test_injects_nudge_when_tail_is_reasoning_only(
-    _loaded: ModuleType, model_catalog: ModelCatalog
+    _loaded: ModuleType, model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ):
     state = _state([HumanMessage(content="hi"), _reasoning_only_ai()])
     result = await _loaded.silent_idle_continue_before_llm(
-        state, _runtime(model_catalog), _config()
+        state, _runtime(model_catalog, database_gate=database_gate), _config()
     )  # pyright: ignore[reportUnknownMemberType]
     assert result is not None
     msgs = result["messages"]
@@ -96,38 +97,52 @@ async def test_injects_nudge_when_tail_is_reasoning_only(
     assert note.additional_kwargs["ava_note_tag"] == NoteTag.SILENT_IDLE_CONTINUE  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_noop_when_tail_has_text(_loaded: ModuleType, model_catalog: ModelCatalog):
+async def test_noop_when_tail_has_text(
+    _loaded: ModuleType, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+):
     state = _state([HumanMessage(content="hi"), AIMessage(content="done")])
     assert (
-        await _loaded.silent_idle_continue_before_llm(state, _runtime(model_catalog), _config())
+        await _loaded.silent_idle_continue_before_llm(
+            state, _runtime(model_catalog, database_gate=database_gate), _config()
+        )
         is None
     )  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_noop_when_tail_has_tool_call(_loaded: ModuleType, model_catalog: ModelCatalog):
+async def test_noop_when_tail_has_tool_call(
+    _loaded: ModuleType, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+):
     ai = AIMessage(
         content="", tool_calls=[{"name": "execute_code", "args": {"code": "1"}, "id": "c1"}]
     )
     state = _state([HumanMessage(content="hi"), ai])
     assert (
-        await _loaded.silent_idle_continue_before_llm(state, _runtime(model_catalog), _config())
+        await _loaded.silent_idle_continue_before_llm(
+            state, _runtime(model_catalog, database_gate=database_gate), _config()
+        )
         is None
     )  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_noop_when_tail_is_human(_loaded: ModuleType, model_catalog: ModelCatalog):
+async def test_noop_when_tail_is_human(
+    _loaded: ModuleType, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+):
     # A reasoning-only AIMessage that is NOT the tail must not trigger.
     state = _state([_reasoning_only_ai(), HumanMessage(content="hi")])
     assert (
-        await _loaded.silent_idle_continue_before_llm(state, _runtime(model_catalog), _config())
+        await _loaded.silent_idle_continue_before_llm(
+            state, _runtime(model_catalog, database_gate=database_gate), _config()
+        )
         is None
     )  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_noop_when_empty(_loaded: ModuleType, model_catalog: ModelCatalog):
+async def test_noop_when_empty(
+    _loaded: ModuleType, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+):
     assert (
         await _loaded.silent_idle_continue_before_llm(
-            _state([]), _runtime(model_catalog), _config()
+            _state([]), _runtime(model_catalog, database_gate=database_gate), _config()
         )
         is None
     )  # pyright: ignore[reportUnknownMemberType]
@@ -138,6 +153,7 @@ async def test_defers_when_auto_compact_would_fire(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ):
     """When auto-compact would replace messages this turn, the nudge defers
     (returns None) so it does not collide with compaction's `messages` write —
@@ -160,7 +176,9 @@ async def test_defers_when_auto_compact_would_fire(
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", pinned_budget)
     state = _state([HumanMessage(content="a long history " * 20), _reasoning_only_ai()])
     assert (
-        await _loaded.silent_idle_continue_before_llm(state, _runtime(model_catalog), _config())
+        await _loaded.silent_idle_continue_before_llm(
+            state, _runtime(model_catalog, database_gate=database_gate), _config()
+        )
         is None
     )  # pyright: ignore[reportUnknownMemberType]
     assert any(

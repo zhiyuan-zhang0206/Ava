@@ -13,6 +13,7 @@ from psycopg_pool import ConnectionPool
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import Liveness
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
@@ -27,6 +28,7 @@ async def test_a_quiesced_unit_borrows_no_connection(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.01)
@@ -34,7 +36,7 @@ async def test_a_quiesced_unit_borrows_no_connection(
     task = asyncio.create_task(
         daemon._dispatch_loop(
             cast("ConnectionPool", pool),
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             Liveness(daemon._LIVENESS_TIMEOUT_S),
             daemon.labeler_config(),

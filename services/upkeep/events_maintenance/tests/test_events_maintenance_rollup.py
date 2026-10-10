@@ -13,10 +13,12 @@ import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from unittest.mock import Mock
 
 import psycopg
 import pytest
 
+from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import rollup
 
 _DAY = date(2026, 6, 9)
@@ -212,3 +214,19 @@ def test_compute_rollup_recomputes_the_last_closed_days_but_not_today(
     # today (offset 0) is left to the live readers; offset 9 is older than the window
     assert [row[0] for row in days] == [date(2026, 6, 2), date(2026, 6, 3), date(2026, 6, 9)]
     assert result.tokens_rows == 3
+
+
+def test_operator_rejects_an_inverted_range_before_capture_or_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from services.upkeep.events_maintenance import daemon, rollup
+
+    capture = Mock()
+    database = Mock()
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(daemon, "events_maintenance_db", database)
+    with pytest.raises(SystemExit) as caught:
+        rollup.main(["--from", "20261002", "--to", "20261001"])
+    assert caught.value.code == 2
+    capture.assert_not_called()
+    database.assert_not_called()

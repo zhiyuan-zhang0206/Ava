@@ -10,6 +10,7 @@ import pytest
 
 from base.agents.context.clients import ClientSet
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.telemetry.delivery.pipeline import EventPipeline
@@ -38,7 +39,10 @@ def event() -> Event:
 
 @pytest.mark.parametrize("native_failure", [False, True])
 async def test_host_release_runs_and_first_original_failure_remains_primary(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, native_failure: bool
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    native_failure: bool,
+    database_gate: ProcessDbGate,
 ) -> None:
     writer_error = TypeError("original event writer failed")
     resource_error = ValueError("original joined resource failed")
@@ -57,7 +61,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
         catalog=model_catalog,
         clients=clients,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
     )
     release = AsyncMock()
     monkeypatch.setattr("services.agent_runner.agent_host.host.release_hosted_owner", release)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,6 +12,7 @@ import psycopg
 import pytest
 
 from base import telemetry
+from base.db import Database
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
 
@@ -672,16 +674,21 @@ def test_flag_defaults_on_with_standard_endpoint(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _bind_telemetry(db_conn: psycopg.Connection) -> None:
-    telemetry.init_telemetry(process="test-proc")
-    with db_conn.cursor() as cur:
-        cur.execute("INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (_AGENT,))
-        cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running') "
-            "ON CONFLICT DO NOTHING",
-            (_AGENT,),
-        )
-    db_conn.commit()
+def _bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator[None]:
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    try:
+        telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
+        with db_conn.cursor() as cur:
+            cur.execute("INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (_AGENT,))
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running') "
+                "ON CONFLICT DO NOTHING",
+                (_AGENT,),
+            )
+        db_conn.commit()
+        yield
+    finally:
+        pipeline.stop(timeout=2)
 
 
 # ── exec-child export path (task #1423) ──────────────────────────────────────

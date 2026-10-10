@@ -318,8 +318,8 @@ def add_postgres_sink(
     process: str = "unknown",
     *,
     agent_id: int | None = None,
-    producer: Callable[[], Any] | None = None,
-    machine_reader: Callable[[], str] | None = None,
+    producer: Callable[[], Any],
+    machine_reader: Callable[[], str],
 ) -> int:
     """Eagerly open the unified event pipeline + register the loguru adapter.
     Pipeline open failure raises during init_* (it no longer touches the DB);
@@ -342,15 +342,12 @@ def add_postgres_sink(
     JSONL file sink is the durable backfill source."""
     from base import telemetry
 
-    if producer is None and machine_reader is None:
-        telemetry.init_telemetry(process=process, agent_id=agent_id)
-    else:
-        telemetry.init_telemetry(
-            process=process,
-            agent_id=agent_id,
-            pipeline=producer() if producer is not None else None,
-            machine_reader=machine_reader,
-        )
+    telemetry.init_telemetry(
+        process=process,
+        agent_id=agent_id,
+        pipeline=producer(),
+        machine_reader=machine_reader,
+    )
     global _postgres_sink_id  # noqa: PLW0603 — process-level singleton
     live_handlers: Any = cast(Any, logger)._core.handlers  # private `_core` registry
     if _postgres_sink_id is not None and _postgres_sink_id in live_handlers:
@@ -443,9 +440,9 @@ def _add_stderr_sink_before_settings() -> None:
 def init_gateway_process(
     name: str = "gateway",
     *,
-    producer: Callable[[], Any] | None = None,
-    machine_reader: Callable[[], str] | None = None,
-    image: loaded_commit.LoadedCommit | None = None,
+    producer: Callable[[], Any],
+    machine_reader: Callable[[], str],
+    image: loaded_commit.LoadedCommit,
 ) -> None:
     """Called once at a gateway-style process startup — the gateway itself
     and every long-running service daemon (agent-host / watchdog / labeler /
@@ -475,17 +472,8 @@ def init_gateway_process(
     from base.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"{name}.log")
-    if producer is None and machine_reader is None:
-        add_postgres_sink(process=name)
-    else:
-        add_postgres_sink(process=name, producer=producer, machine_reader=machine_reader)
+    add_postgres_sink(process=name, producer=producer, machine_reader=machine_reader)
     _install_stdlib_intercept()
-    # Capture the commit this process loaded, here at the top of its main() —
-    # the earliest seam every gateway-style process shares. Deferring the
-    # capture would let a checkout that moved under a long-lived daemon answer
-    # on its behalf; see `base.native_process.loaded_commit`.
-    if image is None:
-        loaded_commit.freeze()
     # One structured `service_started` agent_event per gateway-style process
     # boot — the ops monitor panel's restart-count source. This function is
     # the single boot seam every long-lived service shares (gateway + all
@@ -498,13 +486,15 @@ def init_gateway_process(
         event="service_started",
         name=name,
         pid=os.getpid(),
-        sha=image.sha if image is not None else loaded_commit.get(),
-        host=(machine_reader or _machine_name_lazy)(),
+        sha=image.sha,
+        host=machine_reader(),
     )
     _init_done = True
 
 
-def init_cli_process(*, name: str) -> None:
+def init_cli_process(
+    *, name: str, producer: Callable[[], Any], machine_reader: Callable[[], str]
+) -> None:
     """Called once by the CLI verbs that bring a unit up. Identical sink set to ``init_gateway_process``,
     minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
     + unified event pipeline (agent_id NULL).
@@ -531,6 +521,6 @@ def init_cli_process(*, name: str) -> None:
     from base.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"{name}.log")
-    add_postgres_sink(process=name)
+    add_postgres_sink(process=name, producer=producer, machine_reader=machine_reader)
     _install_stdlib_intercept()
     _init_done = True

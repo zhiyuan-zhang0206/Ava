@@ -23,10 +23,18 @@ from collections.abc import Callable
 
 import uvicorn
 
+from base.cluster.machine import validate_machine_name
 from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.delivery.receipts import DrainStatus
+from base.telemetry.emitter import build_pipeline
 from services.derived.memory_indexer.embeddings.factory import get_descriptor
 from services.derived.memory_search.app import build_app
 from services.derived.memory_search.config import MemorySearchConfig
@@ -88,37 +96,61 @@ def main() -> None:
         sys.exit(1)
     if not acquire_pidfile(config.memory_search_pidfile, "services.derived.memory_search.daemon"):
         sys.exit(1)
-    init_gateway_process(name="memory_search")
-    install_graceful_shutdown("memory_search")
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="memory_search")
+
+    def database() -> Database:
+        return Database(db_config_from_boot(boot), gate=gate)
+
+    pipeline = build_pipeline(database=database)
     code = 0
-    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
-    # awaits `shutdown_default_executor`, joining the default executor's
-    # workers — the store load among them — and a stop signal must never wait
-    # on those (see `_hard_exit`). The runner is therefore never closed: after
-    # the explicit drain below, teardown is skipped by the hard exit. During
-    # serving, SIGTERM first drives uvicorn's own graceful stop; on the way
-    # out `capture_signals` restores this daemon's handler and re-raises the
-    # signal (uvicorn/server.py, 0.52.4), so it still lands in this
-    # KeyboardInterrupt branch — not a normal return from `run()`.
-    runner = asyncio.Runner()
     try:
-        runner.run(run(config, embedding_name_reader=lambda: boot.view.services.embedding_backend))
-    except KeyboardInterrupt:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
-        _log.info("[memory-search] interrupted, shutting down")
-        # The signal path skips Runner's own cancellation, so drain the loop's
-        # tasks explicitly: uvicorn's serve coroutine unwinds through the
-        # re-raised signal; the pidfile is removed by the finally below either
-        # way. The executor is deliberately NOT drained.
-        failures = cancel_and_drain(runner)
-        if failures:
-            _log.error("[memory-search] async shutdown failed: %r", failures)
+        init_gateway_process(
+            name="memory_search",
+            producer=lambda: pipeline,
+            machine_reader=lambda: validate_machine_name(boot.view.general.machine_name),
+            image=image,
+        )
+        install_graceful_shutdown("memory_search")
+        # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
+        # awaits `shutdown_default_executor`, joining the default executor's
+        # workers — the store load among them — and a stop signal must never wait
+        # on those (see `_hard_exit`). The runner is therefore never closed: after
+        # the explicit drain below, teardown is skipped by the hard exit. During
+        # serving, SIGTERM first drives uvicorn's own graceful stop; on the way
+        # out `capture_signals` restores this daemon's handler and re-raises the
+        # signal (uvicorn/server.py, 0.52.4), so it still lands in this
+        # KeyboardInterrupt branch — not a normal return from `run()`.
+        runner = asyncio.Runner()
+        try:
+            runner.run(
+                run(config, embedding_name_reader=lambda: boot.view.services.embedding_backend)
+            )
+        except KeyboardInterrupt:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
+            _log.info("[memory-search] interrupted, shutting down")
+            # The signal path skips Runner's own cancellation, so drain the loop's
+            # tasks explicitly: uvicorn's serve coroutine unwinds through the
+            # re-raised signal; the pidfile is removed by the finally below either
+            # way. The executor is deliberately NOT drained.
+            failures = cancel_and_drain(runner)
+            if failures:
+                _log.error("[memory-search] async shutdown failed: %r", failures)
+                code = 1
+        except Exception:
+            _log.exception("[memory-search] daemon crashed — uncaught exception escaped run()")
             code = 1
-    except Exception:
-        _log.exception("[memory-search] daemon crashed — uncaught exception escaped run()")
-        code = 1
+        finally:
+            remove_pidfile(config.memory_search_pidfile)
     finally:
-        remove_pidfile(config.memory_search_pidfile)
+        try:
+            drain = pipeline.stop(timeout=2)
+            if drain.status is DrainStatus.UNFINISHED:
+                _log.warning("event pipeline stop unfinished: %s", drain)
+        except Exception:
+            _log.exception("event pipeline stop failed")
+            code = 1
     _hard_exit(code)
 
 

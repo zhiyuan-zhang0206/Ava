@@ -16,9 +16,10 @@ from pathlib import Path
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from base.db import Database
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import schedule_entry
 
 
 # ── Configuration ──────────────────────────────────────────────────────────
@@ -145,11 +146,12 @@ def should_fire_thursday() -> bool:
 # ── Main loop ──────────────────────────────────────────────────────────────
 
 
-def _main_loop() -> None:
-    """The gateway runs this file as `python self-evolution-weekly-schedule.py`
-    (never imports it); the guard keeps the loop out of import, so tests can
-    load the module and call count_events directly."""
-    db = Database.from_settings()
+def _main_loop(*, inputs: ScheduleInputs) -> None:
+    """Run the weekly loop with the executable entry's explicit inputs.
+
+    Importing the template keeps the loop idle, so tests can load the module
+    and call count_events directly."""
+    db = inputs.database()
     thursday_enabled = False
 
     def fire_weekly_trigger(_slot: datetime, trigger: str) -> None:
@@ -235,4 +237,5 @@ if __name__ == "__main__":
         {"TERMINATED"},
         schedule_name="self-evolution-weekly",
     )
-    _main_loop()
+    with schedule_entry(globals().get("AVA_SCHEDULE_INPUTS")) as inputs:
+        _main_loop(inputs=inputs)

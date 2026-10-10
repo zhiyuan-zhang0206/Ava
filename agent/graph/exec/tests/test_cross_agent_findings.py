@@ -34,6 +34,7 @@ from base.clock import Clock
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -66,7 +67,11 @@ class _Turn:
     interleave the way their coroutines do in the host."""
 
     def __init__(
-        self, hosted_resources: HostedTurnResources, pool: AsyncConnectionPool, agent_id: int
+        self,
+        hosted_resources: HostedTurnResources,
+        pool: AsyncConnectionPool,
+        agent_id: int,
+        database_gate: ProcessDbGate,
     ) -> None:
         self.agent_id = agent_id
         self.runtime = Runtime(
@@ -78,7 +83,7 @@ class _Turn:
                 agent=AgentSlices.resolve(
                     default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
                 ),
-                db=Database.from_settings(),
+                db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),
                 catalog=build_model_catalog(),
                 clock_factory=Clock.from_settings,
@@ -177,6 +182,7 @@ async def test_interleaved_turns_deliver_each_finding_to_its_own_agent(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Agent A's SECURITY note is in A's messages and in no other agent's,
     whichever way the two agents' claim and exec nodes interleave."""
@@ -185,11 +191,13 @@ async def test_interleaved_turns_deliver_each_finding_to_its_own_agent(
             hosted_resources,
             aops_pool,
             spawn_agent(catalog=model_catalog, authority=config_authority),
+            database_gate=database_gate,
         ),
         "b": _Turn(
             await hosted_resources.require_service().turn(),
             aops_pool,
             spawn_agent(catalog=model_catalog, authority=config_authority),
+            database_gate=database_gate,
         ),
     }
     insert_inbound_message(

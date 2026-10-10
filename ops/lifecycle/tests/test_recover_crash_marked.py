@@ -20,6 +20,7 @@ from base.agents import AgentNotFound, CrashRecoveryResult
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.plugin_providers import build_model_catalog
 from base.telemetry import Event
@@ -68,13 +69,14 @@ def _park_corpse(
     suppress_reason: str | None = None,
     suppress_seconds: float | None = None,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     """A row shaped like a crash-marked corpse: `create_agent_row` leaves the
     death marker NULL (the production stamp is
     `agent.ownership.hosted.stamp_turn_fatal`), so the scenario sets the
     marker, the settle fields, and any suppression window explicitly."""
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
         machine=machine or machine_name(),
@@ -177,8 +179,9 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = _park_corpse(db_conn, config_authority=config_authority)
+        aid = _park_corpse(db_conn, config_authority=config_authority, database_gate=database_gate)
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert response.status is CrashRecoveryResult.HARVESTED
         assert response.reason is None
@@ -222,8 +225,9 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = _park_corpse(db_conn, config_authority=config_authority)
+        aid = _park_corpse(db_conn, config_authority=config_authority, database_gate=database_gate)
         assert (
             lifecycle._recover_crash_marked_blocking(database, event_bus, aid).status
             is CrashRecoveryResult.HARVESTED
@@ -241,8 +245,11 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = _park_corpse(db_conn, marked=False, config_authority=config_authority)
+        aid = _park_corpse(
+            db_conn, marked=False, config_authority=config_authority, database_gate=database_gate
+        )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (CrashRecoveryResult.REFUSED, "not_marked")
         assert stubs.events == []
@@ -255,8 +262,14 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = _park_corpse(db_conn, status="running", config_authority=config_authority)
+        aid = _park_corpse(
+            db_conn,
+            status="running",
+            config_authority=config_authority,
+            database_gate=database_gate,
+        )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
             CrashRecoveryResult.REFUSED,
@@ -271,8 +284,14 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = _park_corpse(db_conn, runtime_kind="process", config_authority=config_authority)
+        aid = _park_corpse(
+            db_conn,
+            runtime_kind="process",
+            config_authority=config_authority,
+            database_gate=database_gate,
+        )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
             CrashRecoveryResult.REFUSED,
@@ -287,8 +306,14 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = _park_corpse(db_conn, machine="somewhere-else", config_authority=config_authority)
+        aid = _park_corpse(
+            db_conn,
+            machine="somewhere-else",
+            config_authority=config_authority,
+            database_gate=database_gate,
+        )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (CrashRecoveryResult.REFUSED, "wrong_machine")
 
@@ -300,8 +325,14 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = _park_corpse(db_conn, lease_seconds=3600.0, config_authority=config_authority)
+        aid = _park_corpse(
+            db_conn,
+            lease_seconds=3600.0,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (CrashRecoveryResult.REFUSED, "lease_alive")
 
@@ -313,6 +344,7 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """An active suppression window (without a tripped breaker) still
         refuses: automatic recovery is halted until the window expires."""
@@ -321,6 +353,7 @@ class TestRecoverCrashMarkedOp:
             suppress_reason="permanent_provider_reject",
             suppress_seconds=3600.0,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
@@ -337,10 +370,13 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The durable streak gate holds even with no suppression window: a
         claim that cleared the window must not unlock a halted agent."""
-        aid = _park_corpse(db_conn, streak=2, config_authority=config_authority)
+        aid = _park_corpse(
+            db_conn, streak=2, config_authority=config_authority, database_gate=database_gate
+        )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
             CrashRecoveryResult.REFUSED,
@@ -356,8 +392,14 @@ class TestRecoverCrashMarkedOp:
         event_bus: EventBus,
         *,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = _park_corpse(db_conn, suppress_seconds=3600.0, config_authority=config_authority)
+        aid = _park_corpse(
+            db_conn,
+            suppress_seconds=3600.0,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        )
         response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == (
             CrashRecoveryResult.REFUSED,
@@ -374,7 +416,7 @@ class TestRecoverCrashMarkedOp:
 class TestRecoverCrashMarkedRequester:
     @pytest.mark.asyncio
     async def test_suppressed_short_circuits_before_any_rpc(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _halted_permanent)
 
@@ -383,13 +425,13 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
+            Database.from_settings(gate=database_gate), event_bus, 7, stalled_inbound_id=88
         )
         assert (decision, reason) == (CrashRecoveryResult.REFUSED, "permanent_provider_reject")
 
     @pytest.mark.asyncio
     async def test_forwards_to_home_and_maps_the_verdict(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
@@ -403,7 +445,7 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _dispatch)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
+            Database.from_settings(gate=database_gate), event_bus, 7, stalled_inbound_id=88
         )
         assert (decision, reason) == (CrashRecoveryResult.HARVESTED, None)
         assert seen == [
@@ -416,7 +458,7 @@ class TestRecoverCrashMarkedRequester:
 
     @pytest.mark.asyncio
     async def test_local_home_falls_back_in_process(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
@@ -437,14 +479,14 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
+            Database.from_settings(gate=database_gate), event_bus, 7, stalled_inbound_id=88
         )
         assert (decision, reason) == (CrashRecoveryResult.REFUSED, "not_settled:running")
         assert calls == [7]
 
     @pytest.mark.asyncio
     async def test_remote_home_unreachable_reports_unreachable(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
@@ -455,7 +497,7 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
+            Database.from_settings(gate=database_gate), event_bus, 7, stalled_inbound_id=88
         )
         assert decision is CrashRecoveryRequestFailure.UNREACHABLE
         assert reason == "connect timeout"
@@ -465,7 +507,12 @@ class TestRecoverCrashMarkedRequester:
         "payload", [{}, {"status": "unknown"}, {"status": "unreachable"}, {"status": "error"}]
     )
     async def test_invalid_runner_reply_is_local_error(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, payload: dict[str, object]
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        event_bus: EventBus,
+        payload: dict[str, object],
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
@@ -475,14 +522,14 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", invalid_reply)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
+            Database.from_settings(gate=database_gate), event_bus, 7, stalled_inbound_id=88
         )
         assert decision is CrashRecoveryRequestFailure.ERROR
         assert reason == "harvest request failed"
 
     @pytest.mark.asyncio
     async def test_unexpected_failure_maps_to_error(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
@@ -492,7 +539,7 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _explode)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
+            Database.from_settings(gate=database_gate), event_bus, 7, stalled_inbound_id=88
         )
         assert decision is CrashRecoveryRequestFailure.ERROR
         assert reason == "harvest request failed"

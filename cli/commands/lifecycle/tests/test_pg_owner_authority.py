@@ -19,9 +19,9 @@ import getpass
 import os
 import socket
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -46,6 +46,7 @@ from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from services.derived.memory_indexer.backends.pgvector import prepare_table
 from services.derived.memory_indexer.embeddings.factory import get_descriptor
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _OWNER_PASSWORD = "owner-login-fixture"  # noqa: S105 — test fixture, not a real credential
 _GROUPS = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
@@ -251,15 +252,21 @@ def _grant_groups(pg_port: int, identity: str) -> None:
         ensure_groups(conn, owner=identity, database=identity, groups=_GROUPS)
 
 
-def _provision_by_authority(pg_port: int, identity: str) -> bool:
+def _provision_by_authority(
+    pg_port: int, identity: str, *, operator_database: Callable[[], Any]
+) -> bool:
     """Today's start order through the admin authority; returns database creation."""
     admin = ci.pg_admin_url(pg_port)
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=_data_dir())
-    _prepare_by_authority(pg_port, identity, database_created=created)
+    _prepare_by_authority(
+        pg_port, identity, database_created=created, operator_database=operator_database
+    )
     return created
 
 
-def _prepare_by_authority(pg_port: int, identity: str, *, database_created: bool) -> None:
+def _prepare_by_authority(
+    pg_port: int, identity: str, *, database_created: bool, operator_database: Callable[[], Any]
+) -> None:
     admin = ci.pg_admin_url(pg_port)
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=_data_dir())
     ensure_checkpoint_schema(
@@ -268,14 +275,14 @@ def _prepare_by_authority(pg_port: int, identity: str, *, database_created: bool
         database_created=database_created,
         expected_data_dir=_data_dir(),
     )
-    cmd_migrations_apply()
+    cmd_migrations_apply(database_factory=operator_database)
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=_data_dir())
-    prepare_memory_vectors()
+    prepare_memory_vectors(database_factory=operator_database)
     _grant_groups(pg_port, identity)
 
 
 def test_authority_matches_owner_login_privileges_and_is_idempotent(
-    owned_pg: int, monkeypatch: pytest.MonkeyPatch
+    owned_pg: int, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """Same catalog, same application privileges, only the dial changed."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
@@ -285,7 +292,7 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     )
     _bind_cluster_url(monkeypatch, owned_pg, current)
 
-    assert _provision_by_authority(owned_pg, current) is True
+    assert _provision_by_authority(owned_pg, current, operator_database=operator_database) is True
 
     after_birth = _snapshot(_admin_on(owned_pg, current), current)
     assert after_birth == _snapshot(_admin_on(owned_pg, legacy), legacy)
@@ -296,13 +303,16 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     )
 
     # A second start over the same home changes nothing.
-    assert _provision_by_authority(owned_pg, current) is False
-    assert cmd_migrations_apply() == []
+    assert _provision_by_authority(owned_pg, current, operator_database=operator_database) is False
+    assert cmd_migrations_apply(database_factory=operator_database) == []
     assert _snapshot(_admin_on(owned_pg, current), current) == after_birth
 
 
 def test_owner_without_login_keeps_every_admin_path(
-    owned_pg: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    owned_pg: int,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
 ) -> None:
     """The owner is born NOLOGIN; it still migrates, provisions and dumps."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
@@ -320,7 +330,9 @@ def test_owner_without_login_keeps_every_admin_path(
             f"postgresql://{identity}:{_OWNER_PASSWORD}@127.0.0.1:{owned_pg}/{identity}"
         )
 
-    _prepare_by_authority(owned_pg, identity, database_created=created)
+    _prepare_by_authority(
+        owned_pg, identity, database_created=created, operator_database=operator_database
+    )
 
     authority = local_owner_authority()
     assert authority == OwnerAuthority(

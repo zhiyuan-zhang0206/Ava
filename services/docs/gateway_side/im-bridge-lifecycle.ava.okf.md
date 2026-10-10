@@ -50,3 +50,10 @@ Immediate sends suppress resend only for a declared uncertain outcome: a known
 acknowledged prefix or response lost in transport. Unknown program faults remain
 visible even after an external side effect; restart may redeliver in that case.
 This does not promise exactly-once delivery. Native outbox receipts are unchanged.
+
+## Process composition
+
+The executable captures one loaded image and retains its `CodeVersion` and
+`ProcessDbGate`. The work database and lazy telemetry producer share that gate;
+logging and health receive the same image. Adapter startup, auth digests,
+extra routes, primary faults and bounded cleanup keep their existing contracts.

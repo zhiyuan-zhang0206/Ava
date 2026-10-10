@@ -15,8 +15,8 @@ from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 from services.agent_runner.agent_host.tests.test_turn_dispatcher import (
     _patch_redis,
     _QueueingPubSub,
-    _ScanScheduler,
 )
+from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import ScanScheduler
 
 
 class TestSubscriptionRecovery:
@@ -44,7 +44,7 @@ class TestSubscriptionRecovery:
         monkeypatch.setattr(dispatcher.logger, "warning", _warning)
         disp = InboundWakeDispatcher(
             EventBus.from_settings(),
-            _ScanScheduler(),
+            ScanScheduler(),
             pending_scan=_pending,
             stale_after_s=180.0,
             scan_interval_s=0.02,
@@ -71,7 +71,7 @@ class TestSubscriptionRecovery:
         pubsub = _QueueingPubSub()
         clients = _patch_redis(monkeypatch, pubsub)
         first_failure = asyncio.Event()
-        scheduler = _ScanScheduler()
+        scheduler = ScanScheduler()
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             first_failure.set()
@@ -123,7 +123,7 @@ class TestSubscriptionRecovery:
 
         disp = InboundWakeDispatcher(
             EventBus.from_settings(),
-            _ScanScheduler(),
+            ScanScheduler(),
             pending_scan=_pending,
             stale_after_s=180.0,
             scan_interval_s=0.02,
@@ -154,7 +154,7 @@ class TestSubscriptionRecovery:
 
         disp = InboundWakeDispatcher(
             EventBus.from_settings(),
-            _ScanScheduler(),
+            ScanScheduler(),
             pending_scan=_pending,
             stale_after_s=180.0,
         )
@@ -214,7 +214,7 @@ class TestSubscriptionRecovery:
         patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
             EventBus.from_settings(),
-            _ScanScheduler(),
+            ScanScheduler(),
             subscription_read_timeout_s=0.01,
             subscription_read_deadline_grace_s=0.01,
             reconnect_delay_s=0.0,
