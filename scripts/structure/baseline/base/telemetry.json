@@ -1,7 +1,0 @@
-{
-  "ambient_state": {
-    "base/telemetry/otlp/telemetry_otlp.py::thread:_OtlpBackend._ensure": 1,
-    "base/telemetry/tracing.py::thread:_start_arm_thread": 1,
-    "base/telemetry/tracing.py::thread:_start_collector_retry": 1
-  }
-}
