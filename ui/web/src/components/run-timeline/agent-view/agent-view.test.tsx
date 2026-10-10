@@ -126,8 +126,8 @@ describe("agent view", () => {
     await screen.findByTestId("agent-view-agent-8");
     await waitFor(() => expect(within(group(7)).getByTestId("run-timeline-agent").textContent).toBe("Agent #7 · seven"));
     expect(screen.getAllByTestId("run-timeline-chart")).toHaveLength(1);
-    expect(getRunTimeline).toHaveBeenCalledWith(7, {});
-    expect(getRunTimeline).toHaveBeenCalledWith(8, {});
+    expect(getRunTimeline).toHaveBeenCalledWith(7, { signal: expect.any(AbortSignal) as AbortSignal });
+    expect(getRunTimeline).toHaveBeenCalledWith(8, { signal: expect.any(AbortSignal) as AbortSignal });
     // Each agent keeps all of its own rows: agent 7 two tree levels, agent 8 one.
     expect(rowIn(7, "run-timeline-row-level-2")).not.toBeNull();
     expect(rowIn(7, "run-timeline-row-level-1")).not.toBeNull();
