@@ -46,25 +46,36 @@ _FORBIDDEN_PREFIXES = (
     "opentelemetry",
 )
 
+# Literal source with data in argv, so test selection can read the probe's imports.
 _PROBE = """
 import json
 import sys
 
-sys.path.insert(0, {root!r})
+root, prefixes = sys.argv[1], tuple(json.loads(sys.argv[2]))
+sys.path.insert(0, root)
 import ava_builtins.plugins.ava_fleet._task_update  # the imports under test
 import ava_builtins.plugins.ava_fleet.plugin
 import ava_builtins.plugins.ava_fleet.task_registry
 
-bad = sorted(name for name in sys.modules if name.startswith({prefixes!r}))
+bad = sorted(name for name in sys.modules if name.startswith(prefixes))
 print(json.dumps(bad))
 """
 
 
 def test_fleet_plugin_autoload_does_not_load_redis_psycopg_or_otel() -> None:
-    code = _PROBE.format(root=str(_REPO_ROOT), prefixes=_FORBIDDEN_PREFIXES)
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-B", "-X", "utf8", "-c", code],
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-X",
+            "utf8",
+            "-c",
+            _PROBE,
+            str(_REPO_ROOT),
+            json.dumps(_FORBIDDEN_PREFIXES),
+        ],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,

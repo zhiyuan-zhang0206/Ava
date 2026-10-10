@@ -233,6 +233,10 @@ def _connect_with_retry(port: int, *, timeout_s: float = 15.0) -> http.client.HT
     pytest.fail(f"gateway child never accepted a connection on 127.0.0.1:{port}: {last_error}")
 
 
+# The child's entry names this module literally, so test selection can read the import.
+_CHILD_ENTRY = "from gateway.tests.bootstrap.test_server_shutdown import _run_child; _run_child()"
+
+
 def _spawn_child(tmp_path: Path, *, drain_seconds: float) -> _Child:
     port = _free_port()
     markers_path = tmp_path / "markers.txt"
@@ -253,7 +257,7 @@ def _spawn_child(tmp_path: Path, *, drain_seconds: float) -> _Child:
     env[_PORT_ENV] = str(port)
     log_file = log_path.open("wb")
     proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter + in-repo entry, no shell
-        [sys.executable, "-c", f"from {__name__} import _run_child; _run_child()"],
+        [sys.executable, "-c", _CHILD_ENTRY],
         cwd=_REPO_ROOT,
         env=env,
         stdout=log_file,

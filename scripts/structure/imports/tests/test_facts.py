@@ -1,6 +1,8 @@
 """Unpruned dependency facts retain bounded inputs and precise lexical origins."""
 
 import ast
+import gc
+import weakref
 from pathlib import Path
 
 import pytest
@@ -576,3 +578,22 @@ def test_external_prefix_does_not_prove_dynamic_path_stays_external(
     assert found.records == ()
     assert len(found.unknown) == 1
     assert found.unknown[0].kind == facts.FactKind.RESOURCE
+
+
+def test_completed_query_releases_its_source_tree(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    tree = ast.parse("import importlib\nimportlib.import_module('base.net.retry')\n")
+    source = weakref.ref(tree)
+    automatic_collection = gc.isenabled()
+    gc.disable()
+    try:
+        found = facts.collect(
+            tree, "cli/tests/test_probe.py", placement.ModuleIndex(root), tops=("base",)
+        )
+        del tree
+        assert source() is None
+    finally:
+        if automatic_collection:
+            gc.enable()
+    assert any(fact.target == "base.net.retry" for fact in found.records)
+    assert found.unknown == ()
