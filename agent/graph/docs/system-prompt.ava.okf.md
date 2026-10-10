@@ -14,7 +14,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 ## Core Mechanism
 
 ### build_system_prompt (`agent/graph/prompt/system_prompt.py:build_system_prompt`)
-- The base is the `_BASE_SYSTEM_PROMPT` constant in `agent/graph/prompt/_base_prompt.py` (the `{_AVA_OVERVIEW}` placeholder injects the SDK overview)—**it never reads `AGENTS.md` at runtime**
+- The base is the `_BASE_SYSTEM_PROMPT` constant in `agent/graph/prompt/_base_prompt.py` (the `{_AVA_OVERVIEW}` placeholder injects the SDK overview; `{_SEQUENTIAL_TOOL_CALLS}` takes the sequential tool-call sentence when `AVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS` is on, default off)—**it never reads `AGENTS.md` at runtime**
 - Appends SDK documentation (the output of `ava.help(ava)`)
 - Runs `FRAMEWORK_SECTIONS` in fixed order, then the registry's plugin sections
 - Injects the skill and MCP server index — **once**. `# Capabilities` is the sole index; the expanded SDK reference's `*` skips `ava.skills` / `ava.mcps` (`_CAPABILITY_SURFACES`) so it renders call contracts only, never a second capability listing
