@@ -8,64 +8,34 @@ Unrecognized ownership stays a finding rather than an exemption or marker.
 from __future__ import annotations
 
 import ast
-import math
 from collections.abc import Iterator
 
-from scripts.structure.ambient_state.module import Module, dotted
-
-Function = ast.FunctionDef | ast.AsyncFunctionDef
-
-
-def nodes(root: ast.AST) -> Iterator[ast.AST]:
-    """Walk executable statements without treating nested definitions as executed."""
-    pending: list[ast.AST] = (
-        [root] if isinstance(root, ast.Call) else list(ast.iter_child_nodes(root))
-    )
-    while pending:
-        node = pending.pop()
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
-            continue
-        yield node
-        if isinstance(node, ast.If) and isinstance(node.test, ast.Constant):
-            branch = node.body if node.test.value else node.orelse
-            pending.extend([node.test, *branch])
-        else:
-            pending.extend(ast.iter_child_nodes(node))
-
-
-def _field(node: ast.AST) -> str | None:
-    name = dotted(node)
-    return name if name and name.startswith("self.") and name.count(".") == 1 else None
-
-
-def _assignments(root: ast.AST) -> Iterator[tuple[ast.expr, ast.expr]]:
-    for node in nodes(root):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                yield target, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            yield node.target, node.value
+from scripts.structure.ambient_state.module import Module
+from scripts.structure.ambient_state.owner_method import (
+    Function,
+    assignment_pairs,
+    call_nodes,
+    executable_nodes,
+    instance_field,
+    join_has_timeout,
+)
 
 
 def _aliases(root: ast.AST) -> dict[str, str]:
     return {
         target.id: field
-        for target, value in _assignments(root)
-        if isinstance(target, ast.Name) and (field := _field(value)) is not None
+        for target, value in assignment_pairs(root)
+        if isinstance(target, ast.Name) and (field := instance_field(value)) is not None
     }
 
 
 def _receiver(node: ast.expr, aliases: dict[str, str]) -> str | None:
-    return aliases.get(node.id) if isinstance(node, ast.Name) else _field(node)
-
-
-def _calls(root: ast.AST) -> Iterator[ast.Call]:
-    return (node for node in nodes(root) if isinstance(node, ast.Call))
+    return aliases.get(node.id) if isinstance(node, ast.Name) else instance_field(node)
 
 
 def _method_calls(root: ast.AST) -> Iterator[tuple[str, str, ast.Call]]:
     aliases = _aliases(root)
-    for call in _calls(root):
+    for call in call_nodes(root):
         if isinstance(call.func, ast.Attribute):
             receiver = _receiver(call.func.value, aliases)
             if receiver:
@@ -80,40 +50,28 @@ def _closure(method: Function, methods: dict[str, Function]) -> list[Function]:
         if current.name in found:
             continue
         found[current.name] = current
-        for call in _calls(current):
-            name = _field(call.func)
+        for call in call_nodes(current):
+            name = instance_field(call.func)
             if name and (helper := methods.get(name.removeprefix("self."))) is not None:
                 pending.append(helper)
     return list(found.values())
 
 
-def _bounded_join(call: ast.Call) -> bool:
-    timeout = next((kw.value for kw in call.keywords if kw.arg == "timeout"), None)
-    timeout = timeout if timeout is not None else (call.args[0] if call.args else None)
-    if timeout is None:
-        return False
-    if isinstance(timeout, ast.Constant):
-        return (
-            isinstance(timeout.value, int | float)
-            and not isinstance(timeout.value, bool)
-            and math.isfinite(timeout.value)
-        )
-    return not (isinstance(timeout, ast.Call) and dotted(timeout.func) == "float")
-
-
 def _handle(call: ast.Call, method: Function) -> str | None:
-    assignments = list(_assignments(method))
+    assignments = list(assignment_pairs(method))
     for target, value in assignments:
         if value is call:
-            field = _field(target)
+            field = instance_field(target)
             if field:
                 return field
             if isinstance(target, ast.Name):
                 return next(
                     (
-                        _field(held)
+                        instance_field(held)
                         for held, alias in assignments
-                        if isinstance(alias, ast.Name) and alias.id == target.id and _field(held)
+                        if isinstance(alias, ast.Name)
+                        and alias.id == target.id
+                        and instance_field(held)
                     ),
                     None,
                 )
@@ -121,7 +79,7 @@ def _handle(call: ast.Call, method: Function) -> str | None:
 
 
 def _reported_exception(handler: ast.ExceptHandler, module: Module, stored_at: int) -> bool:
-    for call in _calls(handler):
+    for call in call_nodes(handler):
         if call.lineno <= stored_at:
             continue
         if module.full_name(call.func) in {"str", "repr", "type", "isinstance", "bool"}:
@@ -140,15 +98,16 @@ def _stored_exception(handler: ast.ExceptHandler) -> tuple[str, int] | None:
         targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
         if isinstance(value, ast.Name) and value.id == handler.name:
             for target in targets:
-                if field := _field(target):
+                if field := instance_field(target):
                     return field, statement.lineno
     return None
 
 
 def _overwrites_receipt(handler: ast.ExceptHandler, receipt: str) -> bool:
     return any(
-        _field(target) == receipt and not (isinstance(value, ast.Name) and value.id == handler.name)
-        for target, value in _assignments(handler)
+        instance_field(target) == receipt
+        and not (isinstance(value, ast.Name) and value.id == handler.name)
+        for target, value in assignment_pairs(handler)
     )
 
 
@@ -182,7 +141,11 @@ def _target_receipt(
         return None
     if len(attempt.handlers) != 1:
         return None
-    if any(isinstance(node, ast.Return) for handler in attempt.handlers for node in nodes(handler)):
+    if any(
+        isinstance(node, ast.Return)
+        for handler in attempt.handlers
+        for node in executable_nodes(handler)
+    ):
         return None
     for handler in attempt.handlers:
         receipt = _error_receipt(handler, module)
@@ -197,7 +160,7 @@ def _raises(root: Function, receipt: str) -> bool:
         isinstance(node, ast.Raise)
         and node.exc is not None
         and _receiver(node.exc, aliases) == receipt
-        for node in nodes(root)
+        for node in executable_nodes(root)
     )
 
 
@@ -206,8 +169,8 @@ def _event_fields(methods: dict[str, Function], module: Module) -> set[str]:
         field
         for method in methods.values()
         if method.name == "__init__"
-        for target, value in _assignments(method)
-        if (field := _field(target))
+        for target, value in assignment_pairs(method)
+        if (field := instance_field(target))
         and isinstance(value, ast.Call)
         and module.full_name(value.func) == "threading.Event"
     }
@@ -220,14 +183,14 @@ def _completion_only(body: list[ast.stmt], events: set[str]) -> bool:
         call = statement.value
         if not isinstance(call.func, ast.Attribute) or call.func.attr != "set":
             return False
-        if _field(call.func.value) not in events or call.args or call.keywords:
+        if instance_field(call.func.value) not in events or call.args or call.keywords:
             return False
     return True
 
 
 def _join_and_observe(calls: list[tuple[str, str, ast.Call]], handle: str) -> bool:
     joined = any(
-        receiver == handle and name == "join" and _bounded_join(call)
+        receiver == handle and name == "join" and join_has_timeout(call)
         for receiver, name, call in calls
     )
     observed = any(receiver == handle and name == "is_alive" for receiver, name, _ in calls)
@@ -260,7 +223,7 @@ def owned_calls(module: Module) -> set[int]:
         for method in methods.values():
             if method.name != "__init__":
                 continue
-            for call in _calls(method):
+            for call in call_nodes(method):
                 if module.full_name(call.func) != "threading.Thread":
                     continue
                 handle = _handle(call, method)
@@ -278,7 +241,7 @@ def _owned(
 ) -> bool:
     handle = _handle(call, method)
     target = next((kw.value for kw in call.keywords if kw.arg == "target"), None)
-    target_name = _field(target) if target is not None else None
+    target_name = instance_field(target) if target is not None else None
     worker = methods.get(target_name.removeprefix("self.")) if target_name else None
     if not handle or worker is None:
         return False
@@ -295,10 +258,10 @@ def _owned(
 
 def _signals_passed(helper: Function, events: set[str]) -> set[str]:
     signals: set[str] = set()
-    for invocation in _calls(helper):
+    for invocation in call_nodes(helper):
         arguments = [*invocation.args, *(kw.value for kw in invocation.keywords)]
         for argument in arguments:
-            field = _field(argument)
+            field = instance_field(argument)
             if field is not None and field in events:
                 signals.add(field)
     return signals
@@ -320,6 +283,6 @@ def _constructor_handles(methods: dict[str, Function], module: Module) -> list[s
     return [
         _handle(call, method)
         for method in methods.values()
-        for call in _calls(method)
+        for call in call_nodes(method)
         if module.full_name(call.func) == "threading.Thread"
     ]
