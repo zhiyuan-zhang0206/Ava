@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
@@ -21,13 +22,63 @@ from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry ne
 )
 from scripts.structure.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
 
-_FORCED_FULL_ROOTS = (
-    "base/",
-    "ava/",
-    "agent/",
-    "ava_builtins/",
+# Global paths apply to every test, so a change keeps the full suite. This is the
+# one owner of the concept; the root conftest's `pytest_plugins` modules join it
+# per checkout (`Checkout.global_files`).
+_GLOBAL_FILES = frozenset(
+    {
+        "pyproject.toml",  # interpreter, dependencies, pytest configuration
+        "uv.lock",
+        "conftest.py",  # root bootstrap: `pytest_plugins` loads for every test
+        ".python-version",
+        ".env.example",  # the documented settings surface
+    }
+)
+_GLOBAL_PREFIXES = (
+    "tests/fixtures/",  # the suite's global fixture plugins
     "db/",
     "migrations/",
+    "deploy/",  # operational configuration that tests read by path, not by import
+    "commands/",  # slash-command prompt data read at runtime and by tests by path
+)
+# Repository-level configuration and tree-wide inputs: only the tree-scan tests
+# can observe them.
+_TREE_SCAN_ONLY_FILES = frozenset(
+    {
+        ".pre-commit-config.yaml",
+        ".gitignore",
+        ".gitattributes",
+        ".gitleaks.toml",
+        ".test_durations",  # shard balancing only
+        ".test_durations.source.json",
+        "LICENSE",
+        "NOTICE",
+    }
+)
+_TREE_SCAN_ONLY_PREFIXES = (
+    ".github/",
+    ".agents/",
+    ".ava/",
+    ".trunk/",
+    "demos/",
+    "tests/e2e/",  # CI runs the whole e2e package for every diff that is not docs-only
+)
+# Top-level directories whose files belong to a package with an owning `tests/`.
+_PACKAGE_ROOTS = frozenset(
+    {
+        "agent",
+        "ava",
+        "ava_builtins",
+        "base",
+        "cli",
+        "gateway",
+        "ops",
+        "schedules",
+        "scripts",
+        "services",
+        "tests",
+        "ui",
+    }
 )
 _SOURCE_ROOTS = frozenset(
     {
@@ -67,6 +118,20 @@ _TREE_SCAN_TESTS = frozenset(
 )
 
 
+class PathClass(StrEnum):
+    """How one changed path contributes to the selection."""
+
+    DOCUMENTATION = "documentation"  # no backend test; a docs-only diff is SKIP
+    TEST = "test"  # a collectable test file: it runs itself
+    CONFTEST = "conftest"  # every collectable test below its directory
+    PACKAGE = "package"  # direct importers plus the owning package's tests
+    TREE_SCAN_ONLY = "tree-scan-only"  # repository-level input: tree-scan tests only
+    FRONTEND = "frontend"  # ui/ non-Python: the frontend job owns it
+    GLOBAL = "global"  # applies to every test: full suite
+    DELETED = "deleted"  # absent from the head tree: ignored
+    UNMAPPED = "unmapped"  # no rule owns it: full suite (the tracked tree has none)
+
+
 @dataclass(frozen=True)
 class SelectionResult:
     """One deterministic selector decision and the data behind it."""
@@ -99,6 +164,17 @@ class SelectionResult:
             "forced_roots": list(self.forced_roots),
             "map_source_count": self.map_source_count,
         }
+
+
+@dataclass(frozen=True)
+class Checkout:
+    """The facts about one checked-out tree that classification needs."""
+
+    repo_root: Path
+    hosts: tuple[str, ...]
+    collectable: frozenset[str]
+    test_dirs: frozenset[str]  # `tests` directories that contain a collectable test
+    global_files: frozenset[str]  # root-conftest plugin modules and their package inits
 
 
 def _selection_mode() -> str:
@@ -174,38 +250,103 @@ def build_import_reverse_map(repo_root: Path) -> dict[str, set[str]]:
     return reverse_map
 
 
-def _early_decision(
-    changed: tuple[str, ...],
-    *,
-    event: str,
-    head_ref: str,
-    full_estimate: float,
-    hosts: tuple[str, ...],
-) -> SelectionResult | None:
-    """The rules that decide from the changed paths alone; None when the import map is needed."""
-    if event != "pull_request" or head_ref.startswith(_QUEUE_PREFIXES):
-        return _result("FULL", "queue-or-non-pr", full_estimate=full_estimate)
-    if all(_is_documentation_path(path, hosts) for path in changed):
-        return _result("SKIP", "docs-only", full_estimate=full_estimate)
+def load_checkout(repo_root: Path) -> Checkout:
+    """Read the tree facts once so every path is classified against the same view."""
+    repo_root = repo_root.resolve()
+    hosts = pytest_test_hosts((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    collectable = frozenset(collectable_test_paths(repo_root))
+    return Checkout(
+        repo_root=repo_root,
+        hosts=hosts,
+        collectable=collectable,
+        test_dirs=frozenset(d for path in collectable for d in _tests_directories(path)),
+        global_files=frozenset(_plugin_files(repo_root)),
+    )
 
-    forced_roots = _forced_roots(changed, hosts)
-    if forced_roots:
-        return _result(
-            "FULL",
-            f"forced-root:{forced_roots[0]}",
-            full_estimate=full_estimate,
-            forced_roots=forced_roots,
+
+def _tests_directories(path: str) -> list[str]:
+    """Every ancestor directory of ``path`` that is named ``tests``."""
+    parts = path.split("/")
+    return [
+        "/".join(parts[: index + 1]) for index, part in enumerate(parts[:-1]) if part == "tests"
+    ]
+
+
+def classify_path(path: str, checkout: Checkout) -> PathClass:
+    """The single place that decides how a changed repo-relative path is handled.
+
+    ``select_tests`` and the tracked-tree completeness test both call this, so
+    the rules exist once. The first matching rule wins.
+    """
+    if _is_documentation_path(path, checkout.hosts):
+        return PathClass.DOCUMENTATION
+    if Path(path).name == "conftest.py":
+        # Checked before existence: a deleted conftest still changes the fixtures
+        # of every test below it, with no import to break.
+        return PathClass.GLOBAL if path == "conftest.py" else PathClass.CONFTEST
+    if not os.path.lexists(checkout.repo_root / path):
+        return PathClass.DELETED
+    if path in checkout.collectable:
+        return PathClass.TEST
+    return _repository_class(path, checkout)
+
+
+def _repository_class(path: str, checkout: Checkout) -> PathClass:
+    """The class of an existing, non-test, non-conftest path."""
+    if path in _GLOBAL_FILES or path in checkout.global_files or path.startswith(_GLOBAL_PREFIXES):
+        return PathClass.GLOBAL
+    if path in _TREE_SCAN_ONLY_FILES or path.startswith(_TREE_SCAN_ONLY_PREFIXES):
+        return PathClass.TREE_SCAN_ONLY
+    root = path.split("/", maxsplit=1)[0]
+    if root == "ui" and not path.endswith(".py"):
+        return PathClass.FRONTEND
+    if root in _PACKAGE_ROOTS and "/" in path:
+        return PathClass.PACKAGE
+    return PathClass.UNMAPPED
+
+
+def package_tests(path: str, checkout: Checkout) -> set[str]:
+    """Collectable tests of the package that owns ``path``.
+
+    Walk up from the path's directory; the nearest ``tests`` directory that holds
+    a collectable test (the directory itself when the path is inside one, else a
+    sibling ``tests`` beside an ancestor) owns the path, and every collectable test
+    below it is the package's test set.
+    """
+    directory = path.rpartition("/")[0]
+    while True:
+        tests_dir = (
+            directory
+            if directory.rpartition("/")[2] == "tests"
+            else f"{directory}/tests".lstrip("/")
         )
-    if any(
-        path in {"pyproject.toml", ".test_durations"}
-        or path == "conftest.py"
-        or path.endswith("/conftest.py")
-        for path in changed
-    ):
-        return _result("FULL", "test-configuration", full_estimate=full_estimate)
-    if any(path.startswith("tests/e2e/") for path in changed):
-        return _result("FULL", "e2e", full_estimate=full_estimate)
-    return None
+        if tests_dir in checkout.test_dirs:
+            return {test for test in checkout.collectable if test.startswith(f"{tests_dir}/")}
+        if not directory:
+            return set()
+        directory = directory.rpartition("/")[0]
+
+
+def _conftest_tests(path: str, checkout: Checkout) -> set[str]:
+    """The collectable tests a conftest.py can affect: its directory subtree."""
+    prefix = path.rpartition("/")[0] + "/"
+    return {test for test in checkout.collectable if test.startswith(prefix)}
+
+
+def _owner_tests(
+    changed: dict[str, PathClass], checkout: Checkout, reverse_map: dict[str, set[str]]
+) -> set[str]:
+    """The union of what each changed path contributes (rules by class)."""
+    selected: set[str] = set()
+    for path, path_class in changed.items():
+        if path_class is PathClass.TEST:
+            selected.add(path)
+        elif path_class is PathClass.CONFTEST:
+            selected.update(_conftest_tests(path, checkout))
+        elif path_class is PathClass.PACKAGE:
+            selected.update(reverse_map.get(path, set()))
+            selected.update(package_tests(path, checkout))
+    return selected
 
 
 def select_tests(
@@ -218,42 +359,27 @@ def select_tests(
     """Apply the ordered conservative test-selection rules to one changed-file list."""
     repo_root = repo_root.resolve()
     changed = tuple(sorted({path.strip() for path in changed_files if path.strip()}))
-    hosts = pytest_test_hosts((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
-    collectable = collectable_test_paths(repo_root)
+    checkout = load_checkout(repo_root)
     durations = _load_durations(repo_root / ".test_durations")
-    full_estimate = _estimate_seconds(collectable, durations)
+    full_estimate = _estimate_seconds(checkout.collectable, durations)
 
-    early = _early_decision(
-        changed, event=event, head_ref=head_ref, full_estimate=full_estimate, hosts=hosts
-    )
-    if early is not None:
-        return early
+    if event != "pull_request" or head_ref.startswith(_QUEUE_PREFIXES):
+        return _result("FULL", "queue-or-non-pr", full_estimate=full_estimate)
+    if all(_is_documentation_path(path, checkout.hosts) for path in changed):
+        return _result("SKIP", "docs-only", full_estimate=full_estimate)
+
+    classes = {path: classify_path(path, checkout) for path in changed}
+    forced = _forced_full(classes, full_estimate)
+    if forced is not None:
+        return forced
 
     reverse_map = build_import_reverse_map(repo_root)
-    blind_changed = tuple(
-        path
-        for path in changed
-        if path not in collectable
-        and path not in reverse_map
-        and not _is_documentation_path(path, hosts)
-    )
-    if blind_changed:
-        return _result(
-            "FULL",
-            "unmapped",
-            full_estimate=full_estimate,
-            blind_changed=blind_changed,
-            map_source_count=len(reverse_map),
-        )
-
-    selected = {path for path in changed if path in collectable}
-    for source_path in changed:
-        selected.update(reverse_map.get(source_path, set()))
-    # Tree-scan tests are unreachable through the direct map; pin them so a
+    selected = _owner_tests(classes, checkout, reverse_map)
+    # Tree-scan tests are unreachable through the owner rules; pin them so a
     # SELECTED run keeps the repo-wide gates (task #4183).
     selected.update(tree_scan_tests(repo_root))
-    tests = tuple(sorted(selected & collectable))
-    estimate = _estimate_seconds(tests, durations, reference_paths=collectable)
+    tests = tuple(sorted(selected & checkout.collectable))
+    estimate = _estimate_seconds(tests, durations, reference_paths=set(checkout.collectable))
     if not tests:
         return _result(
             "FULL",
@@ -271,12 +397,28 @@ def select_tests(
         )
     return _result(
         "SELECTED",
-        "direct-imports",
+        "owner-tests",
         tests=tests,
         est_seconds=estimate,
         full_estimate=full_estimate,
         map_source_count=len(reverse_map),
     )
+
+
+def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> SelectionResult | None:
+    """FULL for a global path or, as the runtime safety net, an unowned path."""
+    global_paths = tuple(path for path, kind in classes.items() if kind is PathClass.GLOBAL)
+    if global_paths:
+        return _result(
+            "FULL",
+            f"global-path:{global_paths[0]}",
+            full_estimate=full_estimate,
+            forced_roots=global_paths,
+        )
+    unmapped = tuple(path for path, kind in classes.items() if kind is PathClass.UNMAPPED)
+    if unmapped:
+        return _result("FULL", "unmapped", full_estimate=full_estimate, blind_changed=unmapped)
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -323,23 +465,6 @@ def _is_collectable_test_path(path: str) -> bool:
     )
 
 
-def _forced_roots(changed: tuple[str, ...], hosts: tuple[str, ...]) -> tuple[str, ...]:
-    """The forced-full roots a change touches. A test-only edit beside the code
-    (`base/x/tests/test_y.py`) is a test change, not a source change: it goes through
-    the reverse map like an edit under `tests/` always did. Component documents
-    do not turn an otherwise selectable mixed diff into a source change."""
-    return tuple(
-        root
-        for root in _FORCED_FULL_ROOTS
-        if any(
-            path.startswith(root)
-            and not _is_test_dir_path(path, hosts)
-            and not _is_documentation_path(path, hosts)
-            for path in changed
-        )
-    )
-
-
 def _is_documentation_path(path: str, hosts: tuple[str, ...]) -> bool:
     return (
         not path.startswith(_NON_DOCUMENTATION_PREFIXES)
@@ -362,9 +487,8 @@ def _imported_modules(test_path: Path) -> set[str]:
     return modules
 
 
-def _resolve_module(repo_root: Path, module: str) -> str | None:
-    if module.split(".", maxsplit=1)[0] not in _SOURCE_ROOTS:
-        return None
+def _module_file(repo_root: Path, module: str) -> str | None:
+    """The repo-relative file of a dotted module (a module file or a package init)."""
     module_path = repo_root.joinpath(*module.split("."))
     source_file = module_path.with_suffix(".py")
     if source_file.is_file():
@@ -373,6 +497,48 @@ def _resolve_module(repo_root: Path, module: str) -> str | None:
     if package_init.is_file():
         return package_init.relative_to(repo_root).as_posix()
     return None
+
+
+def _resolve_module(repo_root: Path, module: str) -> str | None:
+    if module.split(".", maxsplit=1)[0] not in _SOURCE_ROOTS:
+        return None
+    return _module_file(repo_root, module)
+
+
+def _plugin_modules(repo_root: Path) -> list[str]:
+    """The dotted modules the root conftest lists in ``pytest_plugins``."""
+    conftest = repo_root / "conftest.py"
+    if not conftest.is_file():
+        return []
+    for node in ast.parse(conftest.read_text(), filename=str(conftest)).body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "pytest_plugins"
+        ):
+            value = cast(object, ast.literal_eval(node.value))
+            items = cast(list[object], value) if isinstance(value, list) else []
+            if not isinstance(value, list) or not all(isinstance(item, str) for item in items):
+                raise TypeError("conftest.py pytest_plugins must be a list of module-name strings")
+            return cast(list[str], items)
+    return []
+
+
+def _plugin_files(repo_root: Path) -> set[str]:
+    """Repo files every pytest process loads: plugin modules and their package inits.
+
+    A module that does not resolve to a repo file (an installed plugin such as
+    ``pytester``) has no path to change here and is skipped.
+    """
+    files: set[str] = set()
+    for module in _plugin_modules(repo_root):
+        parts = module.split(".")
+        for end in range(1, len(parts) + 1):
+            file = _module_file(repo_root, ".".join(parts[:end]))
+            if file is not None:
+                files.add(file)
+    return files
 
 
 def _load_durations(path: Path) -> dict[str, float]:
@@ -393,7 +559,7 @@ def _load_durations(path: Path) -> dict[str, float]:
 
 
 def _estimate_seconds(
-    test_paths: set[str] | tuple[str, ...],
+    test_paths: set[str] | frozenset[str] | tuple[str, ...],
     durations: dict[str, float],
     *,
     reference_paths: set[str] | None = None,

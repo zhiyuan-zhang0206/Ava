@@ -11,8 +11,8 @@ tags:
 
 ## What it is
 
-The CI workflow selects a direct-import backend test subset for real pull
-requests. In `enforce` mode (the default) a SELECTED pull request runs that
+The CI workflow selects an owner-rule backend test subset (direct importers
+plus the owning package's tests) for real pull requests. In `enforce` mode (the default) a SELECTED pull request runs that
 subset as its backend pytest gate; every other selector decision and every
 Trunk merge-tree branch keeps the full suite. In `shadow` mode no PR gates on
 the subset: the full fan-out gates and the subset plus its comparison report
@@ -21,7 +21,7 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 
 ## Job data flow
 
-1. `test-select` computes a static direct-import subset from the merge-base
+1. `test-select` computes an owner-rule subset from the merge-base
    diff, publishes the active mode and an audited JSON decision
    (FULL / SKIP / SELECTED), and stays non-gating: a selector or setup failure
    leaves the routing outputs empty, which degrades to the full fan-out.
@@ -43,5 +43,5 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 ## Related policy
 
 [docs/conventions/engineering/test-selection.md](../docs/conventions/engineering/test-selection.md) owns the
-selection rules, blind-file limits, duration guard, artifacts, maintenance, and
+selection rules, path classes, static-map limits, duration guard, artifacts, maintenance, and
 the mode switch.

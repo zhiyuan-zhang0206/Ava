@@ -37,8 +37,9 @@ budget applies to tests and fixture metadata as well as source code.
 - `tests/fixtures/` — the suite's global fixture plugins ([[test-fixtures.ava.okf.md]]) plus event fixture data; `tests/factories/` — data factories
 
 - `scripts/tests/test_test_selector.py` — synthetic-checkout contracts for
-  the static PR test selector, including queue, blind-file, duration, and
-  process-determinism escapes
+  the static PR test selector, including queue, duration, and
+  process-determinism escapes; `scripts/tests/test_test_selector_owner_rules.py`
+  holds the per-path owner rules and the tracked-tree completeness guard
 - `tests/scripts/test_ci_test_selection.py` — workflow contracts for the
   test-selection routing: the single mode switch, the enforced-subset gate,
   the shadow fallback, and the matching non-flaky pytest comparison
