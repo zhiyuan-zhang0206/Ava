@@ -86,11 +86,9 @@ class SdkReminders:
 
 @dataclass(frozen=True)
 class LlmCallPolicy:
-    """How a model call's failures and provider caches are treated."""
+    """How a model call's provider failures are treated."""
 
     llm_fatal_provider_error_types: str
-    gemini_explicit_cache_enabled: bool
-    gemini_cache_timeout_seconds: float
 
 
 @dataclass(frozen=True)

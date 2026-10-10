@@ -89,7 +89,7 @@ class or mutating a cached model.
 
 The OpenAI and Anthropic owners construct fresh clients with `max_retries=0` for
 this path. Guarded generation freezes the original available model and rejects
-unavailable-model fallback. Callers must also suppress their own cache/retry
+unavailable-model fallback. Callers must also suppress their own retry
 loops; this construction contract cannot prove exactly-once external vendor
 execution or recover a response that was lost before durable storage.
 The manual compact consumer and its proof boundary are documented in

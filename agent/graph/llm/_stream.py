@@ -7,9 +7,7 @@ error type. A stalled stream's fallback runs under the SAME bound as its
 stream segment; when that fallback also times out (two adjacent stalls), the
 call is terminated as ``LLMStreamStallPairError`` for the delayed retry
 schedule instead of burning the provider's stalled segments.
-``_stream_with_cache_retry`` wraps the whole exchange (stale Gemini cache
-invalidation + one plain-path retry, concurrency-limiter slot, latency/decode
-stamps).
+``_stream_llm`` binds the agent tool and stamps whole-call latency and decode timing.
 
 Split out of ``node.py`` (Task #1004 >800-line outlier) — the provider-facing
 side of the llm node; it feeds chunks into a caller-owned list that
@@ -34,10 +32,9 @@ from agent.graph.llm_errors import (
     _is_fatal_provider_error_type,
     _parse_provider_error_type,
 )
-from agent.llm.cache import prepare_invocation
+from agent.llm import execute_code
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.call import ProviderCallBinding, recover_invocation
 from base.lm.catalog import ModelCatalog
 from base.lm.errors import normalize_provider_transport_error
 from base.log import logger
@@ -292,7 +289,7 @@ async def _consume_stream_with_stall_timeout(
 
     Also records the stream's decode window: monotonic timestamps of the
     first and last chunk arrival (`first_ts` / `last_ts`), returned as a
-    `(first, last)` pair so `_stream_with_cache_retry` can stamp
+    `(first, last)` pair so `_stream_llm` can stamp
     `handler.llm_decode_ms = (last - first) * 1000`. An empty stream
     (StopAsyncIteration before any chunk) returns `(None, None)` — there is
     no honest decode window, so the payload carries NULL and the ops panel
@@ -370,7 +367,7 @@ def _next_timeout(
     return stage_timeout, False
 
 
-async def _stream_with_cache_retry(
+async def _stream_llm(
     llm: BaseChatModel,
     messages: list[AnyMessage],
     *,
@@ -378,79 +375,18 @@ async def _stream_with_cache_retry(
     handler: RedisStreamHandler,
     agent: AgentSlices,
     catalog: ModelCatalog,
-    binding: ProviderCallBinding | None = None,
 ) -> None:
-    """Stream the LLM response into `chunks`, retrying once on a stale cache.
+    """Bind tools, stream the complete prefix and stamp latency/decode timing.
 
-    SystemMessage is in state.messages[0] (injected by claim's first round);
-    don't dynamically prepend here — keep byte-level stability so prompt cache
-    hits across restart. Handler doesn't go through LangChain callback —
-    ChatAnthropic with tools bound never triggers `on_llm_new_token`; see
-    _callbacks.py module docstring. Internal streaming/non-streaming branching
-    is in `_consume_llm` docstring.
-
-    prepare_invocation picks the request shape: a live explicit Gemini cache
-    strips the SystemMessage and binds cached_content (tools come from the
-    cache); everything else takes the plain path (bind_tools at use site
-    rather than build_chat_model — the factory lives in `base`, which can't
-    import agent.llm.execute_code; bind_tools returns a new Runnable, cheap).
-    A stale cache reference 403s on the wire — invalidate the memo and rerun
-    once on the plain path.
-
-    Stamps `handler.llm_decode_ms` alongside `llm_latency_ms`: the decode
-    window (last chunk - first chunk, ms) of the final successful attempt -
-    pure generation time for the Σout/Σdecode_ms TPS panel. Non-streaming
-    fallback calls and empty streams leave it None (NULL in the payload).
+    Keep the existing SystemMessage byte-stable for provider implicit caching.
+    Non-streaming fallback and empty streams have no decode window.
     """
-
-    # Whole-call wall-clock: starts before the first attempt and is stamped
-    # onto the handler after the LAST successful attempt, so the latency
-    # covers the stale-cache retry and the non-streaming fallback as one
-    # logical LLM call. A raised call never stamps (no llm_usage row exists
-    # for it either — usage is logged only on success).
-    async def _run() -> None:
-        call_started = time.monotonic()
-        invocation = await prepare_invocation(llm, messages, agent.llm_policy, binding)
-        # Cache provenance for the usage event: only the attempt that actually
-        # succeeded counts (a stale-cache retry runs on the plain path).
-        handler.used_explicit_cache = invocation.used_explicit_cache
-        try:
-            first_ts, last_ts = await _consume_llm(
-                invocation.runnable,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-                invocation.messages,
-                chunks=chunks,
-                handler=handler,
-                agent=agent,
-                catalog=catalog,
-            )
-        except Exception as exc:
-            plain = recover_invocation(invocation, exc)
-            if plain is None:
-                raise
-            chunks.clear()
-            # The handler's per-stream state (started sets, args bufs, published
-            # counts, timers) belongs to the FAILED attempt — re-streaming the
-            # same message through it would re-append deltas (doubled partial
-            # text) or stall code deltas (concatenated args JSON fails to parse).
-            # Reset to a fresh-stream state; msg_idx / agent_id survive by design.
-            handler.reset()
-            handler.used_explicit_cache = plain.used_explicit_cache
-            first_ts, last_ts = await _consume_llm(
-                plain.runnable,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-                plain.messages,
-                chunks=chunks,
-                handler=handler,
-                agent=agent,
-                catalog=catalog,
-            )
-        handler.llm_latency_ms = (time.monotonic() - call_started) * 1000.0
-        # Decode-stage wall-clock: first-token → last-token arrival from the
-        # FINAL successful attempt (`_consume_llm` returns (None, None) for the
-        # non-streaming fallback and empty streams → NULL, never a fake window).
-        # This is the pure-generation TPS denominator (Σout/Σdecode_ms): it
-        # excludes network / queue / prefill that latency_ms still carries.
-        handler.llm_decode_ms = (
-            (last_ts - first_ts) * 1000.0 if first_ts is not None and last_ts is not None else None
-        )
-
-    await _run()
+    call_started = time.monotonic()
+    runnable = llm.bind_tools([execute_code])
+    first_ts, last_ts = await _consume_llm(
+        runnable, messages, chunks=chunks, handler=handler, agent=agent, catalog=catalog
+    )
+    handler.llm_latency_ms = (time.monotonic() - call_started) * 1000.0
+    handler.llm_decode_ms = (
+        (last_ts - first_ts) * 1000.0 if first_ts is not None and last_ts is not None else None
+    )

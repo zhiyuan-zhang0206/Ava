@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from base.lm.call import LlmInvocation, ProviderCallContext
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
@@ -162,20 +161,12 @@ def build(ctx: BuildContext) -> BaseChatModel:
     return ChatGoogleGenerativeAI(**kwargs)
 
 
-async def prepare_call(ctx: ProviderCallContext) -> LlmInvocation | None:
-    """Load the Google invocation adapter only when this binding makes a call."""
-    from ava_builtins.plugins.lm_google.gemini_cache import prepare_call as prepare
-
-    return await prepare(ctx)
-
-
 PROVIDER = ProviderContribution(
     binding=ProviderBinding(
         prefix="gemini-",
         display_name="Google",
         key_env="GEMINI_API_KEY",
         build=build,
-        prepare_call=prepare_call,
         effort_levels=_GEMINI_EFFORT_LEVELS,
         vision=True,
         stop_spec=StopSpec(

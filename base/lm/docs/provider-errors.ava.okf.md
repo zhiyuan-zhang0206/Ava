@@ -29,19 +29,9 @@ unknown at the application layer; the SDK's internal retry policy is unchanged.
 Raw HTTPX network and timeout errors are normalized only around the direct model
 invoke or iterator await. A transport error from an output callback or another
 service is unknown to the node's retry policy. Explicit stream stalls and the
-single configured overload/cache recoveries keep their existing contracts.
+configured overload recovery keeps its existing contract.
 Only an expired owned model deadline grants a stall or stall-pair retry; a
 plain `TimeoutError` raised by model code, metadata or output delivery does not.
-Google's stale-cache recovery requires a trusted permanent 403 rejection with
-the expected cached-content message before invalidating and retrying once.
-Google explicit-cache list, create and refresh recover only at their SDK I/O
-boundary: trusted transient provider errors, typed transport failures and an
-expired owned cache-request deadline. A transient list failure permits one fresh
-create; a transient create failure uses implicit caching for the existing negative
-memo window; a transient or typed stale refresh leaves the existing reference.
-Permanent authentication/input rejections and unknown exceptions propagate
-unchanged. Response metadata, schema construction and logging are outside that
-recovery boundary; a nameless create response is invalid rather than a cache miss.
 External cancellation always propagates.
 
 Malformed terminal frames, unknown stop reasons and truncation fail once.

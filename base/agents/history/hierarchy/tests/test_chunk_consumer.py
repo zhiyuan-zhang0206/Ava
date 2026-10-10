@@ -373,22 +373,24 @@ async def test_generation_error_retries_then_fails_at_the_cap(
     assert status == "failed"
 
 
-async def test_gemini_model_is_skipped_with_an_event(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+async def test_gemini_chunk_is_described_with_its_original_prefix(
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    _seams: dict,
 ) -> None:
-    emitted: list[str] = []
-    monkeypatch.setattr(loop.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
-
-    def provider_key(_model: str, *, catalog: ModelCatalog) -> str:
-        assert catalog is model_catalog
-        return "gemini"
-
-    monkeypatch.setattr(loop, "provider_key_of_model", provider_key)
+    monkeypatch.setattr(
+        loop,
+        "agent_model_target",
+        lambda *_a, **_kw: ("gemini-3.8-flash", ModelOverrides.from_pins(None)),
+    )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    [(status, _, error)] = await _status(aops_pool)
-    assert status == "skipped" and "Gemini" in error
-    assert "understanding_chunk_skipped" in emitted and await _nodes(aops_pool) == []
+    assert await _status(aops_pool) == [("done", 1, None)]
+    assert await _nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
+    located = _seams["described"][0]
+    assert located.prefix[0] == SystemMessage(content="head")
+    assert [msg.id for msg in located.prefix[1:]] == ["m0", "m1"]
 
 
 async def test_checkpoint_read_failure_is_retried(

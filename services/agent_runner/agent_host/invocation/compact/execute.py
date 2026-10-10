@@ -87,7 +87,7 @@ async def _generate_original(
         await _settle_without_generation(pool, command, incarnation, reason="model_changed")
         return False
     try:
-        model, binding = build_chat_model_bound(
+        model, _binding = build_chat_model_bound(
             target_model,
             overrides=ctx.require_agent().overrides,
             single_attempt=True,
@@ -126,9 +126,7 @@ async def _generate_original(
                     list(state.messages),
                     model,
                     ctx.require_agent(),
-                    single_attempt=True,
                     catalog=ctx.require_catalog(),
-                    binding=binding,
                 ),
                 interrupted,
             )

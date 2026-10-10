@@ -485,10 +485,6 @@ def test_validate_config_overlay_none_reasoning_effort_passes(
     ("field", "value"),
     [
         # durations / timeouts — must be > 0 and finite
-        ("gemini_cache_timeout_seconds", 0.0),
-        ("gemini_cache_timeout_seconds", -1.0),
-        ("gemini_cache_timeout_seconds", float("nan")),
-        ("gemini_cache_timeout_seconds", float("inf")),
         ("heartbeat_pause_max_seconds", float("inf")),
         ("llm_stream_ttft_timeout_seconds", 0.0),
         ("llm_stream_ttft_timeout_seconds", -1.0),
@@ -729,3 +725,18 @@ def test_effective_config_snapshot_excludes_sensitive_fields(
     assert "sensitive_test.marker" in snap
     assert "sensitive_test.webhook_secret" not in snap
     assert "plain-text-secret" not in str(snap)
+
+
+@pytest.mark.parametrize("field", ["gemini_explicit_cache_enabled", "gemini_cache_timeout_seconds"])
+def test_retired_google_cache_overlay_is_rejected(
+    model_catalog: ModelCatalog,
+    isolated_registry: dict[str, BaseModel],
+    unit_home,
+    field: str,
+) -> None:
+    with pytest.raises(
+        InvalidConfigOverlay, match="is not in framework Settings nor any plugin Config"
+    ):
+        validate_config_overlay(
+            {field: True}, configs=isolated_registry, models=model_catalog.models
+        )

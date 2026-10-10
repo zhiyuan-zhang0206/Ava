@@ -15,15 +15,6 @@ from base.lm.pricing.cache_writes import cache_write_tokens
 from base.lm.provider_api import InferenceSpeed
 from base.log import logger
 
-# Cache provenance labels for the llm_usage event (task #2660). How much of a
-# provider's cache_read field covers depends on the provider + request shape:
-# Gemini with an explicit cachedContent attached reports ONLY the explicit
-# block (system+tools) — implicit hits on the conversation tail are billed but
-# not reported; Gemini implicit-only and DeepSeek's Anthropic endpoint report
-# the full prefix. The labels keep cross-provider comparisons honest.
-CACHE_MECHANISM_MIXED = "mixed"
-CACHE_SCOPE_EXPLICIT_BLOCK = "explicit_block"
-
 
 def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) -> str:
     """Resolve the billable Ava ID from a Fast call's actual service receipt.

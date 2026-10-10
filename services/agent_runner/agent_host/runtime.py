@@ -20,7 +20,6 @@ from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
-from base.lm.provider_api import ProviderBinding
 from base.lm.registry import resolve_available_model
 from base.log import logger
 
@@ -77,7 +76,6 @@ class _AgentRuntime:
 
     fingerprint: str
     llm: BaseChatModel
-    binding: ProviderBinding | None = None
     last_used: float = field(default_factory=time.monotonic)
 
 
@@ -316,15 +314,15 @@ async def build_runtime(
     catalog: ModelCatalog,
     llm_override: str,
 ) -> _AgentRuntime:
-    """Build the retained model binding after the host repaired its original admission."""
-    llm, binding = await boot_agent_scope(
+    """Build the retained model after the host repaired its original admission."""
+    llm, _binding = await boot_agent_scope(
         agent_id,
         slices.brain.llm_model,
         slices.overrides,
         catalog=catalog,
         llm_override=llm_override,
     )
-    return _AgentRuntime(fingerprint=fingerprint, llm=llm, binding=binding)
+    return _AgentRuntime(fingerprint=fingerprint, llm=llm)
 
 
 def refresh_cached_runtime(

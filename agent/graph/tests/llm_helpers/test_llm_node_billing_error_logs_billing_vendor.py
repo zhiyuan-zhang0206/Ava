@@ -378,7 +378,7 @@ def test_is_fatal_provider_error_type_no_body() -> None:
 async def test_llm_usage_event_carries_latency_ms(loguru_records, ledger: LlmLedger) -> None:
     """The whole-call wall-clock lands on the llm_usage agent_event.
 
-    `_stream_with_cache_retry` stamps `handler.llm_latency_ms` after the call
+    `_stream_llm` stamps `handler.llm_latency_ms` after the call
     completes, and `_finalize_turn_observability` forwards it to
     `log_llm_usage(latency_ms=...)` — the ops monitor panel's latency/TPS
     source. A real stream (one chunk with usage_metadata) must produce an
