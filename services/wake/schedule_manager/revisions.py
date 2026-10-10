@@ -11,7 +11,10 @@ from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.pty import client
 
-_REVISION = re.compile(r"-m gateway\.schedules\.runner \d+ (\d+);")
+# Keep provenance of already-running sessions across the entrypoint migration.
+_REVISION = re.compile(
+    r"-m (?:services\.wake\.schedule_manager|gateway\.schedules)\.runner \d+ (\d+);"
+)
 
 
 class Desired(NamedTuple):
