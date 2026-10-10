@@ -258,3 +258,51 @@ def test_admission_uses_workflow_revision_and_requires_publication() -> None:
         step for step in jobs["refresh"]["steps"] if step.get("id") == "pull-request"
     )
     assert pull_request["if"] == "steps.publish.outputs.changed == 'true'"
+
+
+@pytest.mark.parametrize("existing_pr", ["", "5082"])
+def test_publication_uses_pr_ci_without_dispatch_or_approval(
+    tmp_path: Path, existing_pr: str
+) -> None:
+    """Execute both publisher routes; only PR events may start required CI."""
+    workflow = Path(__file__).resolve().parents[4] / ".github/workflows/refresh-test-durations.yml"
+    steps = yaml.safe_load(workflow.read_text())["jobs"]["refresh"]["steps"]
+    step = next(step for step in steps if step.get("id") == "pull-request")
+    assert step["env"].get("GH_TOKEN") == "${{ github.token }}"
+    fake_gh = tmp_path / "gh"
+    fake_gh.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$1 $2" >> "$GH_CALLS"\n'
+        'case "$1 $2" in\n'
+        '  "pr list") printf "%s\\n" "$EXISTING_PR" ;;\n'
+        '  "pr view") printf "5082\\n" ;;\n'
+        '  "pr create"|"pr edit") ;;\n'
+        "  *) exit 91 ;;\n"
+        "esac\n"
+    )
+    fake_gh.chmod(0o755)
+    calls, outputs = tmp_path / "calls", tmp_path / "outputs"
+    result = proc.run_bounded(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "GH_CALLS": str(calls),
+            "EXISTING_PR": existing_pr,
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(outputs),
+            "BRANCH": "ava-bot/test-durations",
+            "SOURCE_SHA": _HEAD,
+            "SOURCE_RUN_ID": "7",
+            "MODE": "reuse",
+        },
+        timeout=30,
+        capture_output=True,
+        text=True,
+    )
+    result.check_returncode()
+    assert calls.read_text().splitlines() == [
+        "pr list",
+        "pr edit" if existing_pr else "pr create",
+        "pr view",
+    ]
+    assert outputs.read_text() == "number=5082\n"
