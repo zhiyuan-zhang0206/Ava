@@ -52,11 +52,8 @@ def _event(i: int, category: str = "log") -> telemetry.Event:
 def test_sync_flushes_batch_held_by_drain_thread() -> None:
     """sync() must land a batch the drain thread already dequeued.
 
-    flush() drains the queue on the calling thread only — a batch the
-    drain thread fetched earlier is written up to one flush_interval
-    later, which is exactly the window that polluted exact-content
-    events assertions after a TRUNCATE (straggler flake class). sync()
-    closes it: the held batch must reach the writer before sync returns.
+    Both flush() and sync() acknowledge the sole writer's held batch before
+    returning, including records dequeued before the barrier was admitted.
     """
 
     rec = _Recorder()
@@ -73,8 +70,7 @@ def test_sync_flushes_batch_held_by_drain_thread() -> None:
         while time.monotonic() < deadline and not sink._queue.empty():
             time.sleep(0.01)
         assert sink._queue.empty(), "drain thread never dequeued the record"
-        sink.flush()
-        assert rec.batches == [], "flush() must not write the held batch"
+        assert sink.flush().status is telemetry.DrainStatus.COMPLETED
         sink.sync(timeout=2.0)
         assert [e.event_name for b in rec.batches for e in b] == ["kind-0"]
         sink.sync(timeout=2.0)  # idempotent: nothing new, no extra write
@@ -168,10 +164,13 @@ def test_queue_is_bounded_and_counts_what_it_sheds(monkeypatch: pytest.MonkeyPat
     The drain thread is stalled so the queue genuinely fills; before this bound
     existed the same burst grew the agent process's heap without limit.
     """
+    import threading
+
     blocked = _Recorder()
+    release = threading.Event()
 
     def _stalled(batch: list[Any]) -> None:
-        time.sleep(5.0)
+        assert release.wait(5.0)
         blocked(batch)
 
     reports: list[dict[str, Any]] = []
@@ -182,20 +181,17 @@ def test_queue_is_bounded_and_counts_what_it_sheds(monkeypatch: pytest.MonkeyPat
         return original_report(event, count, queue_name)
 
     monkeypatch.setattr(loss, "report_loss", report)
-    # Not stopped in a finally: stop() joins, and this writer sleeps 5s by
-    # design. The drain thread is already a daemon, so it cannot hold the
-    # interpreter open.
     sink = _make_sink(_stalled, batch=10, interval=0.05, maxsize=20)
-    for i in range(500):
-        sink.enqueue(_event(i))
-    deadline = time.monotonic() + 10.0
-    while time.monotonic() < deadline and not reports:
-        time.sleep(0.01)
-
-    assert reports, "expected an event_log_drop report after shedding records"
-    assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType]
-    assert reports[0]["n"] > 0
-    assert sink._queue.qsize() <= 20, "queue grew past its bound"
+    try:
+        for i in range(500):
+            sink.enqueue(_event(i))
+        assert reports, "expected an event_log_drop report after shedding records"
+        assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType]
+        assert reports[0]["n"] > 0
+        assert sink._queue.qsize() <= 20, "queue grew past its bound"
+    finally:
+        release.set()
+        assert sink.stop(timeout=1).status is telemetry.DrainStatus.COMPLETED
 
 
 def test_nothing_is_dropped_when_the_drain_keeps_up() -> None:
@@ -339,6 +335,9 @@ def test_shed_records_report_one_event_log_drop() -> None:
 
     pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
     pipe._queue = queue.Queue(maxsize=1)
+    pipe._admission_lock = threading.Lock()
+    pipe._stop_requested = threading.Event()
+    pipe._finished = threading.Event()
     pipe._dropped_lock = threading.Lock()
     pipe.dropped = 0
     pipe._drop_example = None
