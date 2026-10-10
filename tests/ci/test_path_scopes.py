@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import json
 import os
 import subprocess
 import sys
@@ -177,6 +178,67 @@ def test_a_directory_left_without_tests_is_reported(tmp_path: Path) -> None:
     assert len(problems) == 1, problems
     assert "hold no test file" in problems[0]
     assert scope_problems({"scoped_mod": Scope(("test_a.py",))}, tmp_path) == []
+
+
+def test_scope_validity_does_not_prove_a_moved_tests_autouse_closure(tmp_path: Path) -> None:
+    """Deleting the old declaration can hide a move's missing autouse environment.
+
+    This characterizes the scope validator's boundary, not a migration gate:
+    runtime fixture evidence must accompany a move even when every path is valid.
+    """
+    _tree(tmp_path, {})
+    (tmp_path / "scoped_plugin.py").write_text(
+        "import json\n"
+        "from pathlib import Path\n"
+        "from tests.fixtures import path_scopes as ps\n"
+        "ps._MODULES_BY_PATH.clear()\n"
+        "ps._MODULES_BY_PATH.update(ps.modules_by_path(ps.discover_scopes(Path.cwd())))\n"
+        "pytest_configure = ps.pytest_configure\n"
+        "pytest_collectstart = ps.pytest_collectstart\n"
+        "def pytest_runtest_makereport(item, call):\n"
+        "    if call.when == 'call':\n"
+        "        resolved = {name: f'{definition.func.__module__}:'\n"
+        "                    f'{definition.func.__qualname__}:{definition.scope}'\n"
+        "                    for name, definition in item._request._fixture_defs.items()}\n"
+        "        Path('fixture-closure.json').write_text(json.dumps(resolved))\n",
+        encoding="utf-8",
+    )
+    original = tmp_path / "gov" / "test_hidden.py"
+    original.write_text("def test_hidden():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+    original_scope = original.parent / "path_scopes.toml"
+    declaration = '"scoped_mod" = ["test_hidden.py"]\n'
+    original_scope.write_text(declaration, encoding="utf-8")
+    marker = tmp_path / "session.mark"
+    receipt = tmp_path / "fixture-closure.json"
+
+    before = _run(tmp_path, "gov/test_hidden.py")
+    assert before.returncode == 0, before.stdout + before.stderr
+    assert marker.exists()
+    original_closure = json.loads(receipt.read_text(encoding="utf-8"))
+    receipt.rename(tmp_path / "fixture-closure-before.json")
+    assert original_closure["_sess"] == "scoped_mod:_sess:session"
+    assert original_closure["_func"] == "scoped_mod:_func:function"
+
+    destination = tmp_path / "moved" / "test_hidden.py"
+    destination.parent.mkdir()
+    original.rename(destination)
+    original_scope.unlink()
+    marker.unlink()
+    assert scope_problems(discover_scopes(tmp_path), tmp_path) == []
+    omitted = _run(tmp_path, "moved/test_hidden.py")
+    assert omitted.returncode == 0, omitted.stdout + omitted.stderr
+    assert "1 passed" in omitted.stdout
+    assert not marker.exists()
+    omitted_closure = json.loads(receipt.read_text(encoding="utf-8"))
+    receipt.rename(tmp_path / "fixture-closure-omitted.json")
+    assert "_sess" not in omitted_closure
+    assert "_func" not in omitted_closure
+
+    (destination.parent / "path_scopes.toml").write_text(declaration, encoding="utf-8")
+    repaired = _run(tmp_path, "moved/test_hidden.py")
+    assert repaired.returncode == 0, repaired.stdout + repaired.stderr
+    assert marker.exists()
+    assert json.loads(receipt.read_text(encoding="utf-8")) == original_closure
 
 
 def test_the_plugin_registers_only_listed_paths() -> None:

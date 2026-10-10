@@ -23,6 +23,10 @@ old path. Scan working-tree text for `git ls-files` entries, excluding the froze
 docs/decisions/ and docs/postmortems/ axes and this script itself. Untracked
 environments, caches, and operator scaffolding are outside that universe. Stage
 new files before auditing. Binary files are skipped. Any failed check exits 1.
+
+This audit checks references and importable names, not pytest fixture resolution.
+For a test move, attach before/after runtime fixture closure evidence to review:
+valid declarations alone cannot detect an omitted destination autouse fixture.
 """
 
 from __future__ import annotations
