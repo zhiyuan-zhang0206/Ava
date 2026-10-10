@@ -14,6 +14,7 @@ import pytest
 
 from scripts.structure import imports, locality, placement
 from scripts.structure.imports import cache
+from scripts.structure.placement_evidence import Placement
 from scripts.structure.tests.patch_repo import make_repo, write
 
 RUN = "cli/commands/run.py"
@@ -32,7 +33,7 @@ def _edit(root: pathlib.Path, rel: str, text: str) -> None:
     os.utime(path, ns=(stamp, stamp))
 
 
-def _place(root: pathlib.Path, text: str = TEST) -> placement.Placement:
+def _place(root: pathlib.Path, text: str = TEST) -> Placement:
     """Where a test with this text belongs, judged against the checkout as it is now."""
     return placement.place("tests/test_x.py", ast.parse(text), placement.ModuleIndex(root))
 
@@ -271,8 +272,8 @@ def test_a_cached_graph_is_the_graph_of_a_fresh_read_file_by_file(
     cold = cache.production_imports(REPO_ROOT, TOPS)
     warm = cache.production_imports(REPO_ROOT, TOPS)
     assert cold == warm
-    for rel, cached in warm.items():
-        assert cached == cache._statements(REPO_ROOT / rel, rel, TOPS), rel
+    monkeypatch.setattr(cache, "CACHE_PATH", str(cache_root / "fresh-tree-cache.json"))
+    assert warm == cache.production_imports(REPO_ROOT, TOPS)
 
 
 def test_old_cache_cannot_hide_an_invalid_relative_import(cache_root: pathlib.Path) -> None:

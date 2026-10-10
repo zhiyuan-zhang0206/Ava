@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+__all__ = ["ModuleMap"]
+
 
 class ModuleMap[T]:
     """dotted module -> a value built on first access; `in` asks whether the module exists."""

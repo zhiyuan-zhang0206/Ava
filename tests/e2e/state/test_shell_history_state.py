@@ -37,8 +37,8 @@ import httpx
 import pytest
 from playwright.sync_api import Page
 
-from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
+from tests.e2e.fixture_environment import E2EEnv
 
 
 class _TimelineState(TypedDict):

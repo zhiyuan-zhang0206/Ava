@@ -278,8 +278,8 @@ def _service_probes() -> list[str]:
     not responding" and "ava-ops is answering, but it is /home/ava/.ava" are the
     same bare session name and completely different incidents — the second one
     means another unit holds this unit's port and no amount of waiting fixes it."""
-    import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.probe as _probe_commands
     from base.deploy.lifecycle.service_selection import read_selection
 
     roles = _repo_commands._roles_or_none()
@@ -293,7 +293,7 @@ def _service_probes() -> list[str]:
     for spec, gate_reason in _repo_commands._services_for_roles_annotated(roles):
         if gate_reason is not None or not selection.enabled(spec.session):
             continue
-        probe = _probe_commands._probe_service(spec)
+        probe = _probe_commands.probe_service(spec)
         if probe.alive is not True:
             failing.append(f"{spec.session} ({probe.detail})" if probe.detail else spec.session)
     return failing

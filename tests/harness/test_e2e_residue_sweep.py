@@ -1,73 +1,98 @@
-"""Managed E2E process diagnostics and stale-run residue tests (`tests/e2e/_proc.py`).
+"""Managed E2E process diagnostics and stale-run residue tests (`tests/e2e/process_support.py`).
 
 The reaper finds processes an e2e run left behind (identified by the
 `ava_e2e_home_<pid>_<ts>` AVA_HOME most of them inherit, or, for the
 session-scoped frontend whose env snapshot predates the e2e env layering, by
 its `.builds/build-<pid>_<ts>` cwd) whose owning pytest process is gone, and
 kills them. These tests cover the parsing and the live-run-protection
-partitioning — the kill loop itself is exercised by the e2e package's two
-sweep calls (a signal to nothing is not a unit-testable contract).
+partitioning through the public support component. Native child proofs exercise
+guarded signals without offering any unrelated host process to the sweep.
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from tests.e2e import _proc
+from tests.e2e import process_support as processes
 
 
-def test_split_cmdline_env() -> None:
-    cmdline, env = _proc._split_cmdline_env(
-        "uv run uvicorn gateway.app:app --port 60758 AVA_HOME=/x/ava_e2e_home_1_2"
-        " AVA_DB_URL=postgresql://u@h/db"
+@pytest.mark.parametrize(
+    ("command", "environment"),
+    [
+        (
+            "uv run uvicorn gateway.app:app --port 60758",
+            "AVA_HOME=/x/ava_e2e_home_1_2 AVA_DB_URL=postgresql://u@h/db",
+        ),
+        ("npm run start -p 60759", ""),
+        ("next-server (v16.2.7)", "FOO=bar"),
+    ],
+)
+def test_process_table_observation_retains_command_and_environment(
+    command: str, environment: str
+) -> None:
+    observation = processes.ProcessObservation.from_ps_row(
+        f"100 ?? S 0:00.01 {command} {environment}".rstrip()
     )
-    assert cmdline == "uv run uvicorn gateway.app:app --port 60758"
-    assert env == "AVA_HOME=/x/ava_e2e_home_1_2 AVA_DB_URL=postgresql://u@h/db"
+    assert observation == processes.ProcessObservation(100, command, environment)
+    assert processes.ProcessObservation.from_ps_row("COMMAND PID USER") is None
 
 
-def test_split_cmdline_env_without_env() -> None:
-    cmdline, env = _proc._split_cmdline_env("npm run start -p 60759")
-    assert cmdline == "npm run start -p 60759"
-    assert env == ""
-
-
-def test_split_cmdline_env_arg_shaped_like_env_is_argv() -> None:
-    """An argv token that merely *looks* like an env assignment is still argv:
-    the split is at the FIRST env token, which is the boundary between the
-    command and the env block in `ps eww` output."""
-    cmdline, env = _proc._split_cmdline_env("next-server (v16.2.7) FOO=bar")
-    assert cmdline == "next-server (v16.2.7)"
-    assert env == "FOO=bar"
-
-
-def test_parse_run_id_home_and_build() -> None:
-    assert _proc._parse_run_id(
-        "AVA_HOME=/r/tmp/ava_e2e_home_43948_1788018418678623", _proc._E2E_HOME_RUN_RE
-    ) == (43948, 1788018418678623)
-    assert _proc._parse_run_id(
-        "/r/ui/web/.builds/build-43948_1788018418678623", _proc._E2E_BUILD_RUN_RE
-    ) == (43948, 1788018418678623)
-    assert _proc._parse_run_id("no marker here", _proc._E2E_HOME_RUN_RE) is None
-    assert _proc._parse_run_id("/r/ui/web/.builds/build-x_y", _proc._E2E_BUILD_RUN_RE) is None
-
-
-def test_parse_lsof_cwd_keeps_path_with_spaces() -> None:
-    out = (
-        "node  44147 zyonzhang  cwd    DIR   1,15       64 836742558 "
-        "/Users/me/Ava/.worktrees/x/ui/web/.builds/build-1_2\n"
+@pytest.mark.parametrize(
+    ("command", "environment", "cwd", "run"),
+    [
+        (
+            "python server",
+            "AVA_HOME=/r/tmp/ava_e2e_home_43948_1788018418678623",
+            None,
+            (43948, 1788018418678623),
+        ),
+        (
+            "next-server (v16.2.7)",
+            "",
+            "/r/ui/web/.builds/build-43948_1788018418678623",
+            (43948, 1788018418678623),
+        ),
+        ("npm run start", "", "/r/ui/web/.builds/build-1_2", (1, 2)),
+        ("python server", "", "/r/ui/web/.builds/build-1_2", None),
+        ("next-server", "", "/opt/other/.builds/build-1_2", None),
+        ("next-server", "", "/r/ui/web/.builds/build-x_y", None),
+        ("python server", "no marker here", None, None),
+    ],
+)
+def test_e2e_process_classifies_observation(
+    command: str, environment: str, cwd: str | None, run: tuple[int, int] | None
+) -> None:
+    process = processes.E2EProcess.from_observation(
+        processes.ProcessObservation(100, command, environment), pgid=100, cwd=cwd
     )
-    assert _proc._parse_lsof_cwd(out) == "/Users/me/Ava/.worktrees/x/ui/web/.builds/build-1_2"
-    assert _proc._parse_lsof_cwd("COMMAND PID USER FD TYPE DEVICE NODE NAME\n") is None
+    assert (process.run if process is not None else None) == run
 
 
-def test_looks_like_frontend() -> None:
-    assert _proc._looks_like_frontend("next-server (v16.2.7)")
-    assert _proc._looks_like_frontend("npm run start -p 60759")
-    assert not _proc._looks_like_frontend("uv run uvicorn gateway.app:app")
+def test_frontend_cwd_observation_keeps_path_with_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    from subprocess import CompletedProcess
+
+    cwd = "/Users/me/Ava with spaces/ui/web/.builds/build-1_2"
+
+    def lsof(*args: object, **kwargs: object) -> CompletedProcess[str]:
+        return CompletedProcess(
+            ["lsof"], 0, stdout=f"node 44147 user cwd DIR 1,15 64 836742558 {cwd}\n"
+        )
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr("subprocess.run", lsof)
+    inspection = processes.ProcessInspection()
+    assert inspection.working_directory(44147) == cwd
+    process = processes.E2EProcess.from_observation(
+        processes.ProcessObservation(44147, "next-server", ""),
+        pgid=44147,
+        cwd=inspection.working_directory(44147),
+    )
+    assert process is not None and process.run == (1, 2)
 
 
 def _fake_ps_rows() -> list[tuple[int, str, str]]:
@@ -87,12 +112,11 @@ def _identity_pgid(pid: int) -> int:
     return pid
 
 
-def test_scan_finds_env_marked_and_frontend_by_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_proc, "_ps_rows_with_env", _fake_ps_rows)
-    monkeypatch.setattr(_proc, "_cwd_of", _fake_cwd)
-    monkeypatch.setattr(os, "getpgid", _identity_pgid)
-
-    procs = _proc.scan_e2e_processes()
+def test_scan_finds_env_marked_and_frontend_by_cwd() -> None:
+    inspection = processes.ProcessInspection(
+        rows=_fake_ps_rows, working_directory=_fake_cwd, group=_identity_pgid
+    )
+    procs = inspection.scan()
     assert [(p.pid, p.run) for p in procs] == [(100, (1, 2)), (200, (5, 6)), (400, (1, 2))]
 
 
@@ -108,11 +132,11 @@ def _dead_pgid(pid: int) -> int:
     raise ProcessLookupError
 
 
-def test_scan_skips_process_that_died_mid_scan(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_proc, "_ps_rows_with_env", _dead_one_row)
-    monkeypatch.setattr(_proc, "_cwd_of", _no_cwd)
-    monkeypatch.setattr(os, "getpgid", _dead_pgid)
-    assert _proc.scan_e2e_processes() == []
+def test_scan_skips_process_that_died_mid_scan() -> None:
+    inspection = processes.ProcessInspection(
+        rows=_dead_one_row, working_directory=_no_cwd, group=_dead_pgid
+    )
+    assert inspection.scan() == []
 
 
 def _live_owner_2(pid: int) -> bool:
@@ -123,8 +147,8 @@ def _no_alive(_pid: int) -> bool:
     return False
 
 
-def _proc_for(pid: int, pgid: int, owner: int, cmdline: str = "uv") -> _proc.E2EProcess:
-    return _proc.E2EProcess(pid=pid, pgid=pgid, cmdline=cmdline, run=(owner, 1))
+def _proc_for(pid: int, pgid: int, owner: int, cmdline: str = "uv") -> processes.E2EProcess:
+    return processes.E2EProcess(pid=pid, pgid=pgid, cmdline=cmdline, run=(owner, 1))
 
 
 def test_sweep_targets_kills_dead_owner_and_protects_live() -> None:
@@ -134,16 +158,16 @@ def test_sweep_targets_kills_dead_owner_and_protects_live() -> None:
         _proc_for(20, 99, 1),  # non-leader, dead owner -> individual
         _proc_for(30, 30, 2, "npm"),  # leader, LIVE owner -> untouched
     ]
-    groups, singles, owners = _proc._sweep_targets(
+    plan = processes.ResidueSweepPlan.from_processes(
         procs,
         own_pid=99999,
         own_pgrp=88888,
         include_own=False,
         owner_live=_live_owner_2,
     )
-    assert groups == {10}
-    assert singles == {11, 20}
-    assert owners == {1}
+    assert plan.groups == {10}
+    assert plan.singles == {11, 20}
+    assert plan.owners == {1}
 
 
 def test_sweep_targets_include_own() -> None:
@@ -152,43 +176,43 @@ def test_sweep_targets_include_own() -> None:
         _proc_for(11, 11, 99999, "npm"),  # own run leader
         _proc_for(12, 12, 1),  # dead-run leader
     ]
-    groups, singles, owners = _proc._sweep_targets(
+    plan = processes.ResidueSweepPlan.from_processes(
         procs,
         own_pid=99999,
         own_pgrp=77777,
         include_own=True,
         owner_live=_no_alive,
     )
-    assert groups == {10, 11, 12}
-    assert singles == set()
-    assert owners == {1, 99999}
+    assert plan.groups == {10, 11, 12}
+    assert plan.singles == set()
+    assert plan.owners == {1, 99999}
 
 
 def test_sweep_targets_never_killpgs_own_pgrp() -> None:
     """A leader process whose pgid IS our own pgrp (a browser worker started
     by pytest in the same session) must go to singles, never to killpg."""
     procs = [_proc_for(10, 77777, 1, "chrome-headless-shell")]
-    groups, singles, _owners = _proc._sweep_targets(
+    plan = processes.ResidueSweepPlan.from_processes(
         procs,
         own_pid=99999,
         own_pgrp=77777,
         include_own=False,
         owner_live=_no_alive,
     )
-    assert groups == set()
-    assert singles == {10}
+    assert plan.groups == set()
+    assert plan.singles == {10}
 
 
 def test_sweep_targets_skips_own_run_when_not_included() -> None:
     procs = [_proc_for(10, 10, 99999), _proc_for(11, 11, 1)]
-    groups, _singles, _owners = _proc._sweep_targets(
+    plan = processes.ResidueSweepPlan.from_processes(
         procs,
         own_pid=99999,
         own_pgrp=88888,
         include_own=False,
         owner_live=_no_alive,
     )
-    assert groups == {11}
+    assert plan.groups == {11}
 
 
 def test_cwd_of_returns_str_or_none_for_real_process() -> None:
@@ -199,7 +223,7 @@ def test_cwd_of_returns_str_or_none_for_real_process() -> None:
     tests monkeypatch `_cwd_of` and would mask exactly that regression (this
     one surfaced as CI e2e failures, not on the macOS dev box).
     """
-    cwd = _proc._cwd_of(os.getpid())
+    cwd = processes.ProcessInspection().working_directory(os.getpid())
     assert cwd is None or isinstance(cwd, str)
 
 
@@ -231,44 +255,39 @@ def _cmd_other(_pid: int) -> str:
     return "npm run start -p 60759"
 
 
-def test_parse_run_id_build_pattern_requires_ui_web_dir() -> None:
-    """The frontend marker is anchored to the repo's build dir — a foreign
-    `.builds/build-<pid>_<ts>` directory must not make a process e2e-owned."""
-    assert _proc._parse_run_id("/opt/other/.builds/build-1_2", _proc._E2E_BUILD_RUN_RE) is None
-    assert _proc._parse_run_id("/r/ui/web/.builds/build-1_2", _proc._E2E_BUILD_RUN_RE) == (1, 2)
+@pytest.mark.parametrize(
+    ("command", "live"),
+    [(_cmd_pytest, True), (_cmd_xdist, True), (_cmd_sshd, False), (_cmd_none, False)],
+)
+def test_owner_live_requires_a_pytest_command(
+    command: Callable[[int], str | None], live: bool
+) -> None:
+    inspection = processes.ProcessInspection(command=command, probe=_kill_ok)
+    assert inspection.owner_live(123) is live
 
 
-def test_owner_live_requires_a_pytest_command(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A recycled pid must not hold the residue hostage: `os.kill(pid, 0)`
-    succeeding on an unrelated process is not a live run."""
-    monkeypatch.setattr(os, "kill", _kill_ok)
-
-    monkeypatch.setattr(_proc, "_ps_command_of", _cmd_pytest)
-    assert _proc._owner_live(123) is True
-    monkeypatch.setattr(_proc, "_ps_command_of", _cmd_xdist)
-    assert _proc._owner_live(123) is True
-    monkeypatch.setattr(_proc, "_ps_command_of", _cmd_sshd)
-    assert _proc._owner_live(123) is False
-    monkeypatch.setattr(_proc, "_ps_command_of", _cmd_none)
-    assert _proc._owner_live(123) is False
-
-    def _gone(_pid: int, _sig: int) -> None:
+def test_dead_owner_is_not_live() -> None:
+    def gone(_pid: int, _signal: int) -> None:
         raise ProcessLookupError
 
-    monkeypatch.setattr(os, "kill", _gone)
-    assert _proc._owner_live(123) is False
+    inspection = processes.ProcessInspection(command=_cmd_pytest, probe=gone)
+    assert not inspection.owner_live(123)
 
 
-def test_identity_holds_compares_command_before_signal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TOCTOU guard: the process at a pid is only signalled while it is still
-    the exact process the scan matched (whitespace-tolerant compare)."""
-    monkeypatch.setattr(_proc, "_ps_command_of", _cmd_gateway)
-    assert _proc._identity_holds(100, "uv run uvicorn gateway.app:app --port 49397") is True
-    assert _proc._identity_holds(100, "uv  run uvicorn gateway.app:app --port 49397") is True
-    monkeypatch.setattr(_proc, "_ps_command_of", _cmd_other)
-    assert _proc._identity_holds(100, "uv run uvicorn gateway.app:app") is False
-    monkeypatch.setattr(_proc, "_ps_command_of", _cmd_none)
-    assert _proc._identity_holds(100, "x") is False
+@pytest.mark.parametrize(
+    ("command", "observed", "matches"),
+    [
+        (_cmd_gateway, "uv run uvicorn gateway.app:app --port 49397", True),
+        (_cmd_gateway, "uv  run uvicorn gateway.app:app --port 49397", True),
+        (_cmd_other, "uv run uvicorn gateway.app:app", False),
+        (_cmd_none, "x", False),
+    ],
+)
+def test_identity_query_rechecks_observed_command(
+    command: Callable[[int], str | None], observed: str, matches: bool
+) -> None:
+    inspection = processes.ProcessInspection(command=command)
+    assert inspection.matches(_proc_for(100, 100, 1, observed)) is matches
 
 
 def test_next_launch_preserves_failed_process_diagnostics(tmp_path: Path) -> None:
@@ -284,10 +303,102 @@ def test_next_launch_preserves_failed_process_diagnostics(tmp_path: Path) -> Non
             message,
             str(exit_code),
         ]
-        with _proc.managed_proc(
+        with processes.managed_proc(
             command, label="log-retention-proof", log_path=str(log_path)
         ) as process:
             assert process.wait(timeout=5) == exit_code
+            evidence = processes.dead_server_evidence()
+            assert f"exit code {exit_code}" in evidence and message in evidence
         records.append(message)
         assert log_path.read_text().splitlines() == records
-        assert _proc.proc_log_tail(str(log_path)).splitlines() == records
+        assert processes.proc_log_tail(str(log_path)).splitlines() == records
+
+
+def test_registered_server_query_exposes_only_the_active_fixture(tmp_path: Path) -> None:
+    label = "registry-query-proof"
+    with pytest.raises(KeyError):
+        processes.registered_server(label)
+    log_path = tmp_path / "fixture.log"
+    with processes.managed_proc(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        label=label,
+        log_path=str(log_path),
+    ) as process:
+        server = processes.registered_server(label)
+        assert server.process is process and server.log_path == str(log_path)
+        assert processes.dead_server_evidence() == ""
+    assert process.returncode is not None
+    with pytest.raises(KeyError):
+        processes.registered_server(label)
+
+
+def test_native_sweep_preserves_live_run_and_recycled_command(tmp_path: Path) -> None:
+    """Only these three birth-owned fixture groups may be candidates in this proof."""
+    from contextlib import ExitStack
+
+    with ExitStack() as stack:
+        children = [
+            stack.enter_context(
+                processes.managed_proc(
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                    label=f"guard-proof-{index}",
+                    log_path=str(tmp_path / f"child-{index}.log"),
+                )
+            )
+            for index in range(3)
+        ]
+        native = processes.ProcessInspection()
+        commands = [native.command(child.pid) for child in children]
+        assert all(commands)
+
+        def rows() -> list[tuple[int, str, str]]:
+            return [
+                (children[0].pid, str(commands[0]), "AVA_HOME=/proof/ava_e2e_home_99999999_1"),
+                (
+                    children[1].pid,
+                    "foreign command replaced the scanned child",
+                    "AVA_HOME=/proof/ava_e2e_home_99999999_1",
+                ),
+                (
+                    children[2].pid,
+                    str(commands[2]),
+                    f"AVA_HOME=/proof/ava_e2e_home_{os.getpid()}_1",
+                ),
+            ]
+
+        assert (
+            processes.sweep_stale_e2e_processes(inspection=processes.ProcessInspection(rows=rows))
+            == 2
+        )  # Existing return contract counts planned targets, including guarded skips.
+        assert children[0].wait(timeout=5) != 0
+        assert children[1].poll() is None  # Command identity changed: never signalled.
+        assert children[2].poll() is None  # This live concurrent run: never targeted.
+
+
+@pytest.mark.parametrize("serving", [False, True])
+def test_public_module_entry_launches_with_only_the_explicit_fixture_gate(
+    tmp_path: Path, serving: bool
+) -> None:
+    """Exercise the real -m entry used by gateway, agent-host, and ops fixtures."""
+    gate = tmp_path / "serving"
+    if serving:
+        gate.write_text("ready\n")
+    target = tmp_path / "fixture_gate_target.py"
+    target.write_text(
+        "from base.deploy.lifecycle import start_serving\n"
+        "print(start_serving.is_serving(), flush=True)\n"
+        "with start_serving.recovery_permitted() as allowed:\n"
+        "    print(allowed, flush=True)\n"
+    )
+    env = os.environ.copy()
+    root = Path(__file__).resolve().parents[2]
+    env["PYTHONPATH"] = os.pathsep.join((str(tmp_path), str(root)))
+    log_path = tmp_path / "entry.log"
+    with processes.managed_proc(
+        [sys.executable, "-m", "tests.e2e.process_support", str(gate), target.stem],
+        env=env,
+        label="fixture-entry-proof",
+        log_path=str(log_path),
+    ) as child:
+        assert child.wait(timeout=15) == 0
+    assert log_path.read_text().splitlines() == [str(serving), str(serving)]

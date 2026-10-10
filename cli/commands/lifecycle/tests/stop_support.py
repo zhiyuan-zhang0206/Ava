@@ -37,7 +37,7 @@ from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle import service_stop as strict
 from ops import pty_close_notices
 from tests.components.agent.test_maintenance import WHEN
-from tests.e2e._proc import kill_group_if_alive
+from tests.e2e.process_support import kill_group_if_alive
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_service import PtyServiceProcess as PtyServiceProcess

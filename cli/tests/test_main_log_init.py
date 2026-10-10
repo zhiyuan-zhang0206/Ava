@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 import cli.main as _main
+from cli import parsers
 from cli.parsers import build_parser
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -113,7 +114,7 @@ def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
     monkeypatch: pytest.MonkeyPatch, cli_log_sinks: list[str], argv: list[str], name: str | None
 ) -> None:
     monkeypatch.setattr(
-        _main, "_build_parser", _ignoring_retention(lambda: _dispatching(cli_log_sinks))
+        parsers, "build_parser", _ignoring_retention(lambda: _dispatching(cli_log_sinks))
     )
 
     assert _main.main(argv) == 0
@@ -135,7 +136,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
     dispatched: list[str] = []
     monkeypatch.setattr(base.log, "init_cli_process", unreachable)
     monkeypatch.setattr(
-        _main, "_build_parser", _ignoring_retention(lambda: _dispatching(dispatched))
+        parsers, "build_parser", _ignoring_retention(lambda: _dispatching(dispatched))
     )
 
     assert _main.main(["restart"]) == 1

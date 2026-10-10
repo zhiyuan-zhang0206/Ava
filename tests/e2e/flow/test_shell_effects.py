@@ -20,9 +20,9 @@ from base.sessions.backend import PtySessionBackend
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, wait_for_status
 from tests.e2e._ports import GATEWAY_SOCKET, GATEWAY_URL
-from tests.e2e._proc import _LIVE_SERVERS, managed_proc, wait_for_port
-from tests.e2e.fakes._recording import model_inputs, reset_record
+from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
 from tests.e2e.fakes.scenarios import shell_effects as world
+from tests.e2e.process_support import managed_proc, registered_server, wait_for_port
 
 Call = list[dict[str, Any]]
 
@@ -65,7 +65,8 @@ def _inbounds(agent_id: int, prefix: str) -> list[tuple[str, str, str]]:
 @contextmanager
 def _restarted_server(label: str, *, pass_gateway_fd: bool = False) -> Generator[dict[str, str]]:
     """Replace a fixture process while keeping its PTY service and environment."""
-    old, log_path = _LIVE_SERVERS[label]
+    server = registered_server(label)
+    old, log_path = server.process, server.log_path
     assert isinstance(old.args, list)
     env = psutil.Process(old.pid).environ()
     os.killpg(old.pid, signal.SIGTERM)

@@ -12,7 +12,7 @@ tags:
 
 `scripts/lint/patch_targets.py` (pre-commit `lint-patch-targets`, and `pre-commit run --all-files` in the CI structure job) keeps a test from replacing a private name that belongs to another package. Each such reach-in is a missing injection seam: the code under test had no public way to take its clock, transport or identity from the caller. The authoritative rule text is the script's module docstring; this node is the map.
 
-## The rule
+## The implemented legacy rule
 
 Every patch point of a test file is classified. A point is a violation (class D) when the target is repository code, is not in the ambient list, has a private name (an attribute or module segment with a single leading underscore), and the package that owns that name does not contain the test's home. The owner is Rule 4's owner (`locality._private_target`): the package holding the first private component.
 
@@ -29,7 +29,14 @@ D is reported by relation: `ancestor` (the test's home is a strict ancestor of t
 
 ## The home
 
-`scripts/structure/placement.py` derives a test's home from the file's own text, not its directory: the referenced first-party modules (imports, import-module string targets, source paths below the repository root, imports in source strings the file runs) are grouped by unit (runnable Python templates under `schedules/`, `commands/` and `demos/` participate like package code), and the unit that may legally import all the others is chosen from the import-linter contracts in `pyproject.toml` (silent pairs follow the source import direction). Inside that unit the home is the deepest package that holds or directly depends on every referenced module: each module lies in its subtree, or the non-test code in its subtree imports it (function-level imports included; references into a tests package, `tests.*` or `<pkg>.tests.*`, are test support and not modules of the unit). Candidates are the packages on the modules' ancestor chains, below their nearest common ancestor (the bound); only direct imports count, not dependencies of dependencies; with no single deepest package (a dependency cycle) the home stays at the bound. Evidence that exists only because the file patches it (a patch string target, an import read only as a patch object) does not count; neither does sample data (a path not rooted at the repository root, a bare path string, source in a string of a file that spawns no interpreter); a file whose every strong reference is patch evidence keeps it (the fallback). Top-level tests (e2e, shared fixtures and factories, the root conftest, the real-process integration proofs) have no home. A support module (a file not named `test_*`) inside a package's `tests/` directory has no subject of its own, so the lint files it in the package that holds the directory.
+`scripts/structure/placement.py` owns the full legacy home calculation. It uses
+the file's first-party subjects and legal import direction, then chooses the
+deepest package containing or directly depending on those subjects. Test support
+and patch-only evidence do not ordinarily choose a subject; the all-patch
+fallback retains its evidence. Resource paths need a proved repository anchor,
+and embedded source must be an actual interpreter input. Top-level integration
+tests have no package home. The owner module documents unit selection, cycles,
+namespace packages, support files and the nearest-common-ancestor bound.
 
 The verdict does not change when a test moves into `<pkg>/tests/`, but it follows production imports: adding an import can lower the home of a test that references both ends, deleting one can raise it, and a cycle keeps it at the bound. The home can be the consumer of the subject's package: a test of `a.x` and `b.y` lives in `b` when `b` imports `a` and `a` does not import `b`. A lint that enforces where a test sits on this rule must require the *legal* directory, never the *lowest*: the lowest moves with unrelated production commits, so it is the move tool's output. The top-level-tests lint ([[scripts/lint/docs/tests-location.ava.okf.md|tests-location]]) uses a separate complete subject-directory LCA for unregistered root tests. Neither its verdict nor `--suggest` consumes this legacy private-patch home heuristic. `scripts/structure/imports/cache.py` reads the production imports from the working tree on every run and caches them per file by `(mtime_ns, size)` under `.cache/structure/`; nothing is committed.
 
@@ -63,10 +70,18 @@ unreadable members or existing-policy violations, including with `--report`.
 The independent LCA check may prove root from known subjects while retaining
 unknown; completeness failure does not invalidate that proof.
 
-No replacement private-authority rule is selected. The root integration owner
-coordinates that design; verified consumer/seam closure under the final design
-must precede adapter removal. The placement owner independently closes LCA and
-fixture/lane migration. No baseline, exception marker or whitelist bridges them.
+The approved [component public contract](../../../docs/decisions/engineering/design/simplification/2026-10-10-component-public-contracts.md)
+makes private members and modules file-local, including tests. Moving a test or
+changing its inferred home grants no private authority. Cross-component calls
+use an explicit entry and the actual definition owner's static `__all__`; tests
+exercise that contract or supply a real operation input instead of reaching in.
+Renaming a private helper or adding a forwarding export is not a substitute.
+
+The new `scripts/lint/public_contracts.py` is currently a failing migration audit,
+not an enabled repository gate. Complete declarations, actual consumer migration
+and recognized gaps must close before it replaces the legacy private-authority
+adapter. No baseline, exception marker or whitelist bridges them. Test placement
+and runtime dependency facts remain separate responsibilities.
 
 ## Report
 

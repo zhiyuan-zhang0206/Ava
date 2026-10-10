@@ -27,6 +27,8 @@ from typing import cast
 
 from scripts.structure import imports
 
+__all__ = ["CACHE_PATH", "production_imports"]
+
 CACHE_PATH = ".cache/structure/production-imports.json"
 _VERSION = 3
 _SKIPPED_DIRS = frozenset({"tests", "docs", "__pycache__"})

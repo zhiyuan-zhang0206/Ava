@@ -9,7 +9,7 @@ import pytest
 from playwright.sync_api import Page, Request
 
 from tests.components.base.poll_until import poll_until
-from tests.e2e._env import E2EEnv
+from tests.e2e.fixture_environment import E2EEnv
 
 _CHANNEL_PATHS = {
     "/api/system": "system",

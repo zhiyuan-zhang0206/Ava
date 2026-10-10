@@ -42,4 +42,4 @@ and authenticate current native root status.
 This is local evidence, not a fleet barrier, resource-predecessor closure or a
 protocol-version grant. Hosted admission keeps its own row and resource fences.
 Direct-process E2E fixtures inject their own test-only serving
-gate through `tests.e2e._proc`; those business tests exclude root custody proof.
+gate through `tests.e2e.process_support`; those business tests exclude root custody proof.

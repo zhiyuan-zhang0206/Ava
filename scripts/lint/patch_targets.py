@@ -1,4 +1,4 @@
-"""Forbid a test from patching a private name of a package it does not belong to.
+"""Legacy cross-package private-patch check during public-contract migration.
 
 Run: `.venv/bin/python scripts/lint/patch_targets.py [path ...]` (no argument scans every
 test file; an explicit path that does not exist is an error (stderr + exit 1)). `--report`
@@ -22,7 +22,7 @@ caller, so the test reached in. Rule 4 (`scripts/lint/code_structure.py`) forbid
 reach for imports and attribute access but exempts test directories wholesale, so a string
 target such as `monkeypatch.setattr("base.db.connections._pool", ...)` was invisible.
 
-## The rule
+## The implemented legacy rule
 
 Every patch point of a test file is classified (`scripts/structure/patch_targets.py`
 documents classes A-E and U). A point is a violation (class D) when all of these hold:
@@ -38,23 +38,27 @@ The home is the package the file's own first-party references place it in, not t
 directory it sits in (`scripts/structure/placement.py`), so the verdict is the same before
 and after a test moves into `<pkg>/tests/`. It is the deepest package that holds or directly
 depends on every module the file references: a test of `cli.commands.cluster.health` that
-also references `cli.commands._probe` lives in `cli/commands/cluster` when `health.py`
-imports `_probe`, and a private name of that package is then its own. Recognised forms:
+also references `cli.commands.probe` is placed using `health.py`'s dependency on
+that public owner. This legacy calculation does not grant private authority under
+the approved component contract. Recognised forms:
 `monkeypatch.setattr / delattr / setitem` (string target or object plus attribute name),
 `patch`, `patch.object`, `patch.dict`, `patch.multiple`, `mocker.patch`, as calls, decorators
 or `with` blocks. Deep attributes of another package's public name (`module.Class.method`)
 are counted in the report but are not violations yet; a target the linter cannot resolve
 statically is counted, never flagged.
 
-## Fixing a violation
+## Contribution contract
 
-The message names the package that owns the private name and the relation of the test to it:
+The approved component contract makes private names file-local, including tests.
+Moving a test does not grant private access. Verify behavior through the actual
+public definition owner or pass an explicit clock, transport or identity capability
+at the existing composition root. Removing an underscore or adding a forwarding
+export is not an interface design.
 
-- the test lives in an ancestor package (its imports span several packages) and patches a
-  descendant's private name: move the test down into the owning package (a test that also
-  needs a package the owner does not import cannot sit there: split the file), or
-- give the owning package a public entry point or injection seam (a parameter, a settings
-  field, a public setter) and patch that.
+`scripts/lint/public_contracts.py` currently provides a failing migration audit;
+it is not yet enabled as a repository gate. Its component declarations, consumer
+migration and recognized gaps must be complete before it replaces this legacy
+private-authority calculation. See the accepted component-public-contract decision.
 
 Every foreign-private patch fails directly. There is no per-site opt-out or
 baseline allowance; moving a file or changing a measurement rule cannot permit

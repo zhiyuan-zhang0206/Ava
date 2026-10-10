@@ -21,7 +21,9 @@ from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 
-from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+
+__all__ = ["RecordingModel", "exec_call", "model_inputs", "reset_record", "say", "scratch_root"]
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
@@ -32,13 +34,13 @@ def scratch_root(kind: str) -> Path:
     return Path(tempfile.gettempdir()).resolve() / f"ava-e2e-{kind}-{name}"
 
 
-def record_path() -> Path:
+def _record_path() -> Path:
     return scratch_root("record") / "model_inputs.jsonl"
 
 
 def reset_record() -> None:
     """Forget earlier calls (a test starts from an empty record)."""
-    record_path().unlink(missing_ok=True)
+    _record_path().unlink(missing_ok=True)
 
 
 def exec_call(n: int, code: str) -> AIMessage:
@@ -84,8 +86,8 @@ class RecordingModel(ScriptedFakeChatModel):
                 for m in messages
             ],
         }
-        record_path().parent.mkdir(parents=True, exist_ok=True)
-        with record_path().open("a") as f:
+        _record_path().parent.mkdir(parents=True, exist_ok=True)
+        with _record_path().open("a") as f:
             f.write(json.dumps(entry) + "\n")
 
     async def _astream(
@@ -112,7 +114,7 @@ class RecordingModel(ScriptedFakeChatModel):
 
 def model_inputs(agent_id: int | None = None) -> list[list[dict[str, Any]]]:
     """Model calls so far (of one agent, or all), oldest first: each call's messages as seen."""
-    path = record_path()
+    path = _record_path()
     if not path.exists():
         return []
     entries = [json.loads(line) for line in path.read_text().splitlines()]

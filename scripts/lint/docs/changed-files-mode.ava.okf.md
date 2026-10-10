@@ -17,7 +17,7 @@ The commit hooks run the per-file lints with `--only` followed by the changed fi
 - **Widening.** An edit to the lint tooling (`scripts/lint/`, `scripts/structure/` including the baseline shards, `scripts/content_lint/`, `lint_pool_keepalives.py`; their own `tests/` excepted) or to an input the rule reads (`base/config/` for the Settings-managed names, the `TerminationSource` enum, the clock-lattice family modules, `pyproject.toml` for the Pyright tiers) can change the verdict of files that did not move, so the run becomes the full scan.
 - **What stays whole-repo.** CI runs every hook with `--all-files`, which is the full scan of every lint; a helper whose change alters verdicts of unchanged callers (`time_bomb`'s clock-threading rule) is caught there. `time_bomb` builds its module index on demand (`scripts/structure/lazy_modules.py`), so it reads only the modules the judged files reach.
 
-`code_structure.py --only` turns the files into explicit targets (each also checks every ancestor directory's entry budget up to its scope root) and still runs the baseline guard, whose base-revision shards are read with one batched `git cat-file`.
+`code_structure.py --only` turns the files into explicit targets (each also checks every ancestor directory's entry budget up to its scope root) and still runs the baseline guard, whose base-revision shards are read with one batched `git cat-file`. Python callers use `code_structure.main(argv, repo_root=checkout, baseline_base=revision)`; omitted inputs preserve CLI defaults, explicit targets remain cwd-relative, and diagnostics/exit codes match the CLI.
 
 The required CI `backend-structure` job runs the following compliance checks via
 `pre-commit run --all-files` on both SELECTED and FULL backend test paths:

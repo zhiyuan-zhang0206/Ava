@@ -1,4 +1,4 @@
-"""E2EEnv -- frozen data pack passed to test after fixture orchestration completes."""
+"""Public fixture data contract for completed E2E orchestration."""
 
 from __future__ import annotations
 
@@ -6,9 +6,18 @@ from dataclasses import dataclass
 
 from playwright.sync_api import Page
 
+__all__ = ["E2EEnv"]
+
 
 @dataclass(frozen=True)
 class E2EEnv:
+    """Fixture-owned endpoints, browser page and spawned-agent identity.
+
+    The record is immutable; fixtures retain ownership of the page and processes.
+    Scenario tests navigate with ``agent_url`` unless they exercise automatic
+    agent selection using ``frontend_url``.
+    """
+
     gateway_url: str
     frontend_url: str
     """frontend base URL, no query. e2e tests normally use agent_url to deep-link to

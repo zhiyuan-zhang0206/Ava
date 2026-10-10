@@ -8,6 +8,7 @@ used to each inline.
 
 from __future__ import annotations
 
+from dataclasses import fields
 from typing import Any
 
 import httpx
@@ -284,7 +285,7 @@ def test_answer_text_happy_path(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert out == "answer"
@@ -320,7 +321,7 @@ def test_answer_text_build_failure_raises_error_type(
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
 
@@ -360,7 +361,7 @@ def test_answer_text_build_failure_uses_build_error_when_given(
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
     assert seen["model"] == "m1"

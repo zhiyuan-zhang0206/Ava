@@ -28,16 +28,16 @@ from __future__ import annotations
 
 import pytest
 
-import cli.commands._probe as _probe_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
+import cli.commands.probe as _probe_commands
 from base.daemon.health import DaemonProbe
-from cli.commands._probe import ReadinessWait
 from cli.commands.lifecycle import start as start_mod
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _base_start,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
+from cli.commands.probe import ReadinessWait
 from ops.roster.service_spec import _AGENT_RUNNER, _GATEWAY, ServiceSpec
 
 # The gate IS the subject here, so stand the global autouse net down for this
@@ -76,7 +76,7 @@ _FOREIGN = (
 
 
 def _verdicts(monkeypatch: pytest.MonkeyPatch, by_session: dict[str, DaemonProbe]) -> None:
-    """Pin `_probe_service` from a per-session `DaemonProbe`, through the same
+    """Pin `probe_service` from a per-session `DaemonProbe`, through the same
     translation the real one performs — so what these tests exercise is the
     gate's reading of a verdict, not a hand-built `ServiceProbe`."""
 
@@ -86,7 +86,7 @@ def _verdicts(monkeypatch: pytest.MonkeyPatch, by_session: dict[str, DaemonProbe
             probe.alive, "identity", "" if probe.alive else probe.detail, probe.terminal
         )
 
-    monkeypatch.setattr(_probe_commands, "_probe_service", _probe)
+    monkeypatch.setattr(_probe_commands, "probe_service", _probe)
 
 
 # ─── which verdicts are conflicts ────────────────────────────────────────────
@@ -99,7 +99,7 @@ def test_a_foreign_units_daemon_on_a_health_port_is_a_conflict(
     labeler = _healthz_spec("labeler", 8103)
     _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
 
-    occupied = _probe_commands._occupied_health_ports((labeler,))
+    occupied = _probe_commands.occupied_health_ports((labeler,))
 
     assert [o.spec.session for o in occupied] == ["labeler"]
     assert occupied[0].detail == _FOREIGN
@@ -113,7 +113,7 @@ def test_our_own_running_daemon_is_not_a_conflict(monkeypatch: pytest.MonkeyPatc
     labeler = _healthz_spec("labeler", 8103)
     _verdicts(monkeypatch, {"labeler": DaemonProbe.up("pid 4242")})
 
-    assert _probe_commands._occupied_health_ports((labeler,)) == ()
+    assert _probe_commands.occupied_health_ports((labeler,)) == ()
 
 
 def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -132,7 +132,7 @@ def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) 
         },
     )
 
-    assert _probe_commands._occupied_health_ports((labeler, ops)) == ()
+    assert _probe_commands.occupied_health_ports((labeler, ops)) == ()
 
 
 def test_only_daemon_health_ports_are_gated(
@@ -155,7 +155,7 @@ def test_only_daemon_health_ports_are_gated(
         },
     )
 
-    assert _probe_commands._occupied_health_ports((gateway, browser, labeler)) == ()
+    assert _probe_commands.occupied_health_ports((gateway, browser, labeler)) == ()
 
 
 def test_every_conflicting_port_is_reported_not_just_the_first(
@@ -171,7 +171,7 @@ def test_every_conflicting_port_is_reported_not_just_the_first(
         {"labeler": DaemonProbe.port_taken("a"), "ops": DaemonProbe.port_taken("b")},
     )
 
-    assert [o.spec.session for o in _probe_commands._occupied_health_ports(specs)] == [
+    assert [o.spec.session for o in _probe_commands.occupied_health_ports(specs)] == [
         "labeler",
         "ops",
     ]

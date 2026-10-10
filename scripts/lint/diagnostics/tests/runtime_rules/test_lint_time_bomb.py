@@ -21,33 +21,33 @@ The known bombs are reproduced as regression fixtures.
 
 from __future__ import annotations
 
-import importlib
 import textwrap
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
+from scripts.lint.diagnostics import time_bomb
+from scripts.structure import lint_common
 
-_lint = importlib.import_module("scripts.lint.diagnostics.time_bomb")
+_Scratch = tuple[Path, Callable[[list[Path]], list[str]]]
 
 
 @pytest.fixture()
-def scratch(tmp_path: Path, monkeypatch) -> tuple[Path, Callable[[], Any]]:
-    """Point the lint at a scratch repo; returns (root, build_index) so
-    fixtures are written BEFORE the index is built (the index is a snapshot)."""
-    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
-    for d in (*_lint._SCAN_DIRS, "tests"):
-        (tmp_path / d).mkdir(exist_ok=True)
+def scratch(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> _Scratch:
+    """Run the public lint against a synthetic repo and collect its diagnostics."""
+    for directory in (*lint_common.FRAMEWORK_DIRS, "scripts", "tests"):
+        (tmp_path / directory).mkdir()
 
-    def build() -> Any:
-        return _lint._Index(tmp_path, tuple(_lint._SCAN_DIRS))
+    def scan(paths: list[Path]) -> list[str]:
+        result = time_bomb.main([str(path) for path in paths], repo_root=tmp_path)
+        output = capsys.readouterr()
+        errors = output.err.splitlines()
+        assert output.out == ""
+        assert result == (1 if errors else 0)
+        return errors
 
-    return tmp_path, build
+    return tmp_path, scan
 
 
 FIXED_FAMILY = """
@@ -77,8 +77,8 @@ def _write(root: Path, rel: str, body: str) -> Path:
 # ── rule 1: source clock threading into the fixed-instant world ────────────
 
 
-def test_unthreaded_split_inside_clocked_function_is_rejected(scratch) -> None:
-    root, build = scratch
+def test_unthreaded_split_inside_clocked_function_is_rejected(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -96,16 +96,15 @@ def test_unthreaded_split_inside_clocked_function_is_rejected(scratch) -> None:
             return split_index_label_window(day, day)
         """,
     )
-    idx = build()
-    errors = _lint._lint_source(idx, [idx.root / "services" / "events_maintenance.py"])
+    errors = scan([root / "services"])
     assert len(errors) == 1
     assert "compute_rollup" in errors[0]
     assert "now_utc" in errors[0]
     assert "_aggregate" in errors[0]
 
 
-def test_threaded_split_is_allowed(scratch) -> None:
-    root, build = scratch
+def test_threaded_split_is_allowed(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -123,13 +122,13 @@ def test_threaded_split_is_allowed(scratch) -> None:
             return split_index_label_window(now, now, now=now)
         """,
     )
-    errors = _lint._lint_source(build(), [build().root / "services" / "events_maintenance.py"])
+    errors = scan([root / "services"])
     assert errors == []
 
 
-def test_clocked_function_pinning_the_callee_is_allowed(scratch) -> None:
+def test_clocked_function_pinning_the_callee_is_allowed(scratch: _Scratch) -> None:
     """A `now` parameter threaded into the fixed-instant callee is fine."""
-    root, build = scratch
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -143,17 +142,17 @@ def test_clocked_function_pinning_the_callee_is_allowed(scratch) -> None:
             return floor, now
         """,
     )
-    errors = _lint._lint_source(build(), [build().root / "services" / "noop.py"])
+    errors = scan([root / "services"])
     assert errors == []
 
 
 # ── rule 2: test-side exact equality on an unpinned fixed instant ──────────
 
 
-def test_inspect_bomb_exact_equality_after_opaque_http_is_rejected(scratch) -> None:
+def test_inspect_bomb_exact_equality_after_opaque_http_is_rejected(scratch: _Scratch) -> None:
     """Regression: the 2026-08-30 agent-inspect bomb — `client.get(...)` then
     `assert ... == INDEX_LABEL_CUTOVER_AT`."""
-    root, build = scratch
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -173,18 +172,18 @@ def test_inspect_bomb_exact_equality_after_opaque_http_is_rejected(scratch) -> N
             assert lifecycle["from_"] == INDEX_LABEL_CUTOVER_AT
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert len(errors) == 1
     assert "test_inspect.py:" in errors[0]
     assert "time-bomb test" in errors[0]
     assert "opaque HTTP" in errors[0]
 
 
-def test_rollup_bomb_unpinned_callee_derivation_is_rejected(scratch) -> None:
+def test_rollup_bomb_unpinned_callee_derivation_is_rejected(scratch: _Scratch) -> None:
     """Regression: the 2026-08-30 rollup bomb — the test pins `now_utc` but the
     production clock is unthreaded, so the exact aggregate still rides the
     wall clock."""
-    root, build = scratch
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -216,15 +215,15 @@ def test_rollup_bomb_unpinned_callee_derivation_is_rejected(scratch) -> None:
             assert result == (day, day, 1, 1)
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert len(errors) == 1
     assert "clock not pinned" in errors[0]
 
 
-def test_pinned_clock_exact_equality_is_allowed(scratch) -> None:
+def test_pinned_clock_exact_equality_is_allowed(scratch: _Scratch) -> None:
     """The fleet-graph shape: the call site passes a fixed-derived `now`, so
     `== INDEX_LABEL_CUTOVER_AT` is deterministic forever."""
-    root, build = scratch
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -253,13 +252,13 @@ def test_pinned_clock_exact_equality_is_allowed(scratch) -> None:
             assert calls["to"] == INDEX_LABEL_CUTOVER_AT
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_tolerance_assertion_is_allowed(scratch) -> None:
+def test_tolerance_assertion_is_allowed(scratch: _Scratch) -> None:
     """The post-fix inspect shape: a drift-tolerant compare, never an exact."""
-    root, build = scratch
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -273,13 +272,13 @@ def test_tolerance_assertion_is_allowed(scratch) -> None:
             assert abs((from_ - retention_floor()).total_seconds()) < 10
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_explicit_now_to_boundary_function_is_allowed(scratch) -> None:
+def test_explicit_now_to_boundary_function_is_allowed(scratch: _Scratch) -> None:
     """The shared-slice test shape: every boundary call pins `now=`."""
-    root, build = scratch
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -300,12 +299,12 @@ def test_explicit_now_to_boundary_function_is_allowed(scratch) -> None:
             assert before == ("legacy",)
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_opt_out_comment_suppresses(scratch) -> None:
-    root, build = scratch
+def test_opt_out_comment_suppresses(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -325,14 +324,14 @@ def test_opt_out_comment_suppresses(scratch) -> None:
             assert lifecycle["from_"] == INDEX_LABEL_CUTOVER_AT  # time-bomb-ok: endpoint pins the constant by definition
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_literal_datetime_assertions_are_allowed(scratch) -> None:
+def test_literal_datetime_assertions_are_allowed(scratch: _Scratch) -> None:
     """A test-local `datetime(...)` literal is deterministic by construction —
     no repo fixed instant participates, so no bomb."""
-    root, build = scratch
+    root, scan = scratch
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -345,17 +344,17 @@ def test_literal_datetime_assertions_are_allowed(scratch) -> None:
             assert datetime(2026, 8, 10, tzinfo=UTC) == fixed_boundary
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
 # ── rule 3: fixed calendar fixtures bound to window-shaped names ────────────
 
 
-def test_fixture_date_dict_value_is_rejected(scratch) -> None:
+def test_fixture_date_dict_value_is_rejected(scratch: _Scratch) -> None:
     """Regression: the 2026-09-13 queue-level red — a fixed date pinned as the
     `day` window input rotted once the real clock rolled past it."""
-    root, build = scratch
+    root, scan = scratch
     _write(
         root,
         "tests/test_daily_report.py",
@@ -364,15 +363,15 @@ def test_fixture_date_dict_value_is_rejected(scratch) -> None:
             payload = {"day": "2026-09-06", "rows": 3}
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert len(errors) == 1
     assert "tests/test_daily_report.py:" in errors[0]
     assert "time-bomb fixture date" in errors[0]
     assert "'day'" in errors[0]
 
 
-def test_fixture_date_keyword_is_rejected(scratch) -> None:
-    root, build = scratch
+def test_fixture_date_keyword_is_rejected(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(
         root,
         "tests/test_daily_report.py",
@@ -381,16 +380,16 @@ def test_fixture_date_keyword_is_rejected(scratch) -> None:
             payload = build_report(day=date(2026, 6, 9))
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert len(errors) == 1
     assert "time-bomb fixture date" in errors[0]
     assert "'day'" in errors[0]
 
 
-def test_fixture_date_assignment_is_rejected(scratch) -> None:
+def test_fixture_date_assignment_is_rejected(scratch: _Scratch) -> None:
     """The fleet-usage shape: `since = datetime(..., tzinfo=UTC)` — the
     tzinfo keyword does not make the calendar date dynamic."""
-    root, build = scratch
+    root, scan = scratch
     _write(
         root,
         "tests/test_fleet_usage.py",
@@ -403,13 +402,13 @@ def test_fixture_date_assignment_is_rejected(scratch) -> None:
             assert usage._window_bounds(since, None)[0] == since
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert len(errors) == 1
     assert "time-bomb fixture date" in errors[0]
 
 
-def test_fixture_date_opt_out_on_the_binding_suppresses(scratch) -> None:
-    root, build = scratch
+def test_fixture_date_opt_out_on_the_binding_suppresses(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(
         root,
         "tests/test_daily_report.py",
@@ -418,12 +417,12 @@ def test_fixture_date_opt_out_on_the_binding_suppresses(scratch) -> None:
             payload = {"day": "2026-09-06", "rows": 3}  # time-bomb-ok: the report under test pins this day
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_fixture_date_marker_outside_the_binding_span_does_not_suppress(scratch) -> None:
-    root, build = scratch
+def test_fixture_date_marker_outside_the_binding_span_does_not_suppress(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(
         root,
         "tests/test_fleet_usage.py",
@@ -436,12 +435,12 @@ def test_fixture_date_marker_outside_the_binding_span_does_not_suppress(scratch)
             since = datetime(2026, 7, 22, 18, tzinfo=UTC)
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert len(errors) == 1
 
 
-def test_fixture_date_opt_out_inside_a_multiline_value_suppresses(scratch) -> None:
-    root, build = scratch
+def test_fixture_date_opt_out_inside_a_multiline_value_suppresses(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(
         root,
         "tests/test_fleet_usage.py",
@@ -459,12 +458,12 @@ def test_fixture_date_opt_out_inside_a_multiline_value_suppresses(scratch) -> No
             )  # time-bomb-ok: explicit request range, pinned in the assertion
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_clock_derived_window_values_are_allowed(scratch) -> None:
-    root, build = scratch
+def test_clock_derived_window_values_are_allowed(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(
         root,
         "tests/test_daily_report.py",
@@ -477,12 +476,12 @@ def test_clock_derived_window_values_are_allowed(scratch) -> None:
             payload = {"day": day.isoformat(), "since": since}
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_fixture_date_other_names_and_values_are_allowed(scratch) -> None:
-    root, build = scratch
+def test_fixture_date_other_names_and_values_are_allowed(scratch: _Scratch) -> None:
+    root, scan = scratch
     _write(
         root,
         "tests/test_daily_report.py",
@@ -492,14 +491,14 @@ def test_fixture_date_other_names_and_values_are_allowed(scratch) -> None:
             cutover = "2026-09-06"
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_fixture_date_computed_ctor_args_are_allowed(scratch) -> None:
+def test_fixture_date_computed_ctor_args_are_allowed(scratch: _Scratch) -> None:
     """`date(2026, 6, n)` is not a fixed calendar literal — its day is an
     input."""
-    root, build = scratch
+    root, scan = scratch
     _write(
         root,
         "tests/test_daily_report.py",
@@ -508,11 +507,11 @@ def test_fixture_date_computed_ctor_args_are_allowed(scratch) -> None:
             since = date(2026, 6, n)
         """,
     )
-    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    errors = scan([root / "tests"])
     assert errors == []
 
 
-def test_explicit_relative_path_argument_runs(scratch) -> None:
+def test_explicit_relative_path_argument_runs(scratch: _Scratch) -> None:
     """A relative path argument resolves against the repo root instead of
     crashing `relative_to` (pre-existing bug folded in with the lint change)."""
     root, _ = scratch
@@ -524,7 +523,7 @@ def test_explicit_relative_path_argument_runs(scratch) -> None:
             assert True
         """,
     )
-    assert _lint.main(["tests/test_clean.py"]) == 0
+    assert time_bomb.main(["tests/test_clean.py"], repo_root=root) == 0
 
 
 def test_explicit_missing_target_is_an_error(
@@ -534,25 +533,26 @@ def test_explicit_missing_target_is_an_error(
     good = tmp_path / "ok.py"
     good.write_text("value = 1\n", encoding="utf-8")
     missing = tmp_path / "typo.py"
-    assert _lint.main([str(missing)]) == 1
+    assert time_bomb.main([str(missing)], repo_root=tmp_path) == 1
     assert str(missing) in capsys.readouterr().err
-    assert _lint.main([str(good), str(missing)]) == 1
-    assert _lint.main(["typo-missing.py"]) == 1
+    assert time_bomb.main([str(good), str(missing)], repo_root=tmp_path) == 1
+    assert time_bomb.main(["typo-missing.py"], repo_root=tmp_path) == 1
 
 
 def test_out_of_repo_file_and_directory_targets_run(
-    scratch, tmp_path_factory: pytest.TempPathFactory
+    scratch: _Scratch, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     """A target outside the repo (file and directory forms) must scan instead
     of dying on the repo-relative prefix computation."""
+    root, _ = scratch
     outside = tmp_path_factory.mktemp("outside")
     (outside / "clean.py").write_text("value = 1\n", encoding="utf-8")
-    assert _lint.main([str(outside / "clean.py")]) == 0
-    assert _lint.main([str(outside)]) == 0
+    assert time_bomb.main([str(outside / "clean.py")], repo_root=root) == 0
+    assert time_bomb.main([str(outside)], repo_root=root) == 0
 
 
 def test_directory_with_non_utf8_test_member_is_skipped(
-    scratch, capsys: pytest.CaptureFixture[str]
+    scratch: _Scratch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A non-UTF-8 test member of an explicit directory is skipped like any
     unreadable entry — the scan must not crash on it, and a violating sibling
@@ -561,21 +561,21 @@ def test_directory_with_non_utf8_test_member_is_skipped(
     pkg = root / "pkg"
     pkg.mkdir()
     (pkg / "test_bad.py").write_bytes(b"\xff\xfe\x00bad")
-    assert _lint.main([str(pkg)]) == 0
+    assert time_bomb.main([str(pkg)], repo_root=root) == 0
     (pkg / "test_viol.py").write_text('day = "2026-09-06"\n', encoding="utf-8")
-    assert _lint.main([str(pkg)]) == 1
+    assert time_bomb.main([str(pkg)], repo_root=root) == 1
     assert "time-bomb fixture date" in capsys.readouterr().err
 
 
 def test_non_utf8_module_in_scan_dir_is_skipped(
-    scratch, capsys: pytest.CaptureFixture[str]
+    scratch: _Scratch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A non-UTF-8 module inside the scanned tree must not crash the index
     build — and a violating sibling module is still reported."""
     root, _ = scratch
     (root / "base" / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
     (root / "base" / "clean.py").write_text("value = 1\n", encoding="utf-8")
-    assert _lint.main([]) == 0
+    assert time_bomb.main([], repo_root=root) == 0
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
@@ -593,5 +593,41 @@ def test_non_utf8_module_in_scan_dir_is_skipped(
             return split_index_label_window(day, day)
         """,
     )
-    assert _lint.main([]) == 1
+    assert time_bomb.main([], repo_root=root) == 1
     assert "compute_rollup" in capsys.readouterr().err
+
+
+def test_changed_test_keeps_repository_callee_analysis(
+    scratch: _Scratch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, _ = scratch
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(
+        root,
+        "services/window.py",
+        """
+        from base.telemetry.loki_index_labels import retention_floor
+
+        def plan(now):
+            return retention_floor()
+        """,
+    )
+    _write(
+        root,
+        "tests/test_window.py",
+        """
+        from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+        from services.window import plan
+
+        def test_window():
+            result = plan(now=INDEX_LABEL_CUTOVER_AT)
+            assert result == INDEX_LABEL_CUTOVER_AT
+        """,
+    )
+    assert time_bomb.main(["--only", "tests/test_window.py"], repo_root=root) == 1
+    errors = capsys.readouterr().err.splitlines()
+    assert len(errors) == 1
+    assert "tests/test_window.py:" in errors[0]
+    assert "clock not pinned" in errors[0]
+    assert time_bomb.main(["--only"], repo_root=root) == 0
+    assert capsys.readouterr().err == ""

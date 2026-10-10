@@ -305,7 +305,7 @@ EVENTS: dict[str, EventSpec] = {
         "a non-critical service missed its readiness window at ava start",
         payload=ServiceStartUnready,
         tier="anomaly",
-        site="cli/commands/_probe.py:_report_non_critical_unready_services telemetry.emit",
+        site="cli/commands/probe.py:report_non_critical_unready_services telemetry.emit",
     ),
     "schedule_verify_failed": telemetry_event(
         "schedule_verify_failed",

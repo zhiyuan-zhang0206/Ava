@@ -21,6 +21,7 @@ import pytest
 
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from cli import main as _main
+from cli import parsers as _parsers
 from cli.commands.agents import parsers as _agents
 from cli.commands.extensions.parsers import mcp as _mcp
 from cli.commands.extensions.parsers import plugins as _plugins
@@ -177,7 +178,7 @@ def _stub_dispatch(
     parser = build_parser()
     leaf = next(item for item in _iter_leaf_parsers(parser) if item.prog == f"ava {command}")
     leaf.set_defaults(func=handler)
-    monkeypatch.setattr(_main, "_build_parser", _ignoring_retention(lambda: parser))
+    monkeypatch.setattr(_parsers, "build_parser", _ignoring_retention(lambda: parser))
 
 
 def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,7 +243,7 @@ def test_migrations_subcommand_removed() -> None:
     """`ava migrations apply` is gone — migration is now a side-effect of
     `ava start`. argparse exits 2 on the unknown subcommand."""
     with pytest.raises(SystemExit):
-        _main._build_parser().parse_args(["migrations", "apply"])
+        _parsers.parse_args(["migrations", "apply"])
 
 
 @pytest.mark.parametrize(
@@ -256,14 +257,14 @@ def test_migrations_subcommand_removed() -> None:
 def test_image_release_and_pitr_activation_verbs_are_removed(argv: list[str]) -> None:
     """The retained-image release and PITR-activation operator verbs no longer parse."""
     with pytest.raises(SystemExit) as exited:
-        _main._build_parser().parse_args(argv)
+        _parsers.parse_args(argv)
 
     assert exited.value.code == 2
 
 
 def test_logs_retention_parser_accepts_the_public_flags() -> None:
     """The local-log cleanup contract is reachable at `ava logs retention`."""
-    args = _main._build_parser().parse_args(
+    args = _parsers.parse_args(
         ["logs", "retention", "--family-days", "gateway=31,ops=30", "--dry-run"]
     )
 
@@ -272,16 +273,14 @@ def test_logs_retention_parser_accepts_the_public_flags() -> None:
 
 
 def test_logs_retention_parser_accepts_default_as_the_other_family() -> None:
-    args = _main._build_parser().parse_args(
-        ["logs", "retention", "--family-days", "agent=15,default=14"]
-    )
+    args = _parsers.parse_args(["logs", "retention", "--family-days", "agent=15,default=14"])
 
     assert args.family_days == {"agent": 15, "other": 14}
 
 
 def test_logs_retention_parser_rejects_combined_age_modes() -> None:
     with pytest.raises(SystemExit):
-        _main._build_parser().parse_args(
+        _parsers.parse_args(
             [
                 "logs",
                 "retention",
@@ -295,7 +294,7 @@ def test_logs_retention_parser_rejects_combined_age_modes() -> None:
 
 def test_logs_retention_parser_rejects_unknown_family() -> None:
     with pytest.raises(SystemExit):
-        _main._build_parser().parse_args(["logs", "retention", "--family-days", "restarter=4"])
+        _parsers.parse_args(["logs", "retention", "--family-days", "restarter=4"])
 
 
 def test_logs_retention_default_comes_from_observability_settings() -> None:
@@ -310,7 +309,7 @@ def test_logs_retention_default_comes_from_observability_settings() -> None:
 
 def test_logs_retention_parser_rejects_non_positive_days() -> None:
     with pytest.raises(SystemExit):
-        _main._build_parser().parse_args(["logs", "retention", "--older-than", "0"])
+        _parsers.parse_args(["logs", "retention", "--older-than", "0"])
 
 
 def test_logs_retention_settings_reject_non_positive_environment_default() -> None:
@@ -326,7 +325,7 @@ def test_logs_retention_help_explains_defaults_and_dry_run(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with pytest.raises(SystemExit) as exited:
-        _main._build_parser().parse_args(["logs", "retention", "--help"])
+        _parsers.parse_args(["logs", "retention", "--help"])
 
     assert exited.value.code == 0
     help_text = capsys.readouterr().out
@@ -340,7 +339,7 @@ def test_logs_retention_help_explains_defaults_and_dry_run(
 @pytest.mark.parametrize("verb", ["status", "retire"])
 def test_removed_backup_operation_custody_verbs_are_rejected(verb: str) -> None:
     with pytest.raises(SystemExit):
-        _main._build_parser().parse_args(["backup", "operations", verb])
+        _parsers.parse_args(["backup", "operations", verb])
 
 
 @pytest.mark.parametrize(
@@ -356,7 +355,7 @@ def test_removed_backup_operation_custody_verbs_are_rejected(verb: str) -> None:
 def test_the_removed_wal_verbs_no_longer_parse(argv: list[str]) -> None:
     """The self-written PITR stack remains removed."""
     with pytest.raises(SystemExit) as exited:
-        _main._build_parser().parse_args(argv)
+        _parsers.parse_args(argv)
 
     assert exited.value.code == 2
 
@@ -383,7 +382,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
 
 def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> None:
     """`ava init` owns the first-start inputs: machine name, capabilities, gateway."""
-    args = _main._build_parser().parse_args(
+    args = _parsers.parse_args(
         [
             "init",
             "--machine-name",
@@ -419,7 +418,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
         env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(
-            _main, "_build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
+            _parsers, "build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
         )
         assert _main.main([verb]) == 0
         assert env.get("AVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
@@ -429,7 +428,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
         env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(
-            _main, "_build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
+            _parsers, "build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
         )
         assert _main.main([verb]) == 0
         assert "AVA_CONFIG_FETCH" not in env
@@ -510,8 +509,8 @@ def test_foreign_checkout_is_refused_before_dispatch(
     home = _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(
-        _main,
-        "_build_parser",
+        _parsers,
+        "build_parser",
         _ignoring_retention(lambda: _noop_parser_recording(argv[0], dispatched)),
     )
 
@@ -537,8 +536,8 @@ def test_the_homes_own_checkout_runs_the_state_changing_verbs(
     monkeypatch.setenv("AVA_HOME", str(home))
     dispatched: list[str] = []
     monkeypatch.setattr(
-        _main,
-        "_build_parser",
+        _parsers,
+        "build_parser",
         _ignoring_retention(lambda: _noop_parser_recording("stop", dispatched)),
     )
 
@@ -554,8 +553,8 @@ def test_a_home_with_no_source_accepts_any_checkout(
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     dispatched: list[str] = []
     monkeypatch.setattr(
-        _main,
-        "_build_parser",
+        _parsers,
+        "build_parser",
         _ignoring_retention(lambda: _noop_parser_recording("stop", dispatched)),
     )
 
@@ -575,8 +574,8 @@ def test_foreign_checkout_may_still_ask_for_a_lone_help_flag(
     _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(
-        _main,
-        "_build_parser",
+        _parsers,
+        "build_parser",
         _ignoring_retention(lambda: _noop_parser_recording("ava", dispatched)),
     )
 
@@ -594,8 +593,8 @@ def test_foreign_checkout_may_still_run_bare_ava(
     _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(
-        _main,
-        "_build_parser",
+        _parsers,
+        "build_parser",
         _ignoring_retention(lambda: _noop_parser_recording("ava", dispatched)),
     )
 

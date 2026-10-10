@@ -98,7 +98,7 @@ def probe_set(roles: MachineRoles) -> tuple[ProbeView, ...]:
 def _run_probe(spec: ServiceSpec) -> tuple[bool | None, str]:
     """Run a service's probe; ``(None, "")`` when there is no probe to run.
 
-    Faithful to ``cli.commands._probe._probe_service``: identity, HTTP 2xx/3xx,
+    Prefer identity evidence, then HTTP 2xx/3xx,
     TCP connect, pidfile + ``process_alive``, in that precedence — and, now, in
     what it reports. The verdict alone flattens an occupant on our port into the
     same ``False`` as a dead daemon, which is the distinction the identity probes
@@ -140,7 +140,7 @@ _PROBE_POLICY = Policy(
 
 def _curl_ok(url: str) -> bool:
     # Probe confirm-retry (R2-D, audit-06 Q2) — same policy as
-    # cli/commands/_probe.py's probe: one 1s confirm for transient
+    # HTTP observations: one 1s confirm for transient
     # failures, no Retry-After respect.
     import httpx
 

@@ -7,6 +7,7 @@ import pathlib
 
 import pytest
 
+from base.host.proc import run_bounded
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 from tests.path_scoped.structure_tests import (
@@ -33,22 +34,29 @@ def _baseline(root: pathlib.Path) -> None:
 
 @pytest.fixture
 def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
-    monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
-    lcs._git("init", "--quiet").check_returncode()
-    lcs._git("add", baseline_shards.SHARD_DIR).check_returncode()
-    lcs._git(
-        "-c",
-        "user.name=Path-import gate test",
-        "-c",
-        "user.email=structure-test@example.invalid",
-        "-c",
-        "commit.gpgsign=false",
-        "commit",
-        "--quiet",
-        "-m",
-        "Empty baseline",
+    run_bounded(["git", "-C", str(tmp_path), "init", "--quiet"], timeout=30).check_returncode()
+    run_bounded(
+        ["git", "-C", str(tmp_path), "add", baseline_shards.SHARD_DIR], timeout=30
+    ).check_returncode()
+    run_bounded(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Path-import gate test",
+            "-c",
+            "user.email=structure-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "Empty baseline",
+        ],
+        timeout=30,
     ).check_returncode()
     return tmp_path
 
@@ -64,7 +72,7 @@ def test_a_new_path_import_fails_the_gate(
 ) -> None:
     _write(_repo, _SKILL, _HACK)
 
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=_repo) == 1
     output = capsys.readouterr().out
     assert f"{_SKILL}:2: imports by file path (`sys.path`)" in output
     assert "thin entry point" in output
@@ -76,5 +84,5 @@ def test_retired_path_import_field_cannot_allow_a_site(
 ) -> None:
     _write(_repo, _SKILL, _HACK)
     _write(_repo, f"{baseline_shards.SHARD_DIR}/legacy.json", json.dumps({"path_imports": frozen}))
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=_repo) == 1
     assert "unknown section 'path_imports'" in capsys.readouterr().err

@@ -298,25 +298,27 @@ for the whole bound. `base.sessions.posixproc._terminate_tree` — the loop a gr
 **26 GB** on a 16 GB box, swap ran out, and agent boots went from 850 ms to 78-93 s.
 Nothing failed — the suite just got slow.
 
-So when a test needs to shorten or forbid one specific sleep, the product gives that
-sleep a name and the test patches the name: `cli/commands/lifecycle/root_driver.py` binds
-`_poll_sleep = time.sleep` at import, and `monkeypatch.setattr(root_driver, "_poll_sleep",
-...)` reaches that poll and nothing else. Same reasoning behind patching `_probe_service`
-at the module that actually defines it (`cli.commands._probe`) rather than some shared
-namespace — one named seam per patchable behaviour, so a stub's blast radius is stated
-in the product rather than inferred from an attribute path.
+When a test needs control over one operation's clock or transport, pass that
+capability through the product's actual input boundary. Verify the public result
+or capture the submitted operation. A public readiness call such as
+`cli.commands.probe.probe_service` belongs to its definition owner; replacing a
+shared imported module affects every consumer in the process.
 
-A seam is only patchable from outside its package when its name is public: the
-patch-target lint (`scripts/lint/patch_targets.py`, structure Rule 8) rejects a test that
-patches a `_private` name of a package the test does not belong to. A test belongs to the
-package its own imports and its subject's production imports place it in
-(`scripts/structure/placement.py`), so the same file gets the same verdict in `tests/` and
-in `<pkg>/tests/`. When a private name is the only
-seam, give it a public name or a parameter instead of patching it from another package.
+The approved [component public contract](../docs/decisions/engineering/design/simplification/2026-10-10-component-public-contracts.md)
+makes `_symbol` and `_module` file-local, including tests. Cross-component access
+uses an explicitly declared entry module and its definition owner's static
+`__all__`. A test's directory or inferred placement does not grant private access.
+Removing an underscore, adding a barrel or forwarding a private object through a
+test helper does not create a legitimate capability.
+
+The existing patch-target gate still implements its legacy package calculation
+during migration. The new public-contract audit fails on known violations and
+unresolved recognized inputs; it is not yet an enabled repository gate. A clean
+legacy check therefore does not establish the complete component contract.
 
 The related trap in the same incident: patching a name on the **package** when the
-caller imported it directly. A caller that does `from cli.commands.lifecycle.stop import
-_do_stop` holds its own binding, so `monkeypatch.setattr(cli.commands, "_do_stop", ...)` never
+caller imported it directly. A caller that does `from pkg.owner import run`
+holds its own binding, so `monkeypatch.setattr(pkg, "run", ...)` never
 reaches it — the stub is a silent no-op and the real function runs. Patch the module
 that resolves the name, or have the caller look it up dynamically. `monkeypatch` will
 not tell you the stub was unused.

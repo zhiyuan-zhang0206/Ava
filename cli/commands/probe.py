@@ -7,51 +7,24 @@ process cannot certify this cluster. Root owns startup readiness and recovery.
 
 from __future__ import annotations
 
-import logging
 import sys
 from typing import Any, NamedTuple
 
 from base import telemetry
-from base.deploy.git.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
-from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS as CRITICAL_SERVICE_SESSIONS
-from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
-from cli.commands._repo import ServiceSpec, session_name
+from base.cluster.derive import session_name
+from ops.roster.service_spec import ServiceSpec
 
-__all__ = ["_detect_prod_source_drift"]
-
-logger = logging.getLogger(__name__)
-
-
-# Probe confirm-retry (R2-D, audit-06 Q2): a transient TCP reset / slow
-# response at the probe instant must not read as down and feed the failure signal —
-# one 1s confirm retry. 4xx stays immediate
-# (a misconfigured probe), 429/5xx get the confirm. No Retry-After respect:
-# a probe must never sleep for the upstream's backoff.
-_PROBE_POLICY = Policy(
-    max_attempts=2,
-    backoff=ExponentialBackoff(base=1.0, factor=1.0, cap=1.0),
-    jitter="none",
-    classify=http_classifier,
-    respect_retry_after=False,
-)
-
-
-def _curl_ok(url: str) -> bool:
-    # httpx (a dependency) instead of shelling out to `curl` — `curl` is not
-    # guaranteed on PATH (and the old `-o /dev/null` is POSIX-only). Same intent:
-    # a 2xx/3xx HTTP response means the service is up.
-    import httpx
-
-    def _get() -> None:
-        resp = httpx.get(url, timeout=5.0, follow_redirects=False)
-        resp.raise_for_status()
-
-    try:
-        retry(_PROBE_POLICY)(_get)
-    except httpx.HTTPError as exc:
-        logger.warning("probe %s failed: %s", url, exc)
-        return False
-    return True
+__all__ = [
+    "OccupiedPort",
+    "ReadinessWait",
+    "ServiceProbe",
+    "occupied_health_ports",
+    "print_non_critical_unready_services",
+    "print_service_row",
+    "print_unready_services",
+    "probe_service",
+    "report_non_critical_unready_services",
+]
 
 
 class ServiceProbe(NamedTuple):
@@ -68,7 +41,7 @@ class ServiceProbe(NamedTuple):
     terminal: bool = False
 
 
-def _probe_service(spec: ServiceSpec) -> ServiceProbe:
+def probe_service(spec: ServiceSpec) -> ServiceProbe:
     """Report only identity-bound protocol evidence from the canonical roster."""
     if spec.identity_probe is None:
         return ServiceProbe(None, "unavailable", "service has no identity-bound readiness probe")
@@ -110,7 +83,7 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
     return spec.health_name is not None or spec.home_healthz
 
 
-def _occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort, ...]:
+def occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort, ...]:
     """The health ports among `specs` that another unit already answers on.
 
     `ava start` probes before it binds because the alternative is worse in both
@@ -144,7 +117,7 @@ def _occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort
     for spec in specs:
         if not _binds_a_daemon_health_port(spec):
             continue
-        probe = _probe_service(spec)
+        probe = probe_service(spec)
         if probe.terminal:
             occupied.append(OccupiedPort(spec, probe.detail))
     return tuple(occupied)
@@ -178,7 +151,7 @@ class ReadinessWait(NamedTuple):
     non_critical_unready: tuple[ServiceSpec, ...] = ()
 
 
-def _print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
+def print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
     """Name the services that never became ready, for the operator reading the same
     output as the status snapshot above it.
 
@@ -217,10 +190,10 @@ def _print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
     )
 
 
-def _print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
+def print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
     """Report optional capabilities unavailable when core startup finishes.
 
-    The counterpart of `_print_unready_services` for the tier that cannot fail
+    The counterpart of `print_unready_services` for the tier that cannot fail
     the start. The cross must still appear — the tier downgrade is a verdict
     change, never a silence — and it points at the event that was emitted.
     """
@@ -235,7 +208,7 @@ def _print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None
     )
 
 
-def _report_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
+def report_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
     """Emit one `service_start_unready` event per unavailable optional service.
 
     The tier's second rail: the demotion must not go silent. The boot job's
@@ -252,7 +225,7 @@ def _report_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> Non
         )
 
 
-def _print_service_row(
+def print_service_row(
     spec: ServiceSpec,
     name_w: int,
     skip_reason: str | None = None,
@@ -263,7 +236,7 @@ def _print_service_row(
     unit = root_units.get(spec.session)
     session_mark = "✓" if unit is not None and unit.get("state") == "running" else "✗"
 
-    probe = _probe_service(spec)
+    probe = probe_service(spec)
     if probe.alive is True:
         probe_mark = "✓"
     elif probe.alive is False:

@@ -14,7 +14,7 @@ import psutil
 import pytest
 
 from tests.e2e._ports import GATEWAY_PORT, GATEWAY_SOCKET
-from tests.e2e._proc import listener_evidence, managed_proc, require_native_listener
+from tests.e2e.process_support import listener_evidence, managed_proc, require_native_listener
 
 
 def test_owned_port_survives_delay_and_real_uvicorn_restart(tmp_path: Path) -> None:

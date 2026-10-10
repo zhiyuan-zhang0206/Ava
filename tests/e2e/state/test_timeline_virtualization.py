@@ -14,8 +14,8 @@ import pytest
 from playwright.sync_api import Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
+from tests.e2e.fixture_environment import E2EEnv
 
 ITEM_COUNT = 1200
 FRAME_SAMPLE_ROUNDS = 3  # Serial best-of-three sweeps reduce load jitter at the fixed p95 gate.

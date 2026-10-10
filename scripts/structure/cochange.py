@@ -48,6 +48,8 @@ from pathlib import Path
 
 from scripts.structure import imports
 
+__all__ = ["main"]
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DAYS = 90
 _DEFAULT_MIN_SUPPORT = 8

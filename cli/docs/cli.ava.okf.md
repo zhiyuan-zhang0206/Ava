@@ -10,13 +10,13 @@ tags:
 
 # CLI
 
-The `ava` CLI entry point (`cli/main.py`) composes settings-free builders through
-`cli.parsers.build_parser`. Agents/notices and impersonation belong to
-`cli.commands.agents.parsers` and `cli.commands.agents.impersonation_parsers`;
-extension verbs belong to `cli.commands.extensions.parsers`; other builders
-remain in `cli/parsers/`. Each builder binds its own `_h_*` adapters, which
-lazy-import `cmd_*` implementations on dispatch. Package markers export no
-commands. `pyproject.toml [project.scripts]` installs `.venv/bin/ava` via `uv sync`.
+`cli.parsers` owns settings-free syntax. `parse_args` preserves argparse
+defaults, help and error exits without dispatch; `build_parser` composes handler
+bindings; `command_options` gives doc checks command-scoped long options and
+aliases. Parsing preserves caller-owned children. Agents/notices
+and impersonation builders live in `cli.commands.agents`, extensions in
+`cli.commands.extensions.parsers`, others in `cli/parsers/`. Adapters lazy-import
+`cmd_*` at dispatch; `pyproject.toml` installs `.venv/bin/ava` via `uv sync`.
 
 ## Top-Level Commands
 
@@ -87,7 +87,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 
 ## Entry Points
 
-- `cli/main.py:main()` — argparse entrypoint; `cli.parsers.build_parser` — the settings-free command-tree composition.
+- `cli/main.py:main()` — dispatch; `cli.parsers` — `build_parser` for construction, `parse_args` for syntax, `command_options` for documentation.
 - `cli/init_intent.py:run_init()` — the first-start inputs; `cli/start_intent.py:run_start()` — start admission and the full home lifecycle lock; `cli/start_identity.py` — durable initialization journal and the start gate (`require_initialized`); `cli/unit_join.py` — a runner's gateway join.
 - `cli/commands/cluster/home.py` — `destroy` (confirmed at a terminal), exact cleanup before marking the home detached; `start.py` / `status.py` / `data_plane/cluster_instance.py` — runtime operations.
 

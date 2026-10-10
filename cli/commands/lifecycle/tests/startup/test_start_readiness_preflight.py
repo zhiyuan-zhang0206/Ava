@@ -122,7 +122,7 @@ def test_health_port_occupancy_is_fatal(
         spec=SimpleNamespace(session="ava-gateway"),
         detail="answered by $AVA_HOME=/other-unit (http://127.0.0.1:8123/healthz)",
     )
-    monkeypatch.setattr("cli.commands._probe._occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands.probe.occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
 
     assert _run(repo) == 1
     err = capsys.readouterr().err

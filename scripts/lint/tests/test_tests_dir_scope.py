@@ -15,15 +15,14 @@ import subprocess
 import pytest
 
 from scripts.lint import code_structure as lcs
-from scripts.structure import baseline_shards, path_imports
+from scripts.structure import ambient_state, baseline_shards, path_imports
 
-_SECTIONS = lcs._SITE_SECTIONS
+_SECTIONS = (ambient_state.SECTION,)
 
 
 @pytest.fixture(autouse=True)
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Each main() call scans only its own temporary root, with an empty baseline."""
-    monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _write_baseline(tmp_path, {section: {} for section in _SECTIONS})
     _git(tmp_path, "init", "--quiet")
@@ -86,7 +85,7 @@ def test_tests_layer_takes_a_slot_in_its_parent(
     _fill(package, 20)
     _module(package / "tests/test_pkg.py")
     _git(tmp_path, "add", "base/pkg")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "base/pkg: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -98,7 +97,7 @@ def test_tests_package_with_init_takes_a_slot(
     _fill(package, 20)
     _module(package / "tests/__init__.py")
     _git(tmp_path, "add", "base/pkg")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "base/pkg: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -109,7 +108,7 @@ def test_tests_layer_has_the_same_entry_cap(
     """Test directories obey the same limit at the root and inside packages."""
     _fill(tmp_path / location, 21)
     _git(tmp_path, "add", location)
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert f"{location}: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -118,7 +117,7 @@ def test_directory_below_a_tests_layer_is_still_capped(
 ) -> None:
     _fill(tmp_path / "base/pkg/tests/area", 21)
     _git(tmp_path, "add", "base/pkg/tests")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "base/pkg/tests/area: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -128,7 +127,7 @@ def test_tests_package_with_init_keeps_its_own_cap(
     _module(tmp_path / "base/pkg/tests/__init__.py")
     _fill(tmp_path / "base/pkg/tests", 21)
     _git(tmp_path, "add", "base/pkg/tests")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "base/pkg/tests: directory has 22 direct entries" in capsys.readouterr().out
 
 
@@ -136,7 +135,7 @@ def test_test_files_keep_the_line_ceiling(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _module(tmp_path / "base/pkg/tests/test_big.py", "x = 1\n" * 801)
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert "base/pkg/tests/test_big.py:801: file is 801 lines" in capsys.readouterr().out
 
 
@@ -177,7 +176,7 @@ def test_ast_rules_do_not_govern_a_package_tests_directory(
 ) -> None:
     _private_owner(tmp_path)
     _module(tmp_path / location, _BREAKS_EVERY_AST_RULE)
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -188,7 +187,7 @@ def test_the_same_source_outside_tests_is_governed(
     """The control: the exemption is the location, not a weakened rule."""
     _private_owner(tmp_path)
     _module(tmp_path / location, _BREAKS_EVERY_AST_RULE)
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     out = capsys.readouterr().out
     assert "`if TYPE_CHECKING:` is banned" in out
     assert "machine_role() may only be called" in out
@@ -223,11 +222,11 @@ def test_test_module_move_still_enforces_file_and_function_budgets(
     (tmp_path / new).parent.mkdir(parents=True)
     _git(tmp_path, "mv", old, new)
 
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert f"{new}:817:" in output
     assert f"{new}::f: complexity 16" in output
 
     (tmp_path / new).write_text("def f(x):\n    return x\n", encoding="utf-8")
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""

@@ -1,14 +1,8 @@
-"""scripts/content_lint/lint_no_cjk.py: the repo-wide no-CJK gate.
-
-User ruling 2026-08-27 (tightening the 2026-08-06 English-primary rule): raw
-CJK characters are banned everywhere in the repo; the only exemption is i18n /
-locale copy (message catalogs, locale trees, and the IM alert-copy locale
-module). These tests pin the detection, the exemption paths, and the
-ASCII-escape convention for functional CJK data.
-"""
+"""Public entry contract for the repository language gate."""
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,170 +11,147 @@ from scripts.content_lint import lint_no_cjk as gate
 
 
 @pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the gate at a scratch repo root so the real checkout is untouched."""
-    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(
-        gate,
-        "_LOCALE_PY_FILES",
-        frozenset({"base/telemetry/alerts/copy.py", "base/packages/docs/pages_copy.py"}),
-    )
+def repo(tmp_path: Path) -> Path:
+    """Use a real Git index for default scans without changing the checkout."""
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
     return tmp_path
 
 
-def _write(repo: Path, rel: str, content: str) -> None:
-    p = repo / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
+def _write(repo: Path, rel: str, content: str | bytes) -> None:
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(content, encoding="utf-8")
 
 
-def test_english_file_passes(repo: Path) -> None:
-    _write(repo, "docs/guide.md", "# Guide\n\nAll English here.\n")
-    assert gate._scan_file("docs/guide.md") == []
-
-
-def test_chinese_ideograph_fails(repo: Path) -> None:
-    _write(repo, "docs/guide.md", "# Guide\n\u4e2d\u6587 text\n")
-    hits = gate._scan_file("docs/guide.md")
-    assert len(hits) == 1
-    assert hits[0][0] == 2
-    assert hits[0][1] == "\u4e2d"
-
-
-def test_kana_and_hangul_fail(repo: Path) -> None:
-    _write(repo, "docs/guide.md", "# Guide\n\u3059\u30ad\u30eb\n")
-    assert gate._scan_file("docs/guide.md")
-    _write(repo, "docs/guide.md", "# Guide\n\uc778\uc99d\n")
-    assert gate._scan_file("docs/guide.md")
-
-
-def test_fullwidth_punctuation_fails(repo: Path) -> None:
-    """Real CJK text always carries fullwidth punctuation, so the gate covers
-    CJK symbols/punctuation and fullwidth forms too - a fullwidth comma alone
-    is Chinese punctuation and fails on its own."""
-    _write(repo, "docs/guide.md", "# Guide\nhello\uff0cworld\n")
-    hits = gate._scan_file("docs/guide.md")
-    assert len(hits) == 1 and hits[0][1] == "\uff0c"
-    _write(repo, "docs/guide.md", "# Guide\n\u4f60\u597d\uff0c\u4e16\u754c\n")
-    assert gate._scan_file("docs/guide.md")
-    _write(repo, "docs/guide.md", "# Guide\n\u300cquote\u300d\n")
-    assert gate._scan_file("docs/guide.md")
-
-
-def test_binary_file_skipped(repo: Path) -> None:
-    _write(repo, "assets/logo.png", "\x00\x01\x02\u4e2d\u6587")
-    assert gate._scan_file("assets/logo.png") == []
-
-
-def test_non_utf8_file_skipped(repo: Path) -> None:
-    p = repo / "assets/legacy.txt"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes("\u4e2d".encode() + b"\xff")
-    assert gate._scan_file("assets/legacy.txt") == []
-
-
-def test_next_intl_messages_catalog_exempt(repo: Path) -> None:
-    """The frontend's zh message catalog is the ruling's explicit exemption."""
-    _write(repo, "ui/web/messages/zh/interface/common.json", '{"save": "\u4fdd\u5b58"}\n')
-    assert gate._scan_file("ui/web/messages/zh/interface/common.json") == []
-
-
-def test_locales_dir_and_po_exempt(repo: Path) -> None:
-    _write(repo, "frontend/locales/zh/messages.po", "msgstr \u4fdd\u5b58\n")
-    assert gate._scan_file("frontend/locales/zh/messages.po") == []
-    _write(repo, "frontend/locales/zh/app.json", '{"ok": "\u597d"}\n')
-    assert gate._scan_file("frontend/locales/zh/app.json") == []
-
-
-def test_alerts_copy_locale_module_exempt(repo: Path) -> None:
-    """base/telemetry/alerts/copy.py is the IM alert copy locale module (zh/en by
-    display.language) - the one Python locale file, documented in the gate."""
-    _write(repo, "base/telemetry/alerts/copy.py", 'ALERT_HEAD = {"zh": "\u544a\u8b66"}\n')
-    assert gate._scan_file("base/telemetry/alerts/copy.py") == []
-
-
-def test_pages_copy_locale_module_exempt(repo: Path) -> None:
-    """base/packages/docs/pages_copy.py is the page-expired copy locale module (zh/en by
-    display.language) - same exemption class as alerts_copy."""
-    _write(
-        repo,
-        "base/packages/docs/pages_copy.py",
-        'PAGE_EXPIRED_BODY = {"zh": "\u9875\u9762\u5df2\u8fc7\u671f"}\n',
-    )
-    assert gate._scan_file("base/packages/docs/pages_copy.py") == []
-
-
-def test_skill_body_with_cjk_fails(repo: Path) -> None:
-    """Skill bodies are in scope - the ruling names skill content explicitly."""
-    _write(repo, "ava_builtins/skills/pkg/SKILL.md", "# Skill\n\u4e2d\u6587\n")
-    assert gate._scan_file("ava_builtins/skills/pkg/SKILL.md")
-
-
-def test_main_returns_1_on_hits_and_0_when_clean(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "character", ["\u4e2d", "\u3400", "\uf900", "\u3059", "\u30ad", "\uc778", "\uff0c", "\u300c"]
+)
+def test_cjk_line_is_reported(
+    repo: Path, capsys: pytest.CaptureFixture[str], character: str
 ) -> None:
-    _write(repo, "docs/a.md", "clean\n")
-    monkeypatch.setattr(gate, "_tracked_files", lambda: ["docs/a.md"])
-    assert gate.main([]) == 0
-    _write(repo, "docs/a.md", "\u4e2d\u6587\n")
-    assert gate.main([]) == 1
+    _write(repo, "docs/guide.md", f"# Guide\n  {character} text  \n")
+    assert gate.main(["docs/guide.md"], repo_root=repo) == 1
+    output = capsys.readouterr()
+    assert (
+        output.out == f"docs/guide.md:2: U+{ord(character):04X} {character!r} | {character} text\n"
+    )
+    assert "Raw CJK found" in output.err
 
 
-def test_tracked_scan_preserves_git_order_and_line_output(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    "content",
+    ["All English.\n", r"functional = '\u4e2d'", "\x00\u4e2d", "\u4e2d".encode() + b"\xff"],
+)
+def test_clean_or_binary_file_passes(
+    repo: Path, capsys: pytest.CaptureFixture[str], content: str | bytes
+) -> None:
+    _write(repo, "assets/data.txt", content)
+    assert gate.main(["assets/data.txt"], repo_root=repo) == 0
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "ui/web/messages/zh/interface/common.json",
+        "frontend/locales/zh/app.json",
+        "frontend/zh.po",
+        "base/telemetry/alerts/copy.py",
+        "base/packages/docs/pages_copy.py",
+    ],
+)
+def test_documented_locale_copy_is_exempt(
+    repo: Path, capsys: pytest.CaptureFixture[str], rel: str
+) -> None:
+    _write(repo, rel, "\u4fdd\u5b58\n")
+    assert gate.main([rel], repo_root=repo) == 0
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "ava_builtins/skills/pkg/SKILL.md",
+        "base/other/copy.py",
+        "docs/messages.md",
+        "docs/decisions/history.md",
+    ],
+)
+def test_non_locale_content_is_scanned(repo: Path, rel: str) -> None:
+    _write(repo, rel, "\u4e2d\n")
+    assert gate.main([rel], repo_root=repo) == 1
+
+
+def test_default_scan_uses_git_index_order_and_reports_each_line(
+    repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write(repo, "docs/z.md", "clean\n  \u4e2d first  \n\u6587 second\n")
     _write(repo, "docs/a.md", "\u65e5 later\n")
-    monkeypatch.setattr(gate, "_tracked_files", lambda: ["docs/z.md", "docs/a.md"])
-    assert gate.main([]) == 1
+    _write(repo, "untracked.txt", "\u4e2d ignored\n")
+    subprocess.run(["git", "add", "docs/z.md", "docs/a.md"], cwd=repo, check=True)
+    assert gate.main([], repo_root=repo) == 1
     assert capsys.readouterr().out == (
+        "docs/a.md:1: U+65E5 '\u65e5' | \u65e5 later\n"
         "docs/z.md:2: U+4E2D '\u4e2d' | \u4e2d first\n"
         "docs/z.md:3: U+6587 '\u6587' | \u6587 second\n"
-        "docs/a.md:1: U+65E5 '\u65e5' | \u65e5 later\n"
     )
+    _write(repo, "docs/a.md", "clean\n")
+    _write(repo, "docs/z.md", "clean\n")
+    assert gate.main([], repo_root=repo) == 0
+    assert capsys.readouterr() == ("", "")
 
 
-def test_explicit_paths_scan_untracked_edits(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pre-commit runs whole-repo, but an explicit path must catch a CJK edit
-    even before `git add` (the tracked-file list would miss it)."""
-    _write(repo, "new.txt", "\u4e2d\u6587\n")
-    monkeypatch.setattr(gate, "_tracked_files", list)
-    assert gate.main(["new.txt"]) == 1
-
-
-def test_explicit_targets_are_sorted_and_deduplicated(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_explicit_targets_scan_untracked_sorted_deduplicated(
+    repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write(repo, "docs/z.md", "\u4e2d\n")
     _write(repo, "docs/a.md", "\u6587\n")
-    monkeypatch.setattr(gate, "_tracked_files", lambda: pytest.fail("unexpected git scan"))
-    assert gate.main(["docs/z.md", "docs"]) == 1
+    assert gate.main(["docs/z.md", "docs"], repo_root=repo) == 1
     assert capsys.readouterr().out == (
         "docs/a.md:1: U+6587 '\u6587' | \u6587\ndocs/z.md:1: U+4E2D '\u4e2d' | \u4e2d\n"
     )
 
 
-def test_explicit_missing_target_is_an_error(
+def test_missing_target_fails_before_scanning_existing_targets(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
-    _write(repo, "ok.txt", "All English here.\n")
-    missing = repo / "typo.txt"
-    assert gate.main([str(missing)]) == 1
-    assert str(missing) in capsys.readouterr().err
-    assert gate.main([str(repo / "ok.txt"), str(missing)]) == 1
-    assert gate.main(["typo.txt"]) == 1
+    _write(repo, "bad.txt", "\u4e2d\n")
+    for args in (["typo.txt"], [str(repo / "typo.txt")], ["bad.txt", "typo.txt"]):
+        assert gate.main(args, repo_root=repo) == 1
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert "target path(s) not found" in output.err
+        assert "typo.txt" in output.err
 
 
-def test_out_of_repo_directory_argument_is_scanned(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A directory outside the repo must be scanned: its members used to die
-    on the repo-relative prefix computation."""
-    outside = tmp_path / "outside"
+def test_outside_directory_is_scanned(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    outside = repo.parent / f"{repo.name}-outside"
     outside.mkdir()
-    (outside / "ok.txt").write_text("All English here.\n", encoding="utf-8")
-    assert gate.main([str(outside)]) == 0
-    (outside / "cjk.txt").write_text("\u4e2d\u6587\n", encoding="utf-8")
-    assert gate.main([str(outside)]) == 1
-    assert "cjk.txt" in capsys.readouterr().out
+    _write(outside, "data.txt", "English\n")
+    assert gate.main([str(outside)], repo_root=repo) == 0
+    assert capsys.readouterr() == ("", "")
+    _write(outside, "data.txt", "\u4e2d\n")
+    assert gate.main([str(outside)], repo_root=repo) == 1
+    assert capsys.readouterr().out == f"{outside}/data.txt:1: U+4E2D '\u4e2d' | \u4e2d\n"
+
+
+def test_only_scope_and_tooling_widening(repo: Path) -> None:
+    _write(repo, "docs/bad.md", "\u4e2d\n")
+    _write(repo, "docs/clean.md", "clean\n")
+    _write(repo, "scripts/content_lint/tool.py", "")
+    subprocess.run(["git", "add", "docs", "scripts"], cwd=repo, check=True)
+    assert gate.main(["--only", "docs/bad.md"], repo_root=repo) == 1
+    assert gate.main(["--only", "docs/clean.md"], repo_root=repo) == 0
+    assert gate.main(["--only"], repo_root=repo) == 0
+    assert (
+        gate.main(["--only", "docs/clean.md", "scripts/content_lint/tool.py"], repo_root=repo) == 1
+    )
+
+
+def test_unknown_only_target_is_rejected_before_explicit_scan(repo: Path) -> None:
+    _write(repo, "docs/clean.md", "clean\n")
+    with pytest.raises(SystemExit, match=r"not found: typo\.txt"):
+        gate.main(["docs/clean.md", "--only", "typo.txt"], repo_root=repo)
