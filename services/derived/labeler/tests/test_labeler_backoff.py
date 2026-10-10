@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import httpx2
+import openai
 import psycopg
 import pytest
 
@@ -296,11 +298,11 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
 ) -> None:
-    """Regression (audit round 2, P1): generate_label_async swallows LLM
-    failures (returns False), so the daemon's old except-keyed backoff was
-    dead code — a bad API key hot-looped a full LLM call every second. The
-    backoff must fire on the RETURN value: one LLM attempt, then the agent
-    is cooling and no further calls happen."""
+    """A trusted invocation failure returns False and excludes its row next poll.
+
+    Observe two actual SELECTs, then terminate at the third poll; a regression
+    produces a failing assertion rather than an unbounded loop or sleep race.
+    """
     monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.0)
 
     a = create_agent(db_conn)
@@ -309,32 +311,45 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
 
     from services.derived.labeler import labeler
 
-    llm_calls = {"n": 0}
+    llm_calls: list[bool] = []
 
-    def _boom(model: str, **kwargs: object) -> None:
-        llm_calls["n"] += 1
-        raise RuntimeError("bad API key")
+    class _FailingLLM:
+        async def ainvoke(self, _messages: object) -> None:
+            llm_calls.append(True)
+            raise openai.APIConnectionError(request=httpx2.Request("POST", "https://audit.invalid"))
 
-    monkeypatch.setattr(labeler, "build_chat_model", _boom)
+    def build(_model: str, **_kwargs: object) -> _FailingLLM:
+        return _FailingLLM()
 
+    monkeypatch.setattr(labeler, "build_chat_model", build)
+    select_unlabeled = daemon._select_unlabeled
+    selections: list[list[int]] = []
+    cooling_rounds: list[list[int]] = []
+
+    def select(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int, str | None]]:
+        if len(selections) == 2:
+            raise asyncio.CancelledError
+        cooling_rounds.append(cooling)
+        rows = select_unlabeled(cur, cooling)
+        selections.append([tid for tid, _prompt in rows])
+        return rows
+
+    monkeypatch.setattr(daemon, "_select_unlabeled", select)
     p = pool()
-    task = asyncio.create_task(
-        daemon._dispatch_loop(
-            p,
-            labeler_db(),
-            event_bus,
-            Liveness(daemon._LIVENESS_TIMEOUT_S),
-            daemon.labeler_config(),
-            catalog=model_catalog,
-            llm_override=config_authority.runtime.lm.llm_override,
-            overrides=ModelOverrides.from_pins({}),
-        )
-    )
     try:
-        await asyncio.sleep(0.4)  # several poll rounds
-        assert llm_calls["n"] == 1, "a failing label must back off, not hot-loop"
-    finally:
-        task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await daemon._dispatch_loop(
+                p,
+                labeler_db(),
+                event_bus,
+                Liveness(daemon._LIVENESS_TIMEOUT_S),
+                daemon.labeler_config(),
+                catalog=model_catalog,
+                llm_override=config_authority.runtime.lm.llm_override,
+                overrides=ModelOverrides.from_pins({}),
+            )
+    finally:
         p.close()
+    assert llm_calls == [True]
+    assert selections == [[a], []]
+    assert cooling_rounds == [[], [a]]
