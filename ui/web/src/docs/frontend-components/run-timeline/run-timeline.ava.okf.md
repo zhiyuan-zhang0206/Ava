@@ -23,12 +23,11 @@ guarded `panelLayoutStorage`); below that the panel stacks under the chart. The
 
 **Source layout.** `components/run-timeline/model/` owns the pure axis, selection, row layout and hover readout models with their tests. `canvas/` owns rendering, painting, the axis and the shared canvas test helper. `agent-view/` owns agent headings, shared controls and navigation across agents with their tests. Page composition, rows and the details panel stay at the component root; consumers import their owning modules directly.
 
-**Lifetime reads.** The lifetime read uses the shared 35-second HTTP read budget, covering both
-request headers and response-body consumption. Each query passes its cancellation
-signal to the network request: removing the agent or leaving the page cancels
-that read. A timeout follows the existing per-agent failure and Retry flow;
-selection cancellation does not become a business failure. This client deadline
-does not establish a backend history-reconstruction deadline.
+**Lifetime reads.** Each lifetime read uses the shared 35-second HTTP budget for
+headers and body. Each query passes its cancellation signal: removing an agent
+or leaving the page cancels its request. Timeouts use the per-agent failure and
+Retry flow; selection cancellation is not a business failure. This client budget
+does not impose a backend history-reconstruction deadline.
 
 **Legend highlight.** Each legend entry is a toggle (`run-timeline-legend.tsx`): pressing it highlights every block of that class (`Highlight`: class plus optional source) and fades the rest — other blocks and all summary blocks drop to 0.12 opacity (a selected block keeps its ring). The state lives on the page, so zoom and pan keep it. While an inbound class (human / agent) is highlighted and its blocks come from several senders, a select narrows it to one source (`agent:N` reads "Inbound from agent N"). The context breakdown card's category rows that stand for a block class (user input, agent messages, thinking, text output, tool calls, tool responses, system notes) are the same toggle (`classCategory` / `categoryClass`).
 

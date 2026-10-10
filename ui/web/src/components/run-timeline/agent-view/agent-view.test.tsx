@@ -391,7 +391,11 @@ describe("arrows between agents", () => {
     const detail = await screen.findByTestId("run-timeline-link-detail");
     expect(detail.textContent).toContain("#99 (not in the view)");
     fireEvent.click(screen.getByTestId("run-timeline-link-add-agent"));
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(99, {}));
+    await waitFor(() => {
+      expect(getRunTimeline).toHaveBeenCalledWith(99, { signal: expect.any(AbortSignal) as AbortSignal });
+      const call = getRunTimeline.mock.calls.find(([id]) => id === 99);
+      expect(call?.[1]).toHaveProperty("signal.aborted", false);
+    });
   });
 
   it("walks the Other agents row with the arrow keys, and enters it down from the last agent", async () => {
