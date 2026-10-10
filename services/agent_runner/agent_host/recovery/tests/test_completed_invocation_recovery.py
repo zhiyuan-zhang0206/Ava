@@ -15,6 +15,7 @@ from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.invocation import PendingWorkResult
@@ -23,6 +24,7 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
     _prepare_graph,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 @pytest.mark.parametrize("site", ["before_flush", "after_flush", "before_idle", "after_idle"])
@@ -32,6 +34,7 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
     monkeypatch: pytest.MonkeyPatch,
     site: str,
     model_catalog: ModelCatalog,
+    hosted_resources: HostedTurnResources,
 ) -> None:
     agent = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent)
@@ -105,7 +108,12 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
     monkeypatch.setattr(invocation_owner, "settle_checkpoint", settling)
     outcome = await host._invoke_until_done(
         agent,
-        replace(ctx, original_incarnation=incarnation, hosted_resources=None, native_work=None),
+        replace(
+            ctx,
+            original_incarnation=incarnation,
+            hosted_resources=hosted_resources,
+            native_work=None,
+        ),
     )
     assert not outcome.crashed
     assert queued is not None

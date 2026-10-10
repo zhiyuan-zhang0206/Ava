@@ -20,7 +20,6 @@ import pytest
 
 import ava
 from ava import shell
-from ava.sdk_surface.install import Installation
 from tests.fixtures.pin_agent import pin_agent
 
 # One definition shared with the gateway and integration modules; imported here so it
@@ -39,14 +38,6 @@ from tests.path_scoped.pty_service import pty_service as pty_service
 # captured self id. Spaced by 10 to leave room for the "other agent" in filter tests.
 _WORKER_NUM = int(re.sub(r"\D", "", os.environ.get("PYTEST_XDIST_WORKER", "")) or "0")
 _TEST_AGENT_BASE = 900_000 + _WORKER_NUM * 10
-
-
-@pytest.fixture(autouse=True)
-def sdk_configuration_owner(
-    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
-) -> None:
-    """SDK operation tests explicitly install their live configuration authority."""
-    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
 
 def _ensure_agents_meta_row(agent_id: int | None = None) -> None:

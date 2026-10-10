@@ -20,7 +20,7 @@ from base.native_process.os_platform import is_windows
 
 pytestmark = [
     pytest.mark.skipif(is_windows(), reason="PTY supervisor is POSIX-only"),
-    pytest.mark.usefixtures("pty_service", "_isolated_agent"),
+    pytest.mark.usefixtures("sdk_model_owner", "pty_service", "_isolated_agent"),
 ]
 
 

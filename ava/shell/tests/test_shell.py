@@ -31,7 +31,7 @@ pytestmark = [
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); only the
     # pty-backed session tests want it. `pty_service` must come first: the
     # isolation fixture's own kill_all/list calls hit the session backend.
-    pytest.mark.usefixtures("pty_service", "_isolated_agent"),
+    pytest.mark.usefixtures("sdk_model_owner", "pty_service", "_isolated_agent"),
 ]
 
 # The shared PTY/agent isolation fixtures (`pty_service`, `_isolated_agent`,

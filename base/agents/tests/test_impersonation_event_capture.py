@@ -21,6 +21,7 @@ from ava.sdk_surface import metering
 from base import telemetry
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation import history as history
 from base.agents.impersonation import manifest as capture
@@ -668,6 +669,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     from base.agents.context.identity import ExternalLease
 
@@ -687,10 +689,12 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         validate=lambda: owner.agent_id,
         config=lambda: None,
     )
+    clients = ClientSet(database=lambda: database)
     ava.bind_context(
         AvaContext(
             identity=AgentIdentity(None, True, lease=borrowed),
             sdk_capture=_CaptureOwner(gate),
+            clients=clients,
         )
     )
     try:
@@ -710,6 +714,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         seal_local_participant(gate)
         assert _state(db_conn, participant) == ("sealed",)
     finally:
+        clients.close()
         if prior is None:
             ava.unbind_context()
         else:

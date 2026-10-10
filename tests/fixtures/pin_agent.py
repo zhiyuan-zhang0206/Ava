@@ -16,9 +16,10 @@ from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.clock import Clock
+from base.clock import Clock, clock_config_from_boot
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
+from tests.fixtures.configuration import snapshot_process_config
 
 
 @pytest.fixture
@@ -71,9 +72,11 @@ def exec_context(
     resources: HostedTurnResources | None = None,
 ) -> AvaContext:
     """The host-side context of a turn that runs as `agent_id`: what an exec request carries."""
+    config = snapshot_process_config()
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True, actor=actor),
         original_incarnation=incarnation,
         hosted_resources=resources,
-        clients=process_clients(),
+        clients=process_clients(config=config),
+        clock_factory=lambda: Clock(clock_config_from_boot(config)),
     )

@@ -13,7 +13,7 @@ from ava.sdk_surface.process_context import context_from_description, process_cl
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.config import ConfigBoot
+from base.config import ConfigBoot, settings
 from base.db import Database
 
 
@@ -65,8 +65,8 @@ def test_process_resources_resolve_after_overlay_and_again_after_close(
     monkeypatch: pytest.MonkeyPatch,
     config_boot: ConfigBoot,
 ) -> None:
-    db_url = config_boot.view.data_plane.db_url
-    redis_url = config_boot.view.data_plane.redis_url
+    db_url = settings.data_plane.db_url
+    redis_url = settings.data_plane.redis_url
     config_boot.set_field("db_url", "")
     config_boot.set_field("redis_url", "")
     clients = process_clients(config=config_boot)

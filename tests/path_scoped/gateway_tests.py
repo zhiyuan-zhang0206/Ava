@@ -23,15 +23,12 @@ over the same attribute, which runs after these autouse fixtures and wins.
 from __future__ import annotations
 
 import importlib
-import os
 from typing import Any, cast
-from unittest.mock import patch
 
 import pytest
 
 from base.cluster import machines as _machines
 from base.cluster.machine import machine_name
-from base.config import ConfigBoot, field_domain, field_names, get_field, settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -41,6 +38,7 @@ from gateway.agents import router as _agents_router
 from gateway.app import app
 from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
+from tests.fixtures.configuration import snapshot_process_config
 
 # One definition shared with the ava and integration modules; imported here so it
 # registers for this module's paths.
@@ -57,24 +55,7 @@ def gateway_config_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     gateway_app = importlib.import_module("gateway.app")
 
-    def configured_boot() -> ConfigBoot:
-        values = {name: get_field(name) for name in field_names()}
-        explicit = {
-            domain: set(getattr(settings, domain).model_fields_set)
-            for domain in {field_domain(name) for name in values}
-        }
-        owner = ConfigBoot()
-        with patch.dict(os.environ):
-            model = owner.ensure_eager()
-        for name, value in values.items():
-            owner.set_field(name, value)
-        for domain, fields in explicit.items():
-            destination = getattr(model, domain).model_fields_set
-            destination.clear()
-            destination.update(fields)
-        return owner
-
-    monkeypatch.setattr(gateway_app, "ConfigBoot", configured_boot)
+    monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)
 
 
 @pytest.fixture(autouse=True)
