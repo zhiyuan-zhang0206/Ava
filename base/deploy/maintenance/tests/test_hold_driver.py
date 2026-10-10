@@ -33,22 +33,34 @@ _MINT = (
     "print(json.dumps(mint_driver().encode(), sort_keys=True), flush=True)"
 )
 
-_RUN_MINT = (
-    "p = subprocess.run([sys.executable, '-c', "
-    + repr(_MINT)
-    + "], capture_output=True, text=True)"
-)
-_PRINT = "print(p.stdout.strip(), flush=True)"
+# Child programs print each minted driver, then stay alive until killed. Their
+# sources are literal and their data (`_MINT`, a relay command) arrives as
+# `sys.argv[1]`, so test selection can read them.
+_SESSION_MINTS_TWICE = """import subprocess, sys, time
+for _ in range(2):
+    p = subprocess.run([sys.executable, '-c', sys.argv[1]], capture_output=True, text=True)
+    print(p.stdout.strip(), flush=True)
+    time.sleep(0.2)
+time.sleep(60)
+"""
+
+_SCRIPT_MINTS = """import subprocess, sys, time
+p = subprocess.run([sys.executable, '-c', sys.argv[1]], capture_output=True, text=True)
+print(p.stdout.strip(), flush=True)
+time.sleep(60)
+"""
+
+_SCRIPT_RELAYS = """import subprocess, sys, time
+import shlex
+p = subprocess.run(sys.argv[1], shell=True, capture_output=True, text=True)
+print(p.stdout.strip(), flush=True)
+time.sleep(60)
+"""
 
 
-def _wrapper(body: list[str]) -> str:
-    """A child program that runs `body`, then stays alive until killed."""
-    return "\n".join(["import subprocess, sys, time", *body, "time.sleep(60)"])
-
-
-def _spawn(source: str, *, new_session: bool) -> subprocess.Popen[str]:
+def _spawn(source: str, *argv: str, new_session: bool) -> subprocess.Popen[str]:
     return subprocess.Popen(  # noqa: S603 -- test-controlled argv
-        [sys.executable, "-c", source],
+        [sys.executable, "-c", source, *argv],
         cwd=_REPO,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -75,17 +87,7 @@ def _reap(proc: subprocess.Popen[str]) -> None:
 def test_a_persistent_session_shepherds_across_commands() -> None:
     """Shape a: the leader of a persistent session is the root, so the binding
     survives across the commands that session runs and dies with the session."""
-    session = _spawn(
-        _wrapper(
-            [
-                "for _ in range(2):",
-                "    " + _RUN_MINT,
-                "    " + _PRINT,
-                "    time.sleep(0.2)",
-            ]
-        ),
-        new_session=True,
-    )
+    session = _spawn(_SESSION_MINTS_TWICE, _MINT, new_session=True)
     first = second = None
     try:
         first = _read_driver(session)
@@ -104,7 +106,7 @@ def test_a_persistent_session_shepherds_across_commands() -> None:
 def test_a_script_driving_the_cli_directly_is_the_root() -> None:
     """Shape b: the script that runs `subprocess` itself is the root, so its
     exit -- not the command's -- ends the binding (owner=script)."""
-    script = _spawn(_wrapper([_RUN_MINT, _PRINT]), new_session=True)
+    script = _spawn(_SCRIPT_MINTS, _MINT, new_session=True)
     driver = None
     try:
         driver = _read_driver(script)
@@ -156,18 +158,7 @@ def test_a_shell_relay_is_never_the_owner() -> None:
     """Shape c: the `sh -c` relay sits below the script; its exit between steps
     must not read as owner-lost (the script still shepherds)."""
     relay_cmd = f"{sys.executable} -c {shlex.quote(_MINT)}"
-    script = _spawn(
-        _wrapper(
-            [
-                "import shlex",
-                "p = subprocess.run("
-                + repr(relay_cmd)
-                + ", shell=True, capture_output=True, text=True)",
-                _PRINT,
-            ]
-        ),
-        new_session=True,
-    )
+    script = _spawn(_SCRIPT_RELAYS, relay_cmd, new_session=True)
     driver = None
     try:
         driver = _read_driver(script)
@@ -185,18 +176,7 @@ def test_a_forked_relay_below_the_leader_keeps_the_script_as_the_root() -> None:
     the ladder runs. The binding must skip it -- a relay is never the owner --
     rather than read owner-lost at its exit."""
     relay_cmd = f"{sys.executable} -c {shlex.quote(_MINT)} ; :"
-    script = _spawn(
-        _wrapper(
-            [
-                "import shlex",
-                "p = subprocess.run("
-                + repr(relay_cmd)
-                + ", shell=True, capture_output=True, text=True)",
-                _PRINT,
-            ]
-        ),
-        new_session=True,
-    )
+    script = _spawn(_SCRIPT_RELAYS, relay_cmd, new_session=True)
     driver = None
     try:
         driver = _read_driver(script)

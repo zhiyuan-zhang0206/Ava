@@ -61,17 +61,18 @@ def test_rotate_files_without_prior_generation(
     assert not (tmp_path / "ava-agent-host.out.log.2").exists()
 
 
-def _child_script(log_path: str) -> str:
-    """A real-fd rotation: write past the ceiling, rotate, keep writing.
+# Child sources are literal so test selection can read their imports; argv is
+# the transcript path, then the repo root.
 
-    Runs in a subprocess whose stdout IS the transcript file, so `fstat(1)`
-    and the dup2 re-point are exercised against a genuine fd 1 rather than a
-    pytest capture wrapper.
-    """
-    return f"""
+# A real-fd rotation: write past the ceiling, rotate, keep writing.
+#
+# Runs in a subprocess whose stdout IS the transcript file, so `fstat(1)`
+# and the dup2 re-point are exercised against a genuine fd 1 rather than a
+# pytest capture wrapper.
+_CHILD_SCRIPT = """
 import os, sys
 from pathlib import Path
-sys.path.insert(0, {str(_REPO_ROOT)!r})
+sys.path.insert(0, sys.argv[2])
 from services.agent_runner.agent_host import stdout_log
 
 log = Path(sys.argv[1])
@@ -79,7 +80,7 @@ stdout_log._stdout_log_path = lambda: log
 stdout_log._STDOUT_LOG_ROTATE_BYTES = 1 << 20  # 1 MiB ceiling for the test
 os.write(1, b"x" * (1 << 20))
 rotated = stdout_log._rotate_stdout_log_if_needed()
-assert rotated == (1 << 20), f"expected rotation at ceiling, got {{rotated}}"
+assert rotated == (1 << 20), f"expected rotation at ceiling, got {rotated}"
 os.write(1, b"after-rotation")
 # Stream objects (the loguru console sink writes through the same path) must
 # also land in the re-pointed file, not the renamed chunk.
@@ -96,7 +97,7 @@ def test_subprocess_rotates_and_continues_writing(tmp_path: Path) -> None:
     log = tmp_path / "ava-agent-host.out.log"
     with log.open("wb") as transcript:
         proc = subprocess.run(  # noqa: S603 -- fixed argv: sys.executable + our own script
-            [sys.executable, "-c", _child_script(str(log)), str(log)],
+            [sys.executable, "-c", _CHILD_SCRIPT, str(log), str(_REPO_ROOT)],
             stdout=transcript,
             stderr=subprocess.PIPE,
             cwd=_REPO_ROOT,
@@ -118,7 +119,7 @@ def test_rotation_noop_below_ceiling(tmp_path: Path) -> None:
     log.write_bytes(b"small")
     with log.open("ab") as transcript:
         proc = subprocess.run(  # noqa: S603 -- fixed argv: sys.executable + our own script
-            [sys.executable, "-c", _child_script_noop(str(log)), str(log)],
+            [sys.executable, "-c", _CHILD_SCRIPT_NOOP, str(log), str(_REPO_ROOT)],
             stdout=transcript,
             stderr=subprocess.PIPE,
             cwd=_REPO_ROOT,
@@ -130,30 +131,28 @@ def test_rotation_noop_below_ceiling(tmp_path: Path) -> None:
     assert not (tmp_path / "ava-agent-host.out.log.1").exists()
 
 
-def _child_script_noop(log_path: str) -> str:
-    return f"""
+_CHILD_SCRIPT_NOOP = """
 import os, sys
 from pathlib import Path
-sys.path.insert(0, {str(_REPO_ROOT)!r})
+sys.path.insert(0, sys.argv[2])
 from services.agent_runner.agent_host import stdout_log
 
 log = Path(sys.argv[1])
 stdout_log._stdout_log_path = lambda: log
 stdout_log._STDOUT_LOG_ROTATE_BYTES = 1 << 30  # far above the few bytes written
 rotated = stdout_log._rotate_stdout_log_if_needed()
-assert rotated is None, f"expected no rotation, got {{rotated}}"
+assert rotated is None, f"expected no rotation, got {rotated}"
 os.write(1, b"tail")
 """
 
 
-def _child_script_open_failure(log_path: str) -> str:
-    """First rotation attempt fails at the open (disk full / EMFILE): the
-    transcript must be restored under the original name, and the next attempt
-    must succeed — a stranded `.1` would grow past every bound."""
-    return f"""
+# First rotation attempt fails at the open (disk full / EMFILE): the
+# transcript must be restored under the original name, and the next attempt
+# must succeed — a stranded `.1` would grow past every bound.
+_CHILD_SCRIPT_OPEN_FAILURE = """
 import os, sys
 from pathlib import Path
-sys.path.insert(0, {str(_REPO_ROOT)!r})
+sys.path.insert(0, sys.argv[2])
 from services.agent_runner.agent_host import stdout_log
 
 log = Path(sys.argv[1])
@@ -166,13 +165,13 @@ def boom(_path, _flags, _mode=0o777):
     raise OSError(28, "No space left on device")
 os.open = boom
 rotated = stdout_log._rotate_stdout_log_if_needed()
-assert rotated is None, f"expected failure, got {{rotated}}"
+assert rotated is None, f"expected failure, got {rotated}"
 os.open = real_open
 assert log.exists(), "transcript must be restored under its original name"
 assert not Path(str(log) + ".1").exists(), "no chunk may be stranded"
 os.write(1, b"after-open-failure")
 rotated = stdout_log._rotate_stdout_log_if_needed()
-assert rotated == (1 << 20) + len(b"after-open-failure"), f"self-heal failed: {{rotated}}"
+assert rotated == (1 << 20) + len(b"after-open-failure"), f"self-heal failed: {rotated}"
 os.write(1, b"after-self-heal")
 """
 
@@ -183,7 +182,7 @@ def test_subprocess_open_failure_restores_and_self_heals(tmp_path: Path) -> None
     log = tmp_path / "ava-agent-host.out.log"
     with log.open("wb") as transcript:
         proc = subprocess.run(  # noqa: S603 -- fixed argv: sys.executable + our own script
-            [sys.executable, "-c", _child_script_open_failure(str(log)), str(log)],
+            [sys.executable, "-c", _CHILD_SCRIPT_OPEN_FAILURE, str(log), str(_REPO_ROOT)],
             stdout=transcript,
             stderr=subprocess.PIPE,
             cwd=_REPO_ROOT,

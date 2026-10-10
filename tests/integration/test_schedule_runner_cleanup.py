@@ -133,6 +133,50 @@ def _assert_cleanup(root: Path, owned: list[psutil.Process], *, complete: bool) 
         assert all((root / f"{name}.term").exists() for name in ("child", "grandchild", "session"))
 
 
+# The runner harness. Its source is literal so test selection can read its
+# imports; argv is the mode, the cleanup root, then the schedule id. The mode
+# setup runs first, before the runner is imported for the run.
+_RUNNER_HARNESS = """import sys
+mode, root_arg, schedule_id = sys.argv[1], sys.argv[2], int(sys.argv[3])
+if mode == "missing-module-files":
+    import subprocess, selectors; del subprocess.__file__; del selectors.__file__
+elif mode == "delayed-record":
+    from gateway.schedules import runner as r
+    from pathlib import Path
+    import os, psutil, time
+    root = Path(root_arg)
+    record_error = r._record_error
+    def delayed_record(*args):
+        (root / 'record-started').touch()
+        deadline = time.monotonic() + 5
+        try:
+            grandchild = psutil.Process(int((root / 'grandchild.pid').read_text()))
+            while os.getpid() in [p.pid for p in grandchild.parents()]:
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+        except psutil.NoSuchProcess:
+            pass
+        record_error(*args)
+    r._record_error = delayed_record
+elif mode == "delayed-completion":
+    from gateway.schedules import runner as r
+    import threading, time
+    finish = r._finish_completed
+    def delayed_completion(*args):
+        assert not any(t.name.endswith('-stall-guard') for t in threading.enumerate())
+        time.sleep(0.4)
+        finish(*args)
+    r._finish_completed = delayed_completion
+from gateway.schedules import runner as r; import ava
+from services.wake.schedule_manager.runner import run
+ava.ensure_plugins_loaded = lambda: None
+from base.config import settings
+settings.gateway.schedule_stall_timeout_seconds = 0.15
+settings.gateway.schedule_stall_check_interval_seconds = 0.02
+raise SystemExit(run(schedule_id))
+"""
+
+
 @pytest.mark.parametrize(
     "mode", ["stall", "complete", "missing-module-files", "delayed-record", "delayed-completion"]
 )
@@ -154,50 +198,8 @@ def test_runner_hard_exit_child_ownership(
     ).fetchone()
     db_conn.commit()
     assert row is not None
-    setup = ""
-    if mode == "missing-module-files":
-        setup = "import subprocess, selectors; del subprocess.__file__; del selectors.__file__; "
-    elif mode == "delayed-record":
+    if mode == "delayed-record":
         (root / "reparent-on-record").touch()
-        setup = (
-            "from gateway.schedules import runner as r\n"
-            "from pathlib import Path\n"
-            "import os, psutil, time\n"
-            f"root = Path({str(root)!r})\n"
-            "record_error = r._record_error\n"
-            "def delayed_record(*args):\n"
-            "    (root / 'record-started').touch()\n"
-            "    deadline = time.monotonic() + 5\n"
-            "    try:\n"
-            "        grandchild = psutil.Process(int((root / 'grandchild.pid').read_text()))\n"
-            "        while os.getpid() in [p.pid for p in grandchild.parents()]:\n"
-            "            assert time.monotonic() < deadline\n"
-            "            time.sleep(0.01)\n"
-            "    except psutil.NoSuchProcess:\n"
-            "        pass\n"
-            "    record_error(*args)\n"
-            "r._record_error = delayed_record\n"
-        )
-    elif mode == "delayed-completion":
-        setup = (
-            "from gateway.schedules import runner as r\n"
-            "import threading, time\n"
-            "finish = r._finish_completed\n"
-            "def delayed_completion(*args):\n"
-            "    assert not any(t.name.endswith('-stall-guard') for t in threading.enumerate())\n"
-            "    time.sleep(0.4)\n"
-            "    finish(*args)\n"
-            "r._finish_completed = delayed_completion\n"
-        )
-    code = (
-        setup + "from gateway.schedules import runner as r; import ava; "
-        "from services.wake.schedule_manager.runner import run; "
-        "ava.ensure_plugins_loaded = lambda: None; "
-        "from base.config import settings; "
-        "settings.gateway.schedule_stall_timeout_seconds = 0.15; "
-        "settings.gateway.schedule_stall_check_interval_seconds = 0.02; "
-        f"raise SystemExit(run({row[0]}))"
-    )
     with _processes(root) as tracked, (root / "runner.log").open("w") as log:
         # Use a test-owned group so a buggy group kill fails without harming pytest.
         # The sibling models a PTY shell's other job in the runner's group.
@@ -206,7 +208,10 @@ def test_runner_hard_exit_child_ownership(
         )
         tracked.append(psutil.Process(sibling.pid))
         runner = subprocess.Popen(  # noqa: S603 - fixed test harness and fixture schedule id
-            [sys.executable, "-c", code], stdout=log, stderr=log, process_group=sibling.pid
+            [sys.executable, "-c", _RUNNER_HARNESS, mode, str(root), str(row[0])],
+            stdout=log,
+            stderr=log,
+            process_group=sibling.pid,
         )
         tracked.append(psutil.Process(runner.pid))
         owned = _capture_children(root, runner.pid)
@@ -225,28 +230,66 @@ def test_runner_hard_exit_child_ownership(
     assert run_row == ((True, None) if complete else (False, "stalled (0s)"))
 
 
+# A stalled runner whose first failure record sleeps `sys.argv[2]` seconds;
+# argv[1] is the test root.
+_STALL_RECORDS = """from gateway.schedules import runner as r
+from pathlib import Path
+import sys, threading, time
+root = Path(sys.argv[1])
+r.settings.gateway.schedule_stall_exit_record_deadline_seconds = 1.0
+def record_error(*args):
+    (root / 'started').write_text(str(time.monotonic()))
+    time.sleep(float(sys.argv[2]))
+def record_run_end(*args, **kwargs):
+    (root / 'second-write').touch()
+    threading.Event().wait()
+r._record_error = record_error
+r._record_run_end = record_run_end
+r._stall_action(None, 1, 'test stall', 1)
+"""
+
+# The script returns while a real stall recorder is blocked; hard exit still
+# wins. argv[1] is the test root.
+_COMPLETION_DURING_STALL = """from gateway.schedules import runner as r
+from pathlib import Path
+import ava, runpy, sys, time
+root = Path(sys.argv[1])
+r.settings.gateway.schedule_stall_check_interval_seconds = 0.01
+r.settings.gateway.schedule_stall_timeout_seconds = 0.01
+r.settings.gateway.schedule_stall_exit_record_deadline_seconds = 1.0
+r._schedule_dir = lambda _id: root
+r._load = lambda *_args: ('pass', 'python script.py')
+r._record_run_start = lambda *_args: 1
+r.base.host.proc.kill_process_tree = lambda *_args, **_kwargs: None
+r._StallGuard._sample = lambda _self: ('script.py', 1, 'blocked')
+ava.ensure_plugins_loaded = lambda: None
+def record_error(*_args):
+    (root / 'started').write_text(str(time.monotonic()))
+    time.sleep(60)
+def script(*_args, **_kwargs):
+    while not (root / 'started').exists():
+        time.sleep(0.005)
+    (root / 'script-returned').touch()
+r._record_error = record_error
+runpy.run_path = script
+r._finish_completed = lambda *_args: (root / 'completed').touch()
+raise SystemExit(r._run(None, 1, bind_actor=lambda *_args: None, load_plugins=ava.ensure_plugins_loaded))
+"""
+
+
 @pytest.mark.parametrize("blocked_write", ["error", "run", "complete"])
 def test_stall_exit_bounds_failure_records(tmp_path: Path, blocked_write: str) -> None:
     """A blocked DB write cannot keep a stalled runner alive past the record budget."""
-    code = (
-        "from gateway.schedules import runner as r\n"
-        "from pathlib import Path\n"
-        "import threading, time\n"
-        f"root = Path({str(tmp_path)!r})\n"
-        "r.settings.gateway.schedule_stall_exit_record_deadline_seconds = 1.0\n"
-        "def record_error(*args):\n"
-        "    (root / 'started').write_text(str(time.monotonic()))\n"
-        f"    time.sleep({60 if blocked_write == 'error' else 0.7})\n"
-        "def record_run_end(*args, **kwargs):\n"
-        "    (root / 'second-write').touch()\n"
-        "    threading.Event().wait()\n"
-        "r._record_error = record_error\n"
-        "r._record_run_end = record_run_end\n"
-        "r._stall_action(None, 1, 'test stall', 1)\n"
-    )
     if blocked_write == "complete":
-        code = _completion_during_stall_source(tmp_path)
-    with subprocess.Popen([sys.executable, "-c", code]) as runner:  # noqa: S603 - fixed test source
+        runner = subprocess.Popen(  # noqa: S603 - fixed test source
+            [sys.executable, "-c", _COMPLETION_DURING_STALL, str(tmp_path)]
+        )
+    else:
+        record_s = 60 if blocked_write == "error" else 0.7
+        runner = subprocess.Popen(  # noqa: S603 - fixed test source
+            [sys.executable, "-c", _STALL_RECORDS, str(tmp_path), str(record_s)]
+        )
+    with runner:
         try:
             _await_file(tmp_path / "started")
             assert runner.wait(timeout=2) == 1
@@ -258,33 +301,3 @@ def test_stall_exit_bounds_failure_records(tmp_path: Path, blocked_write: str) -
                 assert not (tmp_path / "completed").exists()
         finally:
             runner.kill()
-
-
-def _completion_during_stall_source(root: Path) -> str:
-    """The script returns while a real stall recorder is blocked; hard exit still wins."""
-    return (
-        "from gateway.schedules import runner as r\n"
-        "from pathlib import Path\n"
-        "import ava, runpy, time\n"
-        f"root = Path({str(root)!r})\n"
-        "r.settings.gateway.schedule_stall_check_interval_seconds = 0.01\n"
-        "r.settings.gateway.schedule_stall_timeout_seconds = 0.01\n"
-        "r.settings.gateway.schedule_stall_exit_record_deadline_seconds = 1.0\n"
-        "r._schedule_dir = lambda _id: root\n"
-        "r._load = lambda *_args: ('pass', 'python script.py')\n"
-        "r._record_run_start = lambda *_args: 1\n"
-        "r.base.host.proc.kill_process_tree = lambda *_args, **_kwargs: None\n"
-        "r._StallGuard._sample = lambda _self: ('script.py', 1, 'blocked')\n"
-        "ava.ensure_plugins_loaded = lambda: None\n"
-        "def record_error(*_args):\n"
-        "    (root / 'started').write_text(str(time.monotonic()))\n"
-        "    time.sleep(60)\n"
-        "def script(*_args, **_kwargs):\n"
-        "    while not (root / 'started').exists():\n"
-        "        time.sleep(0.005)\n"
-        "    (root / 'script-returned').touch()\n"
-        "r._record_error = record_error\n"
-        "runpy.run_path = script\n"
-        "r._finish_completed = lambda *_args: (root / 'completed').touch()\n"
-        "raise SystemExit(r._run(None, 1, bind_actor=lambda *_args: None, load_plugins=ava.ensure_plugins_loaded))\n"
-    )

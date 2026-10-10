@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import textwrap
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
@@ -484,29 +483,30 @@ def test_reasoning_effort_default_must_stay_within_effort_levels(
         )
 
 
+# A literal probe source, so test selection can read its imports.
+_WITHDRAWAL_PROBE = """
+from dataclasses import replace
+from base.lm import plugin_providers
+from base.lm.registry import resolve_available_model
+
+assert not hasattr(plugin_providers, "_STATE")
+catalog = plugin_providers.build_model_catalog()
+assert resolve_available_model("deepseek-flash", models=catalog.models) == "deepseek-flash"
+withdrawn = replace(
+    catalog.models["deepseek-flash"], spawnable=False,
+    unavailable_fallback="deepseek-flash",
+)
+changed = replace(catalog, models={**catalog.models, "deepseek-retired-fixture": withdrawn})
+assert resolve_available_model("deepseek-retired-fixture", models=changed.models) == "deepseek-flash"
+assert "deepseek-retired-fixture" not in catalog.models
+print("OK")
+"""
+
+
 def test_explicit_catalog_resolves_withdrawal_in_a_fresh_process() -> None:
     """The composition root builds a catalog; synthetic changes stay local."""
-    code = textwrap.dedent(
-        """
-        from dataclasses import replace
-        from base.lm import plugin_providers
-        from base.lm.registry import resolve_available_model
-
-        assert not hasattr(plugin_providers, "_STATE")
-        catalog = plugin_providers.build_model_catalog()
-        assert resolve_available_model("deepseek-flash", models=catalog.models) == "deepseek-flash"
-        withdrawn = replace(
-            catalog.models["deepseek-flash"], spawnable=False,
-            unavailable_fallback="deepseek-flash",
-        )
-        changed = replace(catalog, models={**catalog.models, "deepseek-retired-fixture": withdrawn})
-        assert resolve_available_model("deepseek-retired-fixture", models=changed.models) == "deepseek-flash"
-        assert "deepseek-retired-fixture" not in catalog.models
-        print("OK")
-        """
-    )
     result = subprocess.run(  # noqa: S603 — our own venv python + a literal script
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", _WITHDRAWAL_PROBE],
         cwd=Path(__file__).resolve().parents[4],
         capture_output=True,
         text=True,

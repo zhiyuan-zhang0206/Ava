@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import textwrap
 import time
 from datetime import datetime
 from pathlib import Path
@@ -55,26 +54,30 @@ def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(offsite, "publish", _skip)
 
 
+# Literal source with data in argv, so test selection can read its imports.
+# argv: the repo root, the ready file, then the hold seconds.
+_BACKUP_LOCK_HOLDER = """
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from services.backup.dump import backup_lock
+
+with backup_lock(timeout_s=60):
+    Path(sys.argv[2]).write_text("1", encoding="utf-8")
+    time.sleep(float(sys.argv[3]))
+"""
+
+
 def _spawn_backup_lock_holder(
     ava_home: Path, ready: Path, hold_s: float
 ) -> subprocess.Popen[bytes]:
     """A separate interpreter that takes `backup_lock`, signals, and holds it."""
-    code = textwrap.dedent(f"""
-        import sys
-        import time
-        from pathlib import Path
-
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.backup.dump import backup_lock
-
-        with backup_lock(timeout_s=60):
-            Path({str(ready)!r}).write_text("1", encoding="utf-8")
-            time.sleep({hold_s})
-    """)
     env = dict(os.environ)
     env["AVA_HOME"] = str(ava_home)
     return subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", _BACKUP_LOCK_HOLDER, str(_REPO), str(ready), str(hold_s)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

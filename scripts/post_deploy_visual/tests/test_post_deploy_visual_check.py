@@ -307,26 +307,28 @@ def test_accept_wave_rejects_incomplete_matrix(tmp_path: Path) -> None:
         _accept_wave(args)
 
 
+# Literal probe sources with data in argv, so test selection can read them.
+_BUDGET_PROBE = """import signal, sys, time
+sys.path.insert(0, sys.argv[1])
+from scripts.post_deploy_visual import check as module
+module.HARD_EXIT_DELAY_SECONDS = 1
+signal.signal(signal.SIGALRM, module._budget_expired)
+signal.alarm(1)
+try:
+    time.sleep(3600)
+except RuntimeError:
+    time.sleep(3600)  # simulated wedged unwind
+"""
+
+
 def test_budget_hard_exits_after_a_short_grace_when_the_unwind_hangs() -> None:
     """The two-stage budget must not depend on playwright's cooperation.
 
     If the graceful unwind (finally: browser.close()) wedges, the second
     SIGALRM hard-exits the process — the former docker rm --force equivalent.
     """
-    script = (
-        "import signal, sys, time\n"
-        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
-        "from scripts.post_deploy_visual import check as module\n"
-        "module.HARD_EXIT_DELAY_SECONDS = 1\n"
-        "signal.signal(signal.SIGALRM, module._budget_expired)\n"
-        "signal.alarm(1)\n"
-        "try:\n"
-        "    time.sleep(3600)\n"
-        "except RuntimeError:\n"
-        "    time.sleep(3600)  # simulated wedged unwind\n"
-    )
     result = subprocess.run(  # noqa: S603 - fixed interpreter with inline script
-        [sys.executable, "-c", script],
+        [sys.executable, "-c", _BUDGET_PROBE, str(REPO_ROOT)],
         check=False,
         capture_output=True,
         timeout=30,
@@ -382,6 +384,35 @@ def test_run_matrix_still_records_ordinary_failures_as_runner_errors(
     )
 
 
+# The grandchild writes its pid to `sys.argv[1]`, then idles.
+_KILL_GRANDCHILD = """import os, pathlib, sys, time
+pathlib.Path(sys.argv[1]).write_text(str(os.getpid()))
+time.sleep(120)
+"""
+
+# The driver stand-in launches the grandchild source `sys.argv[1]` with the
+# pidfile `sys.argv[2]`.
+_KILL_DRIVER = """import subprocess, sys, time
+subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]])
+time.sleep(120)
+"""
+
+# argv: repo root, pidfile, driver source, grandchild source.
+_KILL_RUNNER = """import subprocess, sys, time
+from pathlib import Path
+root, pidfile, driver_code, grandchild_code = sys.argv[1:5]
+sys.path.insert(0, root)
+from scripts.post_deploy_visual.check import _kill_descendants
+driver = subprocess.Popen([sys.executable, '-c', driver_code, grandchild_code, pidfile])
+deadline = time.monotonic() + 10
+while not Path(pidfile).exists() and time.monotonic() < deadline:
+    time.sleep(0.05)
+assert Path(pidfile).exists(), 'grandchild never reported its pid'
+_kill_descendants()
+driver.wait(timeout=5)
+"""
+
+
 def test_kill_descendants_reaps_the_whole_process_tree(tmp_path: Path) -> None:
     """os._exit skips finally blocks, so the hard exit must reap the tree itself.
 
@@ -390,31 +421,16 @@ def test_kill_descendants_reaps_the_whole_process_tree(tmp_path: Path) -> None:
     test session's.
     """
     pidfile = tmp_path / "grandchild.pid"
-    grandchild_code = (
-        "import os, pathlib, time\n"
-        f"pathlib.Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
-        "time.sleep(120)\n"
-    )
-    driver_code = (
-        "import subprocess, sys, time\n"
-        f"subprocess.Popen([sys.executable, '-c', {grandchild_code!r}])\n"
-        "time.sleep(120)\n"
-    )
-    runner_code = (
-        "import subprocess, sys, time\n"
-        "from pathlib import Path\n"
-        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
-        "from scripts.post_deploy_visual.check import _kill_descendants\n"
-        f"driver = subprocess.Popen([sys.executable, '-c', {driver_code!r}])\n"
-        "deadline = time.monotonic() + 10\n"
-        f"while not Path({str(pidfile)!r}).exists() and time.monotonic() < deadline:\n"
-        "    time.sleep(0.05)\n"
-        f"assert Path({str(pidfile)!r}).exists(), 'grandchild never reported its pid'\n"
-        "_kill_descendants()\n"
-        "driver.wait(timeout=5)\n"
-    )
     result = subprocess.run(  # noqa: S603 - fixed interpreter with inline script
-        [sys.executable, "-c", runner_code],
+        [
+            sys.executable,
+            "-c",
+            _KILL_RUNNER,
+            str(REPO_ROOT),
+            str(pidfile),
+            _KILL_DRIVER,
+            _KILL_GRANDCHILD,
+        ],
         capture_output=True,
         timeout=60,
         check=False,

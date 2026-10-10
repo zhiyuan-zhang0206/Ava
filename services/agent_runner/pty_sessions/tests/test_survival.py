@@ -141,6 +141,14 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
     assert backend.kill_session(name) == (True, "forced")
 
 
+# One fresh client per generation; argv is the session name, then the bytes to send.
+_CLIENT_SEND = (
+    "import sys\n"
+    "from base.sessions.pty import client\n"
+    "client.send(sys.argv[1], sys.argv[2].encode())\n"
+)
+
+
 @pytest.mark.usefixtures("pty_service")
 def test_a_session_outlives_every_client_restarting_in_turn(unit_home: Path) -> None:
     name = "ava-agent-987-shell-1-reconnect"
@@ -148,12 +156,7 @@ def test_a_session_outlives_every_client_restarting_in_turn(unit_home: Path) -> 
     (first,) = client.list_sessions()
     for generation in range(3):
         result = subprocess.run(  # noqa: S603 — repo-internal interpreter + inline program
-            [
-                sys.executable,
-                "-c",
-                "from base.sessions.pty import client; "
-                f"client.send({name!r}, b'echo generation-{generation}\\r')",
-            ],
+            [sys.executable, "-c", _CLIENT_SEND, name, f"echo generation-{generation}\r"],
             cwd=_REPO,
             capture_output=True,
             text=True,

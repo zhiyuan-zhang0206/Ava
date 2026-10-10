@@ -49,8 +49,9 @@ def _run_steward(pool: Path, path_extra: str | None = None) -> subprocess.Comple
     env["AVA_MACHINE_NAME"] = "testbox"
     if path_extra:
         env["PATH"] = path_extra + os.pathsep + env["PATH"]
+    # `--` ends interpreter options, so the script's own `-m` is not read as one.
     return subprocess.run(  # noqa: S603 — sys.executable + repository-owned script
-        [sys.executable, str(_STEWARD), "-m", "memory: testbox test - guard"],
+        [sys.executable, "--", str(_STEWARD), "-m", "memory: testbox test - guard"],
         capture_output=True,
         text=True,
         env=env,

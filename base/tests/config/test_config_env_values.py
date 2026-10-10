@@ -6,7 +6,6 @@ import os
 import secrets
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -218,19 +217,23 @@ def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> No
     assert AlertsSettings().webhook_token is None
 
 
+# A literal probe source, so test selection can read its imports.
+_EVAL_ALIASES_PROBE = """
+from base.config.domains.agent.eval import AgentEvalSettings
+config = AgentEvalSettings()
+assert config.eval_isolation is True
+assert config.eval_network_allowlist == ["web", "understand"]
+print("ok")
+"""
+
+
 def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
     """The child process receives the aliases before its Settings singleton loads."""
     proc = subprocess.run(  # noqa: S603 -- fixed argv, sys.executable is trusted
         [
             sys.executable,
             "-c",
-            textwrap.dedent("""
-                from base.config.domains.agent.eval import AgentEvalSettings
-                config = AgentEvalSettings()
-                assert config.eval_isolation is True
-                assert config.eval_network_allowlist == ["web", "understand"]
-                print("ok")
-            """),
+            _EVAL_ALIASES_PROBE,
         ],
         capture_output=True,
         text=True,

@@ -37,17 +37,8 @@ def _home(path: Path, selected: Path | None) -> Path:
     return path
 
 
-def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, Any]:
-    # Explicitly isolated config; no Ava imports in this child can dial production.
-    env = {
-        "HOME": str(home.parent),
-        "PATH": str(system_bin),
-        "AVA_HOME": str(home),
-        "AVA_CONFIG_FETCH": "skip",
-        "AVA_PROCESS_PROFILE": "gateway",
-        "AVA_REDIS_BIN_DIR": inherited,
-    }
-    code = """
+# The safe resolver probe that stands in for `ava start`.
+_RESOLVER_PROBE = """
 import json, subprocess
 from cli.commands.data_plane import cluster_instance as instance
 from base.config import settings
@@ -59,22 +50,35 @@ print(json.dumps({
     'versions': [subprocess.check_output([tool, '--version'], text=True).strip() for tool in tools],
 }))
 """
-    # Real boot retry owner, replacing only `ava start` with the safe resolver
-    # probe. It still launches a fresh interpreter with cron's inherited env.
-    code = (
-        "import subprocess, sys\n"
-        "from cli import boot_retry\n"
-        "run = subprocess.run\n"
-        "def probe(command, **kwargs):\n"
-        "    assert command[:4] == [sys.executable, '-m', 'cli.main', 'start']\n"
-        f"    result = run([sys.executable, '-c', {code!r}], check=False)\n"
-        "    assert result.returncode == 0\n"
-        "    return result\n"
-        "boot_retry.subprocess.run = probe\n"
-        "raise SystemExit(boot_retry.run_boot([]))\n"
-    )
+
+# Real boot retry owner, replacing only `ava start` with the safe resolver
+# probe (`sys.argv[1]`). It still launches a fresh interpreter with cron's
+# inherited env. Both sources stay literal so test selection can read them.
+_BOOT_RETRY_WRAPPER = """import subprocess, sys
+from cli import boot_retry
+run = subprocess.run
+def probe(command, **kwargs):
+    assert command[:4] == [sys.executable, '-m', 'cli.main', 'start']
+    result = run([sys.executable, '-c', sys.argv[1]], check=False)
+    assert result.returncode == 0
+    return result
+boot_retry.subprocess.run = probe
+raise SystemExit(boot_retry.run_boot([]))
+"""
+
+
+def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, Any]:
+    # Explicitly isolated config; no Ava imports in this child can dial production.
+    env = {
+        "HOME": str(home.parent),
+        "PATH": str(system_bin),
+        "AVA_HOME": str(home),
+        "AVA_CONFIG_FETCH": "skip",
+        "AVA_PROCESS_PROFILE": "gateway",
+        "AVA_REDIS_BIN_DIR": inherited,
+    }
     result = subprocess.run(  # noqa: S603 — fixed interpreter and test-owned source/config.
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", _BOOT_RETRY_WRAPPER, _RESOLVER_PROBE],
         env=env,
         capture_output=True,
         text=True,

@@ -3,7 +3,6 @@
 import asyncio
 import json
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -40,31 +39,32 @@ async def _release_creation(
     return await asyncio.wait_for(asyncio.gather(*(child.communicate() for child in children)), 30)
 
 
+# A literal child source, so test selection can read its imports.
+_BOOT_RACE_CHILD = """
+import sys
+from unittest.mock import patch
+from pydantic import BaseModel
+from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins import config_registration as registration
+
+class Config(BaseModel):
+    marker: str = sys.argv[1]
+
+original = registration.write_default_disk_image
+def synchronized_write(plugin, cls):
+    print('READY', flush=True)
+    assert sys.stdin.readline() == 'CREATE\\n'
+    return original(plugin, cls)
+
+configs = {}
+with patch.object(registration, 'write_default_disk_image', synchronized_write):
+    registration.bind_plugin_config('boot-race', Config, configs)
+bound = registration.get_plugin_config('boot-race', AgentSlices.resolve(plugin_configs=configs), Config)
+print(bound.marker, flush=True)
+"""
+
+
 async def test_fresh_processes_bind_the_same_winning_image(unit_home: Path) -> None:
-    script = textwrap.dedent(
-        """
-        import sys
-        from unittest.mock import patch
-        from pydantic import BaseModel
-        from base.host.env.agent_slices import AgentSlices
-        from base.packages.plugins import config_registration as registration
-
-        class Config(BaseModel):
-            marker: str = sys.argv[1]
-
-        original = registration.write_default_disk_image
-        def synchronized_write(plugin, cls):
-            print('READY', flush=True)
-            assert sys.stdin.readline() == 'CREATE\\n'
-            return original(plugin, cls)
-
-        configs = {}
-        with patch.object(registration, 'write_default_disk_image', synchronized_write):
-            registration.bind_plugin_config('boot-race', Config, configs)
-        bound = registration.get_plugin_config('boot-race', AgentSlices.resolve(plugin_configs=configs), Config)
-        print(bound.marker, flush=True)
-        """
-    )
     children: list[asyncio.subprocess.Process] = []
     try:
         for marker in ("first", "second"):
@@ -72,7 +72,7 @@ async def test_fresh_processes_bind_the_same_winning_image(unit_home: Path) -> N
                 sys.executable,
                 "-I",
                 "-c",
-                script,
+                _BOOT_RACE_CHILD,
                 marker,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
