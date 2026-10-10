@@ -1138,6 +1138,15 @@ jobs:
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime
 
+      - name: Prepare selected-test Postgres scratch
+        id: prepare-pg-scratch
+        shell: bash
+        env:
+          AVA_PG_THROWAWAY_BASE: ${{ runner.temp }}/ava-selected-pg
+        run: |
+          mkdir -p "$AVA_PG_THROWAWAY_BASE"
+          echo "AVA_PG_THROWAWAY_BASE=$AVA_PG_THROWAWAY_BASE" >> "$GITHUB_ENV"
+
       - name: Run selected pytest subset
         id: run-subset
         # Record the native exit for the selector report and propagate it.
@@ -1180,6 +1189,15 @@ jobs:
           path: |
             tmp/junit-backend-selected.xml
           if-no-files-found: warn
+
+      - name: Report selected-test Postgres scratch capacity
+        id: pg-scratch-capacity
+        if: ${{ failure() && steps.prepare-pg-scratch.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          df -h "$AVA_PG_THROWAWAY_BASE"
+          df -i "$AVA_PG_THROWAWAY_BASE"
 
       - name: Upload selected-subset log
         if: ${{ always() }}

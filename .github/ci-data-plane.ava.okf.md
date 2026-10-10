@@ -38,3 +38,15 @@ Both `backend` and `e2e` point `AVA_DB_URL` / `AVA_REDIS_URL` at unreachable
 sentinel ports: the suite must provision its own throwaway cluster, and a
 sentinel turns "a test quietly reached a real data plane" into a connection
 error instead of a silent pass.
+
+The `backend-selected` preparation step sets `AVA_PG_THROWAWAY_BASE` to
+`${{ runner.temp }}/ava-selected-pg`, creates that directory, and writes the
+value to `GITHUB_ENV` for pytest and the later capacity report. The `runner`
+context is resolved in step-level `env`, where GitHub Actions permits it.
+Its selected native suite uses the runner's temporary disk instead of the
+Linux default RAM-backed `/dev/shm`. Each throwaway Postgres instance still
+gets its own private directory and the normal fixture teardown removes it;
+worker parallelism and test selection are unchanged. On job failure, CI prints
+the scratch filesystem's available space and inodes. Those observations are
+after the failure and do not measure peak usage or identify which resource
+caused an earlier `ENOSPC`.
