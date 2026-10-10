@@ -589,3 +589,14 @@ def test_the_declaration_door_does_not_report_its_own_bounded_import(tmp_path: P
         path="base/packages/declared_inputs/__init__.py",
     )
     assert found.records == found.unknown == ()
+
+
+def test_supplied_paths_carry_no_domain_of_their_own(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path, {"base/packages/declared_inputs/__init__.py": ""}),
+        "from base.packages.declared_inputs import supplied_path\n"
+        "def run(args):\n"
+        "    supplied_path(args.file).read_text()\n",
+    )
+    assert found.unknown == ()
+    assert [fact.kind for fact in found.records] == [facts.FactKind.IMPORT]

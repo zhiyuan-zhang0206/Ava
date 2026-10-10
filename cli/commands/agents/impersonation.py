@@ -24,6 +24,7 @@ from uuid import UUID
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
+from base.packages.declared_inputs import supplied_path
 
 
 def relay_token_from_env() -> str:
@@ -206,7 +207,7 @@ def _run_local(args: argparse.Namespace) -> int:
     code = (
         sys.stdin.read()
         if args.file is None or args.file == "-"
-        else Path(args.file).read_text(encoding="utf-8")
+        else supplied_path(args.file).read_text(encoding="utf-8")
     )
     if not code.strip():
         raise ValueError("Python input must be nonempty")

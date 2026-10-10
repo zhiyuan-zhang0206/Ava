@@ -12,6 +12,7 @@ from base.packages.declared_inputs import (
     declared_path,
     declared_spec,
     matches,
+    supplied_path,
 )
 
 
@@ -66,3 +67,7 @@ def test_repository_paths_must_match_their_domain() -> None:
 
 def test_tooling_directories_are_not_repository_inputs() -> None:
     assert declared_path(REPOSITORY_ROOT / ".venv" / "pyvenv.cfg") is not None
+
+
+def test_supplied_paths_pass_through_even_inside_the_checkout() -> None:
+    assert supplied_path(__file__) == Path(__file__)

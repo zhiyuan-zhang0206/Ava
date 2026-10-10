@@ -32,6 +32,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
+from base.packages.declared_inputs import declared_import
 from services.entrypoints.im_bridge.alert_outbound import AlertOutboundBridge
 from services.entrypoints.im_bridge.config import (
     FeishuCredentialsConfig,
@@ -143,7 +144,10 @@ _ADAPTERS: tuple[tuple[str, Callable[[], Any] | None], ...] = (
 def _import_adapter(name: str) -> Any:
     """Import one adapter module by channel name (seam for tests)."""
 
-    return __import__(f"services.entrypoints.im_bridge.adapters.{name}", fromlist=["*"])
+    return declared_import(
+        f"services.entrypoints.im_bridge.adapters.{name}",
+        within=("services.entrypoints.im_bridge.adapters.*",),
+    )
 
 
 def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:

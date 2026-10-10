@@ -71,6 +71,7 @@ _DECLARED = {
     "base.packages.declared_inputs.declared_import": FactKind.DYNAMIC_IMPORT,
     "base.packages.declared_inputs.declared_spec": FactKind.DYNAMIC_IMPORT,
     "base.packages.declared_inputs.declared_path": FactKind.RESOURCE,
+    "base.packages.declared_inputs.supplied_path": FactKind.RESOURCE,
 }
 _DECLARATION_DOOR = "base/packages/declared_inputs/__init__.py"
 _PATCH_IMPORTS = frozenset(

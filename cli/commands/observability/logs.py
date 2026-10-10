@@ -14,6 +14,7 @@ from pathlib import Path
 import psutil
 
 from base.config import settings
+from base.packages.declared_inputs import declared_path
 from base.paths import logs_dir
 
 _MANAGED_LOG_NAME = re.compile(
@@ -375,7 +376,7 @@ def _rotate_entry(
             return False
         if not dry_run:
             shutil.copyfile(path, archive)
-            with path.open("r+b") as stream:
+            with declared_path(path).open("r+b") as stream:
                 stream.truncate(0)
         _print_rotation_state(path, file_stat.st_size, "rotated")
     except OSError as exc:

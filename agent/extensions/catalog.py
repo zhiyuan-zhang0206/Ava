@@ -29,12 +29,12 @@ reader to ignore the diff.
 
 from __future__ import annotations
 
-import importlib
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from base.packages.declared_inputs import declared_import
 from base.packages.plugins import enable_config
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
@@ -253,7 +253,10 @@ def entry_point_signature(entry_point: str) -> str:
             is worse than a crash.
     """
     module_path, _, attr_path = entry_point.partition(":")
-    obj: Any = importlib.import_module(module_path)
+    # Keep in step with the `SURFACES` entry points; an undeclared module fails fast.
+    obj: Any = declared_import(
+        module_path, within=("base.lm.provider_api", "base.packages.plugins.extensions")
+    )
     for segment in attr_path.split("."):
         obj = getattr(obj, segment)
     signature = inspect.signature(obj)

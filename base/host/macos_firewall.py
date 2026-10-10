@@ -81,6 +81,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from base.host.proc import run_bounded
+from base.packages.declared_inputs import declared_path
 
 SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 
@@ -474,7 +475,8 @@ def _expand_glob(pattern: str) -> tuple[Path, ...]:
         return (expanded,) if expanded.exists() else ()
     base = Path(*expanded.parts[:first_wild])
     rest = "/".join(expanded.parts[first_wild:])
-    return tuple(h for h in base.glob(rest) if h.exists())
+    # Manifest binaries live outside the checkout (its own `.venv` is not an input).
+    return tuple(h for h in declared_path(base).glob(rest) if h.exists())
 
 
 def manifest_paths() -> tuple[Path, ...]:

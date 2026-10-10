@@ -11,10 +11,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-from pathlib import Path
 from typing import Any
 
 from base import telemetry
+from base.packages.declared_inputs import supplied_path
 
 # One child's budget. task #3696 exception inventory: a self-imposed guard on a
 # single check child — a healthy top-level import set takes seconds, so a child
@@ -84,7 +84,7 @@ def _read_schedule_rows() -> list[tuple[int, str, str]]:
 
 def _read_rows_file(path: str) -> list[tuple[int, str, str]]:
     """The rows `_read_schedule_rows` returned, dumped as a JSON list of `[id, name, script]`."""
-    data: Any = json.loads(Path(path).read_text(encoding="utf-8"))
+    data: Any = json.loads(supplied_path(path).read_text(encoding="utf-8"))
     return [(int(row[0]), str(row[1]), str(row[2])) for row in data]
 
 
@@ -138,7 +138,7 @@ def _verify_sweep(*, notify: bool, ports: VerifyPorts) -> int:
 def _verify_file(path: str) -> int:
     """`--check-file PATH` — dry-import one script file (no DB, no signal)."""
     try:
-        source = Path(path).read_text(encoding="utf-8")
+        source = supplied_path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         print(f"cannot read script file: {exc}", file=sys.stderr)
         return 2

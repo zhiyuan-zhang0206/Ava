@@ -69,6 +69,16 @@ def declared_path(path: str | PathLike[str], *, within: tuple[str, ...] = ()) ->
     return candidate
 
 
+def supplied_path(path: str | PathLike[str]) -> Path:
+    """Return a path its caller chose, such as a CLI argument, as a ``Path``.
+
+    The read site has no domain of its own: a test that exercises it supplies the
+    path in its own source, which carries the dependency. No runtime check applies,
+    because an operator may legitimately point a command at any file.
+    """
+    return Path(path)
+
+
 def _check_module(module: str, within: tuple[str, ...]) -> None:
     top = module.split(".", maxsplit=1)[0]
     repository = top not in OUTSIDE_REPOSITORY and (

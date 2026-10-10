@@ -24,10 +24,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
-from pathlib import Path
 from typing import Any
 
 import httpx
+
+from base.packages.declared_inputs import supplied_path
 
 _TIMEOUT_S = 15.0
 
@@ -390,7 +391,7 @@ def _read_script(script: str | None, script_file: str | None) -> str | None:
     if script_file == "-":
         return sys.stdin.read()
     try:
-        return Path(script_file).read_text(encoding="utf-8")
+        return supplied_path(script_file).read_text(encoding="utf-8")
     except OSError as e:
         print(f"cannot read script file: {e}", file=sys.stderr)
         return None

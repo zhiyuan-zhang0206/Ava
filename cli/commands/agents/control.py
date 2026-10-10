@@ -36,6 +36,7 @@ from pydantic import BaseModel
 
 from base.agents import ShellSessionKillTiming
 from base.agents.messages.delivery_outbox import DeliverySenderConfig
+from base.packages.declared_inputs import supplied_path
 from ops.rpc_schemas.billing_recovery import BillingRecoveryMode, BillingRecoveryRunOutcome
 
 _TIMEOUT_S = 15.0
@@ -204,14 +205,13 @@ def cmd_agents_send(
 def _with_tail(content: str, tail_file: str) -> str:
     """`content` with the last `_TAIL_LINES` lines of `tail_file` appended (or why it is unavailable)."""
     import os
-    from pathlib import Path
 
     # Delivering the notice is the primary contract; the tail is a rider.
     # An unreadable tail file must not abort the POST — the failure is
     # surfaced inside the delivered message instead, so the agent still
     # learns its command finished and sees why the tail is missing.
     try:
-        with Path(tail_file).open("rb") as f:
+        with supplied_path(tail_file).open("rb") as f:
             f.seek(0, os.SEEK_END)
             f.seek(max(0, f.tell() - _TAIL_BYTES))
             tail = "\n".join(f.read().decode("utf-8", errors="replace").splitlines()[-_TAIL_LINES:])

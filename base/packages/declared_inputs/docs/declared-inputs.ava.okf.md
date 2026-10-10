@@ -12,11 +12,14 @@ tags:
 
 ## What it is
 
-`base/packages/declared_inputs/__init__.py` holds three doors for inputs chosen at runtime:
+`base/packages/declared_inputs/__init__.py` holds doors for inputs chosen at runtime:
 
 - `declared_import(module, within=...)` imports a module;
 - `declared_spec(module, within=...)` probes whether a module exists (`importlib.util.find_spec`);
-- `declared_path(path, within=...)` returns a path that the caller then reads.
+- `declared_path(path, within=...)` returns a path that the caller then reads;
+- `supplied_path(path)` marks a path its caller chose, such as a CLI argument. It has no
+  domain and no runtime check: the test that supplies the path names it in its own source,
+  and an operator may point a command at any file.
 
 `within` is a literal tuple of patterns: dotted module patterns, or repository-relative
 path patterns. `*` matches within one segment and `**` spans any number of segments.
