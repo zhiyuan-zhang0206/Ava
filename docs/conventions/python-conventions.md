@@ -145,7 +145,10 @@ a `global` slot, a `ContextVar`, a platform constant, an import-time call or rea
 ask whether anything reads it to decide what to do, and if so build it in a
 composition root and hand it to the component that uses it. Background work must be
 durable or re-derivable from durable state and run as its own service loop; use a
-per-iteration `async with asyncio.TaskGroup()` for bounded parallelism. A Thread
+per-iteration `async with asyncio.TaskGroup()` for bounded parallelism. An explicit
+Task requires a service owner that retains its identity, collects completion and
+errors, and provides finite stop/join observation and honest unfinished results.
+A Thread
 requires an explicit service/process owner with admission, stop, retained handles
 and completion/error collection; free-floating `create_task` or thread work is
 forbidden. Rule 9 of `scripts/lint/code_structure.py`
@@ -157,6 +160,32 @@ in `scripts/structure/ambient_state/allowlist.py` — write-only facades, framew
 (`re.compile`, `TypeVar`, `timedelta`, `Path`) and memoized pure functions. There is
 no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts
 are not.
+
+Task ownership detection recognizes necessary same-instance wiring, with no file
+list, fixed owner names or marker. Each explicit spawn assigns its actual Task and
+immediately calls a synchronous registration method, before any suspension. That
+method really inserts the same Task into an owner-created set/dict and attaches a
+synchronous completion callback to it. Registration cannot yield, return early,
+replace the Task or immediately remove it. The callback reads that Task's
+exception, retains the original error in an owner field/list, and passes it to an
+observer, directly or through one synchronous same-class helper. The owner's
+async teardown awaits `asyncio.wait` on the same registry or its direct snapshot,
+with an explicit non-None timeout; actual synchronous helper edges cancel work,
+raise from the same error receipt, and provide unfinished Task identities/names
+from that registry. Scalar task slots, async registration/callbacks, deeper helper chains
+and unsupported aliases remain findings. TaskGroups remain available for work
+whose lifetime and failure impact fit their scope; changing a raw spawner's
+receiver name does not establish ownership.
+
+These facts do not prove correct claimed/abandoned routing, retirement timing,
+admission after stop, generation identity, error classification or every control
+flow path. Reading `Task.exception()` leaves the Task result available to the
+active caller; it does not authorize retiring an unclaimed result. Tests must
+prove those handoffs and late-error visibility, preserve original error identity
+and primary failures, and release/join their blocked work. Finite owner observation
+does not promise Task termination or finite `asyncio.run` shutdown. Ordinary
+best-effort telemetry/Redis may return honest unfinished work under the accepted
+decision; business data and durable audit have no such relaxation.
 
 Thread ownership detection is conservative and structural, with no file list or
 inline owner marker. The scanner recognizes an instance-held Thread whose target

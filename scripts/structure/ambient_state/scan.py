@@ -31,8 +31,11 @@ rebinds it, or assigns through `globals()[...]`), `foreign-rebind` (assigning an
 attribute of another first-party module), `class-level-container` (a mutable
 container shared through a class attribute), and the free-floating background
 work rules `asyncio-task` (`asyncio.create_task`, `asyncio.ensure_future`,
-`<loop>.create_task`) and `thread` (`threading.Thread(...)` without the visible
-ownership wiring in `thread_owner.py`), keyed by the enclosing function. A `<expr>.create_task(...)` whose receiver is not
+`<loop>.create_task` without the necessary ownership wiring in `task_owner.py`)
+and `thread` (`threading.Thread(...)` without the visible ownership wiring in
+`thread_owner.py`), keyed by the enclosing function. These are structural facts,
+not lifecycle proofs; branch routing, admission, deadlines and root teardown
+require consumer tests. A `<expr>.create_task(...)` whose receiver is not
 `asyncio` or an event loop (a `TaskGroup`'s `tg.create_task`, a component's
 `self._tg.create_task`) is the sanctioned shape; AST cannot prove the receiver is a
 TaskGroup, so any receiver not named like a loop passes (a known gap).
@@ -63,6 +66,7 @@ from scripts.structure.ambient_state.module import (
     module_statements,
     target_names,
 )
+from scripts.structure.ambient_state.task_owner import owned_calls as owned_task_calls
 from scripts.structure.ambient_state.thread_owner import owned_calls
 
 INSTANCE = "ambient-instance"
@@ -420,6 +424,7 @@ class _Walker:
         self.mutated: set[str] = set()
         self.loop_names: set[str] = set()
         self.owned_threads = owned_calls(module)
+        self.owned_tasks = owned_task_calls(module)
         self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
             ast.Name: self._on_name,
             ast.Call: self._on_call,
@@ -552,12 +557,12 @@ class _Walker:
     def _spawn_rule(self, node: ast.Call) -> str | None:
         callee = self.module.full_name(node.func)
         if callee in _TASK_SPAWNERS:
-            return TASK
+            return None if id(node) in self.owned_tasks else TASK
         if callee in _THREAD_CLASSES:
             return None if id(node) in self.owned_threads else THREAD
         func = node.func
         if isinstance(func, ast.Attribute) and func.attr == "create_task":
-            return TASK if self._is_loop(func.value) else None
+            return TASK if self._is_loop(func.value) and id(node) not in self.owned_tasks else None
         return None
 
     def _is_loop(self, receiver: ast.expr) -> bool:
