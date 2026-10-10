@@ -72,6 +72,8 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const [linkKey, setLinkKey] = useState<string | null>(null);
   const [linkKinds, setLinkKinds] = useState<ReadonlySet<LinkKind>>(() => new Set(LINK_KINDS));
   const [interactions, setInteractions] = useState(true);
+  const [showUser, setShowUser] = useState(true);
+  const [showOther, setShowOther] = useState(true);
   const [levels, setLevels] = useState<number | null>(null);
   const [contextSize, setContextSize] = useState(true);
   const [unitHeights, setUnitHeights] = useState<UnitHeights>("tokens");
@@ -213,6 +215,16 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
           setInteractions(on);
           if (!on) setLinkKey(null);
         }}
+        showUser={showUser}
+        onShowUser={(on) => {
+          setShowUser(on);
+          if (!on) setLinkKey(null);
+        }}
+        showOther={showOther}
+        onShowOther={(on) => {
+          setShowOther(on);
+          if (!on) setLinkKey(null);
+        }}
       />
       {base && view ? (
         <>
@@ -242,6 +254,8 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
             onRetry={retry}
             links={interactions ? links : NO_LINKS}
             interactions={interactions}
+            showUser={showUser}
+            showOther={showOther}
             linkKinds={linkKinds}
             onToggleLinkKind={(kind) =>
               setLinkKinds((kinds) => {

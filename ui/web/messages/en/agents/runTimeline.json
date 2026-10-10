@@ -93,8 +93,8 @@
   "linkResurrect": "Resurrect",
   "linkLegendLabel": "Arrow colors",
   "linkLegendToggle": "Show or hide {kind} arrows",
-  "linkAria": "{kind} from agent {from} to agent {to}",
-  "readoutLink": "{kind} · #{from} → #{to} · {time}",
+  "linkAria": "{kind} from {from} to {to}",
+  "readoutLink": "{kind} · {from} → {to} · {time}",
   "linkFrom": "From",
   "linkTo": "To",
   "linkNotInView": "#{id} (not in the view)",
@@ -104,5 +104,7 @@
   "linkMessage": "Message",
   "linksFailed": "Could not load the arrows between agents.",
   "linkUnmatched": "This message is not matched to a block of the receiver (its history carries no inbound id for it); the arrow ends at the time of the event.",
-  "interactionsLabel": "Interactions"
+  "interactionsLabel": "Interactions",
+  "userGroup": "User",
+  "linkNotice": "Notice"
 }

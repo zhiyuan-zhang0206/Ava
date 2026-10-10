@@ -16337,7 +16337,8 @@
               "fork",
               "terminate",
               "restart",
-              "resurrect"
+              "resurrect",
+              "notice"
             ],
             "title": "Kind"
           },
@@ -16347,11 +16348,25 @@
             "title": "Ts"
           },
           "sender": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Sender"
           },
           "receiver": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Receiver"
           },
           "inbound_id": {
@@ -16399,7 +16414,7 @@
           "preview"
         ],
         "title": "RunTimelineLink",
-        "description": "One event between two agents. `sender` did it to `receiver`.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is\nthe start of the message."
+        "description": "One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.\n\nA `notice` is an agent posting a notice to the user (`agent_notices`, the structured\nagent-to-user channel): its receiver is None and `preview` its title.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is\nthe start of the message."
       },
       "RunTimelineLinks": {
         "properties": {
@@ -16416,7 +16431,7 @@
           "links"
         ],
         "title": "RunTimelineLinks",
-        "description": "GET /api/insights/run-timeline/links response: the agent-to-agent events with an end in the asked agents, oldest first."
+        "description": "GET /api/insights/run-timeline/links response: the events between agents (and with the user) with an end in the asked agents, oldest first."
       },
       "RunTimelineMessage": {
         "properties": {
