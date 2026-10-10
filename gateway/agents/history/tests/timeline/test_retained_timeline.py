@@ -2,16 +2,35 @@
 
 from __future__ import annotations
 
+import secrets
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, BaseMessage
 
 from base.agents.history.checkpoint import CheckpointReadError
+from base.cluster.auth import bearer_header
 from base.config import settings
 from base.db import create_agent
 from gateway.agents.history import timeline
 from gateway.agents.history.tests.test_timeline import test_client as test_client
+from gateway.app import app
+
+
+def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = secrets.token_urlsafe(24)
+    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
+    tid = create_agent(db_conn)
+    with TestClient(app) as client:
+        rejected = client.get(f"/api/agents/{tid}/timeline/retained")
+        assert rejected.status_code == 401
+        accepted = client.get(f"/api/agents/{tid}/timeline/retained", headers=bearer_header(secret))
+    assert accepted.status_code == 200
+    assert accepted.json() == {"boundary_checkpoint_id": None, "items": [], "has_more": False}
 
 
 def test_retained_history_can_start_and_page_without_reading_broken_live_head(
