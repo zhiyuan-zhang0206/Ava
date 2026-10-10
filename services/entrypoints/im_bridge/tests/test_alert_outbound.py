@@ -225,7 +225,9 @@ async def test_any_real_sent_completes_revision_but_ambiguous_channel_is_not_rep
     service = bridge(pool, good, ambiguous)
     await service.accept(group)
     worker = IMOutboxWorker(service.store.outbound, service.adapters)
-    await worker.run_once()
+    with pytest.raises(RuntimeError) as caught:
+        await worker.run_once()
+    assert caught.value is ambiguous.error
     await worker.run_once()
     assert len(good.sent) == len(ambiguous.sent) == 1
     with pool.connection() as conn:
@@ -240,7 +242,7 @@ async def test_any_real_sent_completes_revision_but_ambiguous_channel_is_not_rep
         assert "SECRET" not in serialized and "contextTOKEN" not in serialized
 
 
-async def test_unresolved_sending_after_restart_is_uncertain_without_second_send(
+async def test_unresolved_sending_after_restart_stays_unconfirmed_without_second_send(
     pool: ConnectionPool,
 ):
     [group] = ingest(pool, [item("a")])
@@ -256,7 +258,7 @@ async def test_unresolved_sending_after_restart_is_uncertain_without_second_send
     with pool.connection() as conn:
         assert native_sent_count(conn, {group}) == 0
         assert conn.execute("SELECT status FROM im_bridge_outbound_intents").fetchone() == (
-            "uncertain",
+            "sending",
         )
 
 
