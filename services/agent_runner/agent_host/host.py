@@ -72,7 +72,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
+from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
@@ -181,6 +181,7 @@ class AgentHost:
         self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
         self.database_waits = DatabaseWaits()
         self.stats = HostStats()
+        self._resource_service = HostedServiceResources()
 
     async def run_turn(self, agent_id: int) -> None:
         """Retain the scheduler slot until real work, including threads, settles.
@@ -190,72 +191,73 @@ class AgentHost:
         Durable interrupts still stop cooperative LLM/exec work. Repeated outer
         cancellation must not release this agent to a concurrent successor.
         """
-        resources = HostedTurnResources()
-        self.turn_fingerprints.pop(agent_id, None)
-        work = asyncio.create_task(self._run_turn(agent_id, resources=resources))
-        cancelled = False
-        try:
-            while not work.done():
-                try:
-                    await asyncio.shield(work)
-                except asyncio.CancelledError:
-                    cancelled = True
-            work.result()
-        except BaseException as exc:
-            await maintenance_receipts.record_failure(agent_id, exc, self._maintenance_failed)
-            raise
-        finally:
-            from base.agents.incarnation.hosted_force import original_host_force
+        with self._resource_service.hold_turn(asyncio.current_task()):
+            resources = await self._resource_service.turn()
+            self.turn_fingerprints.pop(agent_id, None)
+            work = asyncio.create_task(self._run_turn(agent_id, resources=resources))
+            cancelled = False
+            try:
+                while not work.done():
+                    try:
+                        await asyncio.shield(work)
+                    except asyncio.CancelledError:
+                        cancelled = True
+                work.result()
+            except BaseException as exc:
+                await maintenance_receipts.record_failure(agent_id, exc, self._maintenance_failed)
+                raise
+            finally:
+                from base.agents.incarnation.hosted_force import original_host_force
 
-            if resources.unresolved:
-                # Keep the actual domains and scheduler registration alive.
-                # No timer/cache reset can turn a failed close into quiescence.
-                self._in_flight.add(agent_id)
-                logger.error(
-                    "hosted resources unresolved; force remains unobserved, "
-                    "exact resource inspection required: {requests}",
-                    agent_id=agent_id,
-                    requests=[str(path) for path in resources.unresolved],
+                if resources.unresolved:
+                    # Keep the actual domains and scheduler registration alive.
+                    # No timer/cache reset can turn a failed close into quiescence.
+                    self._in_flight.add(agent_id)
+                    logger.error(
+                        "hosted resources unresolved; force remains unobserved, "
+                        "exact resource inspection required: {requests}",
+                        agent_id=agent_id,
+                        requests=[str(path) for path in resources.unresolved],
+                    )
+                    cancelled = await wait_retained_resources(resources) or cancelled
+                    self._in_flight.discard(agent_id)
+                # The exclusive pump also covers no-task wakes.
+                if cancelled:
+                    self.drop_agent(agent_id)
+                from services.agent_runner.agent_host.invocation.compact.source import (
+                    finish_force_and_compact,
                 )
-                cancelled = await wait_retained_resources(resources) or cancelled
-                self._in_flight.discard(agent_id)
-            # The exclusive pump also covers no-task wakes.
-            if cancelled:
-                self.drop_agent(agent_id)
-            from services.agent_runner.agent_host.invocation.compact.source import (
-                finish_force_and_compact,
-            )
 
-            settlement = asyncio.create_task(
-                finish_force_and_compact(
-                    original_host_force(
+                settlement = asyncio.create_task(
+                    finish_force_and_compact(
+                        original_host_force(
+                            self._control_pool,
+                            agent_id,
+                            self._owner,
+                            self._machine,
+                            quiescent=True,
+                            kill_shell_sessions=kill_terminating_agent_shells,
+                        ),
                         self._control_pool,
+                        self._checkpointer,
+                        self._graph,
                         agent_id,
                         self._owner,
-                        self._machine,
-                        quiescent=True,
-                        kill_shell_sessions=kill_terminating_agent_shells,
-                    ),
-                    self._control_pool,
-                    self._checkpointer,
-                    self._graph,
-                    agent_id,
-                    self._owner,
-                    resources,
-                    self._bus,
-                    self.drop_agent,
-                    self.database_waits,
-                    self._peek_lock,
-                    work=None,
-                    catalog=self._catalog,
-                    llm_override=settings.lm.llm_override,
+                        resources,
+                        self._bus,
+                        self.drop_agent,
+                        self.database_waits,
+                        self._peek_lock,
+                        work=None,
+                        catalog=self._catalog,
+                        llm_override=settings.lm.llm_override,
+                    )
                 )
-            )
-            cancelled = await wait_shielded_task(settlement) or cancelled
-            settlement.result()
-        if cancelled:
-            raise asyncio.CancelledError
-        await maintenance_receipts.record_drained(self._control_pool, self._owner, agent_id)
+                cancelled = await wait_shielded_task(settlement) or cancelled
+                settlement.result()
+            if cancelled:
+                raise asyncio.CancelledError
+            await maintenance_receipts.record_drained(self._control_pool, self._owner, agent_id)
 
     async def accepts_force(self, agent_id: int, command_id: int) -> bool:
         """Authenticate cancellation against this live host's actual boot owner."""
@@ -748,21 +750,33 @@ class AgentHost:
             native_work,
         )
 
-    async def aclose(self) -> None:
-        """Drop every cached runtime. The pool, checkpointer and graph belong to
-        the daemon that built them and are closed there."""
-        self._runtimes.clear()
-        await asyncio.to_thread(self._clients.close)
+    @property
+    def resources_joined(self) -> bool:
+        return self._resource_service.joined
+
+    async def aclose(self, *, resource_deadline: float | None = None) -> None:
+        """Join cross-turn resource results before releasing owners or closing clients.
+
+        The daemon drains turns first and closes its pools after this returns.
+        A failed completion keeps its exact unresolved scope; joining it cannot
+        certify that those resources became quiescent.
+        """
         try:
-            async with asyncio.timeout(_RELEASE_OWNER_TIMEOUT_S):
-                await release_hosted_owner(
-                    self._control_pool, self._machine, self._owner, self._in_flight
-                )
-        except TimeoutError as exc:
-            raise TimeoutError(
-                f"hosted ownership release did not land within {_RELEASE_OWNER_TIMEOUT_S:g}s; "
-                "its leases expire by TTL"
-            ) from exc
+            await self._resource_service.aclose(deadline=resource_deadline)
+        finally:
+            if self.resources_joined:
+                self._runtimes.clear()
+                await asyncio.to_thread(self._clients.close)
+                try:
+                    async with asyncio.timeout(_RELEASE_OWNER_TIMEOUT_S):
+                        await release_hosted_owner(
+                            self._control_pool, self._machine, self._owner, self._in_flight
+                        )
+                except TimeoutError as exc:
+                    raise TimeoutError(
+                        f"hosted ownership release did not land within {_RELEASE_OWNER_TIMEOUT_S:g}s; "
+                        "its leases expire by TTL"
+                    ) from exc
 
     async def renew_ownership(self) -> None:
         """Renew healthy leases before reaping corpses and retrying committed wakes."""

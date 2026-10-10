@@ -7,11 +7,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
+
 from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._process import ExecTeardownError, TeardownFailure
 from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import _finish_request_evidence, _retain_late_reader_completion
 from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _files(directory: Path) -> tuple[Path, Path]:
@@ -50,9 +53,11 @@ def test_failed_cleanup_keeps_primary_resource_and_wire_evidence(tmp_path: Path)
     assert not request.exists() and not result.exists()
 
 
-async def test_late_reader_cannot_clean_replacement_domain(tmp_path: Path) -> None:
+async def test_late_reader_cannot_clean_replacement_domain(
+    tmp_path: Path, hosted_resources: HostedTurnResources
+) -> None:
     request, result = _files(tmp_path)
-    resources = HostedTurnResources()
+    resources = hosted_resources
     original, replacement = object(), object()
     resources.unresolved[request] = original
     failure = ExecTeardownError((TeardownFailure("reader_join", TimeoutError("join")),))
@@ -85,3 +90,31 @@ async def test_secondary_teardown_failure_cannot_certify_cleanup(tmp_path: Path)
     assert resources.unresolved[request] is domain
     assert request.exists() and result.exists()
     assert [item.stage for item in failure.failures] == ["reader_join", "domain_close"]
+
+
+async def test_actual_owner_completion_unknown_reaches_original_service() -> None:
+    from agent.graph.exec._owned_run import _OwnedRun
+    from base.agents.incarnation.exec_owner_protocol import OwnerClosed
+    from base.native_process.turn_identity import HostedServiceResources
+
+    service = HostedServiceResources()
+    scope = await service.turn()
+    request, domain = Path("original-owner-request"), object()
+    scope.unresolved[request] = domain
+    error = ValueError("unknown close receipt failure")
+
+    async def failed_receipt() -> OwnerClosed:
+        raise error
+
+    completion = asyncio.create_task(failed_receipt())
+    owned = object.__new__(_OwnedRun)
+    owned.attached_completion = lambda: completion
+    service = scope.require_service()
+    service.complete_later(scope, owned.finish_owner(), name="actual-owner-result")
+    while scope.completions:
+        await asyncio.sleep(0)
+    assert service.failures == [(scope, error)]
+    assert scope.unresolved[request] is domain
+    with pytest.raises(ValueError) as observed:
+        await service.aclose()
+    assert observed.value is error

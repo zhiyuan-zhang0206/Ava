@@ -7,12 +7,26 @@ imported before pytest registers it cannot be assertion-rewritten.
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
+import pytest
+
 import ava
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
+from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
+
+
+@pytest.fixture
+async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
+    """An explicit test service owns watcher/completion results until fixture join."""
+    service = HostedServiceResources()
+    try:
+        yield await service.turn()
+    finally:
+        await service.aclose()
 
 
 def pin_agent(

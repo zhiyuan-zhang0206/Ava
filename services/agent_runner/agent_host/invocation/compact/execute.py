@@ -119,7 +119,11 @@ async def _generate_original(
     ctx = replace(ctx, native_work=command.execution)
     try:
         async with subscribe_interrupt(
-            pool, incarnation.agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
+            pool,
+            incarnation.agent_id,
+            incarnation=ctx.original_incarnation,
+            work=ctx.native_work,
+            resources=ctx.hosted_resources,
         ) as interrupted:
             summary = await interruptible_model(
                 generate_summary(

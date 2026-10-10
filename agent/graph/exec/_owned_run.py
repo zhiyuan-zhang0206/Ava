@@ -421,12 +421,7 @@ class _OwnedRun:
     async def finish_owner(self) -> None:
         # Preserve the original task's strong completion ownership. Host
         # cancellation does not mean the independent owner already closed.
-        try:
-            await asyncio.shield(self.attached_completion())
-        except Exception as exc:
-            from base.log import logger
-
-            logger.error("exec owner remains unresolved: {error}", error=exc)
+        await asyncio.shield(self.attached_completion())
 
     def crashed(self, label: str, exc: Exception) -> tuple[_ExecCrashed, None]:
         return _ExecCrashed(output=f"{label}: {exc}\n{self.stream.getvalue()}", exc=exc), None
@@ -499,9 +494,7 @@ async def run_owned(
     finally:
         owned.close_stdin()
         if owned.needs_hand_off():
-            task = asyncio.create_task(
-                owned.finish_owner(), name=f"exec-owner-close-{owned.request_id}"
-            )
             assert owned.scope is not None  # noqa: S101
-            owned.scope.completions.add(task)
-            task.add_done_callback(owned.scope.completions.discard)
+            owned.scope.require_service().complete_later(
+                owned.scope, owned.finish_owner(), name=f"exec-owner-close-{owned.request_id}"
+            )

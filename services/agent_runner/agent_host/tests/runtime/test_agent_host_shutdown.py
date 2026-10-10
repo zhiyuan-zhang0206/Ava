@@ -81,7 +81,7 @@ def _exercise_shutdown(failure: str) -> None:
 
     events: list[str] = []
 
-    async def record(name: str) -> None:
+    async def record(name: str, **_kwargs: object) -> None:
         await asyncio.sleep(0)
         events.append(name)
 
