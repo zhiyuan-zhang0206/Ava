@@ -53,11 +53,11 @@ def test_timeline_anchor_filter_only_includes_chat_inbounds(
     inserts a mixed sequence and verifies the endpoint still returns 200 and lifecycle
     inbounds do not pollute the chat anchor.
     """
-    from base.db import list_inbound_messages
+    from base.db import list_chat_anchors
 
     tid = create_agent(db_conn)
     # Mixed chat / lifecycle kinds, in INSERT order
-    insert_inbound_message(
+    chat_1 = insert_inbound_message(
         db_conn, tid, "chat 1", source="user", kind="chat", bus=event_bus, database=database
     )
     with db_conn.cursor() as cur:
@@ -66,7 +66,7 @@ def test_timeline_anchor_filter_only_includes_chat_inbounds(
             "VALUES (%s, '', 'resurrect', 'user')",
             (tid,),
         )
-    insert_inbound_message(
+    chat_2 = insert_inbound_message(
         db_conn, tid, "chat 2", source="user", kind="chat", bus=event_bus, database=database
     )
     with db_conn.cursor() as cur:
@@ -75,18 +75,14 @@ def test_timeline_anchor_filter_only_includes_chat_inbounds(
             "VALUES (%s, '', 'terminate', 'user')",
             (tid,),
         )
-    insert_inbound_message(
+    chat_3 = insert_inbound_message(
         db_conn, tid, "chat 3", source="user", kind="chat", bus=event_bus, database=database
     )
     db_conn.commit()
 
-    # Directly check the internal helper to see the anchor list (bypass full endpoint,
-    # no LangGraph state needed)
-    inbound_anchors = [
-        row for row in list_inbound_messages(db_conn, tid, 500) if row.kind == "chat"
-    ]
-    assert len(inbound_anchors) == 3
-    assert [r.content for r in inbound_anchors] == ["chat 1", "chat 2", "chat 3"]
+    # Directly check the anchor reader (bypass full endpoint, no LangGraph state needed)
+    inbound_anchors = list_chat_anchors(db_conn, tid, referenced_ids=[], limit=500)
+    assert [r.id for r in inbound_anchors] == [chat_1, chat_2, chat_3]
 
     # Overall endpoint still returns 200 normally (no LangGraph state, items are 0 but
     # should not raise)

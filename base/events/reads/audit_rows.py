@@ -111,6 +111,7 @@ def _tier_clause(tiers: list[EventTier]) -> tuple[LiteralString | None, bool]:
 def _where(
     *,
     agent_id: int | None,
+    involving_agents: list[int] | None,
     event_names: list[str] | None,
     tiers: list[EventTier] | None,
     trace_id: str | None,
@@ -134,6 +135,12 @@ def _where(
             return None
         if tier_clause is not None:
             add(tier_clause, list(_ANOMALY_LEVELS))
+    if involving_agents is not None:
+        add(
+            "(agent_id = ANY(%s) OR source = ANY(%s))",
+            involving_agents,
+            [f"agent:{involved}" for involved in involving_agents],
+        )
     optional: tuple[tuple[LiteralString, Any], ...] = (
         ("agent_id = %s", agent_id),
         ("event_name = ANY(%s)", event_names),
@@ -161,6 +168,7 @@ def query_events(
     conn: psycopg.Connection,
     *,
     agent_id: int | None = None,
+    involving_agents: list[int] | None = None,
     event_names: list[str] | None = None,
     tiers: list[EventTier] | None = None,
     trace_id: str | None = None,
@@ -175,11 +183,15 @@ def query_events(
 ) -> tuple[list[dict[str, Any]], bool]:
     """Slice of the audit record, newest first (`backward`) or oldest first (`forward`).
 
+    `involving_agents` keeps the rows done to one of those agents (`agent_id`) or by one of them
+    (`source` = `agent:N`).
+
     Returns `(rows, has_more)`; `has_more` comes from a one-row lookahead, as in the Loki
     reader. Ties on `ts` are ordered by the table's identity, stable across pages.
     """
     where = _where(
         agent_id=agent_id,
+        involving_agents=involving_agents,
         event_names=event_names,
         tiers=tiers,
         trace_id=trace_id,
@@ -205,6 +217,7 @@ def count_events(
     conn: psycopg.Connection,
     *,
     agent_id: int | None = None,
+    involving_agents: list[int] | None = None,
     event_names: list[str] | None = None,
     tiers: list[EventTier] | None = None,
     trace_id: str | None = None,
@@ -217,6 +230,7 @@ def count_events(
     """Exact count of the audit rows `query_events` would page through."""
     where = _where(
         agent_id=agent_id,
+        involving_agents=involving_agents,
         event_names=event_names,
         tiers=tiers,
         trace_id=trace_id,

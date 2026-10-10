@@ -41,7 +41,10 @@ from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # These tests exercise lazy installation, independently of live sampling refresh.
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     # Each test drives the installation slot + agent identity explicitly;
     # snapshot-restore so nothing leaks between tests. Any SDK surface already
     # installed in this process (ava.memory, ava.tasks, ava.cwd ...) is taken out
@@ -59,6 +62,7 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
             catalog=prior.catalog,
             authority=prior.authority,
             delivery_sender=prior.delivery_sender,
+            sampling=prior.sampling,
         )
 
 

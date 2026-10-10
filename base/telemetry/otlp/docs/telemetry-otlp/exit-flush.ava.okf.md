@@ -14,7 +14,8 @@ tags:
 `base/telemetry/otlp/telemetry_otlp_metrics._build_providers` builds both SDK providers
 with `shutdown_on_exit=False`, so neither registers an atexit shutdown of
 its own. `base.telemetry._drain_on_exit` is the single ordered exit seam:
-it flushes the emitter, then `telemetry_otlp.shutdown()` completes any
+it closes emitter admission and joins its sole writer within a finite deadline,
+then `telemetry_otlp.shutdown()` completes any
 active deferred hold, drains the OTLP queue, and force-flushes the
 still-live providers.
 
@@ -49,3 +50,8 @@ shutdown call.
   [[export-backpressure.ava.okf.md|OTLP export backpressure]].
 
 Parent node: [[telemetry-otlp.ava.okf.md|OTLP export backend & trace ship to Tempo]].
+
+An unfinished emitter stop reports degraded ordinary delivery and returns without
+closing sinks still used by that writer. Queued or held ordinary records can be
+lost at process exit; no secondary rescue writer is started. The durable audit
+record and SDK participant seal are independent of this observation barrier.

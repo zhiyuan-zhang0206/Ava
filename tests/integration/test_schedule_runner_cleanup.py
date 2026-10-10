@@ -191,11 +191,12 @@ def test_runner_hard_exit_child_ownership(
         )
     code = (
         setup + "from gateway.schedules import runner as r; import ava; "
+        "from services.wake.schedule_manager.runner import run; "
         "ava.ensure_plugins_loaded = lambda: None; "
         "from base.config import settings; "
         "settings.gateway.schedule_stall_timeout_seconds = 0.15; "
         "settings.gateway.schedule_stall_check_interval_seconds = 0.02; "
-        f"raise SystemExit(r.run({row[0]}))"
+        f"raise SystemExit(run({row[0]}))"
     )
     with _processes(root) as tracked, (root / "runner.log").open("w") as log:
         # Use a test-owned group so a buggy group kill fails without harming pytest.
@@ -271,7 +272,6 @@ def _completion_during_stall_source(root: Path) -> str:
         "r.settings.gateway.schedule_stall_exit_record_deadline_seconds = 1.0\n"
         "r._schedule_dir = lambda _id: root\n"
         "r._load = lambda *_args: ('pass', 'python script.py')\n"
-        "r._bind_schedule_actor = lambda *_args: None\n"
         "r._record_run_start = lambda *_args: 1\n"
         "r.base.host.proc.kill_process_tree = lambda *_args, **_kwargs: None\n"
         "r._StallGuard._sample = lambda _self: ('script.py', 1, 'blocked')\n"
@@ -286,5 +286,5 @@ def _completion_during_stall_source(root: Path) -> str:
         "r._record_error = record_error\n"
         "runpy.run_path = script\n"
         "r._finish_completed = lambda *_args: (root / 'completed').touch()\n"
-        "raise SystemExit(r._run(None, 1))\n"
+        "raise SystemExit(r._run(None, 1, bind_actor=lambda *_args: None, load_plugins=ava.ensure_plugins_loaded))\n"
     )

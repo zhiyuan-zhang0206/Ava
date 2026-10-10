@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ContextBreakdownResponse,
   RunTimelineContext,
+  RunTimelineLinks,
   RunTimelineMessages,
   RunTimelineResponse,
   UserSettingListResponse,
@@ -14,6 +15,7 @@ const {
   getRunTimeline,
   getRunTimelineMessages,
   getRunTimelineContext,
+  getRunTimelineLinks,
   getAgentRoster,
   getSettings,
   getContextBreakdown,
@@ -22,7 +24,7 @@ const {
   vi.hoisted(() => ({
     getRunTimeline:
       vi.fn<
-        (agentId: number, options?: { from?: string; to?: string }) => Promise<RunTimelineResponse>
+        (agentId: number, options?: { from?: string; to?: string; signal?: AbortSignal }) => Promise<RunTimelineResponse>
       >(),
     getRunTimelineMessages:
       vi.fn<
@@ -35,13 +37,14 @@ const {
     getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
     getRunTimelineContext: vi.fn<(agentId: number, at: number) => Promise<RunTimelineContext>>(),
+    getRunTimelineLinks: vi.fn<(agents: readonly number[], window: { from: string; to: string }) => Promise<RunTimelineLinks>>(),
     getAgentRoster: vi.fn(),
   }));
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getAgentRoster, getSettings, getContextBreakdown },
+  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown },
 }));
 
 import {
@@ -118,6 +121,7 @@ const lifetimeResponse: RunTimelineResponse = {
       start: "2026-10-04T12:00:00.123456Z",
       end: "2026-10-04T12:00:00.123456Z",
       source: "user",
+      inbound_id: null,
       preview: "please fix the bug",
       parent: "1",
       context_tokens: 100,
@@ -134,6 +138,7 @@ const lifetimeResponse: RunTimelineResponse = {
       start: "2026-10-04T12:05:00.000000Z",
       end: "2026-10-04T12:06:00.000000Z",
       source: null,
+      inbound_id: null,
       preview: "look at the failing test",
       parent: "1",
       context_tokens: 300,
@@ -151,6 +156,7 @@ const lifetimeResponse: RunTimelineResponse = {
       start: "2026-10-04T12:05:00.000000Z",
       end: "2026-10-04T12:05:00.000000Z",
       source: null,
+      inbound_id: null,
       preview: "on it",
       parent: "1",
       context_tokens: 50,
@@ -167,6 +173,7 @@ const lifetimeResponse: RunTimelineResponse = {
       start: "2026-10-04T14:00:00.000000Z",
       end: "2026-10-04T14:00:00.000000Z",
       source: null,
+      inbound_id: null,
       preview: "second session",
       parent: "2",
       context_tokens: 20,
@@ -177,7 +184,6 @@ const lifetimeResponse: RunTimelineResponse = {
       request: { calls: 1, input: 400, cache_read: 0, output: 20, cache_write: 0, cost_usd: 0, cost_calls: 0 },
     },
   ],
-  events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
 };
 
 const messagesResponse: RunTimelineMessages = {
@@ -209,13 +215,16 @@ const cbdFixture: ContextBreakdownResponse = {
   categories: [{ kind: "system_prompt", tokens: 400, estimated: false, exact_fraction: 1 }],
 };
 
-function render() {
+/** Renders the page with the Context size row switched on (it is off by default); `contextSize: false` leaves the default. */
+function render({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return rtlRender(
+  const view = rtlRender(
     <QueryClientProvider client={queryClient}>
       <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
     </QueryClientProvider>,
   );
+  if (contextSize) fireEvent.click(screen.getByTestId("agent-view-context-size"));
+  return view;
 }
 
 /** An item of a canvas row, found by what it is; the rows draw no element per item. */
@@ -251,6 +260,8 @@ beforeEach(() => {
   mockCanvas();
   useMediaQuery.mockReturnValue(false);
   getRunTimeline.mockReset();
+  getRunTimelineLinks.mockReset();
+  getRunTimelineLinks.mockResolvedValue({ links: [] });
   getRunTimeline.mockResolvedValue(lifetimeResponse);
   getRunTimelineMessages.mockReset();
   getRunTimelineMessages.mockResolvedValue(messagesResponse);
@@ -290,7 +301,7 @@ afterEach(() => {
 describe("the default window", () => {
   it("asks for the agent's whole lifetime: no from/to", async () => {
     render();
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(42, {}));
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(42, { signal: expect.any(AbortSignal) as AbortSignal }));
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
@@ -301,17 +312,17 @@ describe("the default window", () => {
       .getAllByTestId(/^run-timeline-row-/)
       .map((row) => row.getAttribute("data-testid"));
     expect(rows).toEqual([
-      "run-timeline-row-lifecycle",
       "run-timeline-row-level-2",
       "run-timeline-row-level-1",
       "run-timeline-row-units",
       "run-timeline-row-context",
+      "run-timeline-row-user",
+      "run-timeline-row-other",
     ]);
     // The rows are canvases: one per row, no element per node or block.
     expect(screen.queryAllByTestId("run-timeline-node")).toHaveLength(0);
     await paintFrame();
     expect(screen.getByTestId("run-timeline-canvas-level-1")).toBeTruthy();
-    expect(screen.getAllByTestId("run-timeline-event")).toHaveLength(1);
     expect(screen.getByTestId("run-timeline-window").textContent).toContain("3 summary nodes");
   });
 
@@ -536,6 +547,44 @@ describe("zoom and pan", () => {
 });
 
 describe("failure and loading", () => {
+  it("aborts the pending read on unmount without turning cancellation into a failed agent", async () => {
+    let signal: AbortSignal | undefined;
+    getRunTimeline.mockImplementation((_agent, options) => {
+      signal = options?.signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    });
+    const view = render();
+    await waitFor(() => expect(signal).toBeDefined());
+    expect(signal?.aborted).toBe(false);
+    expect(screen.queryByRole("alert")).toBeNull();
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a retry after a pending read times out, then loads the fresh result", async () => {
+    let fail: ((error: DOMException) => void) | undefined;
+    getRunTimeline.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    render();
+    await waitFor(() => expect(fail).toBeDefined());
+    const initialSignal = getRunTimeline.mock.calls[0]?.[1]?.signal;
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    await act(async () => {
+      fail?.(new DOMException("run timeline exceeded 35000ms", "TimeoutError"));
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("Could not load the timeline of agent 42.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("run-timeline-chart");
+    expect(getRunTimeline.mock.calls.map(([agent]) => agent)).toEqual([42, 42]);
+    const retrySignal = getRunTimeline.mock.calls[1]?.[1]?.signal;
+    expect(retrySignal).toBeInstanceOf(AbortSignal);
+    expect(retrySignal).not.toBe(initialSignal);
+    expect(retrySignal?.aborted).toBe(false);
+  });
+
   it("offers a retry when the read fails", async () => {
     getRunTimeline.mockRejectedValueOnce(new Error("boom"));
     render();
@@ -560,6 +609,7 @@ describe("failure and loading", () => {
           start: "2026-10-04T12:04:00.000000Z",
           end: "2026-10-04T12:05:00.000000Z",
           source: null,
+          inbound_id: null,
           preview: "need a plan",
           parent: "1",
           context_tokens: null,
@@ -576,6 +626,7 @@ describe("failure and loading", () => {
           start: "2026-10-04T12:05:00.000000Z",
           end: "2026-10-04T12:05:00.000000Z",
           source: null,
+          inbound_id: null,
           preview: "ls",
           parent: "1",
           context_tokens: null,
@@ -883,10 +934,13 @@ describe("context size row", () => {
     await waitFor(() => expect(screen.queryByTestId("run-timeline-request")).toBeNull());
   });
 
-  it("switches off, and has no Added context row", async () => {
-    render();
+  it("is off by default, switches on and off, and has no Added context row", async () => {
+    render({ contextSize: false });
     await screen.findByTestId("run-timeline-chart");
+    expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
     expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
+    fireEvent.click(screen.getByTestId("agent-view-context-size"));
+    expect(screen.queryByTestId("run-timeline-row-context")).not.toBeNull();
     fireEvent.click(screen.getByTestId("agent-view-context-size"));
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
   });

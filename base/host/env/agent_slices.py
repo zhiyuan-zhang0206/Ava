@@ -49,6 +49,7 @@ class Prompt:
     skills_to_expand_at_start: tuple[str, ...]
     agent_communication_style: str | None
     prompt_codeact_enabled: bool
+    prompt_sequential_tool_calls_enabled: bool
     sdk_disable: tuple[str, ...]
 
 
@@ -184,15 +185,18 @@ class AgentSlices:
         plugin_pins: Mapping[str, Mapping[str, Any]] | None = None,
         *,
         plugin_configs: Mapping[str, BaseModel] | None = None,
+        brain: AgentBrain | None = None,
     ) -> AgentSlices:
         """The slices of an agent holding `pins` (`resolve_agent_config_pins`) and `plugin_pins`
-        (`resolve_agent_plugin_pins`); no pins reads the cluster defaults as they are now."""
+        (`resolve_agent_plugin_pins`); no pins reads the cluster defaults as they are now.
+        A composition owner may supply a pre-resolved `brain`; other slices still use
+        their existing live defaults and pins."""
         from base.packages.plugins.config_view import PluginConfigView
 
         pins = pins or {}
         plugin_pins = plugin_pins or {}
         return cls(
-            brain=AgentBrain(**_kwargs(AgentBrain, pins)),
+            brain=brain if brain is not None else AgentBrain(**_kwargs(AgentBrain, pins)),
             prompt=Prompt(**_kwargs(Prompt, pins)),
             memory=MemoryRecall(**_kwargs(MemoryRecall, pins)),
             history_dump=HistoryDump(**_kwargs(HistoryDump, pins)),

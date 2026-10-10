@@ -13,6 +13,7 @@ from gateway.app import app
 from gateway.routers import tasks
 from gateway.routers.tests.test_tasks_router import _make_agent, _make_task
 from gateway.schemas.tasks import TaskUpdateRequest
+from ops import lifecycle
 
 
 def _count(db: psycopg.Connection, table: str) -> int:
@@ -86,7 +87,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
             "SELECT id, status, payload FROM inbound_messages ORDER BY id"
         ).fetchall()
         monkeypatch.setattr(tasks, "publish_inbound_wake", fail_wake)
-        monkeypatch.setattr(tasks._ops, "resurrect_if_terminated", fail_wake)
+        monkeypatch.setattr(lifecycle, "resurrect_if_terminated", fail_wake)
         replay = client.patch(f"/api/tasks/{tid}", json={"owner": middle}, headers=headers)
     assert replay.status_code == 200
     assert replay.json() == original

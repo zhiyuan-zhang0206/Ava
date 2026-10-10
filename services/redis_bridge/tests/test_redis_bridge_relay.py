@@ -30,6 +30,9 @@ def connection() -> Iterator[tuple[socket.socket, socket.socket, relay._Connecti
     client.settimeout(3.0)
     backend.settimeout(3.0)
     try:
+        # Accept precedes backend publication; actual forwarding proves readiness.
+        backend.sendall(b"\x00")
+        assert client.recv(1) == b"\x00"
         yield client, backend, handler
     finally:
         for endpoint in (client, backend):

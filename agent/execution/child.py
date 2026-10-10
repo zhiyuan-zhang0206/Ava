@@ -352,6 +352,7 @@ def _run_code(code: str, payload: Any) -> None:
         format_full_traceback,
         register_agent_source,
     )
+    from ava.sdk_surface import install as sdk_install
     from ava.sdk_surface.help import HelpRouter
     from base.agents.sdk import telemetry as sdk_usage_telemetry
 
@@ -375,6 +376,10 @@ def _run_code(code: str, payload: Any) -> None:
 
     tally = sdk_usage_telemetry.SdkCallTally()
     execution_context = ava.context
+    installation = sdk_install.installed()
+    sampling = (
+        contextlib.nullcontext() if installation is None else installation.sampling.execution()
+    )
     ava.bind_context(replace(execution_context, sdk_calls=tally))
     try:
         # From here on the agent-authored code has run (or is about to) — the
@@ -384,7 +389,8 @@ def _run_code(code: str, payload: Any) -> None:
         # Each child owns one execution tally. Its context shares that owner with
         # all public SDK entries, including ordinary threads; boot calls occurred
         # before this binding and do not enter the execution's result.
-        exec(compile(code, "<agent_code>", "exec"), fresh_globals)
+        with sampling:
+            exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
         from base.agents.lifecycle import LifecycleExit
 
@@ -413,28 +419,24 @@ def _run_code(code: str, payload: Any) -> None:
 
 
 def _finalize_telemetry() -> None:
-    """Deliver queued records before exit — only when a queue exists.
+    """Attempt finite ordinary delivery in life, then flush the available OTLP tail.
 
-    Callers run it after the result envelope is written, so the envelope's own
-    result/write record rides the same delivery (task #4312). The delivery must
-    happen in-life: an exec child defers its OTLP bring-up (task #3816 M4b),
-    and `_ensure()` refuses to construct the providers once the interpreter is
-    finalizing — an exit-time completion would leave the backlog mirror-only.
-    The exit seam (`base.telemetry._drain_on_exit`, task #4320) carries a
-    live pipeline's tail batch; a deferred hold is not a live pipeline.
-
-    The emitter loads `base.telemetry` off its first record, so a zero-record
-    child skips everything here and exits without the telemetry / OTel imports
-    (task #3816 M3). For a child with records, `telemetry_otlp.finalize()`
-    completes a deferred hold — the backend comes up and the backlog ships here
-    when the child lived below saturation and the max-age bound (task #3816
-    M4b) — and stays a plain flush for a never-deferred backend.
+    A completed barrier observes writer processing, not durable capture. An
+    unfinished barrier may lose ordinary queued records or deliver them later;
+    the result envelope and independent durable journals retain their contracts.
+    A zero-record child avoids importing telemetry and OTel entirely. Deferred
+    OTLP startup must still be attempted before interpreter finalization.
     """
     if "base.telemetry" not in sys.modules:
         return
     from base import telemetry
 
-    telemetry.sync()
+    result = telemetry.sync()
+    if result.status is telemetry.DrainStatus.UNFINISHED:
+        logger.warning(
+            "exec child: ordinary telemetry delivery is unfinished; "
+            "queued records may be lost or land later"
+        )
     if "base.telemetry.otlp.telemetry_otlp" in sys.modules:
         from base.telemetry.otlp import telemetry_otlp
 
@@ -445,31 +447,25 @@ def _deliver_envelope_telemetry() -> None:
     """Best-effort last-mile delivery for the crash-envelope writers (task #4312).
 
     Never raises and never rewrites the envelope: the crash must stay the
-    reported failure, and a failed delivery still leaves the JSONL mirror.
+    reported failure. Ordinary observation delivery can remain unfinished.
     """
     try:
         _finalize_telemetry()
     except BaseException:
         logger.opt(exception=True).warning(
             "exec child: telemetry delivery after a crash envelope failed; "
-            "queued records stay in the JSONL mirror"
+            "ordinary observation delivery is unfinished; queued records may be lost or land later"
         )
 
 
 def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
-    """Deliver this run's queued records — after the envelope write (task #4312).
+    """Attempt ordinary observation delivery after writing this run's envelope.
 
-    `write_result` ends the run with its result/write record, and this is where
-    the child delivers it — in-life, because a deferred hold cannot complete
-    once the interpreter is finalizing (`_ensure()` refuses to construct).
-    sync() lands the pipeline's held batch (queue + drain-thread batch);
-    finalize() then completes the deferred hold (bring-up + backlog drain +
-    force-flush, task #3816 M4b) or plain-flushes a live backend — a
-    short-lived child exits before the 5s batch window would fire on its own.
-    A timed-out or cancelled child skips this (the parent is already killing it
-    and the JSONL mirror holds the records); a zero-record child skips it too,
-    so its exit never imports the telemetry / OTel modules at all (task #3816
-    M3)."""
+    Known unfinished delivery is best effort and preserves the business result.
+    Unknown sync/flush failures retain the existing crash boundary for successful
+    runs; an existing crash stays primary. Timed-out or cancelled children skip
+    delivery because their parent is already stopping them.
+    """
     if payload.kind not in ("done", "lifecycle", "crashed"):
         return
     try:
@@ -477,7 +473,7 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
     except BaseException as exc:
         logger.opt(exception=True).warning(
             "exec child: post-run telemetry delivery failed (run outcome: {}); "
-            "queued records stay in the JSONL mirror",
+            "ordinary observation delivery is unfinished; queued records may be lost or land later",
             payload.kind,
         )
         # A post-run telemetry sync/flush failure must not read as a clean

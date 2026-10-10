@@ -110,3 +110,54 @@ def test_snapshot_nonexistent_agent_404(
 ) -> None:
     resp = test_client.get("/api/agents/999999/conversation-snapshot")
     assert resp.status_code == 404
+
+
+def test_snapshot_deserializes_the_checkpoint_once(
+    db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The timeline and token-usage sections share one live-checkpoint load."""
+    from langchain_core.messages import BaseMessage
+
+    from gateway.agents import state
+    from gateway.agents.history import timeline
+
+    tid = create_agent(db_conn)
+    _put_checkpoint(tid, [_usage_message(42, 2, 0)])
+    loads: list[int] = []
+    real_load = timeline.load_checkpoint_messages
+
+    def counting_load(db: Database, agent_id: int) -> list[BaseMessage]:
+        loads.append(agent_id)
+        return real_load(db, agent_id)
+
+    monkeypatch.setattr(timeline, "load_checkpoint_messages", counting_load)
+    monkeypatch.setattr(state, "load_checkpoint_messages", counting_load)
+    body = test_client.get(f"/api/agents/{tid}/conversation-snapshot").json()
+
+    assert loads == [tid]
+    assert body["timeline"]["msg_count"] == 1
+    assert body["token_usage"]["input_tokens"] == 42
+
+
+def test_snapshot_checkpoint_read_failure_matches_timeline_unavailability(
+    db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable shared checkpoint fails the composed read as unavailable."""
+    import base.agents.history.checkpoint_postgres_walks as ckpt_mod
+
+    tid = create_agent(db_conn)
+
+    def fail_read(_saver: object, _config: object) -> None:
+        raise OSError("simulated DB connection lost")
+
+    monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
+    resp = test_client.get(f"/api/agents/{tid}/conversation-snapshot")
+
+    assert resp.status_code == 503
+    problem = resp.json()
+    assert problem["detail"] == f"Checkpoint history unavailable for agent {tid}"
+    assert problem["retryable"] is True
+    standalone = test_client.get(f"/api/agents/{tid}/timeline").json()
+    assert problem.pop("trace_id")
+    assert standalone.pop("trace_id")
+    assert problem == standalone

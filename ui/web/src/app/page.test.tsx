@@ -41,6 +41,9 @@ const hooksState = {
   forkPending: false,
   toast: null as string | null,
   timelineItems: [] as unknown[],
+  timelineError: null as Error | null,
+  timelineFetching: false,
+  retryTimeline: vi.fn(),
   connectionState: "open" as ConnectionState,
   turnActive: false,
   spawn: vi.fn().mockResolvedValue(7),
@@ -86,6 +89,9 @@ vi.mock("@/lib/timeline/use-timeline", () => ({
     turnActive: hooksState.turnActive,
     isLoading: false,
     isRefetching: false,
+    error: hooksState.timelineError,
+    isFetching: hooksState.timelineFetching,
+    retryTimeline: hooksState.retryTimeline,
   }),
 }));
 
@@ -210,10 +216,11 @@ vi.mock("@/components/shell/header-bar", () => ({
 }));
 
 vi.mock("@/components/timeline", () => ({
-  TimelineView: ({ turnActive, maxWidthCss }: { turnActive?: boolean; maxWidthCss?: string }) => (
+  TimelineView: ({ turnActive, maxWidthCss, items }: { turnActive?: boolean; maxWidthCss?: string; items: unknown[] }) => (
     <div
       data-testid="timeline"
       data-turn-active={turnActive ? "1" : "0"}
+      data-item-count={items.length}
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
     />
   ),
@@ -345,6 +352,8 @@ beforeEach(() => {
   hooksState.forkPending = false;
   hooksState.toast = null;
   hooksState.timelineItems = [];
+  hooksState.timelineError = null;
+  hooksState.timelineFetching = false;
   hooksState.connectionState = "open";
   hooksState.turnActive = false;
   hooksState.settings = { "display.timeline_width_ratio": 0.4 };
@@ -356,6 +365,38 @@ beforeEach(() => {
 });
 
 describe("HomePage top-level render", () => {
+  it("keeps a cold checkpoint failure visible with manual Retry until a successful read", () => {
+    hooksState.activeId = 42;
+    hooksState.agents = [makeAgent({ agent_id: 42 })];
+    hooksState.timelineError = new Error("Checkpoint history unavailable for agent 42");
+    const view = wrap(<HomePage />);
+    expect(screen.getByRole("alert").textContent).toContain("Could not load this conversation.");
+    expect(screen.getByRole("alert").textContent).toContain("Checkpoint history unavailable for agent 42");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(hooksState.retryTimeline).toHaveBeenCalledOnce();
+
+    hooksState.timelineError = null;
+    hooksState.timelineItems = [{ item_id: "0.1", kind: "agent_chat", payload: "read restored" }];
+    view.rerender(<QueryClientProvider client={new QueryClient()}><HomePage /></QueryClientProvider>);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByTestId("timeline").getAttribute("data-item-count")).toBe("1");
+  });
+
+  it("shows a refresh failure without replacing loaded history, and disables Retry during its read", () => {
+    hooksState.activeId = 42;
+    hooksState.agents = [makeAgent({ agent_id: 42 })];
+    hooksState.timelineItems = [{ item_id: "0.1", kind: "agent_chat", payload: "retained history" }];
+    hooksState.timelineError = new Error("Checkpoint history unavailable for agent 42");
+    hooksState.timelineFetching = true;
+    wrap(<HomePage />);
+    expect(screen.getByRole("alert").textContent).toContain("Previously loaded messages are still shown.");
+    expect(screen.getByTestId("timeline").getAttribute("data-item-count")).toBe("1");
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(retry);
+    expect(hooksState.retryTimeline).not.toHaveBeenCalled();
+  });
+
   it("activeId=null → composer 'disabled' + label '…'", () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("disabled");

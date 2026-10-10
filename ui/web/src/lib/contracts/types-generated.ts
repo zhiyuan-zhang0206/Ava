@@ -2403,10 +2403,10 @@ export interface paths {
          * Get Conversation Snapshot
          * @description Compose the three conversation reads in one round trip.
          *
-         *     Calls the standalone routes' own functions — no duplicated logic. A
-         *     nonexistent agent 404s through the timeline read, matching
-         *     `GET .../timeline` (token usage and pending tolerate absence, but are not
-         *     reached then).
+         *     Calls the functions the standalone routes are built from — no duplicated
+         *     logic — over one deserialized checkpoint. A nonexistent agent 404s
+         *     through the timeline read, matching `GET .../timeline` (token usage and
+         *     pending tolerate absence, but are not reached then).
          */
         get: operations["get_conversation_snapshot_api_agents__agent_id__conversation_snapshot_get"];
         put?: never;
@@ -3077,6 +3077,46 @@ export interface paths {
          * @description The understanding tree and the message units in a window; no window means the agent's whole lifetime.
          */
         get: operations["get_run_timeline_api_agents__agent_id__run_timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/insights/run-timeline/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Timeline Links
+         * @description The agent-to-agent events in a window with an end among the comma-separated `agents`.
+         */
+        get: operations["get_run_timeline_links_api_insights_run_timeline_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/insights/run-timeline/link-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Timeline Link Content
+         * @description The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`).
+         */
+        get: operations["get_run_timeline_link_content_api_insights_run_timeline_link_content_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7940,21 +7980,6 @@ export interface components {
             ts: string;
         };
         /**
-         * RunTimelineEvent
-         * @description A lifecycle marker from the audit record (spawn, restart, terminate).
-         */
-        RunTimelineEvent: {
-            /**
-             * Ts
-             * Format: date-time
-             */
-            ts: string;
-            /** Kind */
-            kind: string;
-            /** Label */
-            label: string | null;
-        };
-        /**
          * RunTimelineGeneration
          * @description What generating a node cost: the usage and wall time of its understanding calls.
          */
@@ -7969,6 +7994,57 @@ export interface components {
             output: number;
             /** Seconds */
             seconds: number;
+        };
+        /**
+         * RunTimelineLink
+         * @description One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.
+         *
+         *     A `notice` is an agent posting a notice to the user (`agent_notices`, the structured
+         *     agent-to-user channel): its receiver is None and `notice_id` its row. The text of a message or
+         *     notice is not in the list; `/run-timeline/link-content` serves it for the one that is selected.
+         *
+         *     `inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent
+         *     a fork was copied from (fork only; the sender is the agent that executed the fork).
+         */
+        RunTimelineLink: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "send_message" | "spawn" | "fork" | "terminate" | "restart" | "resurrect" | "notice";
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Sender */
+            sender: number | null;
+            /** Receiver */
+            receiver: number | null;
+            /** Inbound Id */
+            inbound_id: number | null;
+            /** Fork From */
+            fork_from: number | null;
+            /** Notice Id */
+            notice_id: number | null;
+        };
+        /**
+         * RunTimelineLinkContent
+         * @description GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one notice.
+         */
+        RunTimelineLinkContent: {
+            /** Title */
+            title: string | null;
+            /** Content */
+            content: string;
+        };
+        /**
+         * RunTimelineLinks
+         * @description GET /api/insights/run-timeline/links response: the events between agents (and with the user) with an end in the asked agents, oldest first.
+         */
+        RunTimelineLinks: {
+            /** Links */
+            links: components["schemas"]["RunTimelineLink"][];
         };
         /**
          * RunTimelineMessage
@@ -8070,8 +8146,7 @@ export interface components {
          *     `lifetime` is the agent's whole extent — the earliest and latest of its
          *     messages and understanding nodes — and the default window; None when it has
          *     neither. `nodes` are the tree's nodes intersecting the window, every level;
-         *     `units` are layer 0 intersecting it. `events` are optional lifecycle markers
-         *     in the window; they play no part in the extent.
+         *     `units` are layer 0 intersecting it.
          */
         RunTimelineResponse: {
             /** Agent Id */
@@ -8082,8 +8157,6 @@ export interface components {
             nodes: components["schemas"]["RunTimelineNode"][];
             /** Units */
             units: components["schemas"]["RunTimelineUnit"][];
-            /** Events */
-            events: components["schemas"]["RunTimelineEvent"][];
         };
         /**
          * RunTimelineUnit
@@ -8094,7 +8167,9 @@ export interface components {
          *     execution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the
          *     inclusive message-index span of the block's unit. Blocks without a time are not served.
          *     `parent` is the level-1 node whose span holds the block's first message, None for a block no
-         *     node covers (a compaction segment's head, the not yet summarized tail).
+         *     node covers (a compaction segment's head, the not yet summarized tail). `inbound_id` is the
+         *     `inbound_messages` row an inbound or note block was made from (the checkpoint's `ava_inbound_id`), None
+         *     for any other block and for a message that carries no stamp.
          *
          *     `context_tokens` is what the block occupies in the context (None while no request has read
          *     it), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether
@@ -8131,6 +8206,8 @@ export interface components {
             end: string;
             /** Source */
             source: string | null;
+            /** Inbound Id */
+            inbound_id: number | null;
             /** Preview */
             preview: string;
             /** Parent */
@@ -13330,6 +13407,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunTimelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_timeline_links_api_insights_run_timeline_links_get: {
+        parameters: {
+            query: {
+                agents: string;
+                from: string;
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTimelineLinks"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_timeline_link_content_api_insights_run_timeline_link_content_get: {
+        parameters: {
+            query?: {
+                inbound_id?: number | null;
+                notice_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTimelineLinkContent"];
                 };
             };
             /** @description Validation Error */

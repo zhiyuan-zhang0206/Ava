@@ -23,6 +23,8 @@ _PROXIED = (
     "/api/agents/{agent_id}/run-timeline",
     "/api/agents/{agent_id}/run-timeline/messages",
     "/api/agents/{agent_id}/run-timeline/context",
+    "/api/insights/run-timeline/links",
+    "/api/insights/run-timeline/link-content",
 )
 
 

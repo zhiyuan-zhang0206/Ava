@@ -10,6 +10,7 @@ lands just before / during a node is caught here.
 """
 
 import asyncio
+from typing import cast
 
 import psycopg
 import pytest
@@ -29,7 +30,9 @@ from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugins.extensions import ExtensionRegistry
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because
@@ -64,13 +67,20 @@ class TestHasPendingInterrupt:
         [("user", InterruptReason.USER), ("agent:9", InterruptReason.SYSTEM)],
     )
     async def test_reason_retains_first_pending_command(
-        self, db_conn, aops_pool: AsyncConnectionPool, source: str, reason: InterruptReason
+        self,
+        hosted_resources: HostedTurnResources,
+        db_conn,
+        aops_pool: AsyncConnectionPool,
+        source: str,
+        reason: InterruptReason,
     ):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel", source=source)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel", source="user")  # pyright: ignore[reportUnknownArgumentType]
         assert await pending_interrupt_reason(aops_pool, tid, incarnation=None, work=None) is reason
-        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
+        async with subscribe_interrupt(
+            aops_pool, tid, incarnation=None, work=None, resources=hosted_resources
+        ) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.reason is reason
             event.set(
@@ -146,46 +156,62 @@ class TestHasPendingInterrupt:
 
 class TestSubscribeInterrupt:
     @pytest.mark.flaky  # initial SELECT fire within a real IO window
-    async def test_fires_on_already_pending_cancel(self, db_conn, aops_pool: AsyncConnectionPool):
+    async def test_fires_on_already_pending_cancel(
+        self, hosted_resources: HostedTurnResources, db_conn, aops_pool: AsyncConnectionPool
+    ):
         # cancel landed BEFORE the node subscribed — the initial SELECT catches it.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel")  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
+        async with subscribe_interrupt(
+            aops_pool, tid, incarnation=None, work=None, resources=hosted_resources
+        ) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.is_set()
 
     @pytest.mark.flaky  # poll cadence + real DB IO window
     async def test_fires_on_cancel_inserted_after_subscribe(
-        self, db_conn, aops_pool: AsyncConnectionPool
+        self, hosted_resources: HostedTurnResources, db_conn, aops_pool: AsyncConnectionPool
     ):
         # cancel arrives mid-action -> the watcher's next DB poll catches it
         # within one poll interval.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
+        async with subscribe_interrupt(
+            aops_pool, tid, incarnation=None, work=None, resources=hosted_resources
+        ) as event:
             assert not event.is_set()
             _insert(db_conn, tid, "cancel")  # pyright: ignore[reportUnknownArgumentType]
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.is_set()
 
     @pytest.mark.flaky  # initial SELECT fire within a real IO window
-    async def test_fires_on_terminate(self, db_conn, aops_pool: AsyncConnectionPool):
+    async def test_fires_on_terminate(
+        self, hosted_resources: HostedTurnResources, db_conn, aops_pool: AsyncConnectionPool
+    ):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "terminate")  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
+        async with subscribe_interrupt(
+            aops_pool, tid, incarnation=None, work=None, resources=hosted_resources
+        ) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.is_set()
 
-    async def test_does_not_fire_on_chat(self, db_conn, aops_pool: AsyncConnectionPool):
+    async def test_does_not_fire_on_chat(
+        self, hosted_resources: HostedTurnResources, db_conn, aops_pool: AsyncConnectionPool
+    ):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "chat")  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
+        async with subscribe_interrupt(
+            aops_pool, tid, incarnation=None, work=None, resources=hosted_resources
+        ) as event:
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(event.wait(), timeout=0.5)
             assert not event.is_set()
 
     async def test_none_pool_never_fires(self):
         # container/eval: no inbound queue -> the wrapped action is uninterruptible.
-        async with subscribe_interrupt(None, 1, incarnation=None, work=None) as event:
+        async with subscribe_interrupt(
+            None, 1, incarnation=None, work=None, resources=None
+        ) as event:
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(event.wait(), timeout=0.3)
             assert not event.is_set()
@@ -198,7 +224,9 @@ class TestWatcherDecoupledFromSharedListener:
     watcher held the listener lock while the wake publish for a fresh inbound
     went unheard → 30s SELECT-recheck pickup)."""
 
-    async def test_watcher_never_uses_listener(self, db_conn, aops_pool: AsyncConnectionPool):
+    async def test_watcher_never_uses_listener(
+        self, hosted_resources: HostedTurnResources, db_conn, aops_pool: AsyncConnectionPool
+    ):
         """A listener whose surface raises on any touch still works: the
         watcher polls the DB only."""
         calls: list[str] = []
@@ -220,13 +248,19 @@ class TestWatcherDecoupledFromSharedListener:
         _ = _BoomListener()
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "cancel")  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None) as event:
+        async with subscribe_interrupt(
+            aops_pool, tid, incarnation=None, work=None, resources=hosted_resources
+        ) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
             assert event.is_set()
         assert not calls, f"watcher touched the listener: {calls}"
 
     async def test_cancel_surviving_watcher_exits_promptly(
-        self, db_conn, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+        self,
+        hosted_resources: HostedTurnResources,
+        db_conn,
+        aops_pool: AsyncConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
     ):
         """Even when a cancellation is swallowed (the cancel-vs-completion race
         that orphaned watchers in the shared-listener design), the stop belt
@@ -257,12 +291,12 @@ class TestWatcherDecoupledFromSharedListener:
         monkeypatch.setattr(mod, "pending_interrupt_reason", _swallow_once)  # pyright: ignore[reportUnknownArgumentType]
 
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None):
+        async with subscribe_interrupt(
+            aops_pool, tid, incarnation=None, work=None, resources=hosted_resources
+        ):
             await entered.wait()  # watcher is inside the SELECT when we exit
             watchers = [
-                t
-                for t in asyncio.all_tasks()
-                if "_watch_for_interrupt" in t.get_coro().__qualname__  # type: ignore[union-attr]
+                t for t in asyncio.all_tasks() if t.get_name().startswith("interrupt-watcher-")
             ]
         assert watchers, "expected the watcher task to be observable"
         _, pending = await asyncio.wait(watchers, timeout=3.0)
@@ -270,7 +304,11 @@ class TestWatcherDecoupledFromSharedListener:
         assert swallowed, "the swallow-once path never exercised — race not simulated"
 
     async def test_survived_cancel_never_fires_after_stop(
-        self, db_conn, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+        self,
+        hosted_resources: HostedTurnResources,
+        db_conn,
+        aops_pool: AsyncConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
     ):
         """P0-2 regression: in the lost-cancel race the watcher can return
         "normally" (the CancelledError was swallowed by a completing await).
@@ -316,7 +354,9 @@ class TestWatcherDecoupledFromSharedListener:
         monkeypatch.setattr(mod, "_watch_for_interrupt", _recording_watch)  # pyright: ignore[reportUnknownArgumentType]
 
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        async with subscribe_interrupt(aops_pool, tid, incarnation=None, work=None):
+        async with subscribe_interrupt(
+            aops_pool, tid, incarnation=None, work=None, resources=hosted_resources
+        ):
             await entered.wait()  # watcher is inside the SELECT when we exit
         # turn over; the swallow-once path must have been exercised
         assert swallowed, "race not simulated — cancel was delivered cleanly"
@@ -324,11 +364,7 @@ class TestWatcherDecoupledFromSharedListener:
         # the survivor must not have fired its event after exit
         assert not recorded_events[0].is_set(), "survivor fired the event after stop"
         # and it must be gone within a bounded window (stop belt)
-        watchers = [
-            t
-            for t in asyncio.all_tasks()
-            if "_watch_for_interrupt" in t.get_coro().__qualname__  # type: ignore[union-attr]
-        ]
+        watchers = [t for t in asyncio.all_tasks() if t.get_name().startswith("interrupt-watcher-")]
         if watchers:
             _, pending = await asyncio.wait(watchers, timeout=3.0)
             assert not pending, "survivor still running after stop"
@@ -341,7 +377,7 @@ class TestWatcherExitBounded:
 
     @pytest.mark.flaky  # wall-clock upper-bound assertion (elapsed < 2.0) on a bounded exit
     async def test_exit_abandons_wedged_watcher(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records
+        self, hosted_resources: HostedTurnResources, monkeypatch: pytest.MonkeyPatch, loguru_records
     ):
         """A watcher whose cancellation cleanup never unwinds → exit returns
         within the bounded window and logs the abandonment."""
@@ -359,15 +395,21 @@ class TestWatcherExitBounded:
         monkeypatch.setattr(mod, "_watch_for_interrupt", _wedged)
         monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 0.2)
         t0 = asyncio.get_running_loop().time()
-        async with subscribe_interrupt(object(), 1, incarnation=None, work=None):  # type: ignore[arg-type]
+        async with subscribe_interrupt(
+            cast(AsyncConnectionPool, object()),
+            1,
+            incarnation=None,
+            work=None,
+            resources=hosted_resources,
+        ):
             await asyncio.sleep(
                 0
             )  # let the watcher actually start (an unstarted task cancels instantly)
         elapsed = asyncio.get_running_loop().time() - t0
-        assert elapsed < 2.0, f"exit took {elapsed:.2f}s — the bounded abandon did not bound"
-        abandons = [r for r in loguru_records if "abandoning" in r["message"]]
+        assert elapsed < 2.0, f"exit took {elapsed:.2f}s — the bounded handoff did not bound"
+        abandons = [r for r in loguru_records if "retained by its service" in r["message"]]
         assert abandons
-        # INFO: the abandonment is a host-stall companion, not its own signal
+        # INFO: the retained handoff is a host-stall companion
         # (2026-10-03 triage #13).
         assert abandons[0]["level"].name == "INFO"  # pyright: ignore[reportUnknownMemberType]
         # The report must name WHERE the orphan is wedged: the await chain
@@ -379,30 +421,37 @@ class TestWatcherExitBounded:
         )
         release.set()  # let the orphan unwind so the loop closes clean
         await asyncio.sleep(0.01)
-        # The orphan's eventual fate is logged with its delay since abandonment.
+        # The retained watcher reports its eventual outcome and handoff delay.
         fates = [
-            r["message"] for r in loguru_records if "abandoned interrupt watcher" in r["message"]
+            r["message"] for r in loguru_records if "retained interrupt watcher" in r["message"]
         ]
-        assert len(fates) == 1, f"expected one orphan-fate line, got {fates}"  # pyright: ignore[reportUnknownArgumentType]
+        assert len(fates) == 1, f"expected one retained-watcher result, got {fates}"  # pyright: ignore[reportUnknownArgumentType]
         assert "cancelled" in fates[0]
 
     async def test_exit_still_reaps_prompt_watcher(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records
+        self, hosted_resources: HostedTurnResources, monkeypatch: pytest.MonkeyPatch, loguru_records
     ):
         """The normal path is unchanged: a healthy watcher unwinds on cancel
-        immediately and no abandonment is logged."""
+        immediately and no service handoff is logged."""
         from agent.graph import interrupt as mod
 
         async def _healthy(*_a: object, **_k: object) -> None:
             await asyncio.sleep(3600)
 
         monkeypatch.setattr(mod, "_watch_for_interrupt", _healthy)
-        async with subscribe_interrupt(object(), 1, incarnation=None, work=None):  # type: ignore[arg-type]
+        async with subscribe_interrupt(
+            cast(AsyncConnectionPool, object()),
+            1,
+            incarnation=None,
+            work=None,
+            resources=hosted_resources,
+        ):
             await asyncio.sleep(0)  # watcher running, suspended in its sleep
-        assert not any("abandoning" in r["message"] for r in loguru_records)
+        assert not any("retained by its service" in r["message"] for r in loguru_records)
 
 
 async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
+    hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -455,6 +504,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     publisher, model = MagicMock(), MagicMock()
     runtime = Runtime(
         context=AvaContext(
+            hosted_resources=hosted_resources,
             ops_pool=aops_pool,
             llm=model,
             event_publisher=publisher,
@@ -510,6 +560,7 @@ async def test_model_completion_and_cancel_same_tick_discards_result() -> None:
 
 @pytest.mark.parametrize("marker", ["compact_summary", "compact_request"])
 async def test_compaction_returns_through_claim_then_generates_before_compacting_again(  # noqa: PLR0915 -- one checkpoint/cancel/resume transition proof.
+    hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -584,6 +635,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
     runtime = Runtime(
         context=AvaContext(
+            hosted_resources=hosted_resources,
             ops_pool=aops_pool,
             llm=model,
             event_publisher=publisher,

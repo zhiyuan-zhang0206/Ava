@@ -1,4 +1,4 @@
-"""Session entrypoint for a gateway-hosted schedule: ``python -m gateway.schedules.runner <id>``.
+"""Schedule execution engine, composed by ``services.wake.schedule_manager.runner``.
 
 Loads schedule ``<id>`` from the DB, materializes its script under
 ``$AVA_HOME/schedules/<id>/``, binds a ``schedule:<id>`` actor identity (so the
@@ -42,6 +42,7 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
 
@@ -50,7 +51,7 @@ from loguru import logger
 import base.host.proc
 from base.config import settings
 from base.db import Database
-from base.paths import ava_home, prod_service_checkout_error
+from base.paths import ava_home
 
 
 # A .py schedule script is run in-process, so a single call that hangs (a
@@ -241,7 +242,7 @@ def _restore_park_detection() -> None:
     The wrapper exists only for the stall guard's judgment window; leaving it
     installed past the guard's stop swaps `time.sleep` for a Python function
     process-wide in this runner (the runner is its own process — one schedule
-    per `python -m gateway.schedules.runner <id>` session — but a
+    per `python -m services.wake.schedule_manager.runner <id>` session — but a
     ``.py`` schedule script runs in-process here, so the swap would leak into
     the rest of its run), which a later ``assert time.sleep is _REAL_SLEEP``
     guard in the test suite trips on. Idempotent and safe to call without a
@@ -475,34 +476,33 @@ def _record_script_exit(
     return code
 
 
-def run(schedule_id: int, revision: int | None = None) -> int:
+def run(
+    schedule_id: int,
+    revision: int | None = None,
+    *,
+    bind_actor: Callable[[int], None],
+    load_plugins: Callable[[], None],
+) -> int:
     """Materialize + run the schedule. Returns a process exit code."""
-    return _run(Database.from_settings(), schedule_id, revision)
-
-
-def _bind_schedule_actor(schedule_id: int) -> None:
-    """Bind a context whose actor is this schedule so ava.agents.* attributes its spawns/wakes to
-    `schedule:<id>` (a .py script, run in-process, shares this binding)."""
-    import ava
-    from ava.sdk_surface import process_context
-    from base.agents.context import AvaContext
-    from base.agents.context.identity import AgentIdentity
-
-    ava.bind_context(
-        AvaContext(
-            identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
-            clients=process_context.process_clients(),
-        )
+    return _run(
+        Database.from_settings(),
+        schedule_id,
+        revision,
+        bind_actor=bind_actor,
+        load_plugins=load_plugins,
     )
 
 
 def _run_python_script(
-    database: Database, schedule_id: int, run_id: int | None, script_path: Path
+    database: Database,
+    schedule_id: int,
+    run_id: int | None,
+    script_path: Path,
+    *,
+    load_plugins: Callable[[], None],
 ) -> None:
     """Run with isolated argv and collect the watchdog before any terminal write."""
     import runpy
-
-    import ava
 
     # Load plugin namespaces (ava.tasks etc.) into this process before the
     # in-process script runs. This runner never builds the agent graph, so
@@ -517,7 +517,7 @@ def _run_python_script(
     # so a clean return cannot be overtaken by a spurious kill.
     _patch_park_detection()
     guard = _start_stall_guard(database, schedule_id, run_id)
-    # The gateway launches this runner as `python -m gateway.schedules.runner
+    # The gateway launches this runner as `python -m services.wake.schedule_manager.runner
     # <id>`, so sys.argv carries the schedule id. The script must not
     # inherit that runner-only argv: hand it the argv `python <script>`
     # would produce — just its own path — and restore the runner's argv
@@ -527,7 +527,7 @@ def _run_python_script(
     runner_argv = sys.argv
     sys.argv = [str(script_path)]
     try:
-        ava.ensure_plugins_loaded()
+        load_plugins()
         runpy.run_path(str(script_path), run_name="__main__")
     finally:
         sys.argv = runner_argv
@@ -552,7 +552,14 @@ def _run_python_script(
                 os._exit(1)
 
 
-def _run(database: Database, schedule_id: int, revision: int | None = None) -> int:
+def _run(
+    database: Database,
+    schedule_id: int,
+    revision: int | None = None,
+    *,
+    bind_actor: Callable[[int], None],
+    load_plugins: Callable[[], None],
+) -> int:
     loaded = _load(database, schedule_id, revision)
     if loaded is None:
         logger.warning("Schedule {} is gone or disabled; nothing to run", schedule_id)
@@ -565,7 +572,7 @@ def _run(database: Database, schedule_id: int, revision: int | None = None) -> i
     script_path = work_dir / script_name
     script_path.write_text(script)
 
-    _bind_schedule_actor(schedule_id)
+    bind_actor(schedule_id)
 
     # Run history: one row per process execution, opened in-progress (ok=NULL)
     # here and closed with the outcome on every exit path below — including the
@@ -578,7 +585,9 @@ def _run(database: Database, schedule_id: int, revision: int | None = None) -> i
 
     try:
         if script_name.endswith(".py"):
-            _run_python_script(database, schedule_id, run_id, script_path)
+            _run_python_script(
+                database, schedule_id, run_id, script_path, load_plugins=load_plugins
+            )
             _finish_completed(
                 database, schedule_id, run_id
             )  # clean return => finished, not crashed
@@ -628,23 +637,5 @@ def _run(database: Database, schedule_id: int, revision: int | None = None) -> i
         return 1
 
 
-def main() -> None:
-    if len(sys.argv) not in (2, 3):
-        logger.error("Usage: python -m gateway.schedules.runner <schedule_id> [revision]")
-        raise SystemExit(2)
-    # issue #194: refuse to run from a foreign checkout (a dev worktree
-    # against the prod home) — the runner's own repo root anchors every
-    # subprocess it spawns, so a worktree-anchored runner executes un-reviewed
-    # code and dies silently when the worktree is removed.
-    refusal = prod_service_checkout_error(Path(__file__).resolve().parents[2])
-    if refusal is not None:
-        logger.error("schedule runner refused: {}", refusal)
-        raise SystemExit(3)
-    revision = int(sys.argv[2]) if len(sys.argv) == 3 else None
-    if revision is not None and revision < 0:
-        raise SystemExit(2)
-    raise SystemExit(run(int(sys.argv[1]), revision))
-
-
 if __name__ == "__main__":
-    main()
+    raise SystemExit("Use python -m services.wake.schedule_manager.runner <schedule_id> [revision]")

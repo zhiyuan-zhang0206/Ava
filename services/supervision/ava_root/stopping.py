@@ -7,6 +7,7 @@ leader exits, root does not enumerate descendants or reuse its old group number.
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import signal
 from dataclasses import dataclass
@@ -22,6 +23,15 @@ class SupervisorConfig:
 
     stop_timeout_s: float = 10.0
     """Default TERM window; only explicit force permits a later KILL."""
+
+    watch_join_timeout_s: float = 0.2
+    """Independent bounded observation of retained generation watchers at shutdown."""
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.stop_timeout_s) or self.stop_timeout_s <= 0:
+            raise ValueError("stop_timeout_s must be finite and positive")
+        if not math.isfinite(self.watch_join_timeout_s) or self.watch_join_timeout_s < 0:
+            raise ValueError("watch_join_timeout_s must be finite and nonnegative")
 
 
 class StoppingMixin:

@@ -33,7 +33,10 @@ def _load_ava_code_plugin(
     from ava_builtins.plugins.ava_code import plugin
     from base.agents.sdk import call_policy
 
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
     install.install(
         ExtensionRegistry((("ava_code", plugin.contribute()),)),
@@ -53,7 +56,10 @@ def _load_ava_fleet_plugin(
     from ava_builtins.plugins.ava_fleet import plugin
     from base.agents.sdk import call_policy
 
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
     install.install(
         ExtensionRegistry((("ava_fleet", plugin.contribute()),)),

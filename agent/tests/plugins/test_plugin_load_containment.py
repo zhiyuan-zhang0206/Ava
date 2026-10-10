@@ -205,6 +205,7 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
     from agent.extensions import load_extensions
     from ava.sdk_surface import install, settings
     from base.agents.messages.delivery_outbox import logical_key
+    from base.agents.sdk import call_policy
     from base.lm.catalog import CatalogBuilder
 
     catalog = CatalogBuilder().build()
@@ -219,10 +220,15 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
         assert settings.config_authority() is config_authority
         sender = installation.delivery_sender
         assert sender is not None
+        sampling = installation.sampling
+        sampling.reader = call_policy.SamplingPolicy
+        sampling.value = sampling.read()
+        refresh = sampling.worker
         key = logical_key(sender=sender, agent_id=7, source="watcher:7", content="notice")
         load_extensions(catalog=catalog, authority=config_authority)
         replacement = install.installed()
         assert replacement is not None and replacement.delivery_sender is sender
+        assert replacement.sampling is sampling and sampling.worker is refresh
         assert logical_key(sender=sender, agent_id=7, source="watcher:7", content="notice") == key
     finally:
         install.uninstall()

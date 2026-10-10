@@ -89,7 +89,7 @@ describe("row layouts", () => {
   const T = Date.parse("2026-10-04T12:00:00Z");
   const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
   const unit = (i0: number, from: number, to: number, own: number | null, total: number | null): RunTimelineUnit => ({
-    kind: "text", i0, i1: i0, start: iso(from), end: iso(to), source: null, preview: "", parent: null,
+    kind: "text", i0, i1: i0, start: iso(from), end: iso(to), source: null, inbound_id: null, preview: "", parent: null,
     context_tokens: own, generation_tokens: null, estimated: null, session: 0, context_total: total, request: null,
   });
   const node = (id: string, from: number, to: number): RunTimelineNode => ({

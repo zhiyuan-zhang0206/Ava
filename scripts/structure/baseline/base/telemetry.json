@@ -1,7 +1,5 @@
 {
   "ambient_state": {
-    "base/telemetry/emitter.py::thread:_EventPipeline.__init__": 1,
-    "base/telemetry/emitter_sync.py::thread:synchronize": 1,
     "base/telemetry/otlp/telemetry_otlp.py::thread:_OtlpBackend._ensure": 1,
     "base/telemetry/tracing.py::thread:_start_arm_thread": 1,
     "base/telemetry/tracing.py::thread:_start_collector_retry": 1

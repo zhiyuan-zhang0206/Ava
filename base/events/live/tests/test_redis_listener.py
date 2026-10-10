@@ -251,16 +251,15 @@ class TestWaitOneBudgetAndCancel:
         warning — the genuinely-stuck case the grace-padded backstop targets."""
         listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=7002)
 
-        async def _instant_open() -> object:
-            return object()  # stand-in pubsub, only handed to the wedged consume
-
+        # Use the actual listener-owned subscription; an unattached object no
+        # longer satisfies admission to a consume generation.
+        await listener.ensure_listening()
         started = asyncio.Event()
 
         async def _wedged_consume(pubsub: object, timeout: float) -> None:
             started.set()
             await asyncio.sleep(3600)  # never ticks a deadline; cancellable
 
-        monkeypatch.setattr(listener, "_ensure_subscribed", _instant_open)
         monkeypatch.setattr(listener, "_consume_one", _wedged_consume)
 
         t0 = asyncio.get_running_loop().time()
@@ -268,6 +267,8 @@ class TestWaitOneBudgetAndCancel:
             await asyncio.wait_for(listener.wait_one(timeout=0.3), timeout=8.0)
         except TimeoutError:
             pytest.fail("wait_one hung past 8s on a 0.3s budget — abandon backstop lost")
+        finally:
+            await listener.stop()
         elapsed = asyncio.get_running_loop().time() - t0
 
         assert started.is_set(), "the consume attempt must actually have started"

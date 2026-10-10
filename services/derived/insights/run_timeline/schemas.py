@@ -87,7 +87,9 @@ class RunTimelineUnit(BaseModel):
     execution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the
     inclusive message-index span of the block's unit. Blocks without a time are not served.
     `parent` is the level-1 node whose span holds the block's first message, None for a block no
-    node covers (a compaction segment's head, the not yet summarized tail).
+    node covers (a compaction segment's head, the not yet summarized tail). `inbound_id` is the
+    `inbound_messages` row an inbound or note block was made from (the checkpoint's `ava_inbound_id`), None
+    for any other block and for a message that carries no stamp.
 
     `context_tokens` is what the block occupies in the context (None while no request has read
     it), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether
@@ -111,6 +113,7 @@ class RunTimelineUnit(BaseModel):
     start: datetime
     end: datetime
     source: str | None
+    inbound_id: int | None
     preview: str
     parent: str | None
     context_tokens: int | None
@@ -121,14 +124,46 @@ class RunTimelineUnit(BaseModel):
     request: RunTimelineUsage | None
 
 
-class RunTimelineEvent(BaseModel):
-    """A lifecycle marker from the audit record (spawn, restart, terminate)."""
+LinkKind = Literal["send_message", "spawn", "fork", "terminate", "restart", "resurrect", "notice"]
+
+
+class RunTimelineLink(BaseModel):
+    """One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.
+
+    A `notice` is an agent posting a notice to the user (`agent_notices`, the structured
+    agent-to-user channel): its receiver is None and `notice_id` its row. The text of a message or
+    notice is not in the list; `/run-timeline/link-content` serves it for the one that is selected.
+
+    `inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent
+    a fork was copied from (fork only; the sender is the agent that executed the fork).
+    """
 
     model_config = ConfigDict(frozen=True)
 
+    kind: LinkKind
     ts: datetime
-    kind: str
-    label: str | None
+    sender: int | None
+    receiver: int | None
+    inbound_id: int | None
+    fork_from: int | None
+    notice_id: int | None
+
+
+class RunTimelineLinkContent(BaseModel):
+    """GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one notice."""
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str | None
+    content: str
+
+
+class RunTimelineLinks(BaseModel):
+    """GET /api/insights/run-timeline/links response: the events between agents (and with the user) with an end in the asked agents, oldest first."""
+
+    model_config = ConfigDict(frozen=True)
+
+    links: list[RunTimelineLink]
 
 
 class RunTimelineResponse(BaseModel):
@@ -137,8 +172,7 @@ class RunTimelineResponse(BaseModel):
     `lifetime` is the agent's whole extent — the earliest and latest of its
     messages and understanding nodes — and the default window; None when it has
     neither. `nodes` are the tree's nodes intersecting the window, every level;
-    `units` are layer 0 intersecting it. `events` are optional lifecycle markers
-    in the window; they play no part in the extent.
+    `units` are layer 0 intersecting it.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -148,7 +182,6 @@ class RunTimelineResponse(BaseModel):
     lifetime: RunTimelineWindow | None
     nodes: list[RunTimelineNode]
     units: list[RunTimelineUnit]
-    events: list[RunTimelineEvent]
 
 
 RunTimelinePartKind = Literal[

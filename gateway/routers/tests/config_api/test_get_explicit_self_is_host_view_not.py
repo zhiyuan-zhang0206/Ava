@@ -14,7 +14,6 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.host.env import audit, runtime_config
 from gateway.app import app
-from gateway.routers.configuration import runtime as config_router
 from gateway.routers.tests.test_config_api import REMOTE, _seed_machine
 from gateway.routers.tests.test_config_api import (
     _clean_overrides as _clean_overrides,
@@ -234,11 +233,6 @@ def test_get_config_audit_default_last_comes_from_display_config(
     default, not a hard-coded cap."""
     from base.agents import MachineNotRegistered
 
-    def _known(_target: str) -> None:
-        return None
-
-    monkeypatch.setattr(config_router, "_assert_machine_known", _known)
-
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
@@ -274,11 +268,6 @@ def test_get_config_audit_reads_own_records(
     """A self audit read returns this box's newest records, tagged with its machine."""
     from base.agents import MachineNotRegistered
 
-    def _known(_target: str) -> None:
-        return None
-
-    monkeypatch.setattr(config_router, "_assert_machine_known", _known)
-
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
@@ -313,14 +302,27 @@ async def test_get_config_audit_all_merges_runners_newest_first(
     stamp = {"m1": "01", "m2": "02", machine_name(): "00"}
     called: list[str] = []
 
-    async def _fake_dispatch(target: str, last: int) -> ConfigAuditReadResult:
-        called.append(target)
+    async def _fake_dispatch(
+        db: object, *, target_machine: str, kind: str, payload: dict[str, object]
+    ) -> dict[str, object]:
+        assert kind == "config_audit_read"
+        assert payload == {"last": 2}
+        called.append(target_machine)
         return ConfigAuditReadResult(
-            machine=target,
-            records=[{"ts": f"2026-09-16T00:0{stamp[target]}:00+00:00", "site": f"s-{target}"}],
-        )
+            machine=target_machine,
+            records=[
+                {
+                    "ts": f"2026-09-16T00:0{stamp[target_machine]}:00+00:00",
+                    "site": f"s-{target_machine}",
+                }
+            ],
+        ).model_dump()
 
-    monkeypatch.setattr(config_router, "_dispatch_config_audit_read", _fake_dispatch)
+    def _roles(_db: object, _target: str) -> list[str]:
+        return ["agent-runner"]
+
+    monkeypatch.setattr("base.cluster.machines.lookup_role", _roles)
+    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
     def _runners(_db: object) -> list[tuple[str, str | None]]:
         return [("m1", None), ("m2", None)]

@@ -9,7 +9,7 @@ tags: []
 
 Launched by the `schedule-manager` service ([[schedules.ava.okf.md]]) inside the session `ava-schedule-<id>`.
 
-- **In-session entrypoint**: `.venv/bin/python -m gateway.schedules.runner <id>`
+- **In-session entrypoint**: `.venv/bin/python -m services.wake.schedule_manager.runner <id>`
 - Loads the schedule's script + command from the DB
 - Materializes the script to `$AVA_HOME/schedules/<id>/`
 - Binds the `schedule:<id>` actor identity (so `ava.agents.*` invocations are attributed to the schedule)
@@ -17,6 +17,17 @@ Launched by the `schedule-manager` service ([[schedules.ava.okf.md]]) inside the
 - **Stall guard**: a deepest non-park frame stable beyond `schedule_stall_timeout_seconds` triggers cleanup. Wrapped sleep/sleep-family waits, subprocess `_wait` and selectors' `select` directly inside `_communicate` park; caller `timeout=` bounds child waits when supplied. Spawn, conversion, stdin flush and other selectors stay guarded. Leaving a park resets the budget.
 - **Hard-exit cleanup**: before failure writes, capture descendants and verify birth identity + current ancestry. TERM, 3s grace, KILL survivors (recheck identity), reap up to 5s. Runner/shared PTY group excluded; `setsid()` covered. Already-reparented daemons, pre-signal ancestry/identity mismatches and later births are exempt. The runner owns the guard, which owns the admitted hard-exit action. That action owns a recorder handle and a single shared deadline, `schedule_stall_exit_record_deadline_seconds` (default 10s); always hard-exit 1. An abandoned NULL run row is closed as `interrupted` by manager reconcile.
 - **Exit means terminal**: script exits cleanly with rc=0 → runner writes `status='completed'` before exiting (the resident process finished, manager will not restart); non-zero rc / uncaught exception → traceback written to `schedules.last_error` (latest crash) and, tail-truncated to 3000 chars after a `crashed: <ExceptionName>` first line, to that run's `schedule_runs.note` (one per crash; the session log is gone with the session), handed to manager to restart; SIGTERM/SIGHUP active kill → nothing written, not counted as a crash
+
+The process entrypoint statically imports the SDK and supplies two narrow callbacks
+to `gateway/schedules/runner.py`: actor binding and plugin loading. The engine
+materializes the script, binds its actor, then opens the run-history row. SDK
+policy readers retain their normal live read timing; the gateway HTTP process
+does not construct this schedule SDK owner. The manager launches the new entrypoint
+for every new session. The retired `gateway.schedules.runner` CLI exits 1 with
+the replacement command; existing schedule processes keep their original code.
+The manager still recognizes their recorded revision and adopts matching live
+sessions without reaping or replaying them. An old manager must be replaced before
+launching new sessions from a checkout that has retired its old runner command.
 
 The guard starts before plugin loading. Script completion closes stall admission
 under the same lock used to claim a real stall, wakes the guard, and joins its

@@ -60,7 +60,12 @@ def _deliver_telemetry_before_detach() -> None:
     try:
         from base import telemetry
 
-        telemetry.sync(bounded=True)
+        result = telemetry.sync(bounded=True)
+        if result.status is telemetry.DrainStatus.UNFINISHED:
+            logger.warning(
+                "external attachment: ordinary telemetry delivery is unfinished; "
+                "queued records may be lost or land later"
+            )
         if "base.telemetry.otlp.telemetry_otlp" in sys.modules:
             from base.telemetry.otlp import telemetry_otlp
 
@@ -68,7 +73,7 @@ def _deliver_telemetry_before_detach() -> None:
     except Exception:
         logger.opt(exception=True).warning(
             "external attachment: telemetry delivery before detach failed; "
-            "queued records stay in the JSONL mirror"
+            "ordinary queued records may be lost or land later"
         )
 
 

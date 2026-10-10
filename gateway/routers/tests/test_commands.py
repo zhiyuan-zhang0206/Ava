@@ -2,31 +2,29 @@
 
 from collections.abc import Callable
 from typing import NoReturn
+from unittest.mock import MagicMock
 
 import pytest
-from fastapi import Request
 from fastapi.testclient import TestClient
 
 from ava.skills import composer_commands as ava_commands
 from gateway.app import app
-from gateway.routers import commands as commands_router
 from ops.cluster import rpc as cluster_rpc
 
 
-def _runner_a(_request: Request, _agent_id: int) -> str:
-    return "runner-a"
+def _agent_pool(machine: str | None) -> MagicMock:
+    pool = MagicMock()
+    cursor = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = (machine,) if machine else None
+    return pool
 
 
-def _missing_agent(_request: Request, _agent_id: int) -> None:
-    return None
+def _runner_unreachable() -> cluster_rpc.ClusterOpUnreachable:
+    return cluster_rpc.ClusterOpUnreachable("runner down")
 
 
-def _runner_unreachable() -> commands_router._cluster_rpc.ClusterOpUnreachable:
-    return commands_router._cluster_rpc.ClusterOpUnreachable("runner down")
-
-
-def _runner_failed() -> commands_router._cluster_rpc.ClusterOpFailed:
-    return commands_router._cluster_rpc.ClusterOpFailed({"error": "unknown op"})
+def _runner_failed() -> cluster_rpc.ClusterOpFailed:
+    return cluster_rpc.ClusterOpFailed({"error": "unknown op"})
 
 
 def test_endpoint_returns_command_metadata(monkeypatch: pytest.MonkeyPatch):
@@ -47,8 +45,6 @@ def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.Mo
     """An agent-scoped request forwards to its runner's new view op."""
     seen: dict[str, object] = {}
 
-    monkeypatch.setattr(commands_router, "_agent_machine", _runner_a)
-
     async def _dispatch(
         _db: object, machine: str, kind: str, payload: dict[str, int], *, timeout_s: float
     ) -> dict[str, object]:
@@ -62,7 +58,8 @@ def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.Mo
         }
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _dispatch)
-    with TestClient(app) as client:
+    with TestClient(app) as client, monkeypatch.context() as patch:
+        patch.setattr(app.state, "db_pool", _agent_pool("runner-a"))
         resp = client.get("/api/commands?agent_id=42")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "project", "description": "d", "instruction_hint": "h"}]
@@ -82,7 +79,6 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
     failure: Callable[[], Exception],
 ):
     """A down or version-skewed runner leaves autocomplete usable from the local list."""
-    monkeypatch.setattr(commands_router, "_agent_machine", _runner_a)
     monkeypatch.setattr(
         ava_commands,
         "discover_commands",
@@ -93,7 +89,8 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
         raise failure()
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unavailable)
-    with TestClient(app) as client:
+    with TestClient(app) as client, monkeypatch.context() as patch:
+        patch.setattr(app.state, "db_pool", _agent_pool("runner-a"))
         resp = client.get("/api/commands?agent_id=42")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "local", "description": "d", "instruction_hint": "h"}]
@@ -101,13 +98,13 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
 
 def test_endpoint_agent_view_missing_agent_falls_back_locally(monkeypatch: pytest.MonkeyPatch):
     """A missing agents_meta row takes the same backward-compatible fallback."""
-    monkeypatch.setattr(commands_router, "_agent_machine", _missing_agent)
     monkeypatch.setattr(
         ava_commands,
         "discover_commands",
         lambda: [{"name": "local", "description": "d", "instruction_hint": "h", "body": "b"}],
     )
-    with TestClient(app) as client:
+    with TestClient(app) as client, monkeypatch.context() as patch:
+        patch.setattr(app.state, "db_pool", _agent_pool(None))
         resp = client.get("/api/commands?agent_id=999")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "local", "description": "d", "instruction_hint": "h"}]

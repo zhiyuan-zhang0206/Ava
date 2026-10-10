@@ -41,7 +41,9 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.lm.registry import ModelSpec
+from base.native_process.turn_identity import HostedTurnResources
 from tests.fixtures.model_catalog import AddModels
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -64,10 +66,13 @@ async def _one_try(
     )
 
 
-def _make_runtime(llm: MagicMock, *, model_catalog: ModelCatalog) -> Runtime[AvaContext]:
+def _make_runtime(
+    hosted_resources: HostedTurnResources, llm: MagicMock, *, model_catalog: ModelCatalog
+) -> Runtime[AvaContext]:
     """Same pattern as test_cancel.py: fake llm returns itself via bind_tools (chain method)."""
     llm.bind_tools.return_value = llm
     ctx = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,
         event_publisher=MagicMock(),
@@ -80,6 +85,7 @@ def _make_runtime(llm: MagicMock, *, model_catalog: ModelCatalog) -> Runtime[Ava
 
 
 async def test_stall_at_ttft_raises_with_ttft_marker(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -107,10 +113,16 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
+        await _one_try(
+            state,
+            _make_runtime(
+                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+            ),
+        )
 
 
 async def test_stall_mid_stream_raises_with_chunk_count(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -140,10 +152,16 @@ async def test_stall_mid_stream_raises_with_chunk_count(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
+        await _one_try(
+            state,
+            _make_runtime(
+                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+            ),
+        )
 
 
 async def test_normal_stream_completes_no_stall_timeout(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -173,7 +191,10 @@ async def test_normal_stream_completes_no_stall_timeout(
     # No raise — normal stream completed. The specific return value is handled by
     # llm_node's existing path (BEFORE_EXEC); this test only locks "not falsely
     # killed by stall timeout"
-    result = await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
+    result = await _one_try(
+        state,
+        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog),
+    )
     assert result is not None
 
 
@@ -294,6 +315,7 @@ async def test_none_disables_stream_total_timeout(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -320,7 +342,12 @@ async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
 
     started = time.monotonic()
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
+        await _one_try(
+            state,
+            _make_runtime(
+                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+            ),
+        )
     elapsed = time.monotonic() - started
     # ~2 x 0.1s; the 600s fallback ceiling would make this test hang for 20min.
     assert elapsed < 5.0
@@ -339,6 +366,7 @@ class _FakeOverloadedError(openai.RateLimitError):
 
 
 async def test_overload_fallback_timeout_is_not_a_stall_pair(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -363,11 +391,17 @@ async def test_overload_fallback_timeout_is_not_a_stall_pair(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(TimeoutError) as exc_info:
-        await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
+        await _one_try(
+            state,
+            _make_runtime(
+                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+            ),
+        )
     assert not isinstance(exc_info.value, LLMStreamStallPairError)
 
 
 async def test_stall_events_carry_provider_health_fields(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
@@ -403,7 +437,12 @@ async def test_stall_events_carry_provider_health_fields(
     try:
         settings.lm.llm_model = "deepseek-v4-flash"
         with pytest.raises(LLMStreamStallPairError):
-            await _one_try(state, _make_runtime(fake_llm, model_catalog=model_catalog))
+            await _one_try(
+                state,
+                _make_runtime(
+                    hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                ),
+            )
     finally:
         settings.lm.llm_model = original
 
@@ -424,7 +463,10 @@ async def test_stall_events_carry_provider_health_fields(
 
 
 async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
-    fake_cancel_event: asyncio.Event, *, model_catalog: ModelCatalog
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: asyncio.Event,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The transient wall-clock budget must not end a delayed stall sequence at
     node entry (its own streak bounds it); without an active streak the same
@@ -446,7 +488,7 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     ledger.record_stall_pair_streak("7", 1)
     result = await _one_try(
         state,
-        _make_runtime(fake_llm, model_catalog=model_catalog),
+        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog),
         attempt=2,
         started_ago=spent,
         ledger=ledger,
@@ -458,7 +500,9 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     with pytest.raises(LLMRetryBudgetExceededError):
         await _one_try(
             state,
-            _make_runtime(fake_llm, model_catalog=model_catalog),
+            _make_runtime(
+                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+            ),
             attempt=2,
             started_ago=spent,
         )

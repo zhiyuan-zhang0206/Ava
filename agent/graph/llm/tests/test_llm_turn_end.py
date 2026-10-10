@@ -27,14 +27,17 @@ from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
-def _runtime_with_redis(catalog: ModelCatalog):
+def _runtime_with_redis(hosted_resources: HostedTurnResources, catalog: ModelCatalog):
     """MagicMock runtime + functional ops_pool (node_lifecycle reads chat
     anchors on enter; subscribe_interrupt's watcher reads pending interrupts)."""
     runtime = MagicMock()
     runtime.execution_info = None
     runtime.context = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
@@ -49,7 +52,10 @@ def _config_with_thread() -> RunnableConfig:
 
 
 async def test_turn_end_ok_false_record_carries_exception(
-    monkeypatch: pytest.MonkeyPatch, loguru_records, model_catalog: ModelCatalog
+    hosted_resources: HostedTurnResources,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records,
+    model_catalog: ModelCatalog,
 ) -> None:
     """`_llm_node_impl` raises → finally uses logger.opt(exception=True) so that
     record["exception"] is not None, allowing downstream _postgres_sink to inject the traceback."""
@@ -62,7 +68,7 @@ async def test_turn_end_ok_false_record_carries_exception(
     with pytest.raises(RuntimeError, match="simulated LLM timeout"):
         await llm_attempt(
             state=MagicMock(messages=[]),
-            runtime=_runtime_with_redis(model_catalog),
+            runtime=_runtime_with_redis(hosted_resources=hosted_resources, catalog=model_catalog),
             config=_config_with_thread(),
             attempt=Attempt(1, time.time()),
             ledger=LlmLedger(),
@@ -83,7 +89,10 @@ async def test_turn_end_ok_false_record_carries_exception(
 
 
 async def test_turn_end_ok_true_record_no_exception(
-    monkeypatch: pytest.MonkeyPatch, loguru_records, model_catalog: ModelCatalog
+    hosted_resources: HostedTurnResources,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records,
+    model_catalog: ModelCatalog,
 ) -> None:
     """Normal path ok=True: uses logger.info without exc_info, record["exception"] is None,
     payload must not bloat with traceback/exception_* fields."""
@@ -96,7 +105,7 @@ async def test_turn_end_ok_true_record_no_exception(
 
     result = await llm_node(
         state=MagicMock(),
-        runtime=_runtime_with_redis(model_catalog),
+        runtime=_runtime_with_redis(hosted_resources=hosted_resources, catalog=model_catalog),
         config=_config_with_thread(),
         ledger=LlmLedger(),
     )

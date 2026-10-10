@@ -1,43 +1,28 @@
 """Agent-host daemon — the supervised process that runs every local agent's turns.
 
-Phase 1 of `future/infra/lifecycle/agent-runner-as-server.md`, and the piece that makes the
-other three real: `dispatcher.py` turns wakes into turn tasks, `host.py` runs a
-turn, and this module is the long-running process they live in — pidfile,
-healthz, process-scope boot, and the shutdown that drains them.
-
-Every agent-runner starts one instance through its service roster.
+The service roster starts this process to own wake dispatch, agent turns,
+health, process boot and their shutdown (see
+`future/infra/lifecycle/agent-runner-as-server.md`).
 
 Usage:
     .venv/bin/python -m services.agent_runner.agent_host.daemon
 
 ## Boot order, and why it is this one
 
-1. **Pidfile**, so a second instance exits instead of racing the first for turns.
-2. **Process-scope boot** — `init_process_scope` (trace export; must precede any
-   model build so OpenLLMetry can instrument it), `land_cluster_extensions` (the
-   cluster's installed skills onto this machine). The plugin load
-   (`agent.extensions.load_extensions`, step 3) happens exactly once per process:
-   repeating it is not an option, see issue #170 for the behavioural change that
-   follows. The
-   materialization is once per process for a milder reason — the skills
-   directory belongs to the machine, not to any agent — but it lands here rather
-   than per turn because the host is long-lived. Newly installed extensions
-   take effect after its normal restart.
-3. **The shared data plane** — isolated workload/control pools, checkpointer,
-   graph. Before the scheduler exists, the control pool recovers any old
-   applied hosted force whose durable exec evidence proves resource-free.
-   The builtin-plugin load and the plugin registry built from it come first and
-   feed the checkpointer, the graph and the host: the other half of "once per
-   process".
-4. **Healthz**, published only after the above, so a green probe means the host
-   can actually take a turn.
-5. **The dispatcher**, last: subscribing before the host can serve would drop
-   wakes on the floor.
+1. **Pidfile**, so a second instance cannot race the first for turns.
+2. **Process-scope boot** — trace export precedes models and skills materialize
+   once. Plugins load once (issue #170); new extensions require a host restart.
+3. **The shared data plane** — workload/control pools, checkpointer and graph.
+   Recover predecessor forces only with durable resource-free exec evidence.
+4. **Healthz**, after boot, so a green probe means the host can take a turn.
+5. **The dispatcher**, after serving is ready, so subscribed wakes are not lost.
 
-The daemon holds no agent identity. `init_gateway_process` leaves the log sink's
-process agent unset. Ordinary logs belong to the process; agent-owned events
-carry explicit attribution. The SDK process entry records shared-host startup
-posture before boot work so inherited child identity cannot bind here.
+Shutdown joins dispatcher siblings and drains turns before collecting the
+installation's sampling refresh. Health and ownership callbacks still unwind;
+joined host pools close even if sampling reports an original failure.
+The host has no agent identity: process logs remain unattributed, agent events
+carry explicit identity, and the SDK entry rejects inherited child identity
+before boot work.
 """
 
 from __future__ import annotations
@@ -97,6 +82,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
+from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -110,6 +96,8 @@ from .force_termination import kill_terminating_agent_shells
 from .host import AgentHost
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
+from .pools import close_host_pools as _close_host_pools
+from .runtime import HostCachePolicy, HostPolicy
 from .stdout_log import _rotate_stdout_log_forever
 
 _log = logging.getLogger("services.agent_runner.agent_host.daemon")
@@ -353,13 +341,14 @@ async def _close_host_runtime(
 ) -> None:
     """Drain turns and release settled ownership even if a stage fails.
 
-    The background loops are already joined: their `TaskGroup` in `run` exits
-    before this runs. Every cleanup stage must run before a failure propagates;
-    closing the pools first strands ownership and active turns. Callbacks unwind
-    in reverse.
+    The background group has joined. Callbacks unwind in reverse so every
+    stage runs before failure propagates; pools must outlive active turns.
     """
+    # Share the existing unwind allowance; late resource join must not add a
+    # second five-second window after the scheduler has spent its own budget.
+    resource_deadline = asyncio.get_running_loop().time() + CANCEL_UNWIND_TIMEOUT_S
     async with contextlib.AsyncExitStack() as cleanup:
-        cleanup.push_async_callback(host.aclose)
+        cleanup.push_async_callback(host.aclose, resource_deadline=resource_deadline)
         cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
         cleanup.push_async_callback(scheduler.aclose)
 
@@ -478,15 +467,35 @@ async def _open_host_pools(
     await _recover_hosted_forces_at_boot(control_pool, machine)
 
 
-async def _close_host_pools(
+async def _close_joined_host_pools(
+    host: AgentHost | None,
     workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
 ) -> None:
-    """Close both pools even if the control-pool close itself fails."""
-    try:
-        await control_pool.close()
-    finally:
-        await workload_pool.close()
+    if host is None or host.resources_joined:
+        await _close_host_pools(workload_pool, control_pool)
+    else:
+        _log.error("[agent-host] resource join unfinished; keeping pools open until hard exit")
+
+
+async def _close_process_owners(
+    host: AgentHost | None,
+    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    installation: Installation | None,
+    health: asyncio.Server | None,
+    beat: asyncio.Task[Exception | None] | None,
+    beat_tasks: asyncio.TaskGroup | None,
+) -> None:
+    """After turn drain, collect sampling before pools and always remove the pidfile."""
+    async with contextlib.AsyncExitStack() as cleanup:
+        cleanup.callback(remove_pidfile, _pidfile())
+        cleanup.push_async_callback(_close_joined_host_pools, host, workload_pool, control_pool)
+        if installation is not None:
+            cleanup.callback(installation.sampling.close)
+        if health is not None:
+            cleanup.push_async_callback(stop_health_server, health)
+        cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
 
 
 def _is_running() -> bool:
@@ -569,6 +578,8 @@ async def run() -> None:
     beat: asyncio.Task[Exception | None] | None = None
     beat_tasks: asyncio.TaskGroup | None = None
     health = None
+    host: AgentHost | None = None
+    installation = None
     try:
         local_machine = machine_name()
         await _open_host_pools(workload_pool, control_pool, local_machine)
@@ -587,6 +598,15 @@ async def run() -> None:
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
+            policy=HostPolicy(
+                max_concurrent_turns=settings.daemon.host_max_concurrent_turns,
+                cache=lambda: HostCachePolicy(
+                    idle_ttl_seconds=settings.daemon.host_agent_idle_ttl_seconds,
+                    size=settings.daemon.host_agent_cache_size,
+                ),
+                default_model=lambda: settings.lm.llm_model,
+                llm_override=lambda: settings.lm.llm_override,
+            ),
             clients=process_clients(database=lambda: db),
             extensions=installation.registry,
             plugin_configs=installation.configs,
@@ -647,14 +667,10 @@ async def run() -> None:
                 beat = None  # Runtime cleanup attempted its join even when another stage failed.
                 beat_tasks = None
     finally:
-        # A retained heartbeat failure during boot must still close pools and
-        # remove the pidfile, just as one raised after dispatch/drain does.
-        async with contextlib.AsyncExitStack() as cleanup:
-            cleanup.callback(remove_pidfile, _pidfile())
-            cleanup.push_async_callback(_close_host_pools, workload_pool, control_pool)
-            if health is not None:
-                cleanup.push_async_callback(stop_health_server, health)
-            cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
+        # Boot and drain failures still collect sampling, close pools and remove the pidfile.
+        await _close_process_owners(
+            host, workload_pool, control_pool, installation, health, beat, beat_tasks
+        )
         _log.info("[agent-host] daemon stopped")
 
 

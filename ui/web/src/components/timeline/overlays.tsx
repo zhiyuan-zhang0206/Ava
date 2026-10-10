@@ -17,7 +17,9 @@ import { FLEX, FLEX_1 } from "@/lib/layout/layout";
 // mounted (opacity-only visibility) and an absolutely-positioned overlay
 // outside the scrolled content, so it never shifts scrollHeight or disturbs
 // the prepend anchor; pointer-events-none in every state so it can never
-// capture the wheel/touch gesture that triggered it.
+// capture the wheel/touch gesture that triggered it. Only the icon is
+// conditional: an always-running animate-spin under opacity-0 kept the
+// compositor and style system busy on every idle frame.
 export function LoadOlderSpinner({ loadingOlder }: { loadingOlder: boolean }) {
   const t = useTranslations("timeline");
   return (
@@ -36,7 +38,7 @@ export function LoadOlderSpinner({ loadingOlder }: { loadingOlder: boolean }) {
       )}
     >
       <span className="sr-only">{t("loadingEarlier")}</span>
-      <Loader2 className="size-4 animate-spin text-primary" />
+      {loadingOlder ? <Loader2 className="size-4 animate-spin text-primary" /> : null}
     </div>
   );
 }

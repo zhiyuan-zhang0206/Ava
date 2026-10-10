@@ -38,7 +38,7 @@ def test_local_policy_reads_live_file(
 def test_remote_policy_refreshes_without_waiting_for_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
 
@@ -68,7 +68,7 @@ def test_remote_policy_refreshes_without_waiting_for_network(
 
 
 def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPatch) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy(sampling_enabled=True, sample_every=5)
 
     def read() -> SamplingPolicy:
@@ -138,7 +138,7 @@ def test_expected_fetch_failure_retains_the_valid_snapshot(
         pytest.fail("a sampling fetch failure must not initialize an event pipeline")
 
     monkeypatch.setattr(emitter, "init_telemetry", initialize)
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     snapshot = SamplingPolicy(sampling_enabled=True, sample_every=5)
     cache.value = snapshot
 
@@ -165,7 +165,7 @@ def test_expected_fetch_failure_retains_the_valid_snapshot(
 def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
     monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy(sample_every=5)
 
     def read() -> SamplingPolicy:
@@ -197,7 +197,7 @@ def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
 def test_invalid_schema_is_not_reported_as_a_retained_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
     monkeypatch.setattr(call_policy, "_read_policy", lambda: SamplingPolicy(sample_every=0))
     cache.refresh()
@@ -208,7 +208,7 @@ def test_invalid_schema_is_not_reported_as_a_retained_policy(
 def test_failed_policy_read_still_starts_one_refresh_when_due(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
     error = TypeError("invalid policy")
 
@@ -277,7 +277,7 @@ def test_sdk_telemetry_cold_import_does_not_load_httpx(tmp_path: Path) -> None:
 def test_refresh_dependency_import_failure_reaches_the_caller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
     original_import = builtins.__import__
 
@@ -295,7 +295,7 @@ def test_refresh_dependency_import_failure_reaches_the_caller(
 def test_invalid_refresh_dependency_classification_reaches_the_caller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy._PolicyCache()
+    cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
     monkeypatch.delattr(httpx, "HTTPStatusError")
     cache.refresh()

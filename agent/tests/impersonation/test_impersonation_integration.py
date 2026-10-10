@@ -40,7 +40,9 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -250,6 +252,7 @@ def _assert_resumed_transcript(resumed: dict[str, Any], finish: str) -> None:
 @pytest.mark.parametrize("finish", ["release", "expire"])
 @pytest.mark.usefixtures("runner_exec_env")
 async def test_consent_exec_inbox_release_and_resume(
+    hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -259,6 +262,7 @@ async def test_consent_exec_inbox_release_and_resume(
     *,
     config_authority: ConfigAuthority,
 ) -> None:
+    scope = hosted_resources
     # The real exec child boots this installed unit, whose identity is file-owned.
     config_authority.env_path.write_text(f"AVA_MACHINE_NAME={machine_name()}\n", encoding="utf-8")
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
@@ -279,7 +283,7 @@ async def test_consent_exec_inbox_release_and_resume(
     first = await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=scope, native_work=None),
     )
     assert first["turn_idle"]
     assert (
@@ -289,7 +293,7 @@ async def test_consent_exec_inbox_release_and_resume(
     # Merely returning from exec/graph has NOT issued the external lease.
     await flush_checkpoint(saver, agent_id)
     assert await settle_checkpoint(
-        graph, database, event_bus, agent_id, ctx.relays, incarnation=owner, resources=None
+        graph, database, event_bus, agent_id, ctx.relays, incarnation=owner, resources=scope
     )
     assert (
         leases.require_active(database, requested["id"], attested_caller(requested))["status"]
@@ -304,10 +308,11 @@ async def test_consent_exec_inbox_release_and_resume(
     db_conn.commit()
     await _assert_consent_tool_result_checkpointed(saver, config)
     second_peer = _deliver_peers_and_ack_first(db_conn, database, event_bus, requested, agent_id)
+    scope = await scope.require_service().turn()
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=scope, native_work=None),
     )
     await flush_checkpoint(saver, agent_id)
     assert len(model_calls) == 1
@@ -325,12 +330,13 @@ async def test_consent_exec_inbox_release_and_resume(
     )
     _end_external_session(db_conn, database, event_bus, requested, finish)
     assert not await settle_checkpoint(
-        graph, database, event_bus, agent_id, ctx.relays, incarnation=owner, resources=None
+        graph, database, event_bus, agent_id, ctx.relays, incarnation=owner, resources=scope
     )
+    scope = await scope.require_service().turn()
     resumed = await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=scope, native_work=None),
     )
     await flush_checkpoint(saver, agent_id)
     assert resumed["handoff__total"] == 7
@@ -338,7 +344,7 @@ async def test_consent_exec_inbox_release_and_resume(
     _assert_resumed_transcript(resumed, finish)
     # A second resume-boundary pass cannot double an additive reducer.
     assert not await settle_checkpoint(
-        graph, database, event_bus, agent_id, ctx.relays, incarnation=owner, resources=None
+        graph, database, event_bus, agent_id, ctx.relays, incarnation=owner, resources=scope
     )
     assert (await graph.aget_state(config)).values["handoff__total"] == 7
 

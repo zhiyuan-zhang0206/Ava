@@ -269,3 +269,54 @@ def test_boot_crash_child_delivers_the_crash_envelope_record(
 
     keys = _poll_sent({("exec_envelope", "result", "write")})
     assert ("exec_envelope", "result", "write") in keys, f"receiver saw: {sorted(keys)}"
+
+
+def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import MagicMock
+
+    from agent.execution import child
+    from agent.graph.exec.protocol import ResultPayload, write_result
+    from base import telemetry
+    from base.telemetry.otlp import telemetry_otlp
+
+    result_path = str(tmp_path / "result.json")
+    payload = ResultPayload(kind="done", code_reached=True)
+    write_result(Path(result_path), payload)
+    before = Path(result_path).read_bytes()
+    monkeypatch.setattr(
+        telemetry,
+        "sync",
+        MagicMock(
+            return_value=telemetry.DrainResult(
+                telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN
+            )
+        ),
+    )
+    finalize = MagicMock()
+    monkeypatch.setattr(telemetry_otlp, "finalize", finalize)
+    child._deliver_run_telemetry(result_path, payload)
+    finalize.assert_called_once_with()
+    assert Path(result_path).read_bytes() == before
+
+
+def test_unknown_ordinary_delivery_keeps_crash_primary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import MagicMock
+
+    from agent.execution import child
+    from agent.graph.exec.protocol import ResultPayload, write_result
+    from base import telemetry
+
+    result_path = str(tmp_path / "result.json")
+    payload = ResultPayload(
+        kind="crashed", code_reached=True, exc_type="OriginalError", exc_msg="primary"
+    )
+    write_result(Path(result_path), payload)
+    before = Path(result_path).read_bytes()
+    monkeypatch.setattr(telemetry, "sync", MagicMock(side_effect=ValueError("unknown drain")))
+    child._deliver_run_telemetry(result_path, payload)
+    assert Path(result_path).read_bytes() == before
+    child._deliver_envelope_telemetry()

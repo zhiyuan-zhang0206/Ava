@@ -318,3 +318,20 @@ def test_keyword_only_literal_default_does_not_depend_on_starred_data() -> None:
     )
     assert [source.text for source in found.sources] == ["import base.config"]
     assert found.unresolved == []
+
+
+def test_repeated_helper_callers_keep_sources_and_opaque_arguments_independent() -> None:
+    found = _inputs(
+        "import sys, subprocess\n"
+        "def spawn(code):\n return subprocess.run([sys.executable, '-c', code])\n"
+        "spawn('import base.config')\n"
+        "spawn(opaque)\n"
+        "spawn('import agent.db')\n"
+    )
+    assert [(source.line, source.text) for source in found.sources] == [
+        (4, "import base.config"),
+        (6, "import agent.db"),
+    ]
+    assert [(gap.line, gap.reason) for gap in found.unresolved] == [
+        (5, "Python -c source is not a literal or single binding")
+    ]

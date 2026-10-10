@@ -146,7 +146,12 @@ async def _daemon_call(
     writer.write.side_effect = chunks.append
     writer.drain = AsyncMock()
     writer.wait_closed = AsyncMock()
-    scope = daemon._Scope(local=daemon._Buckets(), shared=daemon._Buckets(), oauth_locks={})
+    scope = daemon._Scope(
+        local=daemon._Buckets(),
+        shared=daemon._Buckets(),
+        oauth_locks={},
+        timeout_seconds=lambda: 15.0,
+    )
     await daemon._handle_client(reader, cast(asyncio.StreamWriter, writer), scope)
     return json.loads(b"".join(chunks))
 

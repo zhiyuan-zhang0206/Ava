@@ -230,10 +230,10 @@ def test_post_message_command_chain_is_one_inbound(db_conn: psycopg.Connection) 
     with TestClient(app) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages",
-            json={"content": "/recap /plan the migration", "source": "user"},
+            json={"content": "/recap the week /compact", "source": "user"},
         )
     assert resp.status_code == 201
-    assert _pending_rows(db_conn, tid) == [("chat", "pending", "/recap /plan the migration")]
+    assert _pending_rows(db_conn, tid) == [("chat", "pending", "/recap the week /compact")]
 
 
 def test_post_message_does_not_inspect_the_command_chain(db_conn: psycopg.Connection) -> None:

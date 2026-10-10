@@ -29,7 +29,6 @@ from base.agents.context import AvaContext
 from base.db import Database
 from base.deploy.release import editable_install
 from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
-from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.turn_identity import HostedTurnResources
@@ -364,20 +363,15 @@ def _retain_late_reader_completion(
             reader.pump()
             if not reader.closed:
                 await asyncio.sleep(0.05)
+        reader.pump()  # Closed after a callback error is not successful output EOF.
         if scope.complete(request, domain):
             for path in (request, result):
                 with contextlib.suppress(FileNotFoundError):
                     path.unlink()
 
-    task = asyncio.create_task(complete_reader(), name=f"exec-late-reader-{request.stem}")
-    scope.completions.add(task)
-
-    def finished(completed: asyncio.Task[None]) -> None:
-        scope.completions.discard(completed)
-        if not completed.cancelled() and completed.exception() is not None:
-            logger.error("late exec reader completion failed: {error}", error=completed.exception())
-
-    task.add_done_callback(finished)
+    scope.require_service().complete_later(
+        scope, complete_reader(), name=f"exec-late-reader-{request.stem}"
+    )
 
 
 async def _run_in_subprocess(
