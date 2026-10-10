@@ -576,6 +576,7 @@ class _FlakyAdapter(FakeAdapter):
     def __init__(self, fail_first: int = 1) -> None:
         super().__init__()
         self._failures_left = fail_first
+        self.failure = RuntimeError("telegram API down")
 
     async def send_to_owner(
         self,
@@ -586,7 +587,7 @@ class _FlakyAdapter(FakeAdapter):
     ) -> None:
         if self._failures_left > 0:
             self._failures_left -= 1
-            raise RuntimeError("telegram API down")
+            raise self.failure
         await super().send_to_owner(text, markdown=markdown, buttons=buttons)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -602,7 +603,15 @@ async def test_poll_accepts_before_uncertain_send_and_never_retries(
         await bridge.poll_once()
         assert bridge._cursor == 3, "accepted means durable intent, not provider success"
         assert flaky.sent == []
-        for _ in range(3):
+        with pytest.raises(RuntimeError) as caught:
+            await bridge.core.outbound_worker.run_once()
+        assert caught.value is flaky.failure, "unknown send errors reach the service owner"
+        with test_im_bridge_core.TEST_POOL.connection() as conn:
+            assert [
+                r[0]
+                for r in conn.execute("SELECT status FROM im_bridge_outbound_intents ORDER BY id")
+            ] == ["uncertain", "queued", "queued"]
+        for _ in range(2):
             await bridge.core.outbound_worker.run_once()
         assert len(flaky.sent) == 2
         await bridge.poll_once()
