@@ -685,9 +685,7 @@ def _fatal(error_type: str | None, configured: str) -> bool:
     from agent.graph.llm_errors import _is_fatal_provider_error_type
 
     body = {"error": {"type": error_type, "message": "m"}}
-    policy = LlmCallPolicy(
-        configured, gemini_explicit_cache_enabled=False, gemini_cache_timeout_seconds=1.0
-    )
+    policy = LlmCallPolicy(configured)
     return _is_fatal_provider_error_type(_FakeOpenAIError(body), policy)
 
 

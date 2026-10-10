@@ -22,8 +22,8 @@ async def test_compaction_preserves_fast_accounting_id() -> None:
     )
     with (
         patch(
-            "agent.hooks.compact.ainvoke_with_cache_retry",
-            new=AsyncMock(return_value=(response, False)),
+            "agent.hooks.compact.ainvoke_tool_call",
+            new=AsyncMock(return_value=response),
         ),
         patch("base.lm.usage.log_usage_from_message") as account,
     ):

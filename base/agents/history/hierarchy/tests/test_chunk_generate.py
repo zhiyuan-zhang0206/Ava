@@ -301,11 +301,15 @@ def _gen(llm: Any, *, model_catalog: ModelCatalog, **kw: Any) -> Any:
     )
 
 
+@pytest.mark.parametrize("model", ["m", "gemini-3.8-flash"])
 def test_request_is_prefix_plus_one_instruction_with_tools_bound(
     model_catalog: ModelCatalog,
+    model: str,
 ) -> None:
     llm = _Recorder([AIMessage(content=_TWO)])
-    out = _gen(llm, model_catalog=model_catalog)
+    out = generate_chunk(
+        llm, _PREFIX, 1, model=model, agent_id=7, tools=["T"], catalog=model_catalog
+    )
     assert out.groups == [UnitGroup(0, 1, "look"), UnitGroup(2, 2, "run")]
     assert [u.kind for u in out.units] == ["inbound", "work", "work"]
     assert llm.bound == ["T"]

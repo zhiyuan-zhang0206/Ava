@@ -36,7 +36,7 @@ from agent.hooks.compact_anchor import compose_summary_message as compose_summar
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.hooks.understanding_chunks import await_snapshot, enqueue_closing_chunk
-from agent.llm.cache import ainvoke_with_cache_retry
+from agent.llm.invoke import ainvoke_tool_call
 from agent.messages import (
     NoteTag,
     system_note_message,
@@ -50,7 +50,6 @@ from base.agents.history.closing_request import ClosingRequest
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
-from base.lm.call import ProviderCallBinding
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.lm.errors import is_retryable_provider_error
@@ -198,18 +197,13 @@ async def generate_summary(
     slices: AgentSlices,
     *,
     catalog: ModelCatalog,
-    single_attempt: bool = False,
-    binding: ProviderCallBinding | None = None,
 ) -> SummaryText:
-    """Summarize the complete conversation using the actual model's binding.
+    """Summarize the complete conversation with one tool-bound model call.
 
     Manual compact requests and automatic compaction share this operation;
     agent-written summaries skip generation. The system prefix and instruction
-    use the same provider preparation as streaming. Single-attempt generation
-    forbids stale recovery. Empty conversations and empty responses fail.
+    stay in-band as in streaming. Empty conversations and empty responses fail.
     """
-    if type(single_attempt) is not bool:
-        raise ValueError("single_attempt must be a boolean")
     has_system = bool(messages) and isinstance(messages[0], SystemMessage)
     system_head = messages[:1] if has_system else []
     content_msgs = messages[1:] if has_system else messages
@@ -221,33 +215,16 @@ async def generate_summary(
         content=f"{COMPACTION_INSTRUCTION}\nava.self.compact contract:\n{compact_contract()}"
     )
     compaction_input = [*system_head, *content_msgs, instruction]
-    # Same request shape as the llm node via prepare_invocation: when a
-    # Gemini explicit cache is live the summary call rides it too (and its
-    # stale-retry recovers a lapsed TTL), otherwise plain bind_tools.
-    response, used_explicit_cache = await ainvoke_with_cache_retry(
-        llm,
-        compaction_input,
-        slices.llm_policy,
-        binding=binding,
-        **({"retry_stale_cache": False} if single_attempt else {}),
-    )
+    response = await ainvoke_tool_call(llm, compaction_input)
     model = slices.brain.llm_model
     if isinstance(model, str) and model:
-        from base.lm.usage import (
-            CACHE_MECHANISM_MIXED,
-            CACHE_SCOPE_EXPLICIT_BLOCK,
-            log_usage_from_message,
-        )
+        from base.lm.usage import log_usage_from_message
 
         log_usage_from_message(
             response,
             model=model,
             usage_kind="agent",
             catalog=catalog,
-            # Gemini + explicit cachedContent reports only the explicit block
-            # in cache_read — label the event's provenance honestly.
-            cache_mechanism=CACHE_MECHANISM_MIXED if used_explicit_cache else None,
-            cache_scope=CACHE_SCOPE_EXPLICIT_BLOCK if used_explicit_cache else None,
         )
     summary = response.text
     closing = closing_request_of(response, instruction)
@@ -317,7 +294,6 @@ async def emergency_compact_summary(
     slices: AgentSlices,
     *,
     catalog: ModelCatalog,
-    binding: ProviderCallBinding | None = None,
 ) -> str:
     """The circuit-breaker compaction summary: a real compaction first, then the
     no-LLM fallback — used by the overflow self-rescue path (claim decide).
@@ -340,9 +316,7 @@ async def emergency_compact_summary(
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(
-                messages, llm, slices, binding=binding, catalog=catalog
-            )
+            summary = await generate_summary(messages, llm, slices, catalog=catalog)
         except Exception as e:
             last_error = e
             if _is_permanent_provider_failure(e):
@@ -446,7 +420,6 @@ async def _auto_compact_summary(
     llm: BaseChatModel,
     content_count: int,
     slices: AgentSlices,
-    binding: ProviderCallBinding | None = None,
     *,
     catalog: ModelCatalog,
 ) -> str:
@@ -455,9 +428,7 @@ async def _auto_compact_summary(
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(
-                messages, llm, slices, binding=binding, catalog=catalog
-            )
+            summary = await generate_summary(messages, llm, slices, catalog=catalog)
         except Exception as e:
             if not isinstance(e, EmptyCompactionSummaryError) and not is_retryable_provider_error(
                 e
@@ -561,7 +532,6 @@ async def auto_compact_for_llm(
                     llm,
                     len(content_msgs),
                     runtime.context.require_agent(),
-                    binding=runtime.context.llm_binding,
                     catalog=catalog,
                 ),
                 interrupted,

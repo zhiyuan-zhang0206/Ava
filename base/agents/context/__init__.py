@@ -41,7 +41,6 @@ from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
-from base.lm.call import ProviderCallBinding
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
@@ -86,9 +85,6 @@ class AvaContext:
     """LLM provider (Anthropic / DeepSeek / etc). Required by graph runtime
     (llm_node + claim node's compact path); graph entry points assert
     non-None at function start."""
-
-    llm_binding: ProviderCallBinding | None = None
-    """Binding selected alongside llm; never serialized into exec or checkpoints."""
 
     catalog: ModelCatalog | None = None
     """Provider facts built and retained by this run's process composition root."""

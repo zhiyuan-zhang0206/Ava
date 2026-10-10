@@ -218,8 +218,7 @@ class UnderstandingSnapshotLag(TypedDict):
 
 class UnderstandingChunkSkipped(TypedDict):
     """`understanding_chunk_skipped` payload — a queued chunk was closed
-    without a node: an unsupported provider path (Gemini explicit cache) or a
-    chunk with nothing past the head."""
+    without a node: an already described chunk or one with no conversation content."""
 
     agent_id: int
     job_id: int
