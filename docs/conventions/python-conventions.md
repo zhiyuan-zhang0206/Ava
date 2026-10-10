@@ -167,6 +167,12 @@ in `scripts/structure/ambient_state/allowlist.py` — write-only facades, framew
 no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts
 are not.
 
+Thread and Task evidence share executable method syntax through the actual
+`ambient_state/owner_method.py` definition owner. It supplies direct instance
+fields, visible assignments/calls and join timeout syntax, excluding nested
+uninvoked definitions and constant-dead branches. Each proof owner retains its
+lifecycle decisions; dynamic timeout syntax does not prove a finite runtime bound.
+
 Task ownership detection recognizes necessary same-instance wiring, with no file
 list, fixed owner names or marker. Each explicit spawn assigns its actual Task and
 immediately calls a synchronous registration method, before any suspension. That
@@ -186,6 +192,13 @@ from that registry. Scalar task slots, async registration/callbacks, deeper help
 and unsupported aliases remain findings. TaskGroups remain available for work
 whose lifetime and failure impact fit their scope; changing a raw spawner's
 receiver name does not establish ownership.
+
+A Task-valued map can also register the original Task directly, followed
+immediately by its actual completion callback. Stop must cancel that map's
+values, await their exact snapshot with a bounded timeout (directly or through
+one awaited same-class helper), and preserve unfinished slots exposed by a
+synchronous lookup. Map keys, replaced snapshots and decorative stop/admission
+gates do not establish these facts.
 
 These facts do not prove correct claimed/abandoned routing, retirement timing,
 admission after stop, generation identity, error classification or every control
