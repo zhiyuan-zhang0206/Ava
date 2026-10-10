@@ -2362,7 +2362,7 @@
     "/api/agents/{agent_id}/timeline": {
       "get": {
         "summary": "Get Timeline",
-        "description": "Timeline = raw view of LangGraph state.messages, one window at a time.\n\nDefault (no `before`) returns the newest `limit` items; an omitted\n`limit` resolves to the configured `display.timeline_default_limit`\n(50 by default). Pass\n`before=<oldest item_id you hold>` to fetch the previous window for\nscroll-up history loading. `has_more` reports whether older items exist\nbefore the returned window.\n\nOne checkpoint segment is built at a time; windowing trims the payload +\nthe frontend render. A checkpoint read failure renders an empty view + 200\n(cold-load tolerance, see `base.agents.history.checkpoint`).",
+        "description": "Timeline = raw view of LangGraph state.messages, one window at a time.\n\nDefault (no `before`) returns the newest `limit` items; an omitted\n`limit` resolves to the configured `display.timeline_default_limit`\n(50 by default). Pass\n`before=<oldest item_id you hold>` to fetch the previous window for\nscroll-up history loading. `has_more` reports whether older items exist\nbefore the returned window.\n\nOne checkpoint segment is built at a time; windowing trims the payload +\nthe frontend render. A checkpoint read failure returns 503. Retained\ncompact boundaries remain independently readable via /timeline/retained.",
         "operationId": "get_timeline_api_agents__agent_id__timeline_get",
         "parameters": [
           {
@@ -2416,6 +2416,98 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TimelineResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/timeline/retained": {
+      "get": {
+        "summary": "Get Retained Timeline",
+        "description": "Read retained compact history explicitly, without reading the live head.\n\nOmit checkpoint_id for the newest retained boundary, or select an exact\nretained boundary. Page using the oldest returned historical item_id.\nNever resumes, rewrites, or repairs the agent's execution checkpoint.",
+        "operationId": "get_retained_timeline_api_agents__agent_id__timeline_retained_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "checkpoint_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Checkpoint Id"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetainedTimelineResponse"
                 }
               }
             }
@@ -16220,6 +16312,40 @@
           "already_alive"
         ],
         "title": "ResurrectResult"
+      },
+      "RetainedTimelineResponse": {
+        "properties": {
+          "boundary_checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boundary Checkpoint Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "boundary_checkpoint_id",
+          "items",
+          "has_more"
+        ],
+        "title": "RetainedTimelineResponse",
+        "description": "One retained compact-history window, independent of live state.messages.\n\nThe boundary identity describes the requested retained segment. Historical\nitem cursors identify every item's own segment, including a crossed page.\nThere is no live message count and these items must not merge into live state."
       },
       "RetryLaunchAccepted": {
         "properties": {
