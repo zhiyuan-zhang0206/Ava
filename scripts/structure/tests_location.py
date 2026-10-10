@@ -47,8 +47,9 @@ _CATEGORIES = ("contract", "integration")
 _SUGGEST = "--suggest"
 _GUIDE = (
     "A top-level test needs complete subject evidence whose LCA is root. Otherwise use `git mv` "
-    "into its subject's tests/ directory and preserve path_scopes.toml isolation fixtures "
-    "(tests/ci/test_path_scopes.py checks the fixture binding). Unknown inputs must be resolved; "
+    "into its subject's tests/ directory and preserve path_scopes.toml isolation fixtures. "
+    "Verify the moved test's resolved fixtures and teardown; path_scopes validation alone "
+    "does not prove that an old binding followed the move. Unknown inputs must be resolved; "
     "replacement-only and sample evidence cannot certify placement. "
     "Rule: scripts/structure/tests_location.py."
 )
