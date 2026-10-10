@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { RunTimelineLink, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
+  bucketOf,
+  clusterArrows,
+  MERGE_PX,
   curveOf,
   curvePoint,
   distanceToCurve,
@@ -250,5 +253,70 @@ describe("hitting a curve", () => {
   it("prefers the one drawn later when two are equally near", () => {
     const p = curvePoint(down, 0.5);
     expect(hitLink([down, { ...down, key: "c" }], p.x, p.y, 4)).toBe("c");
+  });
+});
+
+describe("merging arrows that lie close together", () => {
+  const arrow = (key: string, x0: number, x1: number, bucket = "a") => ({ key, bucket, x0, x1 });
+  const sizes = (arrows: ReturnType<typeof arrow>[], px?: number) =>
+    clusterArrows(arrows, px)
+      .map((c) => c.members.length)
+      .sort((a, b) => b - a);
+
+  it("merges arrows whose two ends are both closer than the threshold, and puts the merged one in the middle of them", () => {
+    const [one, ...rest] = clusterArrows([arrow("p", 100, 300), arrow("q", 104, 306), arrow("r", 108, 303)]);
+    expect(rest).toEqual([]);
+    expect(one.members).toEqual(["p", "q", "r"]);
+    expect(one.key).toBe("group:p:3");
+    expect(one.x0).toBeCloseTo(104, 5);
+    expect(one.x1).toBeCloseTo(303, 5);
+  });
+
+  it("leaves an arrow alone under its own key", () => {
+    expect(clusterArrows([arrow("only", 10, 20)])).toEqual([{ key: "only", bucket: "a", members: ["only"], x0: 10, x1: 20 }]);
+  });
+
+  it("keeps arrows apart when either end is farther than the threshold", () => {
+    expect(sizes([arrow("p", 100, 300), arrow("q", 100 + MERGE_PX, 300)])).toEqual([1, 1]);
+    expect(sizes([arrow("p", 100, 300), arrow("q", 100, 300 + MERGE_PX)])).toEqual([1, 1]);
+    expect(sizes([arrow("p", 100, 300), arrow("q", 100 + MERGE_PX - 1, 300 + MERGE_PX - 1)])).toEqual([2]);
+  });
+
+  it("splits when zoomed in: the same arrows, with their ends farther apart on screen, are not merged", () => {
+    const at = (scale: number) => [arrow("p", 100 * scale, 300 * scale), arrow("q", 105 * scale, 301 * scale), arrow("r", 110 * scale, 302 * scale)];
+    expect(sizes(at(1))).toEqual([3]);
+    expect(sizes(at(4))).toEqual([1, 1, 1]);
+  });
+
+  it("never merges arrows of different kinds or between different rows", () => {
+    const kinds = ["send_message", "spawn"].map((k) => `${k}|units:1|units:2`);
+    expect(sizes([arrow("p", 100, 300, kinds[0]), arrow("q", 101, 301, kinds[1])])).toEqual([1, 1]);
+    const rows = ["send_message|units:1|units:2", "send_message|units:1|units:3"];
+    expect(sizes([arrow("p", 100, 300, rows[0]), arrow("q", 101, 301, rows[1])])).toEqual([1, 1]);
+  });
+
+  it("buckets a link by its kind and the two rows with their agents", () => {
+    const [a, b, c] = resolveLinks(
+      [link({}), link({ kind: "spawn" }), link({ receiver: 3 })],
+      new Set([1, 2, 3]),
+      new Map([[1, agent([])], [2, agent([])], [3, agent([])]]),
+    );
+    expect(new Set([bucketOf(a), bucketOf(b), bucketOf(c)]).size).toBe(3);
+  });
+
+  it("counts every member exactly once, however they chain", () => {
+    const many = Array.from({ length: 500 }, (_, i) => arrow(`k${i}`, (i * 7) % 200, (i * 13) % 400, `b${i % 3}`));
+    const clusters = clusterArrows(many);
+    expect(clusters.reduce((n, c) => n + c.members.length, 0)).toBe(500);
+    expect(new Set(clusters.flatMap((c) => c.members)).size).toBe(500);
+  });
+
+  it("stays fast on thousands of arrows (merged at every zoom, on every viewport change)", () => {
+    const thousands = Array.from({ length: 5000 }, (_, i) => arrow(`k${i}`, (i * 37) % 1800, (i * 91) % 1800, `b${i % 8}`));
+    const started = performance.now();
+    for (let round = 0; round < 10; round += 1) clusterArrows(thousands);
+    const each = (performance.now() - started) / 10;
+    // Measured under 1 ms for 5000 arrows (20000 in one bucket: 15 ms); the bound is generous so a slow CI machine does not flake.
+    expect(each).toBeLessThan(150);
   });
 });

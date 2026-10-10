@@ -491,4 +491,52 @@ describe("arrows between agents", () => {
     expect(screen.queryByTestId("agent-view-user")).toBeNull();
     expect(screen.getByTestId<HTMLInputElement>("agent-view-interactions-user").checked).toBe(false);
   });
+
+  it("draws close arrows of one kind between the same rows as one with a count, hovers and selects it as a group, and pulls it apart on a click", async () => {
+    getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
+    getRunTimelineLinks.mockResolvedValue({
+      links: [
+        link({ ts: at(40) }),
+        link({ ts: at(40.5) }),
+        link({ ts: at(41) }),
+        // Far from the three in time, a different kind, and a different pair of rows: each stays alone.
+        link({ ts: at(100) }),
+        link({ kind: "spawn", ts: at(40.2) }),
+        link({ ts: at(40.2), sender: 8, receiver: 7 }),
+      ],
+    });
+    render("7,8");
+    await screen.findByTestId("agent-view-other");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 5"));
+    await paintFrame();
+    // Six links, three of them one arrow: four arrows, and a badge with the count on the merged one only.
+    expect(strokes()).toHaveLength(4);
+    const badges = drawnLinks().filter((d) => d.op === "text");
+    expect(badges.map((d) => d.text)).toEqual(["3"]);
+    // The legend still counts the links, not the arrows.
+    expect(screen.getByTestId("run-timeline-link-legend-spawn").textContent).toBe("Spawn 1");
+    // The merged arrow is thicker than a single one, up to a bound.
+    const widths = strokes().map((d) => d.lineWidth).sort((a, b) => a - b);
+    expect(widths[0]).toBeLessThan(widths[widths.length - 1]);
+    expect(widths[widths.length - 1]).toBeLessThanOrEqual(3.25);
+
+    const x = (1000 * 40.5) / 120;
+    const merged = curvePoint(curveOf(`group:send_message-${at(40)}-7-8-0:3`, x, mid(7, "run-timeline-row-units"), x, mid(8, "run-timeline-row-units")), 0.5);
+    const chart = screen.getByTestId("run-timeline-chart");
+    fireEvent.pointerMove(chart, { clientX: merged.x, clientY: merged.y });
+    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("Message · #7 → #8 · 3 merged");
+
+    fireEvent.click(chart, { clientX: merged.x, clientY: merged.y });
+    const detail = await screen.findByTestId("run-timeline-link-group-detail");
+    expect(detail.textContent).toContain("3 × Message");
+    const items = within(detail).getAllByTestId("run-timeline-link-group-item");
+    expect(items).toHaveLength(3);
+    const before = screen.getByTestId("run-timeline-window").textContent;
+    fireEvent.click(items[2]);
+    // One link selected, the view zoomed to it, and the arrows apart: no badge is left.
+    await screen.findByTestId("run-timeline-link-detail");
+    expect(screen.getByTestId("run-timeline-window").textContent).not.toBe(before);
+    await paintFrame();
+    expect(drawnLinks().filter((d) => d.op === "text")).toHaveLength(0);
+  });
 });
