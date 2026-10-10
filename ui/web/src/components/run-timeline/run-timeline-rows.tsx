@@ -93,9 +93,10 @@ export function RunTimelineRows({
   onRemove,
   onRetry,
   links,
-  interactions,
   showUser,
+  onShowUser,
   showOther,
+  onShowOther,
   linkKinds,
   onToggleLinkKind,
   linkKey,
@@ -120,11 +121,11 @@ export function RunTimelineRows({
   onRetry: (agent: number) => void;
   /** Every arrow between agents the view can resolve; the kinds that are off are not drawn. */
   links: readonly ResolvedLink[];
-  /** The Interactions switch: off draws no arrows, no legend for them and no Other agents group. */
-  interactions: boolean;
-  /** Within Interactions: whether the User group and the Other agents group, with their arrows, are shown. */
+  /** Whether the User group and the Other agents group, with the arrows that end in them, are shown (the × of a group sets the same state as the toolbar's switch). */
   showUser: boolean;
+  onShowUser: (on: boolean) => void;
   showOther: boolean;
+  onShowOther: (on: boolean) => void;
   linkKinds: ReadonlySet<LinkKind>;
   onToggleLinkKind: (kind: LinkKind) => void;
   /** The selected arrow. */
@@ -141,12 +142,10 @@ export function RunTimelineRows({
   const hitRef = useRef<LinkHit>(() => null);
   const shownLinks = useMemo(
     () =>
-      interactions
-        ? links.filter(
-            (l) => linkKinds.has(l.link.kind) && (showUser || endIn(l, "user") === undefined) && (showOther || endIn(l, "other") === undefined),
-          )
-        : [],
-    [interactions, showUser, showOther, links, linkKinds],
+      links.filter(
+        (l) => linkKinds.has(l.link.kind) && (showUser || endIn(l, "user") === undefined) && (showOther || endIn(l, "other") === undefined),
+      ),
+    [showUser, showOther, links, linkKinds],
   );
   // The links of the User and Other agents groups, in the order the groups are drawn: the arrow keys walk down through them.
   const groups = useMemo(() => {
@@ -561,22 +560,21 @@ export function RunTimelineRows({
         return agent === undefined ? null : renderAgent(agent);
       })}
 
-      {interactions ? (
-        <>
-          {(["user", "other"] as const).filter((row) => (row === "user" ? showUser : showOther)).map((row) => (
-            <LinkRowGroup
-              key={row}
-              variant={row}
-              links={groupLinks(shownLinks)[row]}
-              axis={axis}
-              viewU={viewU}
-              selectedKey={linkKey}
-              onHover={setHoverLink}
-              onSelect={onSelectLink}
-            />
-          ))}
-        </>
-      ) : null}
+      {(["user", "other"] as const)
+        .filter((row) => (row === "user" ? showUser : showOther))
+        .map((row) => (
+          <LinkRowGroup
+            key={row}
+            variant={row}
+            links={groupLinks(shownLinks)[row]}
+            axis={axis}
+            viewU={viewU}
+            selectedKey={linkKey}
+            onHover={setHoverLink}
+            onSelect={onSelectLink}
+            onClose={() => (row === "user" ? onShowUser(false) : onShowOther(false))}
+          />
+        ))}
 
       <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} />
 
@@ -586,7 +584,6 @@ export function RunTimelineRows({
         classLabel={classLabel}
         sources={sources}
         sourceLabel={sourceLabel}
-        interactions={interactions}
         linkKinds={linkKinds}
         linkLabels={linkLabels}
         linkCounts={linkCounts}

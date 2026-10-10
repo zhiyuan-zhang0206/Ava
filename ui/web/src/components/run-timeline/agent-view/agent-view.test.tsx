@@ -82,13 +82,16 @@ const BY_AGENT: Record<number, RunTimelineResponse> = {
 };
 const BASE_78 = viewportOf({ from: at(0), to: at(120) });
 
-function render(agents = "7") {
+/** Renders the page with the Context size row switched on (it is off by default); `contextSize: false` leaves the default. */
+function render(agents = "7", { contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return rtlRender(
+  const view = rtlRender(
     <QueryClientProvider client={queryClient}>
       <AgentViewPage params={Promise.resolve({ agents })} />
     </QueryClientProvider>,
   );
+  if (contextSize) fireEvent.click(screen.getByTestId("agent-view-context-size"));
+  return view;
 }
 
 beforeEach(() => {
@@ -182,9 +185,12 @@ describe("agent view", () => {
     expect(rowIn(7, "run-timeline-row-units")).not.toBeNull();
   });
 
-  it("draws the Context size row by default and drops it when switched off; there is no Added context row", async () => {
-    render("7,8");
+  it("leaves the Context size row off by default and draws it when switched on; there is no Added context row", async () => {
+    render("7,8", { contextSize: false });
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
+    expect(rowIn(7, "run-timeline-row-context")).toBeNull();
+    expect(screen.getByTestId<HTMLInputElement>("agent-view-context-size").checked).toBe(false);
+    fireEvent.click(screen.getByTestId("agent-view-context-size"));
     expect(rowIn(7, "run-timeline-row-context")).not.toBeNull();
     expect(rowIn(8, "run-timeline-row-context")).not.toBeNull();
     expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
@@ -338,22 +344,6 @@ describe("arrows between agents", () => {
     expect(fromOther.map((d) => d.color)).toEqual(["#ef4444"]);
   });
 
-  it("hides every arrow, the link legend and the Other agents group with the Interactions switch, and restores the kinds", async () => {
-    await ready();
-    fireEvent.click(screen.getByTestId("run-timeline-link-legend-spawn"));
-    fireEvent.click(screen.getByTestId("agent-view-interactions"));
-    await paintFrame();
-    expect(strokes()).toHaveLength(0);
-    expect(screen.queryByTestId("run-timeline-link-legend")).toBeNull();
-    expect(screen.queryByTestId("agent-view-other")).toBeNull();
-    fireEvent.click(screen.getByTestId("agent-view-interactions"));
-    await screen.findByTestId("agent-view-other");
-    await paintFrame();
-    expect(strokes().some((d) => d.color === BLUE)).toBe(true);
-    expect(strokes().some((d) => d.color === GREEN)).toBe(false);
-    expect(screen.getByTestId("run-timeline-link-legend-spawn").getAttribute("aria-pressed")).toBe("false");
-  });
-
   it("switches a kind on and off from the legend, with how many there are", async () => {
     await ready();
     const spawn = screen.getByTestId("run-timeline-link-legend-spawn");
@@ -463,29 +453,42 @@ describe("arrows between agents", () => {
     expect(screen.getByTestId("run-timeline-link-legend-notice").textContent).toBe("Notice 1");
   });
 
-  it("hides the User group or the Other agents group, with their arrows, by its own sub-switch, and greys both out with Interactions off", async () => {
+  it("hides the User group or the Other agents group, with the arrows that end in it, by its own switch; arrows between agents in view stay", async () => {
     await ready();
     const user = screen.getByTestId<HTMLInputElement>("agent-view-interactions-user");
     const other = screen.getByTestId<HTMLInputElement>("agent-view-interactions-other");
-    expect([user.checked, other.checked, user.disabled]).toEqual([true, true, false]);
-    const arrows = () => strokes().length;
-    const all = arrows();
+    // There is no master switch: both are on and enabled by default.
+    expect(screen.queryByTestId("agent-view-interactions")).toBeNull();
+    expect([user.checked, other.checked, user.disabled, other.disabled]).toEqual([true, true, false, false]);
+    expect(strokes()).toHaveLength(4);
     fireEvent.click(other);
     await paintFrame();
     expect(screen.queryByTestId("agent-view-other")).toBeNull();
     expect(screen.getByTestId("agent-view-user")).toBeTruthy();
     // Only the arrows between agents in view stay: the message and the spawn.
-    expect(arrows()).toBe(2);
-    expect(all).toBe(4);
+    expect(strokes()).toHaveLength(2);
+    // The kind legend is always there, whatever the groups.
+    expect(screen.getByTestId("run-timeline-link-legend")).toBeTruthy();
     fireEvent.click(other);
     fireEvent.click(user);
     await paintFrame();
     expect(screen.queryByTestId("agent-view-user")).toBeNull();
-    expect(arrows()).toBe(4);
-    fireEvent.click(screen.getByTestId("agent-view-interactions"));
-    expect([user.disabled, other.disabled]).toEqual([true, true]);
-    fireEvent.click(screen.getByTestId("agent-view-interactions"));
-    // The sub-switches keep their state.
-    expect([user.checked, other.checked]).toEqual([false, true]);
+    expect(strokes()).toHaveLength(4);
+  });
+
+  it("closes a group with its ×, which is the same state as its toolbar switch, and the switch brings it back", async () => {
+    await ready();
+    const other = screen.getByTestId<HTMLInputElement>("agent-view-interactions-other");
+    fireEvent.click(screen.getByTestId("agent-view-other-close"));
+    await paintFrame();
+    expect(screen.queryByTestId("agent-view-other")).toBeNull();
+    expect(other.checked).toBe(false);
+    expect(strokes()).toHaveLength(2);
+    fireEvent.click(other);
+    await screen.findByTestId("agent-view-other");
+    expect(other.checked).toBe(true);
+    fireEvent.click(screen.getByTestId("agent-view-user-close"));
+    expect(screen.queryByTestId("agent-view-user")).toBeNull();
+    expect(screen.getByTestId<HTMLInputElement>("agent-view-interactions-user").checked).toBe(false);
   });
 });

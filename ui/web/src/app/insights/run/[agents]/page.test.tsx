@@ -215,13 +215,16 @@ const cbdFixture: ContextBreakdownResponse = {
   categories: [{ kind: "system_prompt", tokens: 400, estimated: false, exact_fraction: 1 }],
 };
 
-function render() {
+/** Renders the page with the Context size row switched on (it is off by default); `contextSize: false` leaves the default. */
+function render({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return rtlRender(
+  const view = rtlRender(
     <QueryClientProvider client={queryClient}>
       <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
     </QueryClientProvider>,
   );
+  if (contextSize) fireEvent.click(screen.getByTestId("agent-view-context-size"));
+  return view;
 }
 
 /** An item of a canvas row, found by what it is; the rows draw no element per item. */
@@ -893,10 +896,13 @@ describe("context size row", () => {
     await waitFor(() => expect(screen.queryByTestId("run-timeline-request")).toBeNull());
   });
 
-  it("switches off, and has no Added context row", async () => {
-    render();
+  it("is off by default, switches on and off, and has no Added context row", async () => {
+    render({ contextSize: false });
     await screen.findByTestId("run-timeline-chart");
+    expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
     expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
+    fireEvent.click(screen.getByTestId("agent-view-context-size"));
+    expect(screen.queryByTestId("run-timeline-row-context")).not.toBeNull();
     fireEvent.click(screen.getByTestId("agent-view-context-size"));
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
   });

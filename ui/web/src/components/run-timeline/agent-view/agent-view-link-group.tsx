@@ -5,7 +5,10 @@
 // holds the events with the user, who is no agent. Each event is a colored tick at its time and the
 // end of an arrow whose other end is an agent in the view. Neither group can be removed.
 
+import { X } from "lucide-react";
 import { useTranslations } from "next-intl";
+
+import { buttonVariants } from "@/components/ui/button";
 
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
@@ -23,6 +26,7 @@ export function LinkRowGroup({
   selectedKey,
   onHover,
   onSelect,
+  onClose,
 }: {
   variant: "user" | "other";
   /** The links with an end in this group, left to right. */
@@ -32,6 +36,8 @@ export function LinkRowGroup({
   selectedKey: string | null;
   onHover: (key: string | null) => void;
   onSelect: (key: string) => void;
+  /** Hides the group and its arrows: the same state as its switch in the toolbar. */
+  onClose: () => void;
 }) {
   const t = useTranslations("runTimeline");
   const labels = useLinkKindLabels();
@@ -43,6 +49,16 @@ export function LinkRowGroup({
         <span className="truncate font-mono" data-testid={`agent-view-${variant}-title`}>
           {title}
         </span>
+        <button
+          type="button"
+          aria-label={t("closeGroup", { title })}
+          title={t("closeGroup", { title })}
+          data-testid={`agent-view-${variant}-close`}
+          onClick={onClose}
+          className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1")}
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
       </div>
       <RowShell label={t("otherRow")} height="h-5" testId={`run-timeline-row-${variant}`}>
         {links.map((l) => {
