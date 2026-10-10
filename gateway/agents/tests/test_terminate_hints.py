@@ -4,6 +4,7 @@ from typing import NoReturn
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
 from base.db import Database
 from gateway.agents import lifecycle
@@ -16,7 +17,10 @@ async def test_hint_read_failure_never_changes_accepted_termination(
 ) -> None:
     forwarded: list[int] = []
 
-    async def accept(agent_id: int, path: str, body: dict[str, object]) -> dict[str, object]:
+    async def accept(
+        agent_id: int, path: str, body: dict[str, object], *, db: Database, pool: ConnectionPool
+    ) -> dict[str, object]:
+        assert db is database
         assert path == f"/api/agents/{agent_id}/terminate"
         assert body == TerminateAgentRequest().model_dump()
         forwarded.append(agent_id)
@@ -29,7 +33,7 @@ async def test_hint_read_failure_never_changes_accepted_termination(
     with database.pool(max_size=2) as pool:
         monkeypatch.setattr(pool, "connection", fail_connection)
         response = await lifecycle.terminate_agent_with_open_tasks(
-            17, TerminateAgentRequest(), pool
+            17, TerminateAgentRequest(), pool, db=database
         )
     assert forwarded == [17]
     assert response.model_dump() == {

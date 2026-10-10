@@ -22,23 +22,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
-from gateway.cluster.snapshots import Snapshot, read_all_blocking
+from base.db import Database
+from gateway.cluster import snapshots
+from gateway.cluster.snapshots import Snapshot
+from gateway.extensions.inventory_matrix import collapse_inventory
 from gateway.extensions.schemas import (
     InventoryAggregate,
     InventoryItem,
-    InventoryItemAggregate,
-    InventoryItemHostState,
     InventoryItemWriteResult,
     InventoryMachineView,
     InventoryWriteResult,
 )
 from ops.cluster import rpc as _cluster_rpc
-from ops.rpc_schemas import InventoryReadItem, InventoryReadResult, InventoryWriteOpResult
+from ops.rpc_schemas import InventoryReadResult, InventoryWriteOpResult
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -50,16 +51,14 @@ _log = logging.getLogger(__name__)
 _AGGREGATE_READ_TIMEOUT_S = 15.0
 
 
-def _assert_inventory_target(target: str) -> None:
+def _assert_inventory_target(pool: ConnectionPool, target: str) -> None:
     """404 unless `target` is a registered agent-runner.
 
     Inventory is agent-runner-only: a gateway name — including this gateway's
     own — has no plugin/MCP inventory and is rejected the same as a typo'd one. A
     registered-but-offline agent-runner passes here and 503s later on timeout.
     """
-    from gateway.app import app
-
-    with app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM machines WHERE name = %s AND 'agent-runner' = ANY(role)", (target,)
         )
@@ -68,7 +67,7 @@ def _assert_inventory_target(target: str) -> None:
 
 
 async def _dispatch_inventory_read(
-    target: str, *, timeout_s: float | None = None, retries: int | None = None
+    db: Database, target: str, *, timeout_s: float | None = None, retries: int | None = None
 ) -> InventoryReadResult:
     """Run inventory_read on agent-runner `target` by POSTing to its ops server.
 
@@ -84,11 +83,9 @@ async def _dispatch_inventory_read(
     aggregate passes 1 (one fast retry inside its budget), the single-machine
     view leaves the cluster default.
     """
-    from gateway.app import app
-
     return InventoryReadResult.model_validate(
         await _cluster_rpc.dispatch_to_machine(
-            app.state.db,
+            db,
             target_machine=target,
             kind="inventory_read",
             payload={},
@@ -99,16 +96,14 @@ async def _dispatch_inventory_read(
 
 
 async def _dispatch_inventory_write(
-    target: str, plugins: dict[str, bool], mcp_servers: dict[str, bool]
+    db: Database, target: str, plugins: dict[str, bool], mcp_servers: dict[str, bool]
 ) -> InventoryWriteOpResult:
     """Run inventory_write on agent-runner `target` by POSTing to its ops server.
 
     Caller has already verified the target is a registered agent-runner."""
-    from gateway.app import app
-
     try:
         wire = await _cluster_rpc.dispatch_to_machine(
-            app.state.db,
+            db,
             target_machine=target,
             kind="inventory_write",
             payload={"plugins": plugins, "mcp_servers": mcp_servers},
@@ -121,58 +116,7 @@ async def _dispatch_inventory_write(
     return InventoryWriteOpResult.model_validate(wire)
 
 
-def _collapse(
-    reads: dict[str, InventoryReadResult],
-    machines: list[str],
-    unreachable: list[str],
-) -> InventoryAggregate:
-    """Collapse per-host inventory_read results into the cross-machine matrix.
-
-    `reads` maps each REACHABLE machine name to its InventoryReadResult.
-    `machines` is every name considered (column set), `unreachable` the subset
-    whose read failed.
-
-    For each item, the row's `description` is the first non-empty description
-    seen across reachable hosts; a reachable host lacking the item gets a
-    present=False cell. Unreachable hosts are excluded from every item's cells.
-    """
-    reachable = sorted(reads)
-
-    def _rows(
-        items_of: Callable[[InventoryReadResult], dict[str, InventoryReadItem]], kind: str
-    ) -> list[InventoryItemAggregate]:
-        names = sorted({name for m in reachable for name in items_of(reads[m])})
-        rows: list[InventoryItemAggregate] = []
-        for name in names:
-            description = ""
-            hosts: dict[str, InventoryItemHostState] = {}
-            for m in reachable:
-                item = items_of(reads[m]).get(name)
-                if item is None:
-                    hosts[m] = InventoryItemHostState(present=False, enabled=False)
-                    continue
-                if not description and item.description:
-                    description = item.description
-                hosts[m] = InventoryItemHostState(
-                    present=True,
-                    enabled=item.enabled,
-                    can_enable=item.can_enable,
-                    reason=item.reason,
-                )
-            rows.append(
-                InventoryItemAggregate(name=name, kind=kind, description=description, hosts=hosts)
-            )
-        return rows
-
-    return InventoryAggregate(
-        machines=sorted(machines),
-        unreachable=sorted(unreachable),
-        plugins=_rows(lambda r: r.plugins, "plugin"),
-        mcp_servers=_rows(lambda r: r.mcp_servers, "mcp"),
-    )
-
-
-def _agent_runner_rows() -> list[tuple[str, bool]]:
+def _agent_runner_rows(pool: ConnectionPool) -> list[tuple[str, bool]]:
     """Agent-runner rows — the aggregate's column set plus each row's
     intentionally-stopped latch.
 
@@ -182,9 +126,7 @@ def _agent_runner_rows() -> list[tuple[str, bool]]:
     registers. `stopped_at` marks an intentional `ava stop`; a stopped host
     stays a column but is reported unreachable without a dial (task #4127).
     """
-    from gateway.app import app
-
-    with app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT name, stopped_at IS NOT NULL FROM machines "
             "WHERE 'agent-runner' = ANY(role) ORDER BY name"
@@ -192,14 +134,12 @@ def _agent_runner_rows() -> list[tuple[str, bool]]:
         return [(row[0], row[1]) for row in cur.fetchall()]
 
 
-def _agent_runner_snapshots() -> dict[str, Snapshot]:
+def _agent_runner_snapshots(pool: ConnectionPool) -> dict[str, Snapshot]:
     """The heartbeat liveness pass's last probe of every machine, by name."""
-    from gateway.app import app
-
-    return read_all_blocking(app.state.db_pool)
+    return snapshots.read_all_blocking(pool)
 
 
-async def _dial_inventory_read(target: str) -> InventoryReadResult:
+async def _dial_inventory_read(db: Database, target: str) -> InventoryReadResult:
     """Dial one host under a bounded transport policy.
 
     The whole dial — one fast retry included — is capped by the aggregate read
@@ -210,14 +150,14 @@ async def _dial_inventory_read(target: str) -> InventoryReadResult:
     budget = _AGGREGATE_READ_TIMEOUT_S
     try:
         async with asyncio.timeout(budget):
-            return await _dispatch_inventory_read(target, timeout_s=budget, retries=1)
+            return await _dispatch_inventory_read(db, target, timeout_s=budget, retries=1)
     except TimeoutError as exc:
         raise _cluster_rpc.ClusterOpUnreachable(
             f"inventory_read for machine={target!r} exceeded its {budget:.1f}s total budget"
         ) from exc
 
 
-async def _aggregate() -> InventoryAggregate:
+async def _aggregate(db: Database, pool: ConnectionPool) -> InventoryAggregate:
     """Fan out inventory_read to every agent-runner concurrently and collapse the
     results; a host whose read raised goes in `unreachable`.
 
@@ -226,17 +166,17 @@ async def _aggregate() -> InventoryAggregate:
     snapshot, `gateway/cluster/snapshots.py`) report `unreachable` directly (a
     dial could only hang; task #4127). Dialed hosts run under a bounded transport
     policy — the roster and this aggregate keep one liveness view, the pass's."""
-    rows = _agent_runner_rows()
+    rows = _agent_runner_rows(pool)
     machines = [name for name, _stopped in rows]
     skipped = {name for name, stopped in rows if stopped}
-    known_down = _agent_runner_snapshots()
+    known_down = _agent_runner_snapshots(pool)
     skipped |= {m for m in machines if m in known_down and known_down[m].known_down()}
     to_dial = [m for m in machines if m not in skipped]
     if skipped:
         _log.debug("inventory aggregate: not dialing known-down host(s) %s", sorted(skipped))
 
     results = await asyncio.gather(
-        *(_dial_inventory_read(m) for m in to_dial),
+        *(_dial_inventory_read(db, m) for m in to_dial),
         return_exceptions=True,
     )
     reads: dict[str, InventoryReadResult] = {}
@@ -253,11 +193,13 @@ async def _aggregate() -> InventoryAggregate:
             raise res
         else:
             reads[m] = res
-    return _collapse(reads, machines, unreachable)
+    return collapse_inventory(reads, machines, unreachable)
 
 
 @router.get("/api/inventory")
-async def get_inventory(machine: str | None = None) -> InventoryAggregate | InventoryMachineView:
+async def get_inventory(
+    request: Request, machine: str | None = None
+) -> InventoryAggregate | InventoryMachineView:
     """Return the plugin + MCP enable inventory.
 
     Without `machine`: the cross-machine AGGREGATE matrix (one row per plugin /
@@ -266,11 +208,11 @@ async def get_inventory(machine: str | None = None) -> InventoryAggregate | Inve
     non-agent-runner machine, 503 offline / timed out).
     """
     if machine is None:
-        return await _aggregate()
+        return await _aggregate(request.app.state.db, request.app.state.db_pool)
 
-    await asyncio.to_thread(_assert_inventory_target, machine)
+    await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)
     try:
-        read = await _dispatch_inventory_read(machine)
+        read = await _dispatch_inventory_read(request.app.state.db, machine)
     except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
         raise HTTPException(
             status_code=503,
@@ -314,7 +256,7 @@ class InventoryWriteRequest(BaseModel):
 
 @router.put("/api/inventory")
 async def put_inventory(
-    body: InventoryWriteRequest, machine: str | None = None
+    body: InventoryWriteRequest, request: Request, machine: str | None = None
 ) -> InventoryWriteResult:
     """Apply plugin + MCP enable toggles to agent-runner `machine` (required).
 
@@ -329,9 +271,11 @@ async def put_inventory(
         raise HTTPException(
             status_code=400, detail="inventory writes require ?machine=<agent-runner>"
         )
-    await asyncio.to_thread(_assert_inventory_target, machine)
+    await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)
 
-    result = await _dispatch_inventory_write(machine, body.plugins, body.mcp_servers)
+    result = await _dispatch_inventory_write(
+        request.app.state.db, machine, body.plugins, body.mcp_servers
+    )
     return InventoryWriteResult(
         applied=result.applied,
         plugin_results={

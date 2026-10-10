@@ -31,7 +31,12 @@ def _catalog() -> ModelCatalog:
 
 def _request() -> Request:
     return Request(
-        {"type": "http", "app": SimpleNamespace(state=SimpleNamespace(catalog=_catalog()))}
+        {
+            "type": "http",
+            "app": SimpleNamespace(
+                state=SimpleNamespace(catalog=_catalog(), db=MagicMock(), db_pool=MagicMock())
+            ),
+        }
     )
 
 
