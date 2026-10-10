@@ -523,6 +523,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/agents/history/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/timeline/retained"): RouteContract(
+        note="read-only retained boundary window, independent of the live checkpoint head"
+    ),
     # ── gateway/routers/insights.py (proxy of services/derived/insights/run_timeline) ──
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
         note="read-only: the understanding tree and the layer-0 message units in a window",
