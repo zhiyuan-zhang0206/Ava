@@ -8,9 +8,9 @@ import pytest
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig, contribute
 from ava_builtins.plugins.ava_fleet.services import services
-from base.config.service_read import plugin_bootstrap_config
 from base.host.env import bootstrap, runtime_config
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, SERVICE_PLUGIN_CONFIG_ENV
+from base.packages.plugins.config_face import plugin_bootstrap_config
 from base.packages.plugins.config_registration import (
     InvalidConfigData,
     SchemaDriftError,
