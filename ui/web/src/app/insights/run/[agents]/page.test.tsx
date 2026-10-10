@@ -558,6 +558,7 @@ describe("failure and loading", () => {
     getRunTimeline.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
     render();
     await waitFor(() => expect(fail).toBeDefined());
+    const initialSignal = getRunTimeline.mock.calls[0]?.[1]?.signal;
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     await act(async () => {
       fail?.(new DOMException("run timeline exceeded 35000ms", "TimeoutError"));
@@ -566,7 +567,11 @@ describe("failure and loading", () => {
     expect(await screen.findByText("Could not load the timeline of agent 42.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByTestId("run-timeline-chart");
-    expect(getRunTimeline).toHaveBeenCalledTimes(2);
+    expect(getRunTimeline.mock.calls.map(([agent]) => agent)).toEqual([42, 42]);
+    const retrySignal = getRunTimeline.mock.calls[1]?.[1]?.signal;
+    expect(retrySignal).toBeInstanceOf(AbortSignal);
+    expect(retrySignal).not.toBe(initialSignal);
+    expect(retrySignal?.aborted).toBe(false);
   });
 
   it("offers a retry when the read fails", async () => {
