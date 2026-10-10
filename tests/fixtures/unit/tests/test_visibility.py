@@ -87,7 +87,11 @@ import pytest
 
 pytest_plugins = ["tests.fixtures.identity_restore"]
 sdk = ModuleType("synthetic_sdk")
-held = SimpleNamespace(clients=SimpleNamespace())
+class HeldClients:
+    def close(self):
+        raise AssertionError("borrowed-clients-must-stay-open")
+
+held = SimpleNamespace(clients=HeldClients())
 sdk.context = held
 
 @pytest.fixture
@@ -107,10 +111,14 @@ class BrokenClients:
 def test_1_owns_new_clients():
     sdk.context = SimpleNamespace(clients=BrokenClients())
 
-def test_2_restored_context():
+def test_2_borrows_the_held_clients():
+    assert sdk.context is held
+    sdk.context = SimpleNamespace(clients=held.clients)
+
+def test_3_restored_context():
     assert sdk.context is held
 """
     )
     result = pytester.runpytest_subprocess("-q", "-o", "addopts=")
-    result.assert_outcomes(passed=2, errors=1)
+    result.assert_outcomes(passed=3, errors=1)
     assert "owned-client-close-failed" in result.stdout.str()
