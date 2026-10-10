@@ -131,12 +131,14 @@ def _helper_parameter(
 ) -> str | None:
     if node.decorator_list:
         return None
-    scope = scope if scope is not None else bindings.Scope(node, path, parent.nested_parent())
-    launches = [
-        call
-        for call in bindings.local_nodes(node)
-        if isinstance(call, ast.Call) and scope.origin(call.func) in _LAUNCHERS
-    ]
+    if scope is None:
+        parent = parent.nested_parent()
+        scope = (
+            parent.context.scope(node, path, parent)
+            if parent.context is not None
+            else bindings.Scope(node, path, parent)
+        )
+    launches = [call for call in scope.calls if scope.origin(call.func) in _LAUNCHERS]
     if len(launches) != 1:
         return None
     code, _reason = _code_input(launches[0], scope)
@@ -208,9 +210,10 @@ def _literal_default(
 
 
 class _Inputs(ast.NodeVisitor):
-    def __init__(self, tree: ast.AST, path: str) -> None:
+    def __init__(self, tree: ast.AST, path: str, context: bindings.ModuleContext) -> None:
         self.path = path
-        self.scope = bindings.Scope(tree, path)
+        self.context = context
+        self.scope = context.scope(tree, path)
         self.result = Inputs()
         self._template_launches: dict[int, tuple[int, ast.Call]] = {}
         self._used_functions: set[int] = set()
@@ -237,14 +240,14 @@ class _Inputs(ast.NodeVisitor):
         for expression in outer:
             self.visit(expression)
         lexical_parent = parent.nested_parent()
-        self.scope = bindings.Scope(node, self.path, lexical_parent)
+        self.scope = self.context.scope(node, self.path, lexical_parent)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             parameter = self._helper(node, lexical_parent, self.scope)
             if parameter is not None:
                 self._template_launches.update(
                     (id(call), (id(node), call))
-                    for call in bindings.local_nodes(node)
-                    if isinstance(call, ast.Call) and self.scope.origin(call.func) in _LAUNCHERS
+                    for call in self.scope.calls
+                    if self.scope.origin(call.func) in _LAUNCHERS
                 )
         for statement in inner:
             self.visit(statement)
@@ -323,11 +326,19 @@ class _Inputs(ast.NodeVisitor):
         return self.result
 
 
-def inputs(tree: ast.AST, path: str) -> Inputs:
+def inputs(tree: ast.AST, path: str, *, context: bindings.ModuleContext | None = None) -> Inputs:
     """Resolve only actual Python -c inputs and transparent local helper calls."""
-    visitor = _Inputs(tree, path)
-    visitor.visit(tree)
-    return visitor.finish()
+    context = (
+        context
+        if context is not None
+        else bindings.module_context(tree, bindings.module_name(path))
+    )
+    visitor = _Inputs(tree, path, context)
+    try:
+        visitor.visit(tree)
+        return visitor.finish()
+    finally:
+        context.clear_scopes()
 
 
 @dataclass
