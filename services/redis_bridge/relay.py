@@ -73,7 +73,10 @@ class _Pump:
         except BaseException as error:
             self._error = error
             self._observe_error(error)
-            self.request_stop()
+            try:
+                self.request_stop()
+            except BaseException as secondary:
+                self._observe_error(secondary)
         finally:
             self._done.set()
 
@@ -145,7 +148,14 @@ class _Connection:
     def _forward(self) -> None:
         try:
             self._connect_and_forward()
-        finally:
+        except BaseException as error:
+            self._observe_error(error)
+            try:
+                self._close_sockets()
+            except BaseException as secondary:
+                self._observe_error(secondary)
+            raise
+        else:
             self._close_sockets()
 
     def _connect_and_forward(self) -> None:
@@ -201,6 +211,7 @@ class _Connection:
             try:
                 finished = pump.stop(max(0.0, deadline - time.monotonic())) and finished
             except BaseException as secondary:
+                self._observe_error(secondary)
                 error = error if error is not None else secondary
         if error is not None:
             raise error

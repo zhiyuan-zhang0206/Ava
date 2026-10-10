@@ -397,3 +397,137 @@ def test_serving_reaps_completed_connections_without_stopping_admission() -> Non
         finally:
             service.stop(2.0)
             _close(client, accepted, backend)
+
+
+@pytest.mark.parametrize("worker_primary", [False, True])
+def test_pump_cleanup_preserves_primary_and_collects_every_secondary(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    worker_primary: bool,
+) -> None:
+    primary = LookupError("first worker or pump cleanup defect")
+    secondary = ValueError("later pump cleanup defect")
+    with socket.socket() as backend_listener:
+        backend_listener.bind(("127.0.0.1", 0))
+        backend_listener.listen()
+        backend_listener.settimeout(2.0)
+        client, accepted = socket.socketpair()
+        client.settimeout(2.0)
+        service = relay.RelayService(("127.0.0.1", 0), backend_listener.getsockname())
+        source = cast(socket.socket, _RecvDefect(accepted, primary)) if worker_primary else accepted
+        service._admit(source, ("127.0.0.1", 1))
+        owner = service._connections[0]
+        backend, _ = backend_listener.accept()
+        backend.settimeout(2.0)
+        try:
+            if not worker_primary:
+                client.shutdown(socket.SHUT_WR)
+                assert backend.recv(1) == b""
+                backend.shutdown(socket.SHUT_WR)
+                assert client.recv(1) == b""
+            assert owner._done.wait(2.0)
+            owner._thread.join(timeout=2.0)
+            first, second = owner._pumps
+            original_stop = relay._Pump.stop
+
+            def stop_with_cleanup_defect(pump: relay._Pump, timeout: float) -> bool:
+                finished = original_stop(pump, timeout)
+                if pump is first and not worker_primary:
+                    raise primary
+                if pump is second:
+                    raise secondary
+                return finished
+
+            with monkeypatch.context() as patched:
+                patched.setattr(relay._Pump, "stop", stop_with_cleanup_defect)
+                with pytest.raises(LookupError) as collected:
+                    service.stop(2.0)
+            assert collected.value is primary
+            assert service._errors == [primary, secondary]
+            stderr = capsys.readouterr().err
+            assert stderr.count(str(primary)) == 1
+            assert stderr.count(str(secondary)) == 1
+            assert owner.completed()
+            assert not service._connections
+        finally:
+            with suppress(LookupError):
+                service.stop(2.0)
+            _close(client, accepted, backend)
+
+
+def test_worker_failure_cleanup_retains_both_original_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    primary = LookupError("pump worker primary defect")
+    secondary = ValueError("pump worker shutdown secondary defect")
+    client, accepted = socket.socketpair()
+    source = cast(socket.socket, _RecvDefect(accepted, primary))
+    original_request_stop = relay._Pump.request_stop
+
+    def request_stop_with_defect(pump: relay._Pump) -> None:
+        original_request_stop(pump)
+        if pump._source is source and threading.current_thread() is pump._thread:
+            raise secondary
+
+    monkeypatch.setattr(relay._Pump, "request_stop", request_stop_with_defect)
+    with socket.socket() as backend_listener:
+        backend_listener.bind(("127.0.0.1", 0))
+        backend_listener.listen()
+        backend_listener.settimeout(2.0)
+        service = relay.RelayService(("127.0.0.1", 0), backend_listener.getsockname())
+        service._admit(source, ("127.0.0.1", 1))
+        owner = service._connections[0]
+        backend, _ = backend_listener.accept()
+        try:
+            assert owner._done.wait(2.0)
+            with pytest.raises(LookupError) as collected:
+                service.stop(2.0)
+            assert collected.value is primary
+            assert service._errors == [primary, secondary]
+            stderr = capsys.readouterr().err
+            assert str(primary) in stderr and str(secondary) in stderr
+            assert owner.completed()
+            assert not service._connections
+        finally:
+            with suppress(LookupError):
+                service.stop(2.0)
+            _close(client, accepted, backend)
+
+
+def test_connect_failure_cleanup_preserves_primary_and_retains_secondary(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    primary = LookupError("connect primary defect")
+    secondary = ValueError("connection close secondary defect")
+    original_close = relay._Connection._close_sockets
+
+    def fail_connect(*_args: object, **_kwargs: object) -> socket.socket:
+        raise primary
+
+    def close_with_defect(owner: relay._Connection) -> None:
+        original_close(owner)
+        if threading.current_thread() is owner._thread:
+            raise secondary
+
+    monkeypatch.setattr(relay.socket, "create_connection", fail_connect)
+    monkeypatch.setattr(relay._Connection, "_close_sockets", close_with_defect)
+    client, accepted = socket.socketpair()
+    service = relay.RelayService(("127.0.0.1", 0), ("redis.example", 6380))
+    service._admit(accepted, ("127.0.0.1", 1))
+    owner = service._connections[0]
+    try:
+        assert owner._done.wait(2.0)
+        with pytest.raises(LookupError) as collected:
+            service.stop(2.0)
+        assert collected.value is primary
+        assert service._errors == [primary, secondary]
+        stderr = capsys.readouterr().err
+        assert str(primary) in stderr and str(secondary) in stderr
+        assert owner.completed()
+        assert not service._connections
+    finally:
+        with suppress(LookupError, ValueError):
+            service.stop(2.0)
+        _close(client, accepted)

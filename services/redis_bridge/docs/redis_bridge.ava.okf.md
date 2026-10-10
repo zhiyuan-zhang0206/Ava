@@ -49,8 +49,9 @@ pumps. Connected sockets retain blocking backpressure throughout forwarding.
 Socket transport/connect failures remain expected connection-local failures.
 Unknown worker exceptions immediately print their traceback and remain attached
 to the original service, whose `stop()` raises the first original exception.
-A primary caller/listener exception survives cleanup; secondary worker errors
-remain visible. A blocked hostname lookup cannot be interrupted by socket
+A primary caller/listener or worker exception survives cleanup; every secondary
+cleanup error is recorded by the original service where it is caught and remains
+visible. A blocked hostname lookup cannot be interrupted by socket
 shutdown: stop reports and retains unfinished connection owners within its
 budget, and the same owner can collect their late completion/error on another
 stop. The daemon workers permit the standalone process to exit after that
