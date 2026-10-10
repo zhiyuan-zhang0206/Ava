@@ -92,6 +92,8 @@ an automatic rewrite that could change which object a local name binds.
 resolve the module's own `__name__`, subscripts of literal tables and loop variables
 over them. A table written through itself or a plain alias by subscript, augmented
 assignment, a mutating method call or a `global`/`nonlocal` rebinding stays opaque.
+Passing a table or its alias as a call argument also keeps it opaque without a
+read-only proof; the collector does not execute the callee to infer its writes.
 Iteration yields a dict's keys and indexing its values, resolved in the table's
 definition scope. Like the one-binding rule, this does not observe writes from other
 modules. Scopes built without a context keep the plain one-binding rules.

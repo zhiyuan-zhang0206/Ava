@@ -150,6 +150,9 @@ def _mutated_names(tree: ast.AST) -> frozenset[str]:
             aliases.setdefault(left, set()).add(right)
             aliases.setdefault(right, set()).add(left)
         mutated.update(_direct_mutations(node))
+        if isinstance(node, ast.Call):
+            arguments = (*node.args, *(keyword.value for keyword in node.keywords))
+            mutated.update(argument.id for argument in arguments if isinstance(argument, ast.Name))
     pending = list(mutated)
     while pending:
         for alias in aliases.get(pending.pop(), ()):
