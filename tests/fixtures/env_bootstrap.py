@@ -105,7 +105,7 @@ os.environ["AVA_EVENTS_CHANNEL"] = _TEST_EVENTS_CHANNEL
 # No Settings construction in the suite may fetch from a gateway. The config
 # source is role-derived (AVA_CONFIG_SOURCE is gone; a unit that does not serve
 # the gateway fetches at Settings build), and this test process is
-# agent-runner-only by default — without the skip, `import ava` below would make
+# agent-runner-only by default — without the skip, an SDK import would make
 # a live GET /api/bootstrap against whatever AVA_GATEWAY_URL leaks in. The
 # suite's cluster-scoped values (db/redis URLs, secret) are pinned explicitly in
 # this env block; subprocess tests that spawn real daemons/agents re-derive or
@@ -440,7 +440,7 @@ def _assert_env_precedes_project_imports() -> None:
 
 _assert_env_precedes_project_imports()
 
-# ava / base.config read AVA_DB_URL + AVA_HOME at import — must come after the
+# base.config reads AVA_DB_URL + AVA_HOME at import — must come after the
 # env block above, which is what the assertion just enforced.
 from base.config import ConfigBoot, set_field, settings
 from base.daemon.health import _HEALTH_PORT_OVERRIDES
@@ -486,20 +486,6 @@ assert settings.data_plane.events_channel == _TEST_EVENTS_CHANNEL
 # back — local must match CI, whose fresh .env has no such value (60s).
 settings.sandbox.exec_timeout_seconds = 60.0
 os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
-# Session default for the SDK's own agent id. `ava.self.*` / `ava.agents.*` read
-# it to address `/api/agents/<AGENT_ID>/...`; leaving it None would 404 or crash
-# earlier. It is only a placeholder for tests that never create an agent: serial
-# ids are no longer reset between tests (see `_clean_state` — no RESTART IDENTITY),
-# so the first spawn is NOT guaranteed to be id 1. Any test that exercises
-# `ava.self.*` / `ava.agents.*` re-pins this to the id it actually created via
-# `pin_agent(spawn_agent())` (`tests/fixtures/identity_restore.py`); the
-# `identity_restore` plugin puts it back after the test. Do not rely on "the first spawn is 1" —
-# capture the returned id.
-from ava.sdk_surface.process_context import process_clients
-from base.clock import Clock, clock_config_from_boot
-from tests.fixtures.pin_agent import pin_agent
-
-pin_agent(1)
 # Remove AVA_AGENT_ID propagated from the agent process — any test that
 # temporarily unbinds the context would re-derive one from this env var with
 # owns_loop=False, corrupting subsequent tests.
@@ -670,17 +656,12 @@ _PROCESS_CONFIG_KEY = pytest.StashKey[ConfigBoot]()
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Prepare the session SDK owner before collection and bare function homes."""
+    """Prepare the process configuration before collection and bare function homes."""
     owner = snapshot_process_config()
     config.stash[_PROCESS_CONFIG_KEY] = owner
-    pin_agent(
-        1,
-        clients=process_clients(config=owner),
-        clock_factory=lambda: Clock(clock_config_from_boot(owner)),
-    )
 
 
 @pytest.fixture(scope="session")
 def process_config(pytestconfig: pytest.Config) -> ConfigBoot:
-    """The prepared process configuration that native provisioning owns."""
+    """The prepared configuration shared by native provisioning and local SDK owners."""
     return pytestconfig.stash[_PROCESS_CONFIG_KEY]

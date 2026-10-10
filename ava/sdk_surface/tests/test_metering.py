@@ -354,15 +354,17 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
 
     monkeypatch.setattr(metering, "_instrument_targets", _stub_targets)
     ledger = metering.install(sampling_owner)
-    wrapped = target.demo
-    assert wrapped is not demo
-    assert metering.is_recorder(wrapped)
+    try:
+        wrapped = target.demo
+        assert wrapped is not demo
+        assert metering.is_recorder(wrapped)
 
-    def _no_walk() -> list[tuple[object, str, str]]:
-        pytest.fail("uninstall() must not re-walk the namespace (task #3426)")
+        def _no_walk() -> list[tuple[object, str, str]]:
+            pytest.fail("uninstall() must not re-walk the namespace (task #3426)")
 
-    monkeypatch.setattr(metering, "_instrument_targets", _no_walk)
-    metering.uninstall(ledger)
+        monkeypatch.setattr(metering, "_instrument_targets", _no_walk)
+    finally:
+        metering.uninstall(ledger)
     assert target.demo is demo
 
 
@@ -374,17 +376,18 @@ def test_teardown_survives_a_poisoned_dynamic_surface(
     behind); uninstall() must complete without touching the surface and restore
     every recorded pair."""
     ledger = metering.install(sampling_owner)
-    assert ledger
-    recorded = list(ledger)
+    try:
+        assert ledger
+        recorded = list(ledger)
 
-    def _poisoned(_self: object) -> list[str]:
-        raise RuntimeError("simulated corrupt install registry")
+        def _poisoned(_self: object) -> list[str]:
+            raise RuntimeError("simulated corrupt install registry")
 
-    monkeypatch.setattr(type(ava.skills), "__all_for_ava__", property(_poisoned))  # pyright: ignore[reportUnknownArgumentType]
-    with pytest.raises(RuntimeError):
-        metering._instrument_targets()  # the old teardown path explodes here
-
-    metering.uninstall(ledger)
+        monkeypatch.setattr(type(ava.skills), "__all_for_ava__", property(_poisoned))  # pyright: ignore[reportUnknownArgumentType]
+        with pytest.raises(RuntimeError):
+            metering._instrument_targets()  # the old teardown path explodes here
+    finally:
+        metering.uninstall(ledger)
     # Completeness on the precise unit of the guarantee: no recorded pair still
     # holds a recorder.
     for parent, attr in recorded:
@@ -536,7 +539,10 @@ def test_install_does_not_evaluate_dynamic_namespace_directory(
     monkeypatch.setattr(ava.skills, "__dir__", dynamic_names)
     monkeypatch.setattr(ava.mcps, "__dir__", dynamic_names)
     ledger = metering.install(sampling_owner)
-    metering.uninstall(ledger)
+    try:
+        assert ledger
+    finally:
+        metering.uninstall(ledger)
 
 
 @pytest.mark.parametrize("wrapper", ["sync", "async", "mcp"])

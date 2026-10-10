@@ -3,3 +3,7 @@
 "tests.path_scoped.structure_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_executed_evidence.py",
+    "test_tests_location.py"
+]

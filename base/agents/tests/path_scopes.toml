@@ -3,3 +3,7 @@
 "tests.path_scoped.gateway_tests" = [
     "test_log_sink.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_impersonation_event_capture.py",
+    "test_log_sink.py"
+]

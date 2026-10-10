@@ -101,7 +101,12 @@ modules. Scopes built without a context keep the plain one-binding rules.
 `bindings.local_nodes()` preserves lexical depth-first order with an explicit
 iterator stack, so deep expressions do not repeatedly relay each node through
 recursive generators. Nested bodies and definition-time inputs retain the same
-scope boundaries.
+scope boundaries. Its optional `bindings_only` projection yields only calls and
+actual binding inputs, including Name stores and Attribute stores/deletes.
+`Scope` consumes this projection rather than relaying every inert literal,
+load name and context/operator node to its binding dispatcher. The projection
+uses the same AST child traversal and does not prune expression subtrees; the
+default public walk still yields all nodes in order.
 
 Within one analysis, `ModuleContext.scope()` reuses completed scopes by AST node,
 source path and lexical parent. The fact and execution-input visitors share these
@@ -121,6 +126,60 @@ it to discover a path; a `mode` keyword on either read method does not prove an
 output. Other method names such as an arbitrary `read()` or
 `open()` do not establish a file read; built-in/imported `open` and recognized
 Path operations retain their existing resource grammar.
+
+`Evidence.resource_reads` distinguishes recognized read operations from resource
+path construction. The same collector emits `ResourceRead` with the operation's
+line, checkout-relative target and method: `read_text`, `read_bytes`, or `open`
+with a default or bounded readable mode. Write-only or unknown modes and unpacked
+open arguments do not provide this positive evidence. Recognized lexical method
+replacement suppresses it. Directory iterator construction does not prove that
+the iterator was consumed. Existing dependency records remain conservative and
+independent of this metadata.
+
+A read event does not prove that a target is tracked, assign its component owner,
+authorize private access or certify test placement. Non-Python targets retain
+their natural artifact directories; absence from `CODE_TOPS` cannot grant root
+ownership. Consumers must retain every unknown input alongside these events.
+
+`file_loader.prove_execution()` owns a pure, bounded proof for an actual local
+`spec_from_file_location` → `module_from_spec` → `spec.loader.exec_module` chain.
+Its inputs are the existing lexical Scope, its AST and already-visited calls;
+it returns the factory and source expression, a structured reason for an opaque
+recognized execution, or None for an unrelated operation. Plain local aliases
+participate; control-flow chains, object mutation, exported bindings, captured
+objects and escape to other calls do not establish a proof. It does not read
+files, parse another source or interpret helpers. `input_domain()` uses the same
+shared text-domain limit to pair bounded names with collector-anchored paths.
+Independent domains conservatively produce a Cartesian product.
+
+The facts collector owns source lookup, parsing and analysis under the actual
+proven runtime module name. It models one level of unchanged, checkout-local
+Python sources, with each parsed source reused only within that analysis. Recognized
+`write_text`, `write_bytes` and potentially writable `open` calls before execution
+prevent a source proof when their target matches a loaded source or is opaque.
+Targets use the existing resource grammar and physical path resolution. A known
+source path passed to another operation, including through a plain alias,
+literal container or bound method, also prevents proof without an existing
+unmodified read-only or Path-builder contract. This rejects an opaque helper or
+unsupported mutation without interpreting its body or enumerating file-write
+APIs. A call result remains opaque; the arguments of its producing call do not
+prove its return value. A read-only open also requires its existing unmodified-callee proof; its mode does
+not certify a replaced function. A later local file-write call does not
+retroactively invalidate an earlier execution. Ancestor
+calls have no proven ordering relative to a nested invocation and remain
+conservative. This is a bounded lexical check, not a helper side-effect model.
+Symlink
+aliases, missing or invalid sources, relative package imports, nested loaders and
+opaque names or paths retain Unknown. A factory without proven execution and
+`runpy.run_path` also remain explicit gaps. Only the matching factory gap is
+closed; every child-analysis or unrelated gap is returned to the caller.
+`Evidence.file_executions` records each possible source and runtime name at the
+execution line. The loaded source and its known dependencies become conservative
+RESOURCE facts; they do not become the caller's Python import or private-access
+authority. Existing Python subject admission still needs complete, independently
+proven subjects. Another known resource read cannot certify a loader's inputs.
+The collector does not interpret command arguments or follow loaders across
+helper definitions.
 
 Import-linter contracts, private package doors and test-placement rules remain
 responsible for their existing boundaries.

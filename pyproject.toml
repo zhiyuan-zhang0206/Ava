@@ -158,6 +158,14 @@ root_packages = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "a
 # The migration audit fails on unclassified boundaries; these declarations do
 # not grant access to other modules, private members, or undeclared consumers.
 [[tool.ava.public_contracts.components]]
+module = "tests.fixtures.unit.sdk"
+entry_modules = ["tests.fixtures.unit.sdk"]
+
+[[tool.ava.public_contracts.components]]
+module = "tests.fixtures.identity_restore"
+entry_modules = ["tests.fixtures.identity_restore"]
+
+[[tool.ava.public_contracts.components]]
 module = "ava.tests.understand"
 entry_modules = ["ava.tests.understand.provider_support"]
 

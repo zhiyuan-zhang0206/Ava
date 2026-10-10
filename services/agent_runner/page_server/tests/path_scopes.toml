@@ -3,3 +3,8 @@
 "tests.path_scoped.services_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py",
+    "test_dead_pages.py",
+    "test_page_server_daemon.py"
+]

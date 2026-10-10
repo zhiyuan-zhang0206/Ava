@@ -13,3 +13,7 @@
 "tests.path_scoped.db_authority_tests" = [
     "test_single_box.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_commands_register.py",
+    "test_external_skills.py"
+]

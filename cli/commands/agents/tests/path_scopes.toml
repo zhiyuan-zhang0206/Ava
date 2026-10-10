@@ -3,3 +3,17 @@
 "tests.path_scoped.cli_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_agents_cmd.py",
+    "test_delivery.py",
+    "test_external_caller_cli.py",
+    "test_impersonation.py",
+    "test_impersonation_agents.py",
+    "test_impersonation_bridge.py",
+    "test_impersonation_bridge_parsers.py",
+    "test_impersonation_bridge_part2.py",
+    "test_impersonation_send_event_log.py",
+    "test_relay_heartbeat_ownership.py",
+    "test_relay_status.py",
+    "test_rpc_result_domains.py"
+]

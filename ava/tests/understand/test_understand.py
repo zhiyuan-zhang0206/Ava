@@ -27,6 +27,7 @@ from ava.tests.understand.provider_support import understand_clock as understand
 from ava.understand import UnderstandError, understand
 from base.config import settings
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+from tests.fixtures.unit.workspace import workspace as workspace
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner", "understand_clock")
 

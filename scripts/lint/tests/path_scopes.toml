@@ -11,3 +11,7 @@
     "test_rename_aware_baseline.py",
     "test_tests_dir_scope.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_lint_agent_docstrings.py",
+    "test_lint_only_mode.py"
+]

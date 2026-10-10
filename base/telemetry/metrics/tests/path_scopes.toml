@@ -3,3 +3,7 @@
 "tests.path_scoped.gateway_tests" = [
     "test_metrics_aggregate_equivalence.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "core/test_catalog.py",
+    "test_metrics_aggregate_equivalence.py"
+]

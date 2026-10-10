@@ -4,3 +4,27 @@
     "test_llm_factory.py",
     "test_llm_factory_new_models.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "llm_factory/test_override_resolution.py",
+    "llm_factory/test_provider_construction.py",
+    "llm_factory/test_reasoning_effort_dispatch.py",
+    "llm_factory/test_validate_model_config.py",
+    "providers/test_call_fail_fast.py",
+    "providers/test_error_trust.py",
+    "providers/test_provider_errors.py",
+    "providers/test_provider_plugins.py",
+    "providers/test_provider_stop.py",
+    "registry/test_settings.py",
+    "test_agent_model_config.py",
+    "test_context_budget.py",
+    "test_fast_services.py",
+    "test_llm.py",
+    "test_llm_factory.py",
+    "test_llm_factory_new_models.py",
+    "test_lm_attach.py",
+    "test_lm_call.py",
+    "test_lm_factory.py",
+    "test_per_agent_overrides.py",
+    "test_repo_model_catalog.py",
+    "test_single_attempt.py"
+]

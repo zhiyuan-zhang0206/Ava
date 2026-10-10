@@ -6,3 +6,7 @@
 "tests.path_scoped.ava_tests" = [
     "test_migrations.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_maintenance_cold.py",
+    "test_migrations.py"
+]

@@ -3,3 +3,7 @@
 "tests.path_scoped.cli_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_cluster_lifecycle.py",
+    "test_commands_cluster_status.py"
+]
