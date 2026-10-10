@@ -330,12 +330,13 @@ class _Collector(ast.NodeVisitor):
         method = node.func
         if isinstance(method, ast.Attribute) and method.attr in {"write_text", "write_bytes"}:
             return self.scope.value(method.value)
-        if not self._open_function(method) and not (
-            isinstance(method, ast.Attribute) and method.attr == "open"
-        ):
+        function = self._open_function(method)
+        if not function and not (isinstance(method, ast.Attribute) and method.attr == "open"):
             return None
         target = self._read_target(node)
         if target is None:
+            return node
+        if not self._unmodified_path_operation(node, "", "open", function=function):
             return node
         mode = self._open_mode(node)
         values = self.scope.strings(mode) if mode is not None else ("r",)
