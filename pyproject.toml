@@ -162,6 +162,10 @@ module = "ava.tests.understand"
 entry_modules = ["ava.tests.understand.provider_support"]
 
 [[tool.ava.public_contracts.components]]
+module = "tests.fixtures.model_catalog"
+entry_modules = ["tests.fixtures.model_catalog"]
+
+[[tool.ava.public_contracts.components]]
 module = "tests.e2e"
 entry_modules = [
     "tests.e2e.fixture_environment",

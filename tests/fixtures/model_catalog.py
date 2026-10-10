@@ -11,6 +11,8 @@ from base.lm.pricing import PriceBook
 from base.lm.provider_api import ProviderBinding
 from base.lm.registry import ModelSpec
 
+__all__ = ["model_catalog"]
+
 AddModels = Callable[[ModelCatalog, Mapping[str, ModelSpec]], ModelCatalog]
 AddBindings = Callable[[ModelCatalog, Mapping[str, ProviderBinding]], ModelCatalog]
 SetPrices = Callable[[ModelCatalog, PriceBook], ModelCatalog]
