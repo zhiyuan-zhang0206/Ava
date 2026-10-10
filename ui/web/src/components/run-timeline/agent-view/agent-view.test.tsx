@@ -449,7 +449,8 @@ describe("arrows between agents", () => {
     expect(getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 11 });
     expect(screen.queryByTestId("run-timeline-link-add-agent")).toBeNull();
     // The legend counts them with the rest: two chat messages and one notice (the terminate is its own kind).
-    expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 2");
+    expect(screen.getByTestId("run-timeline-link-legend-user_message").textContent).toBe("User message 2");
+    expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 0");
     expect(screen.getByTestId("run-timeline-link-legend-notice").textContent).toBe("Notice 1");
   });
 
@@ -553,5 +554,42 @@ describe("arrows between agents", () => {
     fireEvent.click(items[0]);
     await screen.findByTestId("run-timeline-link-detail");
     expect(screen.getByTestId("run-timeline-window").textContent).not.toBe(before);
+  });
+
+  it("draws the user's messages in their own color and legend entry, with a switch of their own, never merged with the messages between agents", async () => {
+    getRunTimeline.mockImplementation((agent) =>
+      Promise.resolve(
+        agent === 7
+          ? { ...BY_AGENT[7], units: [...BY_AGENT[7].units, { ...unit(5, 2, 3, "l"), kind: "inbound", source: "user", inbound_id: 75 }] }
+          : (BY_AGENT[agent] ?? response(agent, [10, 20], false)),
+      ),
+    );
+    getRunTimelineLinks.mockResolvedValue({ links: [link({ ts: at(40) })] });
+    render("7,8");
+    await screen.findByTestId("agent-view-user");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-user_message").textContent).toBe("User message 1"));
+    expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 1");
+    await paintFrame();
+    const brown = "#92400e";
+    expect(strokes().map((d) => d.color).sort()).toEqual([BLUE, brown].sort());
+    fireEvent.click(screen.getByTestId("run-timeline-link-legend-user_message"));
+    await paintFrame();
+    expect(strokes().map((d) => d.color)).toEqual([BLUE]);
+  });
+
+  it("limits the arrows shown to 20 by default, or to 50 by the toolbar's choice", async () => {
+    getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
+    getRunTimelineLinks.mockResolvedValue({ links: Array.from({ length: 80 }, (_, i) => link({ ts: at(20 + i) })) });
+    render("7,8");
+    await screen.findByTestId("agent-view-user");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 80"));
+    expect(screen.getByTestId<HTMLSelectElement>("agent-view-max-arrows").value).toBe("20");
+    await paintFrame();
+    expect(strokes().length).toBeLessThanOrEqual(20);
+    const fewer = strokes().length;
+    fireEvent.change(screen.getByTestId("agent-view-max-arrows"), { target: { value: "50" } });
+    await paintFrame();
+    expect(strokes().length).toBeLessThanOrEqual(50);
+    expect(strokes().length).toBeGreaterThan(fewer);
   });
 });

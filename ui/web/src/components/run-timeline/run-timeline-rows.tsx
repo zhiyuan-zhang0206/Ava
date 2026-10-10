@@ -102,6 +102,7 @@ export function RunTimelineRows({
   onToggleLinkKind,
   linkKeys,
   onSelectLinks,
+  maxArrows = MAX_ARROWS,
 }: {
   /** The agents, top to bottom; at least one is loaded. */
   entries: readonly AgentEntry[];
@@ -133,6 +134,8 @@ export function RunTimelineRows({
   /** The selected links: one for an arrow of one link, several for a merged arrow. */
   linkKeys: readonly string[];
   onSelectLinks: (keys: readonly string[]) => void;
+  /** The most arrows shown at once. */
+  maxArrows?: number;
 }) {
   const linkKey = linkKeys.length === 1 ? linkKeys[0] : null;
   const onSelectLink = (key: string) => onSelectLinks([key]);
@@ -156,7 +159,7 @@ export function RunTimelineRows({
   const shownLinks = useMemo(
     () =>
       links.filter(
-        (l) => linkKinds.has(l.link.kind) && (showUser || endIn(l, "user") === undefined) && (showOther || endIn(l, "other") === undefined),
+        (l) => linkKinds.has(l.kind) && (showUser || endIn(l, "user") === undefined) && (showOther || endIn(l, "other") === undefined),
       ),
     [showUser, showOther, links, linkKinds],
   );
@@ -170,7 +173,7 @@ export function RunTimelineRows({
   }, [shownLinks]);
   const linkCounts = useMemo(() => {
     const counts = new Map<LinkKind, number>();
-    for (const l of links) counts.set(l.link.kind, (counts.get(l.link.kind) ?? 0) + 1);
+    for (const l of links) counts.set(l.kind, (counts.get(l.kind) ?? 0) + 1);
     return counts;
   }, [links]);
   // The row the selection was made in: a block and its bar in the Context size row select the same thing.
@@ -446,7 +449,7 @@ export function RunTimelineRows({
     // The ends of merged arrows can be different peers in the Other agents row: then the row is named, not one agent.
     const same = (pick: (l: ResolvedLink) => number | null, label: string | null) => (hoveredLinks.every((l) => pick(l) === pick(first)) ? endLabel(pick(first)) : (label ?? ""));
     const common = {
-      kind: linkLabels[first.link.kind],
+      kind: linkLabels[first.kind],
       from: same((l) => l.link.sender, t("otherAgents")),
       to: same((l) => l.link.receiver, t("otherAgents")),
     };
@@ -561,7 +564,7 @@ export function RunTimelineRows({
       }}
       className="relative select-none space-y-3 rounded-[10px] border border-border bg-card p-3"
     >
-      <LinksCanvas links={shownLinks} selectedKeys={selectedKeys} hoverKeys={hoverKeys} axis={axis} view={view} maxArrows={MAX_ARROWS} hitRef={hitRef} />
+      <LinksCanvas links={shownLinks} selectedKeys={selectedKeys} hoverKeys={hoverKeys} axis={axis} view={view} maxArrows={maxArrows} hitRef={hitRef} />
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
         {spoken ?? ""}
       </p>

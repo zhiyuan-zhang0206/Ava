@@ -111,5 +111,8 @@
   "closeGroup": "隐藏{title}（可在工具栏重新打开）",
   "readoutLinkGroup": "{kind} · {from} → {to} · 合并 {count} 条 · {start} – {end}",
   "linkGroupTitle": "{count} 条{kind}",
-  "linkGroupHeading": "合并的箭头（选一条会放大到它）"
+  "linkGroupHeading": "合并的箭头（选一条会放大到它）",
+  "linkUserMessage": "用户消息",
+  "maxArrowsLabel": "最多箭头数",
+  "maxArrowsTitle": "超过此数的箭头按远近合并"
 }

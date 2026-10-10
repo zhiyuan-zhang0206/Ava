@@ -5,13 +5,15 @@ import type { RunTimelineLink, RunTimelineResponse, RunTimelineUnit } from "@/li
 
 import type { Selection } from "./timeline-model";
 
-export type LinkKind = RunTimelineLink["kind"];
+/** What an arrow is: an event of the record, or (`user_message`) a chat message of the user, which has no event and is told apart from the messages between agents. */
+export type LinkKind = RunTimelineLink["kind"] | "user_message";
 
 /** The kinds in legend order; a kind is told apart by its color alone. */
-export const LINK_KINDS: readonly LinkKind[] = ["send_message", "spawn", "fork", "terminate", "restart", "resurrect", "notice"];
+export const LINK_KINDS: readonly LinkKind[] = ["send_message", "user_message", "spawn", "fork", "terminate", "restart", "resurrect", "notice"];
 
 export const LINK_COLORS: Record<LinkKind, string> = {
   send_message: "#3b82f6",
+  user_message: "#92400e",
   spawn: "#22c55e",
   fork: "#14b8a6",
   terminate: "#ef4444",
@@ -33,6 +35,8 @@ export interface LinkEnd {
 export interface ResolvedLink {
   /** Stable across redraws: kind, time, ends and position in the response. */
   key: string;
+  /** What it is for the legend, colors and merging; `link.kind` is the record's (a user's message has no record). */
+  kind: LinkKind;
   link: RunTimelineLink;
   from: LinkEnd;
   to: LinkEnd;
@@ -89,6 +93,7 @@ export function resolveLinks(
       to = { row: "units", agent: receiver, ms: block === null ? ms : middle(block) };
     }
     out.push({
+      kind: link.kind,
       key: `${link.kind}-${link.ts}-${link.sender ?? "user"}-${link.receiver ?? "user"}-${index}`,
       link,
       from,
@@ -106,6 +111,7 @@ export function resolveLinks(
       const ms = Date.parse(unit.start);
       out.push({
         key: `user-${id}-${unit.i0}`,
+        kind: "user_message",
         link: { kind: "send_message", ts: unit.start, sender: null, receiver: id, inbound_id: unit.inbound_id, fork_from: null, notice_id: null },
         from: { row: "user", agent: 0, ms },
         to: { row: "units", agent: id, ms: middle(unit) },
@@ -261,7 +267,8 @@ export function nearestUnit(data: RunTimelineResponse, ms: number): Selection | 
 }
 
 /** The most arrows the panel shows at once; the merge distance adapts to the viewport to stay within it. */
-export const MAX_ARROWS = 20;
+export const ARROW_LIMITS = [20, 50] as const;
+export const MAX_ARROWS: number = ARROW_LIMITS[0];
 
 /** What clustering needs of an arrow on screen: its identity, which arrows it may merge with, and where its ends are. */
 export interface Arrow {
@@ -288,7 +295,7 @@ export interface Cluster {
 const rowId = (end: LinkEnd) => (end.row === "units" ? `units:${end.agent}` : end.row);
 
 /** The bucket of a link: its kind and the two rows its ends stand in. Arrows merge only within one. */
-export const bucketOf = (l: ResolvedLink): string => `${l.link.kind}|${rowId(l.from)}|${rowId(l.to)}`;
+export const bucketOf = (l: ResolvedLink): string => `${l.kind}|${rowId(l.from)}|${rowId(l.to)}`;
 
 /** Arrows grouped by bucket and sorted by their start, ready to be merged at any distance. */
 export type PreparedArrows = readonly { bucket: string; list: readonly Arrow[] }[];
