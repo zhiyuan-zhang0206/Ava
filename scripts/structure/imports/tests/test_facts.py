@@ -493,6 +493,22 @@ def test_literal_table_elements_keep_their_definition_scope(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize(
+    "call", ["mutate(TABLE)", "mutate(value=TABLE)", "ALIAS = TABLE\nmutate(ALIAS)"]
+)
+def test_literal_table_escaping_to_a_call_stays_unknown(tmp_path: Path, call: str) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\ndef mutate(value):\n    value['y'] = 'base.db.pool'\n"
+        "TABLE = {'x': 'base.net.retry'}\n"
+        + call
+        + "\ndef load(key):\n    importlib.import_module(TABLE[key])\n",
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.DYNAMIC_IMPORT
+
+
+@pytest.mark.parametrize(
     "expression",
     [
         "(Path('/tmp') / path).read_text()",
