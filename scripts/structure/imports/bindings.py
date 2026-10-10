@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from collections.abc import Iterator
-from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 from typing import cast
@@ -83,21 +82,34 @@ _MUTATORS = frozenset(
 _LITERAL_LIMIT = 256
 
 
-@dataclass(frozen=True)
 class ModuleContext:
     """Whole-module facts that let one reader resolve bounded literal tables.
 
     ``name`` is the runtime ``__name__`` of the analyzed source. ``mutated``
     names every binding whose container contents may change after it is bound;
-    their subscripts and loop elements stay opaque.
+    their subscripts and loop elements stay opaque. It is computed on first use,
+    so modules without a literal-table lookup never pay the extra walk.
     """
 
-    name: str
-    mutated: frozenset[str]
+    def __init__(self, tree: ast.AST, name: str) -> None:
+        self.name = name
+        self._tree = tree
+        self._mutated: frozenset[str] | None = None
+
+    @property
+    def mutated(self) -> frozenset[str]:
+        if self._mutated is None:
+            self._mutated = _mutated_names(self._tree)
+        return self._mutated
 
 
 def module_context(tree: ast.AST, name: str) -> ModuleContext:
-    """In-module container writes and rebinding statements, without evaluating code."""
+    """The module-level context for one parsed source, without evaluating code."""
+    return ModuleContext(tree, name)
+
+
+def _mutated_names(tree: ast.AST) -> frozenset[str]:
+    """In-module container writes and rebinding statements."""
     mutated: set[str] = set()
     for node in ast.walk(tree):
         if (
@@ -117,7 +129,7 @@ def module_context(tree: ast.AST, name: str) -> ModuleContext:
             mutated.add(node.func.value.id)
         elif isinstance(node, ast.Global | ast.Nonlocal):
             mutated.update(node.names)
-    return ModuleContext(name, frozenset(mutated))
+    return frozenset(mutated)
 
 
 def module_name(path: str) -> str:
