@@ -16,8 +16,10 @@ from typing import Any
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 
 from base.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
+from base.db import Database
 from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
 from gateway.app import app
@@ -84,7 +86,11 @@ class TestTerminateRouting:
         """machine != local + force=false → forward, local does not INSERT inbound."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+        async def _capture_forward(
+            agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
+        ) -> dict:
+            assert db is app.state.db
+            assert pool is app.state.db_pool
             captured["agent_id"] = agent_id
             captured["path"] = path
             captured["json_body"] = json_body
@@ -113,7 +119,11 @@ class TestTerminateRouting:
         """machine != local + force=true → forward, local does not touch sessions / pid."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+        async def _capture_forward(
+            agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
+        ) -> dict:
+            assert db is app.state.db
+            assert pool is app.state.db_pool
             captured["json_body"] = json_body
             return {"status": "enqueued"}
 
@@ -207,8 +217,15 @@ def test_restart_overlay_is_validated_without_gateway_agent_domain(
     captured: dict[str, Any] = {}
 
     async def _capture_forward(
-        agent_id: int, path: str, json_body: dict[str, object]
+        agent_id: int,
+        path: str,
+        json_body: dict[str, object],
+        *,
+        db: Database,
+        pool: ConnectionPool,
     ) -> dict[str, str]:
+        assert db is app.state.db
+        assert pool is app.state.db_pool
         captured["agent_id"] = agent_id
         captured["path"] = path
         captured["json_body"] = json_body
@@ -357,7 +374,11 @@ class TestTerminateShellSessions:
     ) -> None:
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+        async def _capture_forward(
+            agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
+        ) -> dict:
+            assert db is app.state.db
+            assert pool is app.state.db_pool
             captured["json_body"] = json_body
             return {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 1]}}
 
@@ -382,7 +403,11 @@ class TestTerminateShellSessions:
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+        async def _capture_forward(
+            agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
+        ) -> dict:
+            assert db is app.state.db
+            assert pool is app.state.db_pool
             return {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}}
 
         with TestClient(app) as client:

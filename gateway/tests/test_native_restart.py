@@ -5,9 +5,10 @@ from typing import Any
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
+from base.db import Database
 from base.lm.plugin_providers import build_model_catalog
 from gateway.tests.test_idempotency import client as client
 from gateway.tests.test_native_cancel import _headers
@@ -34,18 +35,28 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
     calls = 0
     original: Any = None
 
-    async def forward(agent_id: int, path: str, packet: Any, *, idempotency_key: str) -> Any:
+    async def forward(
+        agent_id: int,
+        path: str,
+        packet: Any,
+        *,
+        db: Database,
+        pool: ConnectionPool,
+        idempotency_key: str,
+    ) -> Any:
         nonlocal calls, original
         calls += 1
+        assert db is app.state.db
+        assert pool is app.state.db_pool
         assert path == f"/api/agents/{agent_id}/restart-work-v1"
         operation = NativeRestartOperation.model_validate(packet)
         assert idempotency_key == operation.operation_key
         original = await restart_native_work_op(
-            app.state.db,
+            db,
             app.state.bus,
             agent_id,
             operation,
-            app.state.db_pool,
+            pool,
             catalog=build_model_catalog(),
         )
         if original.status == "refused":
