@@ -244,6 +244,11 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site="ava/sdk_surface/metering.py recorder (via base/sdk_telemetry)",
     ),
+    "sdk_sampling_refresh_unfinished": telemetry_event(
+        "sdk_sampling_refresh_unfinished",
+        "SDK sampling refresh worker retained after the finite shutdown wait",
+        tier="anomaly",
+    ),
     "plugin_activation": telemetry_event(
         "plugin_activation",
         "a plugin injection surface fired (hook / wrap / prompt section)",
