@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.structure import placement
+from scripts.structure import placement, placement_evidence
 from scripts.structure.imports import executed, facts
 from scripts.structure.tests.patch_repo import make_repo
 
@@ -597,3 +597,130 @@ def test_completed_query_releases_its_source_tree(tmp_path: Path) -> None:
             gc.enable()
     assert any(fact.target == "base.net.retry" for fact in found.records)
     assert found.unknown == ()
+
+
+def test_resource_operation_distinguishes_read_from_path_construction(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    prefix = "from pathlib import Path\nresource = Path(__file__).resolve().parents[2] / 'base/data.txt'\n"
+    builder = evidence(root, prefix)
+    reader = evidence(root, prefix + "resource.read_text()\n")
+    assert builder.resource_reads == ()
+    assert [(read.line, read.target, read.operation) for read in reader.resource_reads] == [
+        (3, "base/data.txt", "read_text")
+    ]
+    assert builder.unknown == reader.unknown == ()
+    assert {fact.target for fact in builder.records} == {fact.target for fact in reader.records}
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected"),
+    [
+        ("resource.read_bytes()", "read_bytes"),
+        ("resource.open()", "open"),
+        ("open(resource, mode='r+')", "open"),
+        ("open(resource, 'wb')", None),
+        ("open(resource, mode=mode)", None),
+        ("open(resource, **options)", None),
+        ("open(resource, *options)", None),
+        ("resource.iterdir()", None),
+        ("resource.glob('*')", None),
+    ],
+)
+def test_read_operations_require_eager_reads_or_proven_open_modes(
+    tmp_path: Path, operation: str, expected: str | None
+) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\nresource = Path(__file__).resolve().parents[2] / 'base/data.txt'\n"
+        + operation,
+    )
+    assert [read.operation for read in found.resource_reads] == (
+        [] if expected is None else [expected]
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from pathlib import Path\nPath('/tmp/outside.txt').read_text()",
+        "def read(resource):\n resource.read_bytes()",
+        "def read():\n helper().read_text()",
+        "from pathlib import Path\nPath.read_text = replacement\n"
+        "(Path(__file__).resolve().parents[2] / 'base/data.txt').read_text()",
+        "from pathlib import Path\nresource = Path(__file__).resolve().parents[2] / 'base/data.txt'\n"
+        "resource.read_text = replacement\nresource.read_text()",
+        "import builtins\nbuiltins.open = replacement\n"
+        "from pathlib import Path\nbuiltins.open(Path(__file__).resolve().parents[2] / 'base/data.txt')",
+        "import builtins\nbuiltins.open = replacement\n"
+        "from pathlib import Path\nopen(Path(__file__).resolve().parents[2] / 'base/data.txt')",
+    ],
+)
+def test_unproven_or_external_reads_have_no_positive_repository_operation(
+    tmp_path: Path, source: str
+) -> None:
+    assert evidence(make_repo(tmp_path), source).resource_reads == ()
+
+
+@pytest.mark.parametrize(
+    "loader",
+    [
+        "from importlib.util import spec_from_file_location as load\nload('probe', resource)",
+        "import importlib.util as util\nutil.spec_from_file_location('probe', resource)",
+        "from runpy import run_path as load\nload(resource)",
+    ],
+)
+def test_known_read_cannot_hide_an_unsupported_file_loader(tmp_path: Path, loader: str) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\nresource = Path(__file__).resolve().parents[2] / 'base/net/retry.py'\n"
+        "resource.read_text()\n" + loader,
+    )
+    assert [read.target for read in found.resource_reads] == ["base/net/retry.py"]
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.DYNAMIC_IMPORT
+    assert "File-loader" in found.unknown[0].reason
+
+
+def test_shadowed_file_loader_is_not_an_importlib_operation(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from importlib.util import spec_from_file_location as load\n"
+        "def unrelated(load):\n load('probe', resource)\n",
+    )
+    assert found.unknown == ()
+    assert found.resource_reads == ()
+
+
+def test_file_loader_gap_blocks_otherwise_complete_python_subject_lca(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    source = (
+        "from base.net import retry\nfrom ava.agents import api\n"
+        "from pathlib import Path\nfrom importlib.util import spec_from_file_location\n"
+        "resource = Path(__file__).resolve().parents[2] / 'base/net/retry.py'\n"
+        "resource.read_text()\nretry.backoff()\napi.spawn()\n"
+    )
+    index = placement.ModuleIndex(root)
+    assert (
+        placement_evidence.subject_lca(
+            ast.parse(source), "cli/tests/test_probe.py", index
+        ).directory
+        == ""
+    )
+    loaded = placement_evidence.subject_lca(
+        ast.parse(source + "spec_from_file_location('probe', resource)"),
+        "cli/tests/test_probe.py",
+        index,
+    )
+    assert loaded.directory is None
+    assert len(loaded.unknown) == 1
+    assert "File-loader" in loaded.unknown[0].reason
+
+
+def test_changed_path_builder_has_no_positive_read_operation(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\nPath.resolve = replacement\n"
+        "resource = Path(__file__).resolve().parents[2] / 'base/data.txt'\nresource.read_text()\n",
+    )
+    assert found.resource_reads == ()
+    assert any(fact.target == "base/data.txt" for fact in found.records)

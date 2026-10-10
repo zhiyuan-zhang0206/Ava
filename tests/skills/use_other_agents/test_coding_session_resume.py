@@ -13,7 +13,6 @@ import importlib.util
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -32,16 +31,6 @@ _SKILL_DIR = (
 _SESSION = "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5"
 _OTHER = "01a0e1eb-472f-7832-81f6-77c7d2e47d75"
 _STATUS_CARD = f"│  Directory:  /ws\n│  Session:                     {_SESSION}   │\n"
-
-
-def _load(name: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        f"resume_{name}", _SKILL_DIR / "scripts" / f"{name}.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 @dataclass
@@ -273,7 +262,12 @@ def test_a_fresh_worker_message_does_not_mention_an_interruption(tmp_path: Path)
 def test_resume_takes_a_session_uuid_and_excludes_status(
     script: str, extra: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    module = _load(script)
+    spec = importlib.util.spec_from_file_location(
+        f"resume_{script}", _SKILL_DIR / "scripts" / f"{script}.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
     monkeypatch.setattr(sys, "argv", [f"{script}.py", str(tmp_path), *extra])
 
     with pytest.raises(SystemExit) as excinfo:
