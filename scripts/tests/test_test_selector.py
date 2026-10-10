@@ -332,9 +332,9 @@ def test_selector_mode_is_audit_metadata_from_the_workflow_env(
 def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
     """Hash-randomized set iteration must not change the audit JSON."""
     snippet = """\
-from scripts.ci.test_selector import _estimate_seconds
+from scripts.ci.test_selector import estimate_seconds
 
-print(repr(_estimate_seconds(
+print(repr(estimate_seconds(
     {\"tests/a.py\", \"tests/b.py\", \"tests/c.py\"},
     {
         \"tests/a.py::test_a\": 1e16,
