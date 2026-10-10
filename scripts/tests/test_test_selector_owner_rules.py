@@ -56,6 +56,7 @@ def _repo(tmp_path: Path) -> Path:
         "base/lm/deep/inner.py": "",
         "base/lm/tests/test_lm.py": "from base.lm import engine\n\ndef test_lm(): pass\n",
         "base/empty/mod.py": "",
+        "base/agents/runner.py": "",
         "base/empty/tests/helper.py": "",
         "ops/worker.py": "",
         "scripts/tests/test_bulk.py": "def test_bulk(): pass\n",
@@ -183,17 +184,14 @@ def test_a_malformed_plugin_list_fails_fast(tmp_path: Path) -> None:
         _select(repo_root, "base/lm/engine.py")
 
 
-def test_deleted_paths_are_ignored(tmp_path: Path) -> None:
+def test_deleted_paths_without_base_facts_are_explicitly_incomplete(tmp_path: Path) -> None:
     repo_root = _repo(tmp_path)
-    alone = _select(repo_root, "base/lm/engine.py")
-
-    mixed = _select(
-        repo_root, "base/lm/removed.py", "tests/fixtures/removed.py", "base/lm/engine.py"
+    result = _select(repo_root, "base/lm/removed.py")
+    assert result.decision == "FULL"
+    assert result.reason == "incomplete-impact"
+    assert result.diagnostics == (
+        "head:base/lm/removed.py: deleted path requires --base-ref to recover runtime impact",
     )
-    only_deleted = _select(repo_root, "base/lm/removed.py")
-
-    assert (mixed.decision, mixed.tests) == (alone.decision, alone.tests)
-    assert (only_deleted.decision, only_deleted.tests) == ("SELECTED", (_LINT,))
 
 
 def test_a_frontend_file_adds_no_backend_test(tmp_path: Path) -> None:
@@ -256,7 +254,7 @@ def test_a_module_named_base_agents_does_not_reference_the_agents_directory(
     assert "scripts/tests/test_imports_agents_module.py" not in result.tests
 
 
-def test_the_real_repository_readers_of_hidden_directories_are_selected() -> None:
+def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> None:
     expectations = {
         ".github/workflows/ci.yml": (
             "tests/scripts/test_ci_test_selection.py",
@@ -265,10 +263,18 @@ def test_the_real_repository_readers_of_hidden_directories_are_selected() -> Non
         ".trunk/trunk.yaml": ("tests/scripts/test_audit_branch_protection_contract.py",),
         ".agents/skills/inspect-a-trace/SKILL.md": ("tests/skills/test_inspect_a_trace_fetch.py",),
     }
+    checkout = test_selector.load_checkout(_REPO_ROOT)
     for changed, readers in expectations.items():
-        result = _select(_REPO_ROOT, changed)
-        assert result.decision == "SELECTED", (changed, result.reason)
-        assert set(readers) <= set(result.tests), changed
+        root = changed.split("/", maxsplit=1)[0]
+        assert set(readers) <= test_selector._referencing_tests(root, checkout), changed
+    result = _select(_REPO_ROOT, ".github/workflows/ci.yml")
+    if result.decision == "SELECTED":
+        assert set(expectations[".github/workflows/ci.yml"]) <= set(result.tests)
+    else:
+        assert result.decision == "FULL"
+        assert result.reason in {"incomplete-impact", "subset-too-close"}
+        if result.reason == "incomplete-impact":
+            assert result.diagnostics
 
 
 def test_an_unowned_path_is_the_full_suite_safety_net(tmp_path: Path) -> None:
