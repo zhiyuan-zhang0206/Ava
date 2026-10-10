@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import textwrap
 from dataclasses import fields
 from pathlib import Path
 
@@ -214,23 +213,26 @@ def test_every_supported_model_resolves(*, model_catalog: ModelCatalog) -> None:
             )
 
 
+# Literal source with the model in argv, so test selection can read the probe's imports.
+_FRESH_BUDGET_PROBE = """
+import sys
+
+from base.lm.context_budget import resolve_context_budget
+from base.lm import plugin_providers
+
+from base.host.env.agent_slices import ModelOverrides
+assert not hasattr(plugin_providers, "_STATE")
+catalog = plugin_providers.build_model_catalog()
+budget = resolve_context_budget(sys.argv[1], catalog=catalog, overrides=ModelOverrides.from_pins({}))
+print(budget.max_context_tokens)
+"""
+
+
 def test_owned_catalog_resolves_budget_in_a_fresh_process() -> None:
     """A cold root explicitly builds the catalog before resolving a budget."""
     model = settings.lm.llm_model
-    code = textwrap.dedent(
-        f"""
-        from base.lm.context_budget import resolve_context_budget
-        from base.lm import plugin_providers
-
-        from base.host.env.agent_slices import ModelOverrides
-        assert not hasattr(plugin_providers, "_STATE")
-        catalog = plugin_providers.build_model_catalog()
-        budget = resolve_context_budget({model!r}, catalog=catalog, overrides=ModelOverrides.from_pins({{}}))
-        print(budget.max_context_tokens)
-        """
-    )
     result = subprocess.run(  # noqa: S603 — our own venv python + a literal script
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", _FRESH_BUDGET_PROBE, model],
         cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,

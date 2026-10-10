@@ -38,11 +38,12 @@ _CLEAN_ENV_STRIP = frozenset(
     }
 )
 
+# Literal sources with data in argv, so test selection can read the probes' imports.
 _PROBE = """
 import json
 import sys
 
-sys.path.insert(0, {root!r})
+sys.path.insert(0, sys.argv[1])
 import agent.execution.child as exec_child  # the module under test
 
 exec_child._finalize_telemetry()  # the zero-record exit path
@@ -58,10 +59,9 @@ print(json.dumps(loaded))
 
 
 def test_zero_record_exit_does_not_import_telemetry_or_otel() -> None:
-    code = _PROBE.format(root=str(_REPO_ROOT))
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-B", "-X", "utf8", "-c", code],
+        [sys.executable, "-I", "-B", "-X", "utf8", "-c", _PROBE, str(_REPO_ROOT)],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,
@@ -76,20 +76,17 @@ def test_zero_record_exit_does_not_import_telemetry_or_otel() -> None:
     )
 
 
-def _forbidden_loader_probe(root: str) -> str:
-    """Probe body: the real identity-child arm path, then the exporter check.
-
-    `_init_logger` is the exact arm seam (file sink + event-pipeline sink +
-    deferred OTLP arm); `_emit_child_boot_timing` is the record that used to
-    bring the exporter stack up within the first drain tick. The wait polls the
-    backend's hold so the assertion never runs before the tick landed.
-    """
-    return f"""
+# Probe body: the real identity-child arm path, then the exporter check.
+# `_init_logger` is the exact arm seam (file sink + event-pipeline sink +
+# deferred OTLP arm); `_emit_child_boot_timing` is the record that used to
+# bring the exporter stack up within the first drain tick. The wait polls the
+# backend's hold so the assertion never runs before the tick landed.
+_FORBIDDEN_LOADER_PROBE = """
 import json
 import sys
 import time
 
-sys.path.insert(0, {str(root)!r})
+sys.path.insert(0, sys.argv[1])
 import agent.execution.child as exec_child
 
 exec_child._init_logger(999999)  # the real arm path (task #3816 M4b)
@@ -112,11 +109,11 @@ FORBIDDEN = (
     "google.protobuf",
 )
 loaded = sorted(name for name in sys.modules if name.startswith(FORBIDDEN))
-print(json.dumps({{
+print(json.dumps({
     "deferred": telemetry_otlp.deferred_state(),
     "held": telemetry_otlp.backend._queue.qsize(),
     "forbidden": loaded,
-}}))
+}))
 """
 
 
@@ -129,10 +126,18 @@ def test_identity_child_record_holds_without_exporter_imports() -> None:
     life so the exporter memory is never paid at boot (task #3816 M4b). The
     record is still delivered: it sits in the backend's bounded hold (`held`).
     """
-    code = _forbidden_loader_probe(str(_REPO_ROOT))
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-B", "-X", "utf8", "-c", code],
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-X",
+            "utf8",
+            "-c",
+            _FORBIDDEN_LOADER_PROBE,
+            str(_REPO_ROOT),
+        ],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,

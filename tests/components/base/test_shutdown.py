@@ -226,11 +226,13 @@ async def test_root_graceful_stop_runs_the_product_handlers_cleanup(
         await owner.shutdown()
 
 
+# Literal source with paths in argv, so test selection can read the probe's imports.
 _PLUGIN_SERVICE = """
 import asyncio
 import sys
 from pathlib import Path
-sys.path.insert(0, {repo!r})
+repo, marker = sys.argv[1], sys.argv[2]
+sys.path.insert(0, repo)
 from base.daemon.shutdown import install_graceful_shutdown
 from services.agent_runner.agent_host import daemon
 install_graceful_shutdown("private-plugin-restart-test")
@@ -243,7 +245,7 @@ async def run():
         await daemon._watch_plugins_for_restart()
     finally:
         await asyncio.sleep(0.05)
-        Path({marker!r}).write_text("clean")
+        Path(marker).write_text("clean")
 
 try:
     asyncio.run(run())
@@ -255,11 +257,10 @@ except KeyboardInterrupt:
 def test_plugin_restart_runs_the_product_handlers_cleanup(unit_home: Path) -> None:
     repo = Path(__file__).resolve().parents[3]
     marker = unit_home / "plugin-clean"
-    code = _PLUGIN_SERVICE.format(repo=str(repo), marker=str(marker))
     env = dict(os.environ)
     env.update(AVA_HOME=str(unit_home), AVA_CONFIG_FETCH="skip")
     result = subprocess.run(  # noqa: S603 — fixed test-owned Python script
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", _PLUGIN_SERVICE, str(repo), str(marker)],
         cwd=repo,
         env=env,
         capture_output=True,

@@ -67,6 +67,7 @@ def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
     processes: list[subprocess.Popen[str]] = []
 
     def create(name: str, code: str) -> subprocess.Popen[str]:
+        # launch-ok: callers supply the stop-test source (behavior-spec fixture is a follow-up)
         proc = subprocess.Popen(
             [sys.executable, "-u", "-c", code],
             cwd=home,

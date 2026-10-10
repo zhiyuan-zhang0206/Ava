@@ -45,6 +45,7 @@ def _required_names() -> list[str]:
 def test_the_real_bootstrap_reaches_the_backup_worker() -> None:
     """Every required name resolves inside the code root and the worker module
     imports completely: the only complaint left is the missing request."""
+    # launch-ok: runs the production worker bootstrap source, the subject
     proc = _bootstrap(worker_process._BOOTSTRAP, _ROOT, "services.backup.scheduler.worker")
 
     assert "code root mismatch" not in proc.stderr, proc.stderr
@@ -70,6 +71,7 @@ def test_a_required_name_that_resolves_nowhere_stops_the_worker_at_start() -> No
     )
     assert stale != worker_process._BOOTSTRAP
 
+    # launch-ok: runs the production worker bootstrap source, the subject
     proc = _bootstrap(stale, _ROOT, "services.backup.scheduler.worker")
 
     assert proc.returncode != 0
@@ -77,6 +79,7 @@ def test_a_required_name_that_resolves_nowhere_stops_the_worker_at_start() -> No
 
 
 def test_the_bootstrap_still_refuses_code_outside_its_root(tmp_path: Path) -> None:
+    # launch-ok: runs the production worker bootstrap source, the subject
     proc = _bootstrap(worker_process._BOOTSTRAP, tmp_path, "services.backup.scheduler.worker")
 
     assert proc.returncode != 0

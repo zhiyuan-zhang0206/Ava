@@ -229,6 +229,7 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
     env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
     env.update(AVA_HOME=str(home), HOME=str(tmp_path / "user"))
     try:
+        # launch-ok: the driver imports the guarded script named in argv, the subject
         result = subprocess.run(  # noqa: S603 - test-owned interpreter and fixture paths
             [sys.executable, "-c", _NO_DIAL_DRIVER, str(script), str(target)],
             capture_output=True,

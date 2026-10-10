@@ -9,12 +9,12 @@ and a visible ACK line (success judged by destination state, #2620).
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -304,29 +304,60 @@ def test_open_bucket_reads_the_access_key_pair(tmp_path: Path) -> None:
 # ── the standalone entry: success and failure both leave evidence on stderr ──
 
 
+# Literal source with data in argv, so test selection can read the probe's imports.
+# argv: repo root, "configured"/"unconfigured", the bucket stand-in, then the entry's argv (JSON).
+_ENTRY_PROBE = """
+import json
+import sys
+
+repo, destination, bucket_kind, entry_argv = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+sys.path.insert(0, repo)
+from services.backup.dump import _main
+from services.backup.artifact import offsite
+from services.backup.artifact.tests.oss_fake import FakeOssBucket
+
+if destination not in ("configured", "unconfigured"):
+    raise SystemExit(f"unknown destination {destination!r}")
+if destination == "configured":
+    offsite.configured_target = lambda: offsite.OssTarget("https://oss.example", "b", None)
+if bucket_kind == "fake":
+    offsite.open_bucket = lambda target: FakeOssBucket()
+elif bucket_kind == "failing":
+    bucket = FakeOssBucket()
+    bucket.fail_init = (500, "InternalError")
+    offsite.open_bucket = lambda target: bucket
+elif bucket_kind != "none":
+    raise SystemExit(f"unknown bucket stand-in {bucket_kind!r}")
+raise SystemExit(_main(json.loads(entry_argv)))
+"""
+
+
 def _entry(
-    tmp_path: Path, body: str, *args: str, configured: bool = True
+    tmp_path: Path,
+    bucket: Literal["none", "fake", "failing"],
+    *args: str,
+    configured: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Run `python -m services.backup.dump --publish-offsite` logic in a fresh interpreter.
 
     A fresh interpreter is deliberate: pytest's own root handler would mask the
     standalone logging behavior the entry point configures. `configured` gives
-    it an OSS destination (the settings read is covered in-process above)."""
-    code = textwrap.dedent(f"""
-        import sys
-
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.backup.dump import _main
-        from services.backup.artifact import offsite
-        from services.backup.artifact.tests.oss_fake import FakeOssBucket
-
-        if {configured!r}:
-            offsite.configured_target = lambda: offsite.OssTarget("https://oss.example", "b", None)
-        {textwrap.indent(textwrap.dedent(body), "        ").lstrip()}
-        raise SystemExit(_main({["--publish-offsite", str(tmp_path / _NAME), *args]!r}))
-    """)
+    it an OSS destination (the settings read is covered in-process above);
+    `bucket` picks the store stand-in: untouched, a working fake, or a fake whose
+    upload init fails."""
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+        [
+            sys.executable,
+            "-c",
+            _ENTRY_PROBE,
+            str(_REPO),
+            "configured" if configured else "unconfigured",
+            bucket,
+            json.dumps(["--publish-offsite", str(tmp_path / _NAME), *args]),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -336,9 +367,7 @@ def test_standalone_success_is_visible(tmp_path: Path) -> None:
 
     proc = _entry(
         tmp_path,
-        """
-        offsite.open_bucket = lambda target: FakeOssBucket()
-        """,
+        "fake",
         "--offsite-root",
         "ava-pitr-scratch/smoke",
     )
@@ -351,7 +380,7 @@ def test_standalone_success_is_visible(tmp_path: Path) -> None:
 def test_standalone_unconfigured_still_says_so_and_exits_zero(tmp_path: Path) -> None:
     artifact = _artifact(tmp_path)
 
-    proc = _entry(tmp_path, "", configured=False)
+    proc = _entry(tmp_path, "none", configured=False)
 
     assert proc.returncode == 0, proc.stderr
     assert "[backup] off-site publish skipped" in proc.stderr
@@ -361,14 +390,7 @@ def test_standalone_unconfigured_still_says_so_and_exits_zero(tmp_path: Path) ->
 def test_standalone_publish_failure_keeps_exit_and_artifact(tmp_path: Path) -> None:
     artifact = _artifact(tmp_path)
 
-    proc = _entry(
-        tmp_path,
-        """
-        bucket = FakeOssBucket()
-        bucket.fail_init = (500, "InternalError")
-        offsite.open_bucket = lambda target: bucket
-        """,
-    )
+    proc = _entry(tmp_path, "failing")
 
     assert proc.returncode == 0, proc.stderr
     assert f"[backup] off-site publish of {REMOTE_ROOT}/{_NAME} failed" in proc.stderr

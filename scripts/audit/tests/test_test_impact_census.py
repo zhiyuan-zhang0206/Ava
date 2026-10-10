@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ci import test_impact_census
+from scripts.audit import test_impact_census
 
 
 def _write(root: Path, name: str, text: str = "") -> None:

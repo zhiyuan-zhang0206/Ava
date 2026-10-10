@@ -7,7 +7,6 @@ import ast
 import pathlib
 import subprocess
 import sys
-import textwrap
 
 import pytest
 
@@ -337,23 +336,28 @@ def test_the_verdicts_do_not_depend_on_where_the_checkout_sits(
 # ------------------------------------------------------------------ the checks never read the code
 
 
+# Literal source with data in argv, so test selection can read the probe's imports.
+_NO_PLACEMENT_PROBE = """
+import ast
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from scripts.structure import tests_location as tl
+status = tl.main([], repo_root=Path(sys.argv[2]), allowed=ast.literal_eval(sys.argv[3]))
+assert status == 0
+loaded = [m for m in sys.modules if m.startswith("scripts.structure.placement")]
+assert not loaded, loaded
+assert "scripts.structure.tests_location_suggest" not in sys.modules
+"""
+
+
 def test_registered_checks_do_not_load_the_placement_rule(repo: pathlib.Path) -> None:
     """A hook run is a path lookup: no module index, no import graph, no `place()`."""
-    code = textwrap.dedent(
-        f"""
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, {str(_ROOT)!r})
-        from scripts.structure import tests_location as tl
-        status = tl.main([], repo_root=Path({str(repo)!r}), allowed={_REGISTERED!r})
-        assert status == 0
-        loaded = [m for m in sys.modules if m.startswith("scripts.structure.placement")]
-        assert not loaded, loaded
-        assert "scripts.structure.tests_location_suggest" not in sys.modules
-        """
-    )
     done = subprocess.run(  # noqa: S603 — fixed interpreter, test-owned source
-        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+        [sys.executable, "-c", _NO_PLACEMENT_PROBE, str(_ROOT), str(repo), repr(_REGISTERED)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert done.returncode == 0, done.stderr
 

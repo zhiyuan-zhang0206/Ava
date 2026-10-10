@@ -16,8 +16,13 @@ _CONCRETE_BACKENDS = {
 }
 
 
-def _run_fresh_daemon_import(tmp_path: Path, code: str) -> subprocess.CompletedProcess[str]:
-    """Import the daemon in a fresh interpreter with an isolated unit home."""
+def _run_fresh_daemon_import(
+    tmp_path: Path, code: str, *argv: str
+) -> subprocess.CompletedProcess[str]:
+    """Import the daemon in a fresh interpreter with an isolated unit home.
+
+    `code` stays a literal at each call site so test selection can read its imports;
+    its data arrives as trailing `argv`."""
     (tmp_path / ".env").write_text(
         "AVA_MACHINE_NAME=test-box\n"
         "AVA_MACHINE_SERVE_GATEWAY=true\n"
@@ -36,7 +41,7 @@ def _run_fresh_daemon_import(tmp_path: Path, code: str) -> subprocess.CompletedP
     env.pop("AVA_PROCESS_PROFILE", None)
     env.pop("AVA_AGENT_ID", None)
     return subprocess.run(  # noqa: S603 — fixed interpreter and repository-owned code
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", code, *argv],
         cwd=_REPO_ROOT,
         check=True,
         capture_output=True,
@@ -50,15 +55,16 @@ def test_daemon_import_does_not_load_backend_implementations(tmp_path: Path) -> 
     """Importing the daemon must leave every concrete backend unselected."""
     result = _run_fresh_daemon_import(
         tmp_path,
-        f"""
+        """
 import json
 import sys
 
 import services.derived.memory_indexer.daemon
 
-prefix = {_BACKEND_PREFIX!r}
+prefix = sys.argv[1]
 print(json.dumps(sorted(name for name in sys.modules if name.startswith(prefix))))
 """,
+        _BACKEND_PREFIX,
     )
 
     imported = set(json.loads(result.stdout))

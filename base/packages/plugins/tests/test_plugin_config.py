@@ -12,7 +12,6 @@ Covers:
 import json
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -392,21 +391,22 @@ def test_validate_config_overlay_registered_llm_model_passes(
     )
 
 
+# Literal source, so test selection can read the probe's imports.
+_FRESH_OVERLAY_PROBE = """
+from base.lm import plugin_providers
+from base.packages.plugins.config_registration import validate_config_overlay
+
+assert not hasattr(plugin_providers, "_STATE"), "catalog has no ambient holder"
+catalog = plugin_providers.build_model_catalog()
+validate_config_overlay({"llm_model": "deepseek-flash"}, models=catalog.models)
+print("ok")
+"""
+
+
 def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
     """A fresh process admits a registered model through its explicit catalog."""
-    code = textwrap.dedent(
-        """
-        from base.lm import plugin_providers
-        from base.packages.plugins.config_registration import validate_config_overlay
-
-        assert not hasattr(plugin_providers, "_STATE"), "catalog has no ambient holder"
-        catalog = plugin_providers.build_model_catalog()
-        validate_config_overlay({"llm_model": "deepseek-flash"}, models=catalog.models)
-        print("ok")
-        """
-    )
     result = subprocess.run(  # noqa: S603 — our own venv python + a literal script
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", _FRESH_OVERLAY_PROBE],
         cwd=Path(__file__).resolve().parents[4],
         capture_output=True,
         text=True,

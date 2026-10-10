@@ -1,6 +1,6 @@
 """Measure how far changes reach through the PR test-selection impact graph.
 
-Run: `python3 scripts/ci/test_impact_census.py [--top N] [--json]` from the repository
+Run: `python3 scripts/audit/test_impact_census.py [--top N] [--json]` from the repository
 root (stdlib-only, read-only, no environment). It reports the numbers the locality
 and selector workstreams track (issue #5128):
 
@@ -25,7 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.ci.test_impact import build_impact  # noqa: E402 - standalone script
+from scripts.ci.test_impact import Impact, build_impact  # noqa: E402 - standalone script
 from scripts.ci.test_selector import (  # noqa: E402 - standalone script
     _estimate_seconds,
     _load_durations,
@@ -71,30 +71,17 @@ def census(repo_root: Path, *, top: int = 10) -> Census:
     def minutes(selected: set[str]) -> float:
         return round(_estimate_seconds(selected, durations, reference_paths=reference) / 60, 1)
 
-    sources = {
-        path: consumers
-        for path, consumers in impact.tests_by_input.items()
-        if path.endswith(".py")
-        and path not in tests
-        and "/tests/" not in path
-        and not path.startswith("tests/")
-    }
     total = len(tests)
-    everywhere = Counter(
-        path.split("/", 1)[0] for path, t in sources.items() if "/" in path and len(t) == total
-    )
-    packages = Counter(path.split("/", 1)[0] for path in sources if "/" in path)
-    by_site: defaultdict[tuple[str, int, str], set[str]] = defaultdict(set)
-    for item in impact.unknown:
-        by_site[(item.path, item.line, item.reason)] |= impact.tests_by_input.get(item.path, set())
+    packages, everywhere = _package_reach(impact.tests_by_input, tests)
+    by_site = _unbounded_sites(impact)
     tainted: set[str] = set()
     for consumers in by_site.values():
         tainted |= consumers
     heaviest = sorted(by_site.items(), key=lambda entry: (-minutes(entry[1]), entry[0]))[:top]
     return Census(
-        tests=len(tests),
-        full_minutes=minutes(set(tests)),
-        source_files=len(sources),
+        tests=total,
+        full_minutes=minutes(reference),
+        source_files=sum(packages.values()),
         sources_reached_by_every_test=sum(everywhere.values()),
         by_package={name: (count, everywhere[name]) for name, count in sorted(packages.items())},
         unbounded_sites=len(by_site),
@@ -105,6 +92,32 @@ def census(repo_root: Path, *, top: int = 10) -> Census:
             Site(path, line, reason, len(t), minutes(t)) for (path, line, reason), t in heaviest
         ),
     )
+
+
+def _package_reach(
+    tests_by_input: dict[str, set[str]], tests: frozenset[str]
+) -> tuple[Counter[str], Counter[str]]:
+    """Per top-level package: non-test source files, and those every test reaches."""
+    packages: Counter[str] = Counter()
+    everywhere: Counter[str] = Counter()
+    for path, consumers in tests_by_input.items():
+        if not path.endswith(".py") or "/" not in path or path in tests:
+            continue
+        if "/tests/" in path or path.startswith("tests/"):
+            continue
+        package = path.split("/", 1)[0]
+        packages[package] += 1
+        if len(consumers) == len(tests):
+            everywhere[package] += 1
+    return packages, everywhere
+
+
+def _unbounded_sites(impact: Impact) -> dict[tuple[str, int, str], set[str]]:
+    """Each unbounded input with the tests that reach the file holding it."""
+    by_site: defaultdict[tuple[str, int, str], set[str]] = defaultdict(set)
+    for item in impact.unknown:
+        by_site[(item.path, item.line, item.reason)] |= impact.tests_by_input.get(item.path, set())
+    return by_site
 
 
 def _print(report: Census) -> None:

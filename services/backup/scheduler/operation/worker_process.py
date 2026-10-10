@@ -255,6 +255,7 @@ def _launch(
     with (work / "stdout.log").open("xb") as stdout, (work / "stderr.log").open("xb") as stderr:
         os.fchmod(stdout.fileno(), 0o600)
         os.fchmod(stderr.fileno(), 0o600)
+        # launch-ok: the bootstrap runs the operation module its caller names
         process = subprocess.Popen(  # noqa: S603 -- fixed trusted worker in this checkout
             [
                 sys.executable,

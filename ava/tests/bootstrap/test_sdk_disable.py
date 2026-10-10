@@ -11,19 +11,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
-
-
-def _install_preamble() -> str:
-    """Import `ava` and install the SDK surface — the point the env `AVA_SDK_DISABLE`
-    entries apply.
-
-    The disable machinery runs as the first step of the SDK install
-    (`ava.sdk_surface.install`), not at `import ava`: a real agent child reaches the
-    load itself (a launched child at import, an exec child explicitly), so a bare
-    script loads explicitly."""
-    return "import ava\nava.ensure_plugins_loaded()\n"
 
 
 def _write_isolated_home(home: Path) -> None:
@@ -46,6 +34,15 @@ def _write_isolated_home(home: Path) -> None:
 
 
 def _run(script: str, *, env_disable: str | None = None) -> tuple[int, str, str]:
+    """Run literal probe `script` in a fresh interpreter under an isolated home.
+
+    Every probe starts with `import ava` + `ava.ensure_plugins_loaded()`, the point the
+    env `AVA_SDK_DISABLE` entries apply: the disable machinery runs as the first step
+    of the SDK install (`ava.sdk_surface.install`), not at `import ava`. A real agent
+    child reaches the load itself (a launched child at import, an exec child
+    explicitly), so a bare script loads explicitly. The probe stays a literal at each
+    call site so test selection can read its imports.
+    """
     env: dict[str, str] = {}
     if env_disable is not None:
         env["AVA_SDK_DISABLE"] = env_disable
@@ -54,7 +51,7 @@ def _run(script: str, *, env_disable: str | None = None) -> tuple[int, str, str]
     with tempfile.TemporaryDirectory() as home:
         _write_isolated_home(Path(home))
         proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-            [sys.executable, "-c", _install_preamble() + textwrap.dedent(script)],
+            [sys.executable, "-c", script],
             capture_output=True,
             text=True,
             env={
@@ -84,9 +81,10 @@ def _pass_through_env() -> dict[str, str]:
 
 def test_default_no_disable_full_surface() -> None:
     code, out, err = _run("""
-        import ava
-        names = sorted(ava.__all_for_ava__)
-        print(','.join(names))
+import ava
+ava.ensure_plugins_loaded()
+names = sorted(ava.__all_for_ava__)
+print(','.join(names))
     """)
     assert code == 0, err
     names = out.strip().split(",")
@@ -97,20 +95,21 @@ def test_default_no_disable_full_surface() -> None:
 def test_disable_module_hides_from_parent_and_raises_legibly_on_use() -> None:
     code, out, err = _run(
         """
-        import ava
-        assert not hasattr(ava, 'watcher'), 'watcher should be gone from ava package'
-        assert 'watcher' not in ava.__all_for_ava__
-        # import succeeds — returns the disabled sentinel
-        import ava.watcher as w
-        try:
-            w.anything
-        except AttributeError as e:
-            msg = str(e)
-            assert 'disabled by AVA_SDK_DISABLE' in msg, msg
-            assert "'watcher'" in msg, msg
-            print('ok')
-        else:
-            raise AssertionError('attribute access on disabled module did not raise')
+import ava
+ava.ensure_plugins_loaded()
+assert not hasattr(ava, 'watcher'), 'watcher should be gone from ava package'
+assert 'watcher' not in ava.__all_for_ava__
+# import succeeds — returns the disabled sentinel
+import ava.watcher as w
+try:
+    w.anything
+except AttributeError as e:
+    msg = str(e)
+    assert 'disabled by AVA_SDK_DISABLE' in msg, msg
+    assert "'watcher'" in msg, msg
+    print('ok')
+else:
+    raise AssertionError('attribute access on disabled module did not raise')
         """,
         env_disable="watcher",
     )
@@ -121,14 +120,15 @@ def test_disable_module_hides_from_parent_and_raises_legibly_on_use() -> None:
 def test_disable_attribute_keeps_module_removes_function() -> None:
     code, out, err = _run(
         """
-        import ava
-        assert hasattr(ava, 'self'), 'ava.self module should remain'
-        assert hasattr(ava.self, 'restart'), 'restart should remain'
-        assert not hasattr(ava.self, 'terminate'), 'terminate should be gone'
-        try:
-            ava.self.terminate
-        except AttributeError:
-            print('ok')
+import ava
+ava.ensure_plugins_loaded()
+assert hasattr(ava, 'self'), 'ava.self module should remain'
+assert hasattr(ava.self, 'restart'), 'restart should remain'
+assert not hasattr(ava.self, 'terminate'), 'terminate should be gone'
+try:
+    ava.self.terminate
+except AttributeError:
+    print('ok')
         """,
         env_disable="self.terminate",
     )
@@ -144,20 +144,21 @@ def test_disable_nested_module_swaps_sentinel_and_keeps_siblings() -> None:
     # AttributeError. Sibling members (shell.run) survive.
     code, out, err = _run(
         """
-        import ava
-        assert hasattr(ava, 'shell'), 'ava.shell should remain'
-        assert hasattr(ava.shell, 'run'), 'ava.shell.run should remain'
-        assert not hasattr(ava.shell, 'sessions'), 'ava.shell.sessions should be gone'
-        import ava.shell.sessions as sess
-        try:
-            sess.new
-        except AttributeError as e:
-            msg = str(e)
-            assert 'disabled by AVA_SDK_DISABLE' in msg, msg
-            assert 'shell.sessions' in msg, msg
-            print('ok')
-        else:
-            raise AssertionError('attribute access on disabled nested module did not raise')
+import ava
+ava.ensure_plugins_loaded()
+assert hasattr(ava, 'shell'), 'ava.shell should remain'
+assert hasattr(ava.shell, 'run'), 'ava.shell.run should remain'
+assert not hasattr(ava.shell, 'sessions'), 'ava.shell.sessions should be gone'
+import ava.shell.sessions as sess
+try:
+    sess.new
+except AttributeError as e:
+    msg = str(e)
+    assert 'disabled by AVA_SDK_DISABLE' in msg, msg
+    assert 'shell.sessions' in msg, msg
+    print('ok')
+else:
+    raise AssertionError('attribute access on disabled nested module did not raise')
         """,
         env_disable="shell.sessions",
     )
@@ -168,12 +169,13 @@ def test_disable_nested_module_swaps_sentinel_and_keeps_siblings() -> None:
 def test_multiple_disables_in_one_env() -> None:
     code, out, err = _run(
         """
-        import ava
-        assert not hasattr(ava, 'watcher')
-        assert not hasattr(ava, 'agents')
-        assert not hasattr(ava.self, 'terminate')
-        assert hasattr(ava, 'shell'), 'shell not in disable list, should remain'
-        print('ok')
+import ava
+ava.ensure_plugins_loaded()
+assert not hasattr(ava, 'watcher')
+assert not hasattr(ava, 'agents')
+assert not hasattr(ava.self, 'terminate')
+assert hasattr(ava, 'shell'), 'shell not in disable list, should remain'
+print('ok')
         """,
         env_disable="watcher,agents,self.terminate",
     )
@@ -187,14 +189,16 @@ def test_disabled_module_absent_from_help_overview() -> None:
     # feature is still there. Sibling modules still render.
     code, out, err = _run(
         """
-        import io, contextlib, ava
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            ava.help()
-        output = buf.getvalue()
-        assert 'from . import agents' not in output, output
-        assert 'from . import files' in output, output
-        print('ok')
+import ava
+ava.ensure_plugins_loaded()
+import io, contextlib, ava
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    ava.help()
+output = buf.getvalue()
+assert 'from . import agents' not in output, output
+assert 'from . import files' in output, output
+print('ok')
         """,
         env_disable="agents",
     )
@@ -205,10 +209,11 @@ def test_disabled_module_absent_from_help_overview() -> None:
 def test_whitespace_in_disable_list_is_tolerated() -> None:
     code, out, err = _run(
         """
-        import ava
-        assert not hasattr(ava, 'watcher')
-        assert not hasattr(ava, 'agents')
-        print('ok')
+import ava
+ava.ensure_plugins_loaded()
+assert not hasattr(ava, 'watcher')
+assert not hasattr(ava, 'agents')
+print('ok')
         """,
         env_disable=" watcher , agents ",
     )
@@ -223,14 +228,15 @@ def test_apply_sdk_disable_is_idempotent() -> None:
     """Calling apply_sdk_disable twice with the same entries is a no-op."""
     code, out, err = _run(
         """
-        import ava
-        from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        # The install applied the env entries (the preamble loaded the surface)
-        assert not hasattr(ava, 'watcher')
-        # Second call with same entry should be a no-op — no crash, no duplicate
-        apply_sdk_disable(['watcher'])
-        assert not hasattr(ava, 'watcher')
-        print('ok')
+import ava
+ava.ensure_plugins_loaded()
+from ava.sdk_surface.sdk_disable import apply_sdk_disable
+# The install applied the env entries (the preamble loaded the surface)
+assert not hasattr(ava, 'watcher')
+# Second call with same entry should be a no-op — no crash, no duplicate
+apply_sdk_disable(['watcher'])
+assert not hasattr(ava, 'watcher')
+print('ok')
         """,
         env_disable="watcher",
     )
@@ -242,17 +248,18 @@ def test_apply_sdk_disable_is_cumulative() -> None:
     """New entries not in the env list are applied on top."""
     code, out, err = _run(
         """
-        import ava
-        from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        # The env baseline disabled watcher at install time
-        assert not hasattr(ava, 'watcher')
-        assert hasattr(ava, 'agents'), 'agents still present before second call'
-        # Apply additional disable on top
-        apply_sdk_disable(['agents'])
-        assert not hasattr(ava, 'agents'), 'agents should be gone after second call'
-        assert not hasattr(ava, 'watcher'), 'watcher should remain gone'
-        assert hasattr(ava, 'files'), 'files should remain'
-        print('ok')
+import ava
+ava.ensure_plugins_loaded()
+from ava.sdk_surface.sdk_disable import apply_sdk_disable
+# The env baseline disabled watcher at install time
+assert not hasattr(ava, 'watcher')
+assert hasattr(ava, 'agents'), 'agents still present before second call'
+# Apply additional disable on top
+apply_sdk_disable(['agents'])
+assert not hasattr(ava, 'agents'), 'agents should be gone after second call'
+assert not hasattr(ava, 'watcher'), 'watcher should remain gone'
+assert hasattr(ava, 'files'), 'files should remain'
+print('ok')
         """,
         env_disable="watcher",
     )
@@ -264,16 +271,17 @@ def test_apply_sdk_disable_dotted_cumulative() -> None:
     """Dotted entries can be added cumulatively on top of env entries."""
     code, out, err = _run(
         """
-        import ava
-        from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        # The env baseline disabled self.terminate at install time
-        assert not hasattr(ava.self, 'terminate')
-        assert hasattr(ava.self, 'restart'), 'restart should remain'
-        # Apply additional disable
-        apply_sdk_disable(['self.restart'])
-        assert not hasattr(ava.self, 'terminate'), 'terminate still gone'
-        assert not hasattr(ava.self, 'restart'), 'restart now gone too'
-        print('ok')
+import ava
+ava.ensure_plugins_loaded()
+from ava.sdk_surface.sdk_disable import apply_sdk_disable
+# The env baseline disabled self.terminate at install time
+assert not hasattr(ava.self, 'terminate')
+assert hasattr(ava.self, 'restart'), 'restart should remain'
+# Apply additional disable
+apply_sdk_disable(['self.restart'])
+assert not hasattr(ava.self, 'terminate'), 'terminate still gone'
+assert not hasattr(ava.self, 'restart'), 'restart now gone too'
+print('ok')
         """,
         env_disable="self.terminate",
     )
@@ -285,16 +293,17 @@ def test_apply_sdk_disable_applied_entries_tracked() -> None:
     """The installation records both env and manual entries."""
     code, out, err = _run(
         """
-        import ava
-        from ava.sdk_surface import install as sdk_install
-        from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        # After the install: env entries are recorded on the installation
-        assert 'watcher' in sdk_install.installed().disabled
-        # Add a new one
-        apply_sdk_disable(['agents'])
-        assert 'agents' in sdk_install.installed().disabled
-        assert 'watcher' in sdk_install.installed().disabled
-        print('ok')
+import ava
+ava.ensure_plugins_loaded()
+from ava.sdk_surface import install as sdk_install
+from ava.sdk_surface.sdk_disable import apply_sdk_disable
+# After the install: env entries are recorded on the installation
+assert 'watcher' in sdk_install.installed().disabled
+# Add a new one
+apply_sdk_disable(['agents'])
+assert 'agents' in sdk_install.installed().disabled
+assert 'watcher' in sdk_install.installed().disabled
+print('ok')
         """,
         env_disable="watcher",
     )
@@ -310,11 +319,12 @@ def test_help_still_renders_when_skills_is_disabled() -> None:
     cluster running without the skills surface."""
     code, out, err = _run(
         """
-        import ava
-        assert not hasattr(ava, 'skills'), 'skills should be gone from ava package'
-        ava.help(ava.files)
-        ava.help(ava)
-        print('ok')
+import ava
+ava.ensure_plugins_loaded()
+assert not hasattr(ava, 'skills'), 'skills should be gone from ava package'
+ava.help(ava.files)
+ava.help(ava)
+print('ok')
         """,
         env_disable="skills",
     )
@@ -325,19 +335,27 @@ def test_help_still_renders_when_skills_is_disabled() -> None:
 def test_env_disable_refuses_a_framework_module() -> None:
     """Disabling framework code (identity, the surface machinery) would break the
     framework, not scope the agent's view — the SDK install fails fast instead."""
-    code, _out, err = _run("", env_disable="agent_identity")
+    code, _out, err = _run(
+        """
+import ava
+ava.ensure_plugins_loaded()
+        """,
+        env_disable="agent_identity",
+    )
     assert code != 0
     assert "ValueError" in err and "framework module ava.sdk_surface.agent_identity" in err, err
 
 
 def test_runtime_disable_refuses_a_framework_module_and_its_members() -> None:
     code, out, err = _run("""
-        from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        for entry in ("sdk_surface", "agent_identity.agent_id"):
-            try:
-                apply_sdk_disable([entry])
-            except ValueError as exc:
-                print("refused", entry, "framework module" in str(exc))
+import ava
+ava.ensure_plugins_loaded()
+from ava.sdk_surface.sdk_disable import apply_sdk_disable
+for entry in ("sdk_surface", "agent_identity.agent_id"):
+    try:
+        apply_sdk_disable([entry])
+    except ValueError as exc:
+        print("refused", entry, "framework module" in str(exc))
     """)
     assert code == 0, err
     assert out.splitlines()[:2] == [
@@ -351,12 +369,14 @@ def test_unknown_names_and_already_disabled_namespaces_still_apply() -> None:
     later) stays disable-able, and a member of a namespace an earlier entry
     already disabled does not trip the guard."""
     code, out, err = _run("""
-        from ava.sdk_surface import install as sdk_install
-        from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        apply_sdk_disable(["not_a_real_namespace"])
-        apply_sdk_disable(["agents"])
-        apply_sdk_disable(["agents.spawn"])
-        print(sorted(sdk_install.installed().disabled))
+import ava
+ava.ensure_plugins_loaded()
+from ava.sdk_surface import install as sdk_install
+from ava.sdk_surface.sdk_disable import apply_sdk_disable
+apply_sdk_disable(["not_a_real_namespace"])
+apply_sdk_disable(["agents"])
+apply_sdk_disable(["agents.spawn"])
+print(sorted(sdk_install.installed().disabled))
     """)
     assert code == 0, err
     assert "['agents', 'agents.spawn', 'not_a_real_namespace']" in out, out

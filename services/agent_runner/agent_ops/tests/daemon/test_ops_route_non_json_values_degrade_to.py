@@ -7,7 +7,6 @@ import inspect
 import json
 import subprocess
 import sys
-import textwrap
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -303,6 +302,22 @@ async def test_ops_route_semaphore_caps_concurrency(
     assert all(status == 200 for status, _, _ in results)
 
 
+# Literal source with the repo root in argv, so test selection can read the probe's imports.
+_CRASH_PROBE = """
+import sys
+sys.path.insert(0, sys.argv.pop(1))  # popped: `daemon.main()` parses the remaining argv
+from services.agent_runner.agent_ops import daemon
+
+async def _boom():
+    raise RuntimeError("db pool exploded mid-loop")
+
+daemon.init_gateway_process = lambda **kw: None
+daemon.install_graceful_shutdown = lambda *a, **kw: None
+daemon._main = _boom
+daemon.main()
+"""
+
+
 def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> None:
     """A crash escaping `_main` still reaches the log with its traceback and still
     leaves a non-zero code for the supervisor.
@@ -311,21 +326,12 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
     returns — the price of skipping the interpreter teardown that a wedged arm
     hangs in (see `base.daemon.shutdown`). The contract it used to keep by re-raising is the
     same one asserted here, just observed from outside: logged, and rc != 0."""
-    script = textwrap.dedent(f"""
-        import sys
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.agent_runner.agent_ops import daemon
-
-        async def _boom():
-            raise RuntimeError("db pool exploded mid-loop")
-
-        daemon.init_gateway_process = lambda **kw: None
-        daemon.install_graceful_shutdown = lambda *a, **kw: None
-        daemon._main = _boom
-        daemon.main()
-    """)
     done = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=False
+        [sys.executable, "-c", _CRASH_PROBE, str(_REPO)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
 
     assert done.returncode != 0

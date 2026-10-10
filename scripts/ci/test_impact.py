@@ -49,6 +49,11 @@ class Impact:
     unknown: tuple[Unknown, ...]
 
 
+def analyzed_tops() -> tuple[str, ...]:
+    """Top-level directories whose Python files the runtime impact graph reads."""
+    return _TOPS
+
+
 def _python_files(root: Path) -> Iterator[Path]:
     for top in _TOPS:
         directory = root / top

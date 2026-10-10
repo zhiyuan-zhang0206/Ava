@@ -114,6 +114,15 @@ repos:
         language: system
         types: [python]
 
+      # PR test selection reads the imports of a child Python process from its
+      # literal -c source / -m module; formatted source makes every test that
+      # reaches it join every subset. See the script header.
+      - id: lint-analyzable-launches
+        name: lint analyzable Python launches (literal -c source / -m module)
+        entry: .venv/bin/python scripts/lint/diagnostics/analyzable_launches.py --only
+        language: system
+        types: [python]
+
       # per_agent config fields read through the bare settings singleton in
       # turn-scoped code silently ignore the agent's overlay in hosted-runner
       # mode — force the agent's slices (base/host/env/agent_slices.py).
