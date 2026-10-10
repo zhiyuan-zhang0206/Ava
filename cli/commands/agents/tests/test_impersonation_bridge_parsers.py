@@ -137,8 +137,9 @@ class Listener:
         else:
             self.waited(len(self.waits))
 
-    async def close(self) -> None:
+    async def stop(self) -> tuple[str, ...]:
         self.closed = True
+        return ()
 
 
 def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
