@@ -6168,6 +6168,131 @@
         }
       }
     },
+    "/api/insights/run-timeline/links": {
+      "get": {
+        "summary": "Get Run Timeline Links",
+        "description": "The agent-to-agent events in a window with an end among the comma-separated `agents`.",
+        "operationId": "get_run_timeline_links_api_insights_run_timeline_links_get",
+        "parameters": [
+          {
+            "name": "agents",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agents"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTimelineLinks"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/run-timeline/link-content": {
+      "get": {
+        "summary": "Get Run Timeline Link Content",
+        "description": "The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`).",
+        "operationId": "get_run_timeline_link_content_api_insights_run_timeline_link_content_get",
+        "parameters": [
+          {
+            "name": "inbound_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Inbound Id"
+            }
+          },
+          {
+            "name": "notice_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Notice Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTimelineLinkContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/event-resolutions": {
       "post": {
         "summary": "Create Event Resolution",
@@ -16233,38 +16358,6 @@
         "title": "RunTimelineContext",
         "description": "GET /api/agents/{agent_id}/run-timeline/context — what one LLM request's context held.\n\nThe breakdown of the request `request` (`categories` sum to its `input_tokens`), plus where\nit sits: `session` of `sessions` compaction segments (zero-based) and the time it was sent."
       },
-      "RunTimelineEvent": {
-        "properties": {
-          "ts": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Ts"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          }
-        },
-        "type": "object",
-        "required": [
-          "ts",
-          "kind",
-          "label"
-        ],
-        "title": "RunTimelineEvent",
-        "description": "A lifecycle marker from the audit record (spawn, restart, terminate)."
-      },
       "RunTimelineGeneration": {
         "properties": {
           "calls": {
@@ -16298,6 +16391,138 @@
         ],
         "title": "RunTimelineGeneration",
         "description": "What generating a node cost: the usage and wall time of its understanding calls."
+      },
+      "RunTimelineLink": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "send_message",
+              "spawn",
+              "fork",
+              "terminate",
+              "restart",
+              "resurrect",
+              "notice"
+            ],
+            "title": "Kind"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "sender": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender"
+          },
+          "receiver": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receiver"
+          },
+          "inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Id"
+          },
+          "fork_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fork From"
+          },
+          "notice_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "ts",
+          "sender",
+          "receiver",
+          "inbound_id",
+          "fork_from",
+          "notice_id"
+        ],
+        "title": "RunTimelineLink",
+        "description": "One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.\n\nA `notice` is an agent posting a notice to the user (`agent_notices`, the structured\nagent-to-user channel): its receiver is None and `notice_id` its row. The text of a message or\nnotice is not in the list; `/run-timeline/link-content` serves it for the one that is selected.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork)."
+      },
+      "RunTimelineLinkContent": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "content"
+        ],
+        "title": "RunTimelineLinkContent",
+        "description": "GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one notice."
+      },
+      "RunTimelineLinks": {
+        "properties": {
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/RunTimelineLink"
+            },
+            "type": "array",
+            "title": "Links"
+          }
+        },
+        "type": "object",
+        "required": [
+          "links"
+        ],
+        "title": "RunTimelineLinks",
+        "description": "GET /api/insights/run-timeline/links response: the events between agents (and with the user) with an end in the asked agents, oldest first."
       },
       "RunTimelineMessage": {
         "properties": {
@@ -16568,13 +16793,6 @@
             },
             "type": "array",
             "title": "Units"
-          },
-          "events": {
-            "items": {
-              "$ref": "#/components/schemas/RunTimelineEvent"
-            },
-            "type": "array",
-            "title": "Events"
           }
         },
         "type": "object",
@@ -16583,11 +16801,10 @@
           "window",
           "lifetime",
           "nodes",
-          "units",
-          "events"
+          "units"
         ],
         "title": "RunTimelineResponse",
-        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent."
+        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it."
       },
       "RunTimelineUnit": {
         "properties": {
@@ -16631,6 +16848,17 @@
               }
             ],
             "title": "Source"
+          },
+          "inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Id"
           },
           "preview": {
             "type": "string",
@@ -16714,6 +16942,7 @@
           "start",
           "end",
           "source",
+          "inbound_id",
           "preview",
           "parent",
           "context_tokens",
@@ -16724,7 +16953,7 @@
           "request"
         ],
         "title": "RunTimelineUnit",
-        "description": "One layer-0 block (see `base.agents.history.hierarchy.units`).\n\nA message unit, except that a work unit is served as its parts: `thinking` (the model's\ngeneration for the turn), `call` (an instant at the end of the stream) and `output` (the\nexecution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the\ninclusive message-index span of the block's unit. Blocks without a time are not served.\n`parent` is the level-1 node whose span holds the block's first message, None for a block no\nnode covers (a compaction segment's head, the not yet summarized tail).\n\n`context_tokens` is what the block occupies in the context (None while no request has read\nit), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether\nany of that was a share rather than the provider's own number (None with `context_tokens`).\nA thinking / output(text) / call block is its share of the turn's AIMessage, so estimated.\n\n`context_total` is the context through this block (what the Context size row draws; None while\nno request has read it): its session's head and everything up to and including the block, each\nmessage at the weight it was read with. The blocks of one AIMessage each add their share, so the\nfirst one starts from the `input_tokens` of the request that produced the message and the last\nends at the context through the whole message. `session` is the zero-based compaction segment\n(the total starts over in each). `request` is the usage of the LLM request the block's AIMessage\nwas (input, output, cache, cost), repeated on each of its turn blocks; None on any other block."
+        "description": "One layer-0 block (see `base.agents.history.hierarchy.units`).\n\nA message unit, except that a work unit is served as its parts: `thinking` (the model's\ngeneration for the turn), `call` (an instant at the end of the stream) and `output` (the\nexecution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the\ninclusive message-index span of the block's unit. Blocks without a time are not served.\n`parent` is the level-1 node whose span holds the block's first message, None for a block no\nnode covers (a compaction segment's head, the not yet summarized tail). `inbound_id` is the\n`inbound_messages` row an inbound or note block was made from (the checkpoint's `ava_inbound_id`), None\nfor any other block and for a message that carries no stamp.\n\n`context_tokens` is what the block occupies in the context (None while no request has read\nit), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether\nany of that was a share rather than the provider's own number (None with `context_tokens`).\nA thinking / output(text) / call block is its share of the turn's AIMessage, so estimated.\n\n`context_total` is the context through this block (what the Context size row draws; None while\nno request has read it): its session's head and everything up to and including the block, each\nmessage at the weight it was read with. The blocks of one AIMessage each add their share, so the\nfirst one starts from the `input_tokens` of the request that produced the message and the last\nends at the context through the whole message. `session` is the zero-based compaction segment\n(the total starts over in each). `request` is the usage of the LLM request the block's AIMessage\nwas (input, output, cache, cost), repeated on each of its turn blocks; None on any other block."
       },
       "RunTimelineUsage": {
         "properties": {
