@@ -62,11 +62,20 @@ launder a known private key into a public member.
 ## Agent-facing SDK surface
 
 The existing `ava.*` metadata, Installation and namespace generators own the
-agent-facing surface. A generic contract must consume their authoritative
-derived facts and definition provenance instead of introducing a second
-hand-maintained export list. Static `__all_for_ava__` and dynamic namespaces
-need that explicit integration; their spelling does not exempt private access.
-This integration is still open at the migration stage.
+agent-facing surface. The generic checker consumes exact static provenance from
+the SDK declaration owner instead of introducing a second member list.
+Canonical `__all_for_ava__` markers and supported built-in contribution syntax
+prove exposure and retain the actual definition owner, including its private
+implementation spelling. This grants only the declared SDK exposure, never
+direct private access or a general Python component entry.
+
+The root namespace needs its real canonical marker. Binding `ava` does not
+certify a member or a namespace call. Every subsequent SDK access needs an exact
+proof; missing, opaque, conflicting and runtime-generated declarations retain
+explicit failing `Unknown` diagnostics. Static and conditional plugin
+declarations do not promise installation, enabled configuration or a bound
+process context. Runtime skill/MCP surfaces and unsupported contribution syntax
+remain unproved at the migration stage.
 
 ## Delivery boundary
 

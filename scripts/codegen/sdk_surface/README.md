@@ -7,6 +7,9 @@ constructors in built-in `plugin.py` files. It does not maintain another member
 list or import application modules.
 
 `query(index, "ava.namespace.member")` returns `MemberProof` or `Unknown`.
+The exact root path `"ava"` returns a namespace proof from the canonical root
+marker. Its empty definition name identifies a namespace, not a callable;
+binding the root does not prove any of its members.
 Invalid query syntax raises `ValueError`. A proof retains the exact exposed
 path, actual definition module/name, source location, declaring marker or plugin
 contribution location, and availability. Definition names retain private
@@ -22,7 +25,8 @@ Availability describes declarations, not the live process:
   rollback, SDK-disable settings and wrapping remain runtime responsibilities.
 - `UNKNOWN` means static provenance or canonical visibility was not proved.
 
-Every traversed module namespace must have a literal canonical marker. Missing,
+Every traversed module namespace, including the root of plugin exposures, must
+have a literal canonical marker. Missing,
 opaque, rebound or recognized locally mutated markers retain `Unknown`; the
 runtime discovery fallback cannot certify a static interface. Private marker
 names stay hidden. Module aliases and re-exports lead to their real definition
@@ -48,10 +52,13 @@ are not evaluated. A statically declared module-class property can provide its g
 provenance; its returned object's members remain unknown. Dynamic `__getattr__`
 values such as `ava.memory.PATH` also remain unknown.
 
-These facts are input for a later explicit public-contract integration. A proof
+The public-contract checker consumes these facts for exact SDK exposures after
+checking file privacy and the ordinary Python component contract. A proof
 for an exact SDK exposure grants no blanket `ava` exemption, direct private
 access, general Python component entry or runtime availability claim. The
 public-contract checker and component manifest remain separate policy owners.
+Unproved SDK paths retain the query's source location and reason in a failing
+diagnostic. Namespace declarations cannot certify namespace calls.
 
-Validation lives in `scripts/codegen/tests/test_sdk_surface_contracts.py`, with
+Validation lives in `scripts/codegen/sdk_surface/tests/test_contracts.py`, with
 synthetic positive/negative contracts and current-checkout provenance checks.
