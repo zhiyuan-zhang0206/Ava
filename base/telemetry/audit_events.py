@@ -94,10 +94,11 @@ def prepare_event_log(
             service-level event with no agent (e.g. an MCP tool call from an
             external client).
         source: who triggered the event — 'agent:<N>', 'user', 'system', 'self'.
-        target_agent_id: for directed operations — the other agent (for
-            send_message the recipient, for spawn the spawner, for fork the
-            FORK SOURCE — the lineage parent, never the executor; the executor
-            is `source`, see the fork-lineage ruling 2026-08-28). A dangling
+        target_agent_id: for directed operations — the other agent. For
+            send_message `agent_id` is the recipient and `target_agent_id` the
+            sender (the same agent as `source`); for spawn the spawner; for fork
+            the FORK SOURCE — the lineage parent, never the executor; the executor
+            is `source`, see the fork-lineage ruling 2026-08-28. A dangling
             reference is recorded as-is; readers join against the live agents
             set and drop unknown ids.
         payload: optional JSON-serializable dict with operation-specific data.

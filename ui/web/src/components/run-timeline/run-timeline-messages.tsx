@@ -104,6 +104,36 @@ function MessageCard({
   );
 }
 
+/** A message the history does not hold (a preview an event carries), through the same card and row as the ones it does: `kind` says which part it is shown as. */
+export function PreviewMessage({
+  text,
+  source,
+  ts,
+  kind,
+}: {
+  text: string;
+  source: string | null;
+  ts: string;
+  kind: RunTimelineMessagePart["kind"];
+}) {
+  const t = useTranslations("runTimeline");
+  const message: RunTimelineMessage = {
+    idx: 0,
+    ts,
+    source,
+    parts: [{ kind, chars: text.length, text, text_truncated: false }],
+    context_tokens: null,
+    estimated: null,
+  };
+  return (
+    <Section icon={<MessagesSquare className="size-3" />} title={t("messagesHeading", { count: 1 })}>
+      <div className="space-y-2" data-testid="run-timeline-messages">
+        <MessageCard message={message} parts={message.parts} tokens={null} />
+      </div>
+    </Section>
+  );
+}
+
 export function TimelineMessages({
   agentId,
   start,
