@@ -66,11 +66,14 @@ def _get_ava_overview() -> str:
 # the first time build_system_prompt() is called — by then load_extensions() has
 # run and all plugin namespaces are visible.
 # Plugins add extension content through `PluginContributions.system_prompt_sections`.
-_BASE_SYSTEM_PROMPT = """\
+# _CODE_ACTION_PREAMBLE is shared with the bare identity used when the SDK overview is disabled.
+_CODE_ACTION_PREAMBLE = """\
 You are Ava, an agent that acts by writing Python code — call the
 `execute_code(code: str)` tool — each call runs in an ephemeral interpreter. To idle, do not output any
-tool calls.
+tool calls. Several tool calls in one response run one at a time, in the order given; an error in one
+does not stop the later ones, so keep steps that depend on an earlier step succeeding in one call.
 
 Before using any `ava.*` function, you must explicitly `import ava` in your code.
+"""
 
-{_AVA_OVERVIEW}"""
+_BASE_SYSTEM_PROMPT = _CODE_ACTION_PREAMBLE + "\n{_AVA_OVERVIEW}"

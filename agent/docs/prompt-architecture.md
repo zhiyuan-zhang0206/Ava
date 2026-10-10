@@ -61,7 +61,9 @@ Capabilities rather than standing as its own section.
 
 - **Core base prompt** — `agent/graph/prompt/_base_prompt.py:_BASE_SYSTEM_PROMPT`: the
   code-as-action contract (`execute_code`, speak via text content, empty
-  tool-call = idle) plus the `help(ava)` SDK overview.
+  tool-call = idle, several calls run sequentially and an error does not stop
+  later ones) plus the `help(ava)` SDK overview. Its `_CODE_ACTION_PREAMBLE`
+  is also the bare identity when the SDK overview is disabled.
 - **Core expanded SDK reference** — `agent/graph/prompt/system_prompt.py:_sdk_expand_section`,
   rendering `effective_sdk_expand()`: plugin registrations
   (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. ava_code's `cwd`) first, then
