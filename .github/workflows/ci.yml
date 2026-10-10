@@ -1538,6 +1538,7 @@ jobs:
     # The aggregator carrying the branch-protection check name. Skipped
     # (= satisfied) when the diff has no backend side and structure succeeded;
     # non-backend structure failures propagate without installing test tooling.
+    # A classify failure must fail this required check; an intentional draft skip stays skipped.
     # With a backend side, green iff the
     # static and native smoke jobs are green and the enforced pytest path is
     # green — the selected subset when mode==enforce and the selector returned
@@ -1546,7 +1547,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: [classify, test-select, backend-static, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
-    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success') }}
+    if: ${{ !cancelled() && (needs.classify.result == 'failure' || (needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success'))) }}
     env:
       # Every coverage-data file the combine expects: all backend-shard matrix
       # groups plus the serial and static buckets. tests/scripts/test_ci_artifact_policy.py
