@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ava.sdk_surface import metering
+from base.agents.sdk import call_policy
 
 
 def test_install_wraps_and_restores_mcp_call_funnel() -> None:
@@ -20,7 +21,7 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     # below reads as a failure. The shared guards (`tests/fixtures/`) uninstall an
     # installation a test left behind, so the baseline here is bare.
     before = ava.mcps._call_raw
-    ledger = metering.install()
+    ledger = metering.install(call_policy.SamplingPolicyOwner())
     try:
         assert ava.mcps._call_raw is not before
         assert metering.is_recorder(ava.mcps._call_raw)
@@ -42,7 +43,7 @@ import json, sys
 import ava
 from base import telemetry
 from base.agents.sdk import call_policy as sdk_call_policy
-sdk_call_policy.policy = sdk_call_policy.SamplingPolicy
+sdk_call_policy.policy = lambda owner: sdk_call_policy.SamplingPolicy()
 rows = []
 telemetry.emit = lambda *args, **kwargs: rows.append(kwargs)
 assert ava.files.read(sys.argv[1]) == "hello"

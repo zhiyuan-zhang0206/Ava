@@ -7,7 +7,11 @@ tags: [base]
 
 # SDK-call sampling
 
-`call_policy.py` owns the validated `SamplingPolicy` and its process-local cache.
+`call_policy.py` defines the validated `SamplingPolicy` and `SamplingPolicyOwner`.
+The SDK `Installation` retains that owner. Installed synchronous, asynchronous and
+dynamic MCP recorders carry it explicitly into low-level metering and emission;
+those entry points require their caller's owner, including a direct `emit()`.
+No module cache, current-context registry or event pipeline supplies it.
 `telemetry.py` admits each public SDK entry with one policy snapshot before its body
 executes. The final `sdk_call` emission uses that same snapshot: a refresh during
 the call cannot replace its policy or mask the SDK's return, exception or cancellation.
@@ -21,9 +25,13 @@ Sampling is opt-in. The default records every event; the execution owner still t
 every executed public entry even when its event is sampled out. An invalid policy
 rejects a call before execution and therefore adds no tally.
 
-The existing cache refreshes at most once per five seconds without performing
+The owner's cache refreshes at most once per five seconds without performing
 network I/O on the SDK call path. Enrolled runners fetch with a two-second timeout
 and one attempt; local processes read their local configuration.
+The first read starts a retained refresh attempt. Admission and its real thread
+handle prevent another attempt while it remains alive. Each attempt records
+completion and its original error; worker-boundary failures are immediately
+reported through the no-emitter logger and raised on the owner's next read or stop.
 
 HTTP timeout, network and remote-protocol failures, and HTTP 429, may retain the
 last valid policy. Authentication/status errors other than 429, malformed JSON
@@ -38,6 +46,35 @@ admission must succeed before the SDK body: import, configuration and code error
 the caller instead of permitting an uncaptured operation. An absent participant
 is a normal no-op supplied by the execution's explicit owner; no import-failure
 fallback supplies it.
+
+## Lifetime and shutdown
+
+Full SDK reload explicitly transfers the same sampling owner to the replacement
+installation. Faces/config metadata changes retain it too: a reload cannot clear
+an invalid policy or restart its refresh cadence. Attachment admission and its
+short-lived clients do not own sampling; detach retains the SDK's process lifetime.
+Bare Python calls need no invented `AvaContext` or execution tally to use the
+installed recorders' sampling owner.
+
+`stop(timeout=2.0)` fences new reads and joins the retained attempt for a finite
+budget. It returns `False` if that exact thread remains alive and retains the
+handle and late outcome. A later stop can collect the original failure. `close()`
+also reports `sdk_sampling_refresh_unfinished`; it does not certify a live attempt
+as joined or extend the wait indefinitely.
+
+The execution child collects sampling inside its code-result boundary, before
+forming the result envelope. An already-completed unknown failure enters the
+existing failure envelope with the actual `code_reached` flag. If the body failed,
+its original exception/cause/traceback remain primary and shutdown failure becomes
+a note. A completed body with an unfinished refresh retains its actual result;
+the diagnostic and retained attempt express the separate shutdown outcome. Slow
+sampling does not turn code execution into a timeout or retry its side effects.
+
+The host stops sampling after turn drain and before closing checkpoint pools,
+including failed boot cleanup. Other SDK processes register finite `atexit`
+cleanup when their installation creates the owner. An `atexit` failure is visible
+but does not guarantee a nonzero exit; hard exit does not guarantee a join or
+delivery of an unfinished attempt. Refresh does not start a telemetry pipeline.
 
 The SDK recorder snapshots caller identity at entry and explicitly passes it through
 `run_metered` / `run_metered_async` to the final event. The call retains its own copy;

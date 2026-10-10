@@ -28,10 +28,16 @@ def test_real_shell_owner_probe_counts_its_public_fanout(monkeypatch: pytest.Mon
     def terminated(_agent_id: int) -> AgentStatus:
         return AgentStatus.TERMINATED
 
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     monkeypatch.setattr(sdk_telemetry, "emit", emit)
+    sampling = call_policy.SamplingPolicyOwner()
     monkeypatch.setattr(
-        ava.agents, "get_status", metering._make_recorder(terminated, "agents.get_status")
+        ava.agents,
+        "get_status",
+        metering._make_recorder(terminated, "agents.get_status", sampling),
     )
     registry = ExtensionRegistry(
         (
@@ -43,7 +49,7 @@ def test_real_shell_owner_probe_counts_its_public_fanout(monkeypatch: pytest.Mon
             ),
         )
     )
-    install.install(registry)
+    install.install(registry, sampling=sampling)
     previous = getattr(ava, "context", None)
     tally = SdkCallTally()
     ava.bind_context(replace(previous or AvaContext(), sdk_calls=tally))

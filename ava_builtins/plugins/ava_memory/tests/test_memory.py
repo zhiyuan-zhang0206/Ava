@@ -31,7 +31,10 @@ def _wrap_memory_search(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     from ava import gateway_client as _client
     from base.agents.sdk import call_policy
 
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
     def _wrapper(
         inner: Callable[..., Any], query: str, k: int = 5, *, timeout: float | None = None
