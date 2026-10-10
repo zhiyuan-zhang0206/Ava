@@ -3,7 +3,7 @@
 // The details of the selected arrow between agents: what happened, from whom to whom, when, and (for
 // an end that is not in the view) a button to bring that agent in.
 
-import { Info, MessageSquare } from "lucide-react";
+import { Info } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Metric, Section } from "@/components/inspector/inspector-section";
@@ -12,6 +12,7 @@ import { formatAbsolute } from "@/lib/format/time";
 
 import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
 import type { ResolvedLink } from "./model/timeline-links";
+import { PreviewMessage, TimelineMessages } from "./run-timeline-messages";
 
 export function LinkDetail({ resolved, onAddAgent }: { resolved: ResolvedLink; onAddAgent: (agent: number) => void }) {
   const t = useTranslations("runTimeline");
@@ -51,12 +52,16 @@ export function LinkDetail({ resolved, onAddAgent }: { resolved: ResolvedLink; o
           {t("linkAddAgent", { id: external })}
         </button>
       ) : null}
-      {link.preview !== null ? (
-        <Section icon={<MessageSquare className="size-3" />} title={t("linkMessage")}>
-          <p className="whitespace-pre-wrap text-xs" data-testid="run-timeline-link-preview">
-            {link.preview}
-          </p>
-        </Section>
+      {resolved.block !== null ? (
+        // The block the arrow ends on: its message, exactly as the details of that block show it.
+        <TimelineMessages agentId={resolved.to.agent} start={resolved.block.i0} end={resolved.block.i1} unitKind={resolved.block.kind} />
+      ) : link.preview !== null ? (
+        <PreviewMessage
+          text={link.preview}
+          source={link.sender === null ? "user" : `agent:${link.sender}`}
+          ts={link.ts}
+          kind={link.receiver === null ? "text" : "inbound"}
+        />
       ) : null}
     </div>
   );
