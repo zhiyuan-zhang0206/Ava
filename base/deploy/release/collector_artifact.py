@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 
 from base.host.net.resilience import Policy, retry
+from base.packages.declared_inputs import declared_path
 
 # Pinned contrib version — re-validate against the deploy/lgtm backends
 # (Tempo/Loki/Prometheus OTLP intake) when bumping.
@@ -170,7 +171,7 @@ def download_and_verify(tag: str, dest_dir: Path) -> None:
         tarball = Path(tmp) / "otelcol-contrib.tar.gz"
         _report(f"  · otel-collector: downloading {url}")
         _download_with_retry(url, tarball)
-        digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+        digest = hashlib.sha256(declared_path(tarball).read_bytes()).hexdigest()
         if digest != expected:
             raise RuntimeError(
                 f"otelcol-contrib {OTELCOL_CONTRIB_VERSION} {tag} SHA256 mismatch: "

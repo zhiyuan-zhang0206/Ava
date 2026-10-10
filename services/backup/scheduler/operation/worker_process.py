@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.packages.declared_inputs import supplied_path
 from services.backup.scheduler.operation.staging import (
     OperationBusyError,
     OperationDeferred,
@@ -64,7 +65,7 @@ def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
     signal.signal(signal.SIGTERM, _interrupt)
     if len(argv) != 3:
         raise SystemExit("usage: python -m <operation worker> REQUEST RESULT")
-    value = json.loads(Path(argv[1]).read_text())
+    value = json.loads(supplied_path(argv[1]).read_text())
     if not isinstance(value, dict):
         raise TypeError("operation request must be an object")
     return cast(dict[str, object], value), Path(argv[2])

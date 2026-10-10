@@ -26,6 +26,7 @@ from base.host.atomic_io import write_text_atomic
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.native_process.os_platform import is_linux
 from base.native_process.ownership import OwnedProcess
+from base.packages.declared_inputs import declared_path
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
 
@@ -177,7 +178,7 @@ def render_unit(ctx: BootUnitContext) -> str:
 
 def process_cgroup(pid: int) -> str:
     """Read the native systemd/unified cgroup, without process-name inference."""
-    rows = (Path("/proc") / str(pid) / "cgroup").read_text().splitlines()
+    rows = declared_path(Path("/proc") / str(pid) / "cgroup").read_text().splitlines()
     for row in rows:
         hierarchy, controllers, path = row.split(":", 2)
         if hierarchy == "0" or "name=systemd" in controllers.split(","):

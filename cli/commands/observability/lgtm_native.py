@@ -26,6 +26,7 @@ import yaml
 from dotenv import dotenv_values
 
 from base.host.net.resilience import Policy, retry
+from base.packages.declared_inputs import declared_path
 from base.telemetry.lgtm_local import BACKENDS
 from base.telemetry.lgtm_local import storage_dir as _storage_dir
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
@@ -178,7 +179,7 @@ def _extract_tree(name: str, archive: Path, destination: Path) -> None:
         extracted.mkdir()
         with tarfile.open(archive) as bundle:
             bundle.extractall(extracted, filter="data")
-        roots = [path for path in extracted.iterdir() if path.is_dir()]
+        roots = [path for path in declared_path(extracted).iterdir() if path.is_dir()]
         if len(roots) != 1:
             raise RuntimeError(f"native LGTM {name} archive must have one top-level directory")
         if destination.exists():
@@ -193,7 +194,7 @@ def _download_and_verify(name: str, version: str, asset: dict[str, str], native_
         archive = Path(temporary_dir) / Path(asset["url"]).name
         print(f"  · lgtm native: downloading {name} {version} from {asset['url']}")
         _download_with_retry(asset["url"], archive)
-        actual = hashlib.sha256(archive.read_bytes()).hexdigest()
+        actual = hashlib.sha256(declared_path(archive).read_bytes()).hexdigest()
         if actual != asset["sha256"]:
             raise RuntimeError(
                 f"native LGTM {name} {version} SHA256 mismatch: got {actual}, "

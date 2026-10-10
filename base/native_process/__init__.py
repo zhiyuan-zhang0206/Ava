@@ -28,6 +28,8 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
+from base.packages.declared_inputs import declared_path
+
 
 def pid_starttime_ticks(pid: int) -> int | None:
     """Linux `/proc` start time in clock ticks since boot, or None when unavailable.
@@ -36,7 +38,7 @@ def pid_starttime_ticks(pid: int) -> int | None:
     stat record only after its final closing parenthesis.
     """
     try:
-        line = Path(f"/proc/{pid}/stat").read_text()
+        line = declared_path(f"/proc/{pid}/stat").read_text()
         rest = line.rsplit(")", 1)[1].split()
         ticks = int(rest[22 - 3])
         return ticks if ticks > 0 else None

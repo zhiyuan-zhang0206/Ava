@@ -1,6 +1,6 @@
 """Measure how far changes reach through the PR test-selection impact graph.
 
-Run: `python3 scripts/audit/test_impact_census.py [--top N] [--json]` from the repository
+Run: `python3 scripts/audit/impact_census.py [--top N] [--json]` from the repository
 root (stdlib-only, read-only, no environment). It reports the numbers the locality
 and selector workstreams track (issue #5128):
 
