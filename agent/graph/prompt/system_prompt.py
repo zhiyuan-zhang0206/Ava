@@ -674,19 +674,13 @@ def build_system_prompt(
     """
     from base.config import settings
 
-    from ._base_prompt import _BASE_SYSTEM_PROMPT, _get_ava_overview
+    from ._base_prompt import _BASE_SYSTEM_PROMPT, _CODE_ACTION_PREAMBLE, _get_ava_overview
 
     if settings.agent.prompt_sdk_overview_enabled:
         parts = [_BASE_SYSTEM_PROMPT.format(_AVA_OVERVIEW=_get_ava_overview())]
     else:
-        # Bare identity — no SDK overview, just the one-paragraph preamble
-        parts = [
-            """\
-You are Ava, an agent that acts by writing Python code — call the
-`execute_code(code: str)` tool — each call runs in an ephemeral interpreter. To idle, do not output any
-tool calls. Before using any `ava.*` function, you must explicitly `import ava` in your code.
-"""
-        ]
+        # Bare identity — no SDK overview, just the preamble
+        parts = [_CODE_ACTION_PREAMBLE]
 
     def workspace_section(agent: AgentSlices) -> str:
         return _workspace_section(agent, agent_id=agent_id)
