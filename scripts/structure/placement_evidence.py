@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import collections
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -21,17 +22,19 @@ def _plus(base: int | None, extra: int) -> int | None:
     return None if base is None else base + extra
 
 
-def _ascents_of_call(node: ast.Call) -> int | None:
+def _ascents_of_call(node: ast.Call, is_path: Callable[[ast.expr], bool] | None) -> int | None:
     name = _last_name(node.func)
-    if name == "Path" and len(node.args) == 1:
+    if (is_path(node.func) if is_path else name == "Path") and len(node.args) == 1:
         arg = node.args[0]
         return 0 if isinstance(arg, ast.Name) and arg.id == "__file__" else None
     if name in ("resolve", "absolute") and not node.args and isinstance(node.func, ast.Attribute):
-        return file_ascents(node.func.value)
+        return file_ascents(node.func.value, is_path)
     return None
 
 
-def _ascents_of_parents(node: ast.Subscript) -> int | None:
+def _ascents_of_parents(
+    node: ast.Subscript, is_path: Callable[[ast.expr], bool] | None
+) -> int | None:
     parents, index = node.value, node.slice
     if (
         isinstance(parents, ast.Attribute)
@@ -39,18 +42,18 @@ def _ascents_of_parents(node: ast.Subscript) -> int | None:
         and isinstance(index, ast.Constant)
         and isinstance(index.value, int)
     ):
-        return _plus(file_ascents(parents.value), index.value + 1)
+        return _plus(file_ascents(parents.value, is_path), index.value + 1)
     return None
 
 
-def file_ascents(node: ast.AST) -> int | None:
+def file_ascents(node: ast.AST, is_path: Callable[[ast.expr], bool] | None = None) -> int | None:
     """How many directories above the file `Path(__file__)...` climbs (`.parents[2]`: 3), or None."""
     if isinstance(node, ast.Call):
-        return _ascents_of_call(node)
+        return _ascents_of_call(node, is_path)
     if isinstance(node, ast.Attribute) and node.attr == "parent":
-        return _plus(file_ascents(node.value), 1)
+        return _plus(file_ascents(node.value, is_path), 1)
     if isinstance(node, ast.Subscript):
-        return _ascents_of_parents(node)
+        return _ascents_of_parents(node, is_path)
     return None
 
 
