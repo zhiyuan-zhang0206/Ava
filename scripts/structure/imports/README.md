@@ -101,7 +101,12 @@ modules. Scopes built without a context keep the plain one-binding rules.
 `bindings.local_nodes()` preserves lexical depth-first order with an explicit
 iterator stack, so deep expressions do not repeatedly relay each node through
 recursive generators. Nested bodies and definition-time inputs retain the same
-scope boundaries.
+scope boundaries. Its optional `bindings_only` projection yields only calls and
+actual binding inputs, including Name stores and Attribute stores/deletes.
+`Scope` consumes this projection rather than relaying every inert literal,
+load name and context/operator node to its binding dispatcher. The projection
+uses the same AST child traversal and does not prune expression subtrees; the
+default public walk still yields all nodes in order.
 
 Within one analysis, `ModuleContext.scope()` reuses completed scopes by AST node,
 source path and lexical parent. The fact and execution-input visitors share these
