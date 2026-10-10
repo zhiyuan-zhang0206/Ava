@@ -257,13 +257,57 @@ def _cmd_other(_pid: int) -> str:
 
 @pytest.mark.parametrize(
     ("command", "live"),
-    [(_cmd_pytest, True), (_cmd_xdist, True), (_cmd_sshd, False), (_cmd_none, False)],
+    [(_cmd_pytest, True), (_cmd_xdist, True), (_cmd_sshd, False), (_cmd_none, True)],
 )
-def test_owner_live_requires_a_pytest_command(
+def test_owner_liveness_preserves_an_unreadable_command(
     command: Callable[[int], str | None], live: bool
 ) -> None:
     inspection = processes.ProcessInspection(command=command, probe=_kill_ok)
     assert inspection.owner_live(123) is live
+
+
+@pytest.mark.parametrize("owner_state", ["unknown", "live", "dead", "recycled"])
+def test_native_sweep_preserves_an_unreadable_live_owner(tmp_path: Path, owner_state: str) -> None:
+    """The real sweep sees only this test's birth-owned child, never host strangers."""
+    owner_pid = 99999999
+    with processes.managed_proc(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        label="owner-command-proof",
+        log_path=str(tmp_path / "child.log"),
+    ) as child:
+        native = processes.ProcessInspection()
+        command = native.command(child.pid)
+        assert command is not None
+        probes: list[tuple[int, int]] = []
+
+        def rows() -> list[tuple[int, str, str]]:
+            return [(child.pid, command, f"AVA_HOME=/proof/ava_e2e_home_{owner_pid}_1")]
+
+        def probe(pid: int, sig: int) -> None:
+            assert pid == owner_pid and sig == 0
+            probes.append((pid, sig))
+            if owner_state == "dead":
+                raise ProcessLookupError
+
+        def observed_command(pid: int) -> str | None:
+            if pid == child.pid:
+                return native.command(pid)
+            assert pid == owner_pid
+            assert owner_state != "dead"
+            if owner_state == "unknown":
+                return None
+            return _cmd_pytest(pid) if owner_state == "live" else _cmd_sshd(pid)
+
+        swept = processes.sweep_stale_e2e_processes(
+            inspection=processes.ProcessInspection(rows=rows, command=observed_command, probe=probe)
+        )
+        assert probes == [(owner_pid, 0)]
+        if owner_state in {"unknown", "live"}:
+            assert swept == 0
+            assert child.poll() is None
+        else:
+            assert swept == 1
+            assert child.wait(timeout=5) != 0
 
 
 def test_dead_owner_is_not_live() -> None:
