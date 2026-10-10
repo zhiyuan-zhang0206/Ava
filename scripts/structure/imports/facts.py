@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -80,8 +80,26 @@ class _Collector(ast.NodeVisitor):
         self.embedded = embedded
         self.resource_seen: set[int] = set()
         self.has_launches = False
+        self.visitors: dict[type[ast.AST], Callable[[ast.NodeVisitor, ast.AST], None]] = {}
         self.records: list[Fact] = []
         self.unknown: list[Unknown] = []
+
+    def visit(self, node: ast.AST) -> None:
+        """Resolve visitor dispatch once per node type in this source analysis."""
+        node_type = type(node)
+        visitor = self.visitors.get(node_type)
+        if visitor is None:
+            visitor = getattr(
+                type(self), "visit_" + node_type.__name__, ast.NodeVisitor.generic_visit
+            )
+            self.visitors[node_type] = visitor
+        visitor(self, node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        """Names are resolved by their enclosing operation and completed Scope."""
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        """Literal payloads are resolved at their read, import or execution site."""
 
     def gap(
         self, node: ast.expr | ast.stmt, reason: str, kind: FactKind = FactKind.DYNAMIC_IMPORT

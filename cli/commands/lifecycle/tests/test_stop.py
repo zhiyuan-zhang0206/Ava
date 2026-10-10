@@ -52,10 +52,6 @@ def _restart_stop(**kwargs: Any) -> int:
     )
 
 
-_NORMAL = "import signal,sys,time\nsignal.signal(signal.SIGTERM,lambda *_:sys.exit(0))\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"
-_IGNORE = "import signal,time\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"
-
-
 def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_pty(
     home: Path,
     launch: Launcher,
@@ -75,7 +71,7 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
     # Bootstrap and spawned interpreters consume the raw home before Settings.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
-    orchestration = launch("unowned-test-process", _IGNORE)
+    orchestration = launch("unowned-test-process", term="ignore")
     name = "ava-agent-987-shell-1"
     assert new(name, home, {"AVA_HOME": str(home)})
     identity = pty_reaper.track_session(name)
@@ -113,7 +109,7 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
-    unowned = launch("unowned-test-process", _IGNORE)
+    unowned = launch("unowned-test-process", term="ignore")
     name = "ava-agent-987-shell-2056-smooth"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
@@ -185,7 +181,7 @@ def test_root_stop_refusal_keeps_hold_without_force(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dependencies(monkeypatch)
-    service = launch("ava-worker", _IGNORE)
+    service = launch("ava-worker", term="ignore")
     before = psutil.Process(service.pid).create_time()
 
     def refuse(**kwargs: object) -> None:
