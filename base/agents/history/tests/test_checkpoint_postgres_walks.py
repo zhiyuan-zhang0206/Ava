@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import CheckpointMetadata, CheckpointTuple, DeltaChannelHistory
 from langgraph.checkpoint.base.id import uuid6
@@ -17,9 +17,14 @@ from langgraph.checkpoint.postgres.base import BasePostgresSaver
 from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from base.agents.history import checkpoint_postgres_walks
-from base.agents.history.checkpoint import load_checkpoint_messages_segment
+from base.agents.history.checkpoint import (
+    CheckpointReadError,
+    load_checkpoint_messages,
+    load_checkpoint_messages_segment,
+)
 from base.agents.history.checkpoint_postgres_walks import (
     HistoryAsyncPostgresSaver as AsyncPostgresSaver,
 )
@@ -31,6 +36,12 @@ from base.db import Database
 
 def _db() -> Database:
     return Database.from_settings()
+
+
+def _checkpoint_id(config: RunnableConfig) -> str:
+    identity = config.get("configurable")
+    assert identity is not None
+    return cast(str, identity["checkpoint_id"])
 
 
 def _append_delta_checkpoint(
@@ -82,6 +93,65 @@ def _write_steps(
         parent = _append_delta_checkpoint(saver, thread=thread, step=step, parent=parent)
         configs.append(parent)
     return configs
+
+
+async def test_missing_delta_parent_fails_sync_async_and_public_reader(
+    db_conn: psycopg.Connection,
+) -> None:
+    thread = "6111"
+    with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        configs = _write_steps(saver, thread, 4, None)
+        missing = _checkpoint_id(configs[2])
+        db_conn.execute(
+            "DELETE FROM checkpoints WHERE thread_id=%s AND checkpoint_id=%s", (thread, missing)
+        )
+        db_conn.commit()
+        with pytest.raises(RuntimeError, match="delta messages ancestry is incomplete"):
+            _history(saver, configs[-1])
+    async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        with pytest.raises(RuntimeError, match="delta messages ancestry is incomplete"):
+            await saver.aget_delta_channel_history(config=configs[-1], channels=["messages"])
+    with pytest.raises(CheckpointReadError) as failed:
+        load_checkpoint_messages(_db(), int(thread))
+    assert isinstance(failed.value.__cause__, RuntimeError)
+    assert str(missing) in str(failed.value.__cause__)
+    # Detection is read-only; it neither removes nor substitutes the live head.
+    assert db_conn.execute(
+        "SELECT parent_checkpoint_id FROM checkpoints WHERE thread_id=%s AND checkpoint_id=%s",
+        (thread, _checkpoint_id(configs[-1])),
+    ).fetchone() == (missing,)
+
+
+def test_real_message_reset_can_cut_off_a_missing_older_parent(
+    db_conn: psycopg.Connection,
+) -> None:
+    thread = "6112"
+    with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        configs = _write_steps(saver, thread, 4, None)
+        saver.put_writes(
+            configs[2],
+            [
+                (
+                    "messages",
+                    [
+                        RemoveMessage(id=REMOVE_ALL_MESSAGES),
+                        HumanMessage(id="kept", content="kept"),
+                    ],
+                )
+            ],
+            "reset-task",
+        )
+        db_conn.execute(
+            "DELETE FROM checkpoints WHERE thread_id=%s AND checkpoint_id=%s",
+            (thread, _checkpoint_id(configs[1])),
+        )
+        db_conn.commit()
+        entry = _history(saver, configs[-1])
+        assert "seed" not in entry
+        assert any(
+            isinstance(message, RemoveMessage) for write in entry["writes"] for message in write[2]
+        )
+    assert [message.id for message in load_checkpoint_messages(_db(), int(thread))] == ["kept"]
 
 
 def _write_numbers(entry: DeltaChannelHistory) -> list[int]:

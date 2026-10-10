@@ -30,9 +30,9 @@ Read contract:
   - store readable, latest checkpoint committed but the messages channel not
     yet written (just-spawned agent, first super-step uncommitted) -> empty
     list (legitimate state, see `load_checkpoint_messages`).
-  - store unreadable (DB disconnect, deserialize error) -> raises
-    CheckpointReadError. Each caller decides its own tolerance: a UI cold-load
-    can swallow it to an empty view, a programmatic data endpoint surfaces it.
+  - store unreadable (DB disconnect, deserialize error, incomplete delta
+    ancestry) -> raises CheckpointReadError. A failed reconstruction is never
+    evidence of an empty conversation; HTTP history reads surface failure.
 """
 
 from __future__ import annotations
@@ -70,9 +70,10 @@ async def latest_checkpoint_id_in_transaction(conn: AsyncConnection, agent_id: i
 
 class CheckpointReadError(RuntimeError):
     """The checkpoint store could not be read or its blob could not be
-    deserialized. Distinct from "no checkpoint yet" (which returns an empty
+    deserialized or its required delta ancestry is incomplete. Distinct from
+    "no checkpoint yet" (which returns an empty
     list) and from "checkpoint present but messages channel empty" (also an
-    empty list) — this is an IO / deserialize failure the caller must decide
+    empty list) — this is an IO / deserialize / reconstruction failure the caller must decide
     how to tolerate."""
 
 
