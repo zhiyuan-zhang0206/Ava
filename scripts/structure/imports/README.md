@@ -1,7 +1,9 @@
 # Static import ownership
 
 `__init__.py` owns normalized clauses, package anchors, bindings and direct
-dependency resolution. `cache.py` stores normalized production statements;
+dependency resolution. Its `ModuleSourceLookup` protocol owns exact source
+lookup and the checkout resource anchor; facts and mock proofs import it directly.
+`cache.py` stores normalized production statements;
 resolved module edges always use the current checkout.
 
 `executed.py` supplies bounded facts about actual Python `-c` inputs. It follows

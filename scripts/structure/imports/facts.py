@@ -11,8 +11,7 @@ from pathlib import Path
 
 from scripts.structure import placement_evidence
 
-from . import bindings, dependency_evidence, executed, mock_targets, normalize
-from .mock_targets import Lookup as Lookup
+from . import ModuleSourceLookup, bindings, dependency_evidence, executed, mock_targets, normalize
 
 
 class FactKind(StrEnum):
@@ -66,7 +65,7 @@ class _Collector(ast.NodeVisitor):
         self,
         tree: ast.AST,
         path: str,
-        index: Lookup,
+        index: ModuleSourceLookup,
         tops: Sequence[str],
         *,
         embedded: bool = False,
@@ -389,7 +388,9 @@ class _Collector(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str]) -> Evidence:
+def collect(
+    tree: ast.AST, rel_path: str, index: ModuleSourceLookup, *, tops: Sequence[str]
+) -> Evidence:
     """Unpruned direct facts for a checkout, with every recognized unsupported input retained.
 
     Literal dynamic imports, finite pytest string domains, Python -m/-c launches
@@ -412,7 +413,9 @@ def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str])
     )
 
 
-def _embedded(source: executed.Source, path: str, index: Lookup, tops: Sequence[str]) -> Evidence:
+def _embedded(
+    source: executed.Source, path: str, index: ModuleSourceLookup, tops: Sequence[str]
+) -> Evidence:
     try:
         tree = ast.parse(source.text)
     except SyntaxError as error:

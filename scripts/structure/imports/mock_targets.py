@@ -1,19 +1,11 @@
 """Proofs for mock's object form, independent of string import and placement policy."""
 
 import ast
-from pathlib import Path
-from typing import Protocol
 
-from . import ModuleLookup, bindings
+from . import ModuleSourceLookup, bindings
 
 
-class Lookup(ModuleLookup, Protocol):
-    repo_root: Path
-
-    def file(self, dotted: str) -> str | None: ...
-
-
-def is_object(node: ast.expr, scope: bindings.Scope, index: Lookup) -> bool:
+def is_object(node: ast.expr, scope: bindings.Scope, index: ModuleSourceLookup) -> bool:
     """Prove a collection, standard mapping or imported module without evaluating it."""
     if isinstance(scope.value(node), ast.Dict | ast.List | ast.Tuple | ast.Set):
         return True
@@ -33,7 +25,7 @@ def is_object(node: ast.expr, scope: bindings.Scope, index: Lookup) -> bool:
     return _inert_package(clause.base, index)
 
 
-def _inert_package(module: str, index: Lookup) -> bool:
+def _inert_package(module: str, index: ModuleSourceLookup) -> bool:
     """A namespace or docstring-only door cannot re-export a string over a submodule."""
     if index.kind(module) == "ns":
         return True
