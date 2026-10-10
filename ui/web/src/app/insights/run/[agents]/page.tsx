@@ -11,7 +11,7 @@ import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { LinkDetail } from "@/components/run-timeline/run-timeline-link-detail";
 import { LinkGroupDetail } from "@/components/run-timeline/run-timeline-link-group-detail";
-import { LINK_KINDS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
+import { LINK_KINDS, MAX_ARROWS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
 import { RunTimelineRows, type AgentEntry } from "@/components/run-timeline/run-timeline-rows";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import { PageHeader } from "@/components/shell/page-header";
@@ -76,6 +76,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const [linkKinds, setLinkKinds] = useState<ReadonlySet<LinkKind>>(() => new Set(LINK_KINDS));
   const [showUser, setShowUser] = useState(true);
   const [showOther, setShowOther] = useState(true);
+  const [maxArrows, setMaxArrows] = useState<number>(MAX_ARROWS);
   const [levels, setLevels] = useState<number | null>(null);
   // Off by default: the Context size row is one more row per agent.
   const [contextSize, setContextSize] = useState(false);
@@ -235,6 +236,8 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
           setShowOther(on);
           if (!on) setLinkKey(null);
         }}
+        maxArrows={maxArrows}
+        onMaxArrows={setMaxArrows}
       />
       {base && view ? (
         <>
@@ -282,6 +285,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
               })
             }
             linkKeys={linkKeys}
+            maxArrows={maxArrows}
             onSelectLinks={(keys) => {
               setSelection(null);
               setLinkKeys(keys);

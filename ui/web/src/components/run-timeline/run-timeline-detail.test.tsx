@@ -105,6 +105,7 @@ describe("the details of an arrow and of the block it ends on", () => {
   };
   const resolved = (over: Partial<ResolvedLink>): ResolvedLink => ({
     key: "k",
+    kind: "send_message",
     link: { kind: "send_message", ts: T, sender: 405, receiver: 6657, inbound_id: 31, fork_from: null, notice_id: null },
     from: { row: "units", agent: 405, ms: Date.parse(T) },
     to: { row: "units", agent: 6657, ms: Date.parse(T) },
@@ -132,7 +133,7 @@ describe("the details of an arrow and of the block it ends on", () => {
   it("shows an event with no block through the same card and row, as a message", async () => {
     vi.mocked(api.getRunTimelineMessages).mockClear();
     vi.mocked(api.getRunTimelineLinkContent).mockResolvedValue({ title: "a title", content: "need **a** decision\n\n" + "long ".repeat(500) });
-    const none = resolved({ block: null, link: { ...resolved({}).link, inbound_id: null, notice_id: 3, receiver: null, kind: "notice" } });
+    const none = resolved({ block: null, kind: "notice", link: { ...resolved({}).link, inbound_id: null, notice_id: 3, receiver: null, kind: "notice" } });
     const shown = await messagesOf(<LinkDetail resolved={none} onAddAgent={() => undefined} />);
     expect(shown).toHaveLength(1);
     expect(shown[0]).toContain("<strong");

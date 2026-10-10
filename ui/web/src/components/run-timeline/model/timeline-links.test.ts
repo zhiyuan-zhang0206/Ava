@@ -134,6 +134,8 @@ describe("the User group", () => {
       ["send_message", null, 2, "user"],
       ["send_message", null, 2, "ui:page:fleet"],
     ]);
+    // Its own kind, so it has its own color and legend entry and is never merged with messages between agents.
+    expect(user.map((l) => l.kind)).toEqual(["user_message", "user_message"]);
     expect(user[0].to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(21)) });
     expect(user[0].from).toEqual({ row: "user", agent: 0, ms: Date.parse(iso(20)) });
     expect([user[0].unmatched, user[0].external]).toEqual([false, null]);

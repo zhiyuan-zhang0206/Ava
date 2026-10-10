@@ -123,14 +123,14 @@ export function LinksCanvas({
       const clusters = cache.current.clusters;
       const curves: Curve[] = [];
       const sizes = new Map<string, number>();
-      const kinds = new Map<string, ResolvedLink["link"]["kind"]>();
+      const kinds = new Map<string, ResolvedLink["kind"]>();
       const members = new Map<string, readonly string[]>();
       for (const c of clusters) {
         const [y0, y1] = ys.get(c.members[0]) ?? [0, 0];
         curves.push(curveOf(c.key, c.x0, y0, c.x1, y1));
         sizes.set(c.key, c.members.length);
         members.set(c.key, c.members);
-        const kind = byKey.get(c.members[0])?.link.kind;
+        const kind = byKey.get(c.members[0])?.kind;
         if (kind !== undefined) kinds.set(c.key, kind);
       }
       const litOf = (key: string): 0 | 1 | 2 => {

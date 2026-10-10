@@ -60,7 +60,7 @@ export function LinkDetail({ resolved, onAddAgent }: { resolved: ResolvedLink; o
     agent === null ? t("userGroup") : agent === external ? t("linkNotInView", { id: agent }) : `#${agent}`;
   return (
     <div className="space-y-4" data-testid="run-timeline-link-detail">
-      <h2 className="text-sm font-semibold">{labels[link.kind]}</h2>
+      <h2 className="text-sm font-semibold">{labels[resolved.kind]}</h2>
       <Section icon={<Info className="size-3" />} title={t("detailsHeading")}>
         <div className="grid grid-cols-2 gap-1">
           <Metric className="col-span-2" label={t("linkFrom")} value={end(link.sender)} />

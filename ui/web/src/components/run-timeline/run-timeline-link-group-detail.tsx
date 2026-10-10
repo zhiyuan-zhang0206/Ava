@@ -22,7 +22,7 @@ export function LinkGroupDetail({ links, onSelect }: { links: readonly ResolvedL
   const first = sorted[0];
   return (
     <div className="space-y-4" data-testid="run-timeline-link-group-detail">
-      <h2 className="text-sm font-semibold">{t("linkGroupTitle", { kind: labels[first.link.kind], count: sorted.length })}</h2>
+      <h2 className="text-sm font-semibold">{t("linkGroupTitle", { kind: labels[first.kind], count: sorted.length })}</h2>
       <Section icon={<Info className="size-3" />} title={t("linkGroupHeading")}>
         <ul className="space-y-1">
           {sorted.map((l) => (

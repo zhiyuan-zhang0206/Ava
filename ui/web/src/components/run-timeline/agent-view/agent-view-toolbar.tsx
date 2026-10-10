@@ -11,6 +11,7 @@ import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 import type { UnitHeights } from "../canvas/run-timeline-paint";
+import { ARROW_LIMITS } from "../model/timeline-links";
 
 const HEIGHT_OPTIONS: readonly UnitHeights[] = ["equal", "tokens"];
 const FIELD = "rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground";
@@ -29,6 +30,8 @@ export function AgentViewToolbar({
   onShowUser,
   showOther,
   onShowOther,
+  maxArrows,
+  onMaxArrows,
 }: {
   agentIds: readonly number[];
   onAdd: (agent: number) => void;
@@ -47,6 +50,9 @@ export function AgentViewToolbar({
   onShowUser: (on: boolean) => void;
   showOther: boolean;
   onShowOther: (on: boolean) => void;
+  /** The most arrows shown at once, one of `ARROW_LIMITS`. */
+  maxArrows: number;
+  onMaxArrows: (max: number) => void;
 }) {
   const t = useTranslations("runTimeline");
   const [draft, setDraft] = useState("");
@@ -145,6 +151,25 @@ export function AgentViewToolbar({
           data-testid="agent-view-interactions-other"
         />
         {t("otherInteractionsLabel")}
+      </label>
+      <label className="grid gap-1 text-xs text-muted-foreground" title={t("maxArrowsTitle")}>
+        {t("maxArrowsLabel")}
+        <select
+          value={maxArrows}
+          onChange={(event) => {
+            const next = ARROW_LIMITS.find((limit) => String(limit) === event.target.value);
+            if (next === undefined) throw new Error(`unknown arrow limit: ${event.target.value}`);
+            onMaxArrows(next);
+          }}
+          data-testid="agent-view-max-arrows"
+          className={FIELD}
+        >
+          {ARROW_LIMITS.map((limit) => (
+            <option key={limit} value={limit}>
+              {limit}
+            </option>
+          ))}
+        </select>
       </label>
     </div>
   );

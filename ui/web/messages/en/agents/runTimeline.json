@@ -111,5 +111,8 @@
   "closeGroup": "Hide {title} (switch it on again in the toolbar)",
   "readoutLinkGroup": "{kind} · {from} → {to} · {count} merged · {start} – {end}",
   "linkGroupTitle": "{count} × {kind}",
-  "linkGroupHeading": "Merged arrows (select one to zoom to it)"
+  "linkGroupHeading": "Merged arrows (select one to zoom to it)",
+  "linkUserMessage": "User message",
+  "maxArrowsLabel": "Max arrows",
+  "maxArrowsTitle": "Arrows beyond this many are merged by closeness"
 }
