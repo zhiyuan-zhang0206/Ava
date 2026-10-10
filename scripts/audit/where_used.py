@@ -91,6 +91,8 @@ from scripts.audit.where_used_scan import (  # noqa: E402
     resolve,
 )
 
+__all__ = ["main"]
+
 GROUPS = ("imports", "strings", "tests", "docs", "structure", "history")
 _TITLES = {
     "imports": "IMPORTS (production code)",
@@ -297,16 +299,21 @@ def as_json(report: Report) -> dict[str, object]:
     }
 
 
-def _relative(raw: str) -> str:
+def _relative(raw: str, repo_root: Path) -> str:
     """`/abs/path/in/this/checkout.py:name` -> `path/in/this/checkout.py:name`."""
     spec, sep, rest = raw.partition(":")
     path = Path(spec)
-    if path.is_absolute() and path.resolve().is_relative_to(_REPO):
-        spec = path.resolve().relative_to(_REPO).as_posix()
+    if path.is_absolute() and path.resolve().is_relative_to(repo_root):
+        spec = path.resolve().relative_to(repo_root).as_posix()
     return spec + sep + rest
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+    """Report references in an explicit checkout, defaulting to this checkout.
+
+    Absolute targets inside that checkout are normalized to checkout-relative
+    paths. Command-line parsing, output groups and exit codes are unchanged.
+    """
     parser = argparse.ArgumentParser(
         description=(__doc__ or "").split("## Targets")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -320,11 +327,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.limit < 1:
         parser.error("--limit must be at least 1")
-    repo = load_repo(_REPO)
+    root = _REPO if repo_root is None else repo_root.resolve()
+    repo = load_repo(root)
     reports: list[Report] = []
     for raw in args.targets:
         try:
-            reports.append(scan(repo, resolve(_relative(raw), repo)))
+            reports.append(scan(repo, resolve(_relative(raw, root), repo)))
         except ValueError as error:
             parser.error(str(error))
     if args.as_json:

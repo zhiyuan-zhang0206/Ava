@@ -207,6 +207,10 @@ module = "scripts.codegen.sdk_surface"
 entry_modules = ["scripts.codegen.sdk_surface.contracts"]
 
 [[tool.ava.public_contracts.components]]
+module = "scripts.audit"
+entry_modules = ["scripts.audit.module_moves", "scripts.audit.where_used"]
+
+[[tool.ava.public_contracts.components]]
 module = "base.host.proc"
 entry_modules = ["base.host.proc"]
 
