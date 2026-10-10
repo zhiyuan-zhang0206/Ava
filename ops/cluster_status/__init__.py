@@ -316,8 +316,8 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str
 _KILL_ALL_WORKERS = 8
 
 
-def kill_agent_shells(agent_id: int) -> list[int]:
-    """Kill every host-local persistent shell of one agent; return the killed ids.
+def kill_agent_shells(agent_id: int, *, before_session_index: int) -> list[int]:
+    """Kill listed host-local shells below the owner's cutoff; return their ids.
 
     The `kill_all_shell_sessions` primitive
     (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
@@ -330,10 +330,16 @@ def kill_agent_shells(agent_id: int) -> list[int]:
     listing and its kill still counts as killed — it is gone either way. No
     notice is produced here (an owner-level kill is silent) and nothing is
     written to the database: removing `agent_shell_ttls` rows is the gateway's
-    part. Every listed session is attempted; a kill the backend could not
+    part. IDs at or above the exclusive cutoff are never targeted. Enumeration
+    happens once; late creation and crash leftovers require operator cleanup.
+    Every selected session is attempted; a kill the backend could not
     confirm raises one RuntimeError naming those ids after the others ran.
     """
-    shells = [shell for shell in agent_shell_sessions(agent_id) if not is_page_label(shell.name)]
+    shells = [
+        shell
+        for shell in agent_shell_sessions(agent_id)
+        if shell.id < before_session_index and not is_page_label(shell.name)
+    ]
     if not shells:
         return []
     from base.sessions.backend import get_shell_backend

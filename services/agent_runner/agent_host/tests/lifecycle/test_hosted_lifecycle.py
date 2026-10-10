@@ -313,7 +313,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
 # ─── kill_all_shell_sessions: the at-exit kill ───────────────────────────────
 # docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md: a graceful terminate
 # that asked for it has the agent's shell sessions killed on its home host
-# after the last step returned, right before the termination commits.
+# after the last step returned and the termination commits.
 
 
 def _terminate_command(
@@ -335,7 +335,7 @@ def _record_kills(
     """Patch the host's kill primitive; record (agent id, status at kill time)."""
     calls: list[tuple[int, str | None]] = []
 
-    def _kill(agent_id: int) -> list[int]:
+    def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
             row = conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
         calls.append((agent_id, None if row is None else row[0]))
@@ -384,7 +384,7 @@ async def _run_terminating_turn(
 
 
 @pytest.mark.parametrize("requested", [True, False])
-async def test_hosted_terminate_kills_requested_shell_sessions_before_the_death(
+async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -400,8 +400,8 @@ async def test_hosted_terminate_kills_requested_shell_sessions_before_the_death(
     kills = _record_kills(monkeypatch)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
-    # The kill ran after the last step returned, before `terminated` committed.
-    assert kills == ([(agent_id, "running")] if requested else [])
+    # The kill ran after the last step returned, after `terminated` committed.
+    assert kills == ([(agent_id, "terminated")] if requested else [])
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("terminated",)
@@ -428,7 +428,7 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
         for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     ] == [own]
     await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
-    assert kills == [(agent_id, "running")]
+    assert kills == [(agent_id, "terminated")]
 
 
 async def test_hosted_failed_kill_still_applies_the_termination(
@@ -448,7 +448,7 @@ async def test_hosted_failed_kill_still_applies_the_termination(
     kills = _record_kills(monkeypatch, fail=True)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
-    assert kills == [(agent_id, "running")]
+    assert kills == [(agent_id, "terminated")]
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("terminated",)
@@ -468,10 +468,10 @@ def _record_force_sweeps(monkeypatch: pytest.MonkeyPatch, command: int) -> list[
     """Patch the host's kill primitive; record (agent id, command observed_at)."""
     calls: list[tuple[int, object]] = []
 
-    def _kill(agent_id: int) -> list[int]:
+    def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
             row = conn.execute(
-                "SELECT observed_at FROM inbound_messages WHERE id=%s", (command,)
+                "SELECT observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
             ).fetchone()
         calls.append((agent_id, None if row is None else row[0]))
         return []
@@ -490,8 +490,8 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     model_catalog: ModelCatalog,
 ) -> None:
     """A step still draining past a force's kill may create a shell; the live
-    host sweeps again when it observes the force quiescent, before recording
-    the observation (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md)."""
+    host attempts older sessions again after recording its quiescent
+    observation (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md)."""
     monkeypatch.setattr(
         "services.agent_runner.agent_host.runtime.validate_model_config", _any_model
     )
@@ -510,7 +510,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
         aops_pool, agent_id, "claim-test", host._owner, expected_from="idling", db=database
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction,
             agent_id,
             pool,
@@ -519,7 +519,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
         )
     sweeps = _record_force_sweeps(monkeypatch, command)
     await host.run_turn(agent_id)
-    assert sweeps == ([(agent_id, None)] if requested else [])
+    assert sweeps == ([(agent_id, True)] if requested else [])
     assert db_conn.execute(
         "SELECT observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
     ).fetchone() == (True,)
@@ -548,7 +548,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
         aops_pool, agent_id, "claim-test", old._owner, expected_from="idling", db=database
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command = await asyncio.to_thread(
+        _, _, _, command, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction,
             agent_id,
             pool,
@@ -563,4 +563,4 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
         aops_pool, "claim-test", kill_shell_sessions=kill_terminating_agent_shells
     )
     assert recovered == [agent_id]
-    assert sweeps == [(agent_id, None)]
+    assert sweeps == [(agent_id, True)]

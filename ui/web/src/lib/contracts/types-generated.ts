@@ -8612,14 +8612,13 @@ export interface components {
          *
          *     `when="now"`: the kill already ran on the agent's home machine — a force
          *         terminate, or an agent that was already terminated. `killed` lists the
-         *         session ids it killed, ascending; empty means the agent had no shell
-         *         session there. A force also sweeps again once its host observes the
-         *         agent's work ended, catching a session its last step created after
-         *         this kill; that sweep is not in this response.
+         *         selected session ids confirmed gone, ascending; empty means no eligible
+         *         sessions were listed below the captured cutoff. A force's original host
+         *         attempts one fresh cutoff after quiescence; it is not in this response.
          *     `when="at_exit"`: a graceful terminate of a live agent. The request is
-         *         durable on its terminate command; the home runtime kills every session
-         *         right before the termination applies, after the agent's last step.
-         *         `killed` is empty — the set is fixed only at exit.
+         *         durable on its terminate command; after committing termination the home
+         *         runtime attempts listed sessions below the cutoff captured at exit.
+         *         `killed` is empty; cleanup errors are logged, not returned in this response.
          */
         ShellSessionsKill: {
             when: components["schemas"]["ShellSessionKillTiming"];
@@ -9111,10 +9110,11 @@ export interface components {
          *     its home machine (watchers included; `ava.ui.serve` page servers keep their
          *     own lifecycle), with no per-session notice. A graceful terminate of a live
          *     agent records the request on its terminate command and the home runtime
-         *     kills the sessions right before the termination applies, after the agent's
-         *     last step; a force terminate, or an agent that is already terminated, has
-         *     them killed before the response — and a force sweeps them again once its
-         *     host observes the agent's work ended. Without it, sessions are left alone.
+         *     attempts older sessions after the termination commits and the agent's last
+         *     step ends. Force and already-terminated requests attempt older sessions
+         *     before the response; the original host also attempts one fresh cutoff after
+         *     force quiescence. Cleanup is best-effort: errors are visible, but crash or
+         *     late-session leftovers require operators. Without it, sessions are left alone.
          *     A terminated agent is otherwise an ordinary terminated agent — any new
          *     message may resurrect it
          *     (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).

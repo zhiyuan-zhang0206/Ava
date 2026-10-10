@@ -153,7 +153,7 @@ async def terminate_agent_op(
     A force terminate kills them right after its fence commits, and so does a
     terminate that finds the agent already terminated. A graceful terminate of
     a live agent only records the request on its terminate command: the home
-    runtime kills the sessions right before the termination applies, after the
+    runtime attempts older sessions after the termination commits, after the
     agent's last step (`agent.ownership.hosted.apply_hosted_lifecycle`). The
     response's `shell_sessions` reports which of the two happened.
 
@@ -164,7 +164,7 @@ async def terminate_agent_op(
     if recovery_wake is not None and not body.force:
         raise ValueError("recovery_wake rides a force terminate")
     if body.force:
-        _old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
+        _old_status, pid, killed_page_names, command_id, cutoff = await asyncio.to_thread(
             _terminate_force_blocking, db, bus, agent_id, body, db_pool, recovery_wake
         )
         await _cancel_hosted_turn_best_effort(agent_id, command_id)
@@ -180,25 +180,26 @@ async def terminate_agent_op(
         return TerminateAgentResponse(
             status=TerminateResult.ENQUEUED,
             shell_sessions=await _kill_shell_sessions_now(
-                agent_id, kill=body.kill_all_shell_sessions
+                agent_id, cutoff=cutoff if body.kill_all_shell_sessions else None
             ),
         )
 
-    s = await asyncio.to_thread(get_agent_status, db, agent_id)
-    if s is AgentStatus.TERMINATED:
+    if (
+        not body.kill_all_shell_sessions
+        and (await asyncio.to_thread(get_agent_status, db, agent_id)) is AgentStatus.TERMINATED
+    ):
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
-            shell_sessions=await _kill_shell_sessions_now(
-                agent_id, kill=body.kill_all_shell_sessions
-            ),
         )
 
-    iid = await asyncio.to_thread(_terminate_graceful_blocking, db, bus, agent_id, body, db_pool)
+    iid, cutoff = await asyncio.to_thread(
+        _terminate_graceful_blocking, db, bus, agent_id, body, db_pool
+    )
     if iid is None:
         # The kill-requesting enqueue found the row terminated under its lock.
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
-            shell_sessions=await _kill_shell_sessions_now(agent_id, kill=True),
+            shell_sessions=await _kill_shell_sessions_now(agent_id, cutoff=cutoff),
         )
     await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
@@ -209,15 +210,17 @@ async def terminate_agent_op(
     )
 
 
-async def _kill_shell_sessions_now(agent_id: int, *, kill: bool) -> ShellSessionsKill | None:
-    """Kill the agent's shell sessions on this host when `kill`; report them.
+async def _kill_shell_sessions_now(
+    agent_id: int, *, cutoff: int | None
+) -> ShellSessionsKill | None:
+    """Attempt this host's older shells when a cutoff was captured; report them.
 
     A failed kill propagates: the termination itself is already durable, so
     the caller sees the failure and a repeat request retries the kill.
     """
-    if not kill:
+    if cutoff is None:
         return None
-    killed = await asyncio.to_thread(kill_agent_shells, agent_id)
+    killed = await asyncio.to_thread(kill_agent_shells, agent_id, before_session_index=cutoff)
     _log.info(
         "[gateway] agent %s terminate killed %d shell session(s): %s",
         agent_id,
@@ -263,9 +266,9 @@ def _terminate_force_blocking(
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
     recovery_wake: str | None,
-) -> tuple[AgentStatus, int | None, list[str], int]:
+) -> tuple[AgentStatus, int | None, list[str], int, int]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
-    old_status, pid, killed_page_names, inbound_id = _force_terminate_transaction(
+    old_status, pid, killed_page_names, inbound_id, cutoff = _force_terminate_transaction(
         agent_id,
         db_pool,
         source=body.source,
@@ -275,7 +278,7 @@ def _terminate_force_blocking(
     )
     _publish_force_terminate_inbound(db, bus, agent_id, inbound_id, body.source)
     publish_agent_updated_sync(bus, agent_id)
-    return old_status, pid, killed_page_names, inbound_id
+    return old_status, pid, killed_page_names, inbound_id, cutoff
 
 
 def _terminate_graceful_blocking(
@@ -284,9 +287,8 @@ def _terminate_graceful_blocking(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
-) -> int | None:
-    """Insert the durable termination message and command; None when a
-    kill-requesting enqueue found the agent already terminated."""
+) -> tuple[int | None, int | None]:
+    """Return a durable command ID, or an already-terminated shell cutoff."""
     return termination._enqueue_termination_inbounds(
         db,
         bus,

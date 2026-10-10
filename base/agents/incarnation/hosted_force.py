@@ -59,7 +59,7 @@ async def original_host_force(
     *,
     command_id: int | None = None,
     quiescent: bool = False,
-    kill_shell_sessions: Callable[[int], None] | None = None,
+    kill_shell_sessions: Callable[[int, int], None] | None = None,
 ) -> bool:
     """Validate the exact force, optionally settle in the original serialized pump.
 
@@ -67,15 +67,17 @@ async def original_host_force(
     payload: the host pump still excludes a replacement and its awaited work ended.
     The command's fixed target is checked against that host's actual boot owner.
 
-    A force that asked to kill the agent's shell sessions killed them when it
-    was accepted, but a step still draining then could create one afterwards;
-    the settlement sweeps again (`_sweep_requested_shell_kill`) before it
-    records the observation.
+    A force that asked to kill the agent's shell sessions requested an immediate
+    attempt at acceptance, but a step still draining could create one afterwards;
+    settlement captures one new shell cutoff under the validated row lock.
+    After recording the observation and committing, it attempts older sessions
+    once. Cleanup failure cannot undo the observation; late sessions and crash
+    leftovers belong to operator cleanup.
     """
     async with async_write_transaction(pool) as conn:
         row = await (
             await conn.execute(
-                "SELECT runtime_generation,lifecycle_command_id FROM agents_meta "
+                "SELECT runtime_generation,lifecycle_command_id,session_index FROM agents_meta "
                 "WHERE id=%s AND runtime_owner=%s AND machine=%s "
                 "AND runtime_kind='hosted' AND status='terminated' FOR UPDATE",
                 (agent_id, owner, machine),
@@ -102,7 +104,7 @@ async def original_host_force(
             from base.agents.incarnation.resource_admission import require_resources_closed_async
 
             await require_resources_closed_async(conn, agent_id)
-            await _sweep_requested_shell_kill(agent_id, command[1], kill_shell_sessions)
+            _require_shell_killer(command[1], kill_shell_sessions)
             await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
                 "WHERE id=%s",
@@ -114,14 +116,16 @@ async def original_host_force(
                 "AND runtime_generation=%s",
                 (agent_id, row[1], owner, row[0]),
             )
-        return True
+    if quiescent:
+        await _sweep_requested_shell_kill(agent_id, row[2], command[1], kill_shell_sessions)
+    return True
 
 
 async def recover_orphaned_hosted_forces(
     pool: AsyncConnectionPool,
     machine: str,
     *,
-    kill_shell_sessions: Callable[[int], None] | None = None,
+    kill_shell_sessions: Callable[[int, int], None] | None = None,
 ) -> tuple[list[int], dict[int, tuple[RequestEvidence, ...]]]:
     """Observe resource-free applied forces after an exclusive host boot.
 
@@ -147,8 +151,8 @@ async def recover_orphaned_hosted_forces(
     scan is the one recoverer that can settle it. Everything else stays the
     strict conjunction — applied set, observation missing, target matching the
     current incarnation, pointer alive. A recovered force that asked to kill
-    the agent's shell sessions sweeps them again before its observation, as
-    the live settlement does.
+    the agent's shell sessions captures one cutoff in the validated transaction
+    and attempts older sessions after committing, as the live settlement does.
     """
     async with pool.connection() as conn:
         candidates = await (
@@ -182,14 +186,14 @@ async def recover_orphaned_hosted_forces(
         async with async_write_transaction(pool) as conn:
             row = await (
                 await conn.execute(
-                    "SELECT runtime_generation,runtime_owner,lifecycle_command_id "
+                    "SELECT runtime_generation,runtime_owner,lifecycle_command_id,session_index "
                     "FROM agents_meta WHERE id=%s AND machine=%s "
                     "AND status='terminated' AND runtime_kind='hosted' "
                     "FOR UPDATE",
                     (agent_id, machine),
                 )
             ).fetchone()
-            if row is None or row[0] is None or row[1] is None or row[2] is None:
+            if row is None or row[:2] != (generation, owner) or row[2] is None:
                 continue
             command = await (
                 await conn.execute(
@@ -204,7 +208,7 @@ async def recover_orphaned_hosted_forces(
             ).fetchone()
             if command is None:
                 continue
-            await _sweep_requested_shell_kill(agent_id, command[1], kill_shell_sessions)
+            _require_shell_killer(command[1], kill_shell_sessions)
             observed = await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
                 "WHERE id=%s AND agent_id=%s AND kind='terminate' "
@@ -223,21 +227,30 @@ async def recover_orphaned_hosted_forces(
             if observed.rowcount != 1 or cleared.rowcount != 1:
                 raise RuntimeError("orphaned hosted-force recovery lost its locked target")
         recovered.append(agent_id)
+        await _sweep_requested_shell_kill(agent_id, row[3], command[1], kill_shell_sessions)
     return recovered, deferred
 
 
 async def _sweep_requested_shell_kill(
-    agent_id: int, requested: object, kill_shell_sessions: Callable[[int], None] | None
+    agent_id: int,
+    cutoff: int,
+    requested: object,
+    kill_shell_sessions: Callable[[int, int], None] | None,
 ) -> None:
     """Kill the agent's shell sessions again when its force asked for it.
 
-    Runs under the settlement's row lock, before the observation is recorded,
-    so a crash retries the sweep; the kill is idempotent. The killer belongs
+    Runs after the settlement commits, with the cutoff captured under its
+    validated row lock. The kill is idempotent. The killer belongs
     to the host (the base layer does not reach the ops session primitives)
-    and must not raise; a caller that binds none may not settle such a force.
+    and reports failures; a caller that binds none may not settle such a force.
     """
     if requested is not True:
         return
-    if kill_shell_sessions is None:
+    if kill_shell_sessions is not None:
+        await asyncio.to_thread(kill_shell_sessions, agent_id, cutoff)
+
+
+def _require_shell_killer(requested: object, killer: Callable[[int, int], None] | None) -> None:
+    """Refuse a misconfigured owner before committing its observation."""
+    if requested is True and killer is None:
         raise RuntimeError("shell-session kill requested but no killer is bound")
-    await asyncio.to_thread(kill_shell_sessions, agent_id)
