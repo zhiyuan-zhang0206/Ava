@@ -5,18 +5,64 @@
 Backend CI uses two layers. A Trunk merge-tree branch (trunk-merge/ or
 trunk-temp/) always runs the full backend suite. A real pull request runs
 either the full suite or, when the selector returns SELECTED and the workflow
-is in enforce mode (the default), a direct-import-selected subset in its place.
+is in enforce mode (the default), an owner-rule-selected subset in its place.
 The merge queue therefore continues to verify the combined tree with its full
-regression net; test selection does not change broken-main risk.
+regression net, and a gap in the PR-side subset surfaces in the queue instead
+of reaching main; test selection does not change broken-main risk.
 
 The selector is [scripts/ci/test_selector.py](../../../scripts/ci/test_selector.py). It is
 stdlib-only and builds a direct static import reverse map for the checked-out
 tree. It does not execute tests, import application code, modify the checkout,
-or infer dynamic imports.
+or infer dynamic imports. It does not follow imports transitively: the root
+`conftest.py` loads global fixtures through `pytest_plugins`, and those
+fixtures import most of base/, so a transitive closure would select nearly
+every test for nearly every change.
 
 The existing e2e-env-guard job is outside this selection path. It continues to
 run its complete tests/e2e/ package plus tests/harness/test_home_isolation.py in one
-serial process whenever either side changes; no selector output feeds it.
+serial process whenever either side changes; no selector output feeds it. The
+e2e shards, hosted e2e and e2e-env-guard jobs run for every diff that is not
+documentation-only (the `classify` job marks any non-documentation path outside
+ui/web/ as backend), so a tests/e2e/ change never depends on the backend subset
+to be exercised.
+
+## Path classes
+
+`classify_path` gives every changed path exactly one class; `select_tests` and
+the tracked-tree completeness test share it, so the rules exist once. The first
+matching row decides.
+
+| Order | Path | Class | Contribution |
+| --- | --- | --- | --- |
+| 1 | A documentation path (see below) | DOCUMENTATION | none |
+| 2 | Root `conftest.py` | GLOBAL | full suite |
+| 3 | Any other `conftest.py` (also when deleted) | CONFTEST | every collectable test below its directory |
+| 4 | Absent from the head tree | DELETED | ignored |
+| 5 | A collectable test file | TEST | itself |
+| 6 | A global path (below) | GLOBAL | full suite |
+| 7 | `.github/`, `.agents/`, `.ava/`, `.trunk/`, `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, `.test_durations`, `.test_durations.source.json` | TREE_SCAN_ONLY | tree-scan tests only |
+| 8 | A non-Python file under `ui/` | FRONTEND | none; the frontend job owns it |
+| 9 | Any other file under agent/, ava/, ava_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | direct importers plus the owning package's tests |
+| 10 | Anything else | UNMAPPED | full suite |
+
+Global paths apply to every test: `pyproject.toml`, `uv.lock`, `.python-version`,
+`.env.example`, the root `conftest.py`, the modules its `pytest_plugins` lists
+(plus the `__init__.py` of every package on their import path), and everything
+under tests/fixtures/, db/, migrations/, deploy/ and commands/. This list and
+the plugin set are the single "global path" concept in the selector.
+
+The owning package of a path is found by walking up from its directory: the
+nearest `tests` directory that holds at least one collectable test owns it, and
+every collectable test below that directory is the package's test set. The
+directory itself counts when the path is already inside a `tests` directory,
+otherwise a `tests` directory beside an ancestor counts. A path with no nearer
+owner falls back to the top-level tests/ directory. A source file's direct
+importers are always added to its package tests.
+
+A deleted path is ignored because its importers must change in the same PR, or
+the whole-repo type check and collection fail. A deleted `conftest.py` is the
+exception: it removes fixtures without breaking any import, so it still selects
+its subtree.
 
 ## Decision rules
 
@@ -28,24 +74,27 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | --- | --- | --- |
 | 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
 | 2 | Every path is a documentation path | SKIP |
-| 3 | A path is under base/, ava/, agent/, ava_builtins/, db/, or migrations/ and is not inside a `tests/` directory | FULL (the report names the forced root) |
-| 4 | A path is pyproject.toml, .test_durations, or any conftest.py | FULL |
-| 5 | A path is under tests/e2e/ | FULL |
-| 6 | A path is neither a current collectable backend test, a direct-map source key, nor documentation | FULL (unmapped) |
-| 7 | Otherwise, union direct importers of changed mapped sources with changed collectable test files | candidate subset |
-| 8 | The candidate is empty | FULL (no-tests) |
-| 9 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (subset-too-close) |
-| 10 | None of the above | SELECTED |
+| 3 | A path is GLOBAL | FULL (`global-path:<first path>`; the payload lists every global path) |
+| 4 | A path is UNMAPPED | FULL (unmapped; the payload lists the paths) |
+| 5 | Otherwise, union the contribution of every path with the tree-scan tests | candidate subset |
+| 6 | The candidate is empty | FULL (no-tests) |
+| 7 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (subset-too-close) |
+| 8 | None of the above | SELECTED (owner-tests) |
 
-Tree-scan tests join the candidate subset before rules 8-10 run: every
+Rule 4 is a runtime safety net. scripts/tests/test_test_selector_owner_rules.py
+classifies every tracked path and fails when any is UNMAPPED, so the trunk never
+reaches rule 4; a new top-level directory or root file needs a class in the
+selector before it can merge.
+
+Tree-scan tests join the candidate subset before rules 6-8 run: every
 `test_lint_*.py` under `tests/` (any depth, non-e2e) and the repo-level
 CI/governance checks pinned in `scripts/ci/test_selector.py`
-(`_TREE_SCAN_TESTS`). The direct-import map cannot reach a repo-wide scan
+(`_TREE_SCAN_TESTS`). The owner rules cannot reach a repo-wide scan
 test from a changed source file, and a green subset must not miss a
 tree-wide gate (task #4183: PR #3020's subset passed while the full
 population was red on tests/contracts/test_lint_event_kinds.py). Name a new scan test
 `test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
-scripts/tests/test_test_selector.py guards completeness and staleness.
+tests/scripts/test_test_selector_contract.py guards completeness and staleness.
 
 The documentation predicate reuses base.deploy.git.repo_change.is_doc_path, the same
 owner as CI's frontend/backend classifier. It recognizes the existing project doc
@@ -55,7 +104,7 @@ does not qualify as a component document. Other nested Markdown, including
 AGENTS.md and SKILL.md, retains its code-directory classification.
 
 Files under schedules/ and any `tests/` directory (the top-level one or a package's
-own `<pkg>/**/tests/`) remain conservative in the selector. The classifier's
+own `<pkg>/**/tests/`) are never documentation: they are PACKAGE paths. The classifier's
 existing schedule policy is unchanged. For Trunk PRs, CI always enables the backend
 side before invoking the selector; its forced FULL rule therefore remains reachable
 even on a documentation diff. Non-PR runs enable both sides. The independent
@@ -72,11 +121,11 @@ integration test across packages sits in the lowest package that may legally imp
 everything it uses; end-to-end tests and contract tests that read repository artifacts
 stay in the top-level `tests/` ([testing guide](../../../tests/README.md#where-to-put-tests)).
 The selector treats both alike: a test-only edit under `base/x/tests/` is a
-test change resolved through the reverse map (rule 3 does not force FULL for it), and
-a module that merely carries a `test_` prefix outside a `tests/` directory
-(`scripts/ci/test_selector.py`) is not a test.
+TEST path that runs itself, a helper or data file there belongs to that
+package's tests, and a module that merely carries a `test_` prefix outside a
+`tests/` directory (`scripts/ci/test_selector.py`) is not a test.
 
-## Static map and blind files
+## Static map and its limits
 
 The map AST-parses every Python file under any `tests/` directory, except files named
 conftest.py, and walks imports in every scope. It includes both module imports
@@ -90,18 +139,16 @@ collectable. Test helpers are still inspected but do not add selected tests.
 Resolution considers these source roots: agent, ava, cli, gateway, ops,
 services, base, ava_builtins, ui, scripts, and schedules.
 
-This is intentionally a direct static map, not a coverage claim. About 280 of
-roughly 970 source files have no static test reachability, including
-agent/nodes.py, agent/mcp_daemon.py, and ava/sdk_surface/ files. A changed blind
-file is unmapped and forces FULL; it never silently produces an empty or
-optimistic subset. Dynamic imports, reflection, subprocess boundaries, and test
-helpers are also reasons to prefer the full net.
+The map is intentionally partial and is not a coverage claim: many source files
+have no test that imports them directly, and dynamic imports, string-based module
+access, reflection, subprocess boundaries, and helpers are invisible to it. The
+package-test rule is the answer to that gap: a changed file always runs the
+tests of the package that contains it, whether or not a test imports it. What the
+rules still miss, such as a test elsewhere that exercises the file by path or
+through a subprocess, is caught by the full suite in the merge queue.
 
-The map is rebuilt for every run; no map artifact is committed. Its blind-file
-set therefore moves with the tree: a newly unmapped changed file is reported as
-unmapped and takes the full-suite path. String-based module access and other
-dynamic imports stay outside this map and conservatively force full. There is
-no coverage-derived map yet; that is a future option, not an enforcement claim.
+The map is rebuilt for every run; no map artifact is committed. There is no
+coverage-derived map yet; that is a future option, not an enforcement claim.
 
 ## Duration guard
 
@@ -152,11 +199,11 @@ so the fan-out runs regardless of the mode.
 
 ## Maintenance and the revert switch
 
-- Review any false green immediately and close a real blind-map gap; no false
+- Review any false green immediately and close a real rule gap; no false
   green is accepted as a known exception.
 - Keep selector unit tests focused on observable decisions, AST resolution,
-  current-test filtering, duration estimates, queue branches, and
-  deterministic JSON.
+  current-test filtering, duration estimates, queue branches, per-class owner
+  rules, the tracked-tree completeness guard, and deterministic JSON.
 - Refresh .test_durations through its normal nightly workflow after material
   suite changes.
 - Revert: set `TEST_SELECTION_MODE: "shadow"` in ci.yml (one line) and update

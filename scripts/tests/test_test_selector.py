@@ -2,7 +2,8 @@
 
 Each test runs the selector against a miniature checkout so import discovery,
 changed-file handling, and timing estimates remain independent of this repo's
-current source tree.
+current source tree. The per-path owner rules and the tracked-tree completeness
+guard live in test_test_selector_owner_rules.py.
 """
 
 from __future__ import annotations
@@ -75,6 +76,8 @@ def _selector_repo(tmp_path: Path) -> Path:
         ),
         "tests/unit/test_other.py": "def test_other(): pass\n",
         "tests/e2e/test_browser.py": "import cli.commands\n",
+        # The test the cli package owns: a changed cli source reaches it.
+        "cli/tests/test_owner.py": "def test_owner(): pass\n",
     }
     for relative_path, content in files.items():
         _write(tmp_path, relative_path, content)
@@ -87,6 +90,7 @@ def _selector_repo(tmp_path: Path) -> Path:
                 "tests/unit/test_changed.py::test_changed": 2.0,
                 "tests/unit/test_imports.py::test_imports": 3.0,
                 "tests/unit/test_other.py::test_other": 5.0,
+                "cli/tests/test_owner.py::test_owner": 1.0,
             }
         ),
     )
@@ -116,11 +120,15 @@ def test_selects_mapped_sources_and_changed_tests_in_sorted_order(tmp_path: Path
     )
 
     assert result.decision == "SELECTED"
-    assert result.reason == "direct-imports"
-    assert result.tests == ("tests/unit/test_changed.py", "tests/unit/test_imports.py")
-    assert result.count == 2
-    assert result.est_seconds == 5.0
-    assert result.full_est_seconds == 10.0
+    assert result.reason == "owner-tests"
+    assert result.tests == (
+        "cli/tests/test_owner.py",
+        "tests/unit/test_changed.py",
+        "tests/unit/test_imports.py",
+    )
+    assert result.count == 3
+    assert result.est_seconds == 6.0
+    assert result.full_est_seconds == 11.0
 
 
 def test_tree_scan_tests_join_every_selected_subset(tmp_path: Path) -> None:
@@ -145,22 +153,31 @@ def test_tree_scan_tests_join_every_selected_subset(tmp_path: Path) -> None:
     result = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
 
     assert result.decision == "SELECTED"
-    assert result.tests == ("tests/unit/test_imports.py", "tests/unit/test_lint_demo.py")
+    assert result.tests == (
+        "cli/tests/test_owner.py",
+        "tests/unit/test_imports.py",
+        "tests/unit/test_lint_demo.py",
+    )
 
 
 @pytest.mark.parametrize(
     ("changed_path", "reason"),
     [
-        ("base/deploy/git/repo_change.py", "forced-root:base/"),
-        ("pyproject.toml", "test-configuration"),
-        (".test_durations", "test-configuration"),
-        ("tests/e2e/test_browser.py", "e2e"),
-        ("ops/unmapped.py", "unmapped"),
+        ("pyproject.toml", "global-path:pyproject.toml"),
+        ("conftest.py", "global-path:conftest.py"),
+        ("tests/fixtures/env.py", "global-path:tests/fixtures/env.py"),
+        ("db/schema.sql", "global-path:db/schema.sql"),
+        ("migrations/0001_init.sql", "global-path:migrations/0001_init.sql"),
+        ("mystery/thing.py", "unmapped"),
     ],
 )
 def test_forces_full_for_unsafe_paths(tmp_path: Path, changed_path: str, reason: str) -> None:
     """Removing a conservative escape hatch must leave an unsafe subset behind."""
-    result = test_selector.select_tests([changed_path], repo_root=_selector_repo(tmp_path))
+    repo_root = _selector_repo(tmp_path)
+    if not (repo_root / changed_path).exists():
+        _write(repo_root, changed_path)
+
+    result = test_selector.select_tests([changed_path], repo_root=repo_root)
 
     assert result.decision == "FULL"
     assert result.reason == reason
@@ -169,13 +186,18 @@ def test_forces_full_for_unsafe_paths(tmp_path: Path, changed_path: str, reason:
 def test_docs_only_skips_but_schedule_docs_stay_conservative(tmp_path: Path) -> None:
     """A schedule document is operational input, not a harmless docs-only change."""
     repo_root = _selector_repo(tmp_path)
+    _write(repo_root, "schedules/guide.md")
 
     docs = test_selector.select_tests(["docs/conventions/guide.md"], repo_root=repo_root)
     schedule_doc = test_selector.select_tests(["schedules/guide.md"], repo_root=repo_root)
 
     assert docs.decision == "SKIP"
-    assert schedule_doc.decision == "FULL"
-    assert schedule_doc.reason == "unmapped"
+    assert schedule_doc.decision != "SKIP"
+    checkout = test_selector.load_checkout(repo_root)
+    assert (
+        test_selector.classify_path("schedules/guide.md", checkout)
+        is test_selector.PathClass.PACKAGE
+    )
 
 
 def test_duration_guard_falls_back_to_full_when_subset_is_nearly_full(tmp_path: Path) -> None:
@@ -189,6 +211,7 @@ def test_duration_guard_falls_back_to_full_when_subset_is_nearly_full(tmp_path: 
                 "tests/unit/test_changed.py::test_changed": 0.5,
                 "tests/unit/test_imports.py::test_imports": 9.0,
                 "tests/unit/test_other.py::test_other": 0.5,
+                "cli/tests/test_owner.py::test_owner": 0.5,
             }
         ),
     )
@@ -197,8 +220,8 @@ def test_duration_guard_falls_back_to_full_when_subset_is_nearly_full(tmp_path: 
 
     assert result.decision == "FULL"
     assert result.reason == "subset-too-close"
-    assert result.est_seconds == 9.0
-    assert result.full_est_seconds == 10.0
+    assert result.est_seconds == 9.5
+    assert result.full_est_seconds == 10.5
 
 
 def test_uses_average_duration_for_a_new_test_without_a_timing_entry(tmp_path: Path) -> None:
@@ -210,8 +233,8 @@ def test_uses_average_duration_for_a_new_test_without_a_timing_entry(tmp_path: P
 
     assert result.decision == "SELECTED"
     assert result.tests == ("tests/unit/test_new.py",)
-    assert abs(result.est_seconds - 10 / 3) < 1e-9
-    assert abs(result.full_est_seconds - 40 / 3) < 1e-9
+    assert abs(result.est_seconds - 11 / 4) < 1e-9
+    assert abs(result.full_est_seconds - 55 / 4) < 1e-9
 
 
 def test_measured_fast_files_keep_their_cost_instead_of_the_unknown_average(tmp_path: Path) -> None:
@@ -233,7 +256,7 @@ def test_measured_fast_files_keep_their_cost_instead_of_the_unknown_average(tmp_
 
     assert result.decision == "SELECTED"
     assert result.est_seconds == 0.019
-    assert result.full_est_seconds == 10.019
+    assert result.full_est_seconds == 11.019
 
 
 def test_uses_the_average_timing_entry_for_an_unmeasured_test_file(tmp_path: Path) -> None:
@@ -256,7 +279,7 @@ def test_uses_the_average_timing_entry_for_an_unmeasured_test_file(tmp_path: Pat
     result = test_selector.select_tests(["tests/unit/test_new.py"], repo_root=repo_root)
 
     assert result.est_seconds == 2.5
-    assert result.full_est_seconds == 12.5
+    assert result.full_est_seconds == 15.0
 
 
 def test_json_cli_output_is_machine_readable_and_deterministic(
@@ -283,7 +306,11 @@ def test_json_cli_output_is_machine_readable_and_deterministic(
 
     assert payload["decision"] == "SELECTED"
     assert payload["mode"] == "enforce"  # ci.yml default when the env is unset
-    assert payload["tests"] == ["tests/unit/test_changed.py", "tests/unit/test_imports.py"]
+    assert payload["tests"] == [
+        "cli/tests/test_owner.py",
+        "tests/unit/test_changed.py",
+        "tests/unit/test_imports.py",
+    ]
     assert payload["map_source_count"] == 4
 
     repeated = test_selector.select_tests(
@@ -389,6 +416,7 @@ def test_package_tests_directories_are_in_the_collectable_universe(tmp_path: Pat
         "base/lm/tests/test_lm.py",
         "cli/tests/test_cli.py",
         "scripts/tests/test_script.py",
+        "cli/tests/test_owner.py",
     }
 
 
@@ -405,8 +433,7 @@ def test_reverse_map_reads_the_tests_inside_packages(tmp_path: Path) -> None:
     assert reverse_map["base/lm/tests/helper.py"] == {"cli/tests/test_cli.py"}
 
 
-def test_a_test_only_edit_inside_a_package_is_selected_not_forced_full(tmp_path: Path) -> None:
-    """`base/` forces FULL for source edits; a test under it is a test change."""
+def test_a_test_only_edit_inside_a_package_selects_just_that_test(tmp_path: Path) -> None:
     repo_root = _package_tests_repo(tmp_path)
 
     result = test_selector.select_tests(["base/lm/tests/test_lm.py"], repo_root=repo_root)
@@ -415,8 +442,17 @@ def test_a_test_only_edit_inside_a_package_is_selected_not_forced_full(tmp_path:
     assert result.tests == ("base/lm/tests/test_lm.py",)
     assert result.forced_roots == ()
 
-    source = test_selector.select_tests(["base/lm/__init__.py"], repo_root=repo_root)
-    assert (source.decision, source.reason) == ("FULL", "forced-root:base/")
+
+def test_a_source_edit_under_base_runs_its_importers_and_its_package_tests(
+    tmp_path: Path,
+) -> None:
+    """`base/` is no longer a forced root: the owner rules decide."""
+    repo_root = _package_tests_repo(tmp_path)
+
+    result = test_selector.select_tests(["base/lm/__init__.py"], repo_root=repo_root)
+
+    assert (result.decision, result.reason) == ("SELECTED", "owner-tests")
+    assert result.tests == ("base/lm/tests/test_lm.py", "tests/unit/test_imports.py")
 
 
 def test_a_helper_edit_inside_a_package_reaches_its_importers(tmp_path: Path) -> None:
@@ -425,25 +461,25 @@ def test_a_helper_edit_inside_a_package_reaches_its_importers(tmp_path: Path) ->
     result = test_selector.select_tests(["base/lm/tests/helper.py"], repo_root=repo_root)
 
     assert result.decision == "SELECTED"
-    assert result.tests == ("cli/tests/test_cli.py",)
+    assert result.tests == ("base/lm/tests/test_lm.py", "cli/tests/test_cli.py")
 
 
-def test_a_conftest_inside_a_package_still_forces_the_full_suite(tmp_path: Path) -> None:
+def test_a_conftest_inside_a_package_selects_only_that_package_tests(tmp_path: Path) -> None:
     repo_root = _package_tests_repo(tmp_path)
 
     result = test_selector.select_tests(["base/lm/tests/conftest.py"], repo_root=repo_root)
 
-    assert (result.decision, result.reason) == ("FULL", "test-configuration")
+    assert (result.decision, result.tests) == ("SELECTED", ("base/lm/tests/test_lm.py",))
 
 
 def test_markdown_inside_a_package_tests_directory_is_not_documentation(tmp_path: Path) -> None:
-    """A data file beside the tests is a test input: unmapped, so the full suite runs."""
+    """A data file beside the tests is a test input: it runs that package's tests."""
     repo_root = _package_tests_repo(tmp_path)
     _write(repo_root, "base/lm/tests/expected.md", "expected output\n")
 
     result = test_selector.select_tests(["base/lm/tests/expected.md"], repo_root=repo_root)
 
-    assert (result.decision, result.reason) == ("FULL", "unmapped")
+    assert (result.decision, result.tests) == ("SELECTED", ("base/lm/tests/test_lm.py",))
 
 
 def test_a_production_module_named_test_is_not_a_test(tmp_path: Path) -> None:
@@ -451,8 +487,8 @@ def test_a_production_module_named_test_is_not_a_test(tmp_path: Path) -> None:
 
     result = test_selector.select_tests(["scripts/ci/test_selector.py"], repo_root=repo_root)
 
-    assert result.tests == ()
-    assert (result.decision, result.reason) == ("FULL", "unmapped")
+    assert result.tests == ("scripts/tests/test_script.py",)
+    assert result.decision == "SELECTED"
 
 
 def test_a_package_test_without_a_timing_entry_costs_the_average(tmp_path: Path) -> None:
@@ -464,7 +500,7 @@ def test_a_package_test_without_a_timing_entry_costs_the_average(tmp_path: Path)
 
     assert result.decision == "SELECTED"
     assert result.tests == ("scripts/tests/test_script.py",)
-    assert abs(result.est_seconds - 10 / 3) < 1e-9
+    assert abs(result.est_seconds - 11 / 4) < 1e-9
 
 
 @pytest.mark.parametrize(
@@ -504,25 +540,33 @@ def test_component_docs_preserve_selection_for_other_changes(tmp_path: Path) -> 
     docs = ["scripts/lint/docs/lint.ava.okf.md", "base/lm/docs/lm.ava.okf.md"]
     for changed_path, expected_tests in [
         ("tests/unit/test_changed.py", ("tests/unit/test_changed.py",)),
-        ("cli/commands.py", ("tests/unit/test_imports.py",)),
+        ("cli/commands.py", ("cli/tests/test_owner.py", "tests/unit/test_imports.py")),
     ]:
         result = test_selector.select_tests([changed_path, *docs], repo_root=repo_root)
         assert (result.decision, result.tests) == ("SELECTED", expected_tests), changed_path
 
     source = test_selector.select_tests(["base/lm/__init__.py", *docs], repo_root=repo_root)
-    assert (source.decision, source.reason) == ("FULL", "forced-root:base/")
+    alone = test_selector.select_tests(["base/lm/__init__.py"], repo_root=repo_root)
+    assert (source.decision, source.tests) == (alone.decision, alone.tests)
 
 
-def test_okf_test_data_and_operational_markdown_keep_full_selection(tmp_path: Path) -> None:
+def test_okf_test_data_and_operational_markdown_are_not_documentation(tmp_path: Path) -> None:
+    """Only a component's docs layer is documentation; test data and operational
+    Markdown stay code-directory files that the owner rules select tests for."""
     repo_root = _selector_repo(tmp_path)
-    for path, reason in [
-        ("scripts/lint/tests/docs/expected.ava.okf.md", "unmapped"),
-        ("base/lm/tests/docs/expected.ava.okf.md", "unmapped"),
-        ("tests/docs/expected.ava.okf.md", "unmapped"),
-        ("schedules/docs/example.ava.okf.md", "unmapped"),
-        ("gateway/docs/AGENTS.md", "unmapped"),
-        ("ava_builtins/skills/ava-guide/docs/SKILL.md", "forced-root:ava_builtins/"),
-        ("gateway/gateway.ava.okf.md", "unmapped"),
-    ]:
-        result = test_selector.select_tests([path], repo_root=repo_root)
-        assert (result.decision, result.reason) == ("FULL", reason), path
+    checkout_paths = [
+        "scripts/lint/tests/docs/expected.ava.okf.md",
+        "base/lm/tests/docs/expected.ava.okf.md",
+        "tests/docs/expected.ava.okf.md",
+        "schedules/docs/example.ava.okf.md",
+        "gateway/docs/AGENTS.md",
+        "ava_builtins/skills/ava-guide/docs/SKILL.md",
+        "gateway/gateway.ava.okf.md",
+    ]
+    for path in checkout_paths:
+        _write(repo_root, path)
+    checkout = test_selector.load_checkout(repo_root)
+    for path in checkout_paths:
+        kind = test_selector.classify_path(path, checkout)
+        assert kind is test_selector.PathClass.PACKAGE, path
+        assert test_selector.select_tests([path], repo_root=repo_root).decision != "SKIP", path
