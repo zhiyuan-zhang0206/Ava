@@ -50,18 +50,16 @@ node span (`execute_task claim`) before the node parks in
 explicit `claim idle-wait` span, so an idle wait shows as a labeled span
 instead of a giant opaque node span in the trace.
 
-Idempotent: the _initialized guard prevents a second init. A collector miss at
-startup logs once, then one daemon loop retries every five minutes until trace
-recording comes up (or the single arm attempt fails permanently); disk-watermark auto-degrade remains a deliberate no-retry.
+One arm attempt per process; collector misses retry every five minutes.
 
-History: Laminar -> Langfuse 2026-06-06; Langfuse -> Tempo (LGTM) 2026-08-11;
-agent-side mirror -> local collector sidecar (task #1266) 2026-08-14.
 """
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import json
+import math
 import os
 import threading
 import time
@@ -77,12 +75,14 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from base.config import settings
 from base.log import logger
 from base.paths import traces_dir
+from base.telemetry import report_no_pipeline
 from base.telemetry.observability import cluster_label
 from base.telemetry.otlp.telemetry_otlp import (
     COLLECTOR_RETRY_INTERVAL_S,
     endpoint_reachable,
     observability_export_allowed,
 )
+from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm
 from base.telemetry.trace_mirror import (
     _disk_usage,
     _disk_watermark_exceeded,
@@ -242,6 +242,9 @@ def _strip_content_attributes(otlp: dict[str, Any]) -> None:
 # Dict mutation avoids ruff PLW0603 (global statement) while keeping
 # the same observable semantics without global assignment statements.
 _state: dict[str, Any] = {
+    "closed": False,
+    "arm_owner": None,
+    "retry_owner": None,
     "initialized": False,
     "collector_offline_reported": False,
     "retry_thread": None,
@@ -251,6 +254,7 @@ _state: dict[str, Any] = {
     "timeout_reported": False,
 }
 _init_lock = threading.Lock()
+_lifecycle_lock = threading.Lock()
 
 
 class OtlpJsonHttpSpanExporter(SpanExporter):
@@ -382,30 +386,20 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
         return None
 
 
-def _retry_initialize_tracing() -> None:
-    """Retry the collector preflight on one daemon thread until init succeeds
-    or fails permanently (arm_failed — one arm attempt per process)."""
-    while not _state["initialized"] and not _state["arm_failed"]:
-        time.sleep(COLLECTOR_RETRY_INTERVAL_S)
-        if _state["initialized"] or _state["arm_failed"]:
-            return
-        initialize_tracing()
-
-
 def _start_collector_retry() -> None:
-    retry_thread = _state["retry_thread"]
-    if isinstance(retry_thread, threading.Thread) and retry_thread.is_alive():
-        return
-    retry_thread = threading.Thread(
-        target=_retry_initialize_tracing,
-        daemon=True,
-        name="trace-collector-retry",
-    )
-    _state["retry_thread"] = retry_thread
-    retry_thread.start()
+    with _lifecycle_lock:
+        if _state.get("closed") or _state.get("retry_owner") is not None:
+            return
+        owner = CollectorRetry(
+            initialize=initialize_tracing,
+            resolved=lambda: bool(_state["initialized"] or _state["arm_failed"]),
+            interval=lambda: COLLECTOR_RETRY_INTERVAL_S,
+        )
+        _state["retry_owner"] = owner
+        _state["retry_thread"] = owner._thread
 
 
-def _arm_tracing(endpoint: str) -> None:
+def _arm_tracing(endpoint: str, stop_requested: threading.Event | None = None) -> None:
     """Import traceloop and run Traceloop.init, on one daemon thread.
 
     The import + init cost ~2.5-3 s (traceloop.sdk pulls in pandas via its
@@ -415,6 +409,8 @@ def _arm_tracing(endpoint: str) -> None:
     wait on ensure_init_resolved() before first use; a failure logs and
     resolves the wait — recording stays off instead of killing boot.
     """
+    if stop_requested is not None and stop_requested.is_set():
+        return
     try:
         # Content stripping, layer 1 (the source): false-before-init keeps
         # LLM content out of span attributes. Unconditional when
@@ -444,19 +440,14 @@ def _arm_tracing(endpoint: str) -> None:
         # never dials a remote backend itself); `telemetry_enabled=False`
         # stops traceloop's own usage telemetry from phoning home.
         #
-        # Idempotence guard, under the init lock: at most one Traceloop.init per
-        # process. A second arm thread is only reachable when the module state
-        # was reset while the first was still in flight (the tests reset _state
-        # between cases; production never does), but once two arm threads run,
-        # the SDK's TracerWrapper singleton makes a second init FAKE-SUCCEED
-        # without adding instrumentors — and in tests the second call lands in
-        # the next case's monkeypatch (the #1065 / post-#1068 flake: a second
-        # call counted by test_idempotent_second_call_is_noop). The check runs
-        # after the slow import on purpose: both threads serialize on the
-        # import lock, so the loser reaches here after the winner has recorded
-        # its outcome.
+        # Recheck after slow import: a concurrent caller or real shutdown may
+        # have resolved admission while this arm waited for the import lock.
         with _init_lock:
-            if _state["initialized"] or _state["arm_failed"]:
+            if (
+                _state["initialized"]
+                or _state["arm_failed"]
+                or (stop_requested is not None and stop_requested.is_set())
+            ):
                 return
             try:
                 Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
@@ -471,6 +462,8 @@ def _arm_tracing(endpoint: str) -> None:
                         "environment": "prod" if production_identity() else "dev",
                     },
                 )
+                if stop_requested is not None and stop_requested.is_set():
+                    return
                 logger.info(
                     "trace recording enabled",
                     event="trace",
@@ -488,14 +481,7 @@ def _arm_tracing(endpoint: str) -> None:
         # failure would fake-succeed — the TracerWrapper singleton survives,
         # so a second init() adds no instrumentors yet reports success.
         #
-        # BaseException (a SystemExit/GeneratorExit escape from inside the
-        # SDK — not expected, but the one-attempt contract must hold for
-        # however the thread dies): with only `except Exception`, a dead
-        # arm_thread carrying no flag gets past _start_arm_thread's
-        # is_alive() guard and a later initialize_tracing() would re-arm —
-        # the one-attempt-per-process contract was bypassable in a corner.
-        # Mark the attempt spent; this daemon thread has no caller to
-        # propagate to, so swallow and log.
+        # SDK failures consume the single arm attempt, including BaseException.
         _state["arm_failed"] = True
         logger.warning(
             "trace recording failed to initialize — spans disabled this process",
@@ -508,18 +494,42 @@ def _arm_tracing(endpoint: str) -> None:
 
 
 def _start_arm_thread(endpoint: str) -> None:
-    """Spawn (once) the daemon thread that imports traceloop and arms it."""
-    arm_thread = _state["arm_thread"]
-    if isinstance(arm_thread, threading.Thread) and arm_thread.is_alive():
-        return
-    arm_thread = threading.Thread(
-        target=_arm_tracing,
-        args=(endpoint,),
-        daemon=True,
-        name="trace-arm",
-    )
-    _state["arm_thread"] = arm_thread
-    arm_thread.start()
+    """Admit one arm; stop never acquires the slow SDK init lock."""
+    with _lifecycle_lock:
+        if _state.get("closed") or _state.get("arm_owner") is not None:
+            return
+        owner = TraceArm(endpoint, _arm_tracing)
+        _state["arm_owner"] = owner
+        _state["arm_thread"] = owner._thread
+        _state["init_resolved"] = owner.finished
+
+
+def shutdown(timeout: float = 2.0) -> tuple[str, ...]:
+    """Stop trace admission and report residual workers within one caller budget."""
+    if not math.isfinite(timeout) or timeout < 0:
+        raise ValueError("trace stop timeout must be finite and non-negative")
+    deadline = time.monotonic() + timeout
+    with _lifecycle_lock:
+        _state["closed"] = True
+        owners = [owner for key in ("retry_owner", "arm_owner") if (owner := _state.get(key))]
+    for owner in owners:
+        owner.request_stop()
+    unfinished: list[str] = []
+    primary: BaseException | None = None
+    for owner in owners:
+        try:
+            if not owner.stop(timeout=max(0.0, deadline - time.monotonic())):
+                unfinished.append(owner._thread.name)
+        except BaseException as exc:
+            if primary is None:
+                primary = exc
+    if unfinished:
+        report_no_pipeline(
+            "trace shutdown degraded; unfinished workers: {workers}", workers=unfinished
+        )
+    if primary is not None:
+        raise primary
+    return tuple(unfinished)
 
 
 _INIT_RESOLVED_TIMEOUT_S = 30.0
@@ -607,7 +617,7 @@ def initialize_tracing() -> None:
     - content stripping (`trace_strip_content`): TRACELOOP_TRACE_CONTENT=false
       + exporter-side re-strip, so the mirror holds metadata only.
     """
-    if _state["initialized"] or _state["arm_failed"]:
+    if _state.get("closed") or _state["initialized"] or _state["arm_failed"]:
         return
     if not settings.observability.trace_enabled:
         return
@@ -785,3 +795,6 @@ def claim_idle_wait_span() -> Generator[None, None, None]:
     tracer = otel_trace.get_tracer("ava.claim")
     with tracer.start_as_current_span(_IDLE_WAIT_SPAN_NAME):
         yield
+
+
+atexit.register(shutdown)

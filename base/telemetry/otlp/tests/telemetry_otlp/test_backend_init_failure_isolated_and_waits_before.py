@@ -41,7 +41,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(
     monkeypatch.setattr(telemetry_otlp._OtlpBackend, "_endpoint_reachable", staticmethod(reachable))
     attempts: list[str] = []
 
-    def boom(endpoint: str) -> tuple[Any, Any]:
+    def boom(endpoint: str, **_receipts: Any) -> tuple[Any, Any]:
         attempts.append(endpoint)
         raise RuntimeError("collector unreachable")
 
@@ -84,7 +84,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
     metrics = _MetricProvider()
     attempts = 0
 
-    def build(endpoint: str) -> tuple[Any, Any]:
+    def build(endpoint: str, **_receipts: Any) -> tuple[Any, Any]:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
@@ -203,7 +203,7 @@ def test_pipeline_mirror_survives_otlp_failure(
     """A broken OTLP backend never blocks the drain — the JSONL mirror still
     holds the batch (the PG copy is gone, task #1197)."""
 
-    def boom(endpoint: str) -> tuple[Any, Any]:
+    def boom(endpoint: str, **_receipts: Any) -> tuple[Any, Any]:
         raise RuntimeError("collector unreachable")
 
     monkeypatch.setattr("base.telemetry.emitter.logs_dir", lambda: tmp_path)
