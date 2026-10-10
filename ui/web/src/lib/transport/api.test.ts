@@ -892,3 +892,61 @@ it("submits distinct business operations on private HTTP without randomUUID", as
     expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   }
 });
+
+describe("run timeline read ownership", () => {
+  it.each(["fetch", "body"] as const)("bounds a pending %s and aborts its network request", async (phase) => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | null | undefined;
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+      signal = init?.signal;
+      if (phase === "fetch") return new Promise<Response>(() => undefined);
+      return Promise.resolve({ ok: true, json: () => new Promise(() => undefined) } as Response);
+    }));
+    let failure: unknown;
+    void api.getRunTimeline(6111).catch((error: unknown) => { failure = error; });
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(failure).toMatchObject({ name: "TimeoutError" });
+    expect(signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("forwards caller cancellation to a pending fetch and preserves AbortError", async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    const original = new DOMException("selection left", "AbortError");
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+      signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(original), { once: true });
+      });
+    }));
+    const result = api.getRunTimeline(6111, { signal: caller.signal }).catch((error: unknown) => error);
+    caller.abort();
+    expect(await result).toBe(original);
+    expect(signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps caller cancellation connected while consuming the response body", async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const original = new DOMException("selection left during body", "AbortError");
+    let bodyStarted = false;
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => Promise.resolve({
+      ok: true,
+      json: () => {
+        bodyStarted = true;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(original), { once: true });
+        });
+      },
+    } as Response)));
+    const result = api.getRunTimeline(6111, { signal: caller.signal }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodyStarted).toBe(true);
+    caller.abort();
+    expect(await result).toBe(original);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
