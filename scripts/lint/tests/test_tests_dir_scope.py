@@ -78,15 +78,16 @@ def _git(root: pathlib.Path, *args: str) -> None:
 # ── budgets ─────────────────────────────────────────────────────────────────
 
 
-def test_tests_layer_takes_no_slot_in_its_parent(
+def test_tests_layer_takes_a_slot_in_its_parent(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A package already at the 20-entry cap keeps its tests beside the code."""
+    """Tests take one parent slot even without an __init__.py."""
     package = tmp_path / "base/pkg"
     _fill(package, 20)
     _module(package / "tests/test_pkg.py")
-    assert lcs.main([]) == 0
-    assert capsys.readouterr().out == ""
+    _git(tmp_path, "add", "base/pkg")
+    assert lcs.main([]) == 1
+    assert "base/pkg: directory has 21 direct entries" in capsys.readouterr().out
 
 
 def test_tests_package_with_init_takes_a_slot(
@@ -96,24 +97,27 @@ def test_tests_package_with_init_takes_a_slot(
     package = tmp_path / "base/pkg"
     _fill(package, 20)
     _module(package / "tests/__init__.py")
+    _git(tmp_path, "add", "base/pkg")
     assert lcs.main([]) == 1
     assert "base/pkg: directory has 21 direct entries" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("location", ["tests", "base/pkg/tests", "ava_builtins/skills/x/tests"])
-def test_tests_layer_has_no_entry_cap_of_its_own(
+def test_tests_layer_has_the_same_entry_cap(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
 ) -> None:
-    """The top-level `tests/` and a package's tests are flat by nature: 30 files, no finding."""
-    _fill(tmp_path / location, 30)
-    assert lcs.main([]) == 0
-    assert capsys.readouterr().out == ""
+    """Test directories obey the same limit at the root and inside packages."""
+    _fill(tmp_path / location, 21)
+    _git(tmp_path, "add", location)
+    assert lcs.main([]) == 1
+    assert f"{location}: directory has 21 direct entries" in capsys.readouterr().out
 
 
 def test_directory_below_a_tests_layer_is_still_capped(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _fill(tmp_path / "base/pkg/tests/area", 21)
+    _git(tmp_path, "add", "base/pkg/tests")
     assert lcs.main([]) == 1
     assert "base/pkg/tests/area: directory has 21 direct entries" in capsys.readouterr().out
 
@@ -123,6 +127,7 @@ def test_tests_package_with_init_keeps_its_own_cap(
 ) -> None:
     _module(tmp_path / "base/pkg/tests/__init__.py")
     _fill(tmp_path / "base/pkg/tests", 21)
+    _git(tmp_path, "add", "base/pkg/tests")
     assert lcs.main([]) == 1
     assert "base/pkg/tests: directory has 22 direct entries" in capsys.readouterr().out
 

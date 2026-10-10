@@ -78,7 +78,7 @@ helper's logical-point space via the backing scale reported by `snapshot`
 (`screen.width/height/scale` + `pixels.width/height`). `snapshot` writes the
 PNG under `$AVA_HOME/logs/computer/snapshots/` and returns its path;
 `include_ocr` adds recognized text boxes (Vision framework, built on demand
-from `services/desktop/computer/ocr.swift` into `$AVA_HOME/logs/computer/ocr-bin/`),
+from `services/desktop/computer/ocr/ocr.swift` into `$AVA_HOME/logs/computer/ocr-bin/`),
 `include_ax` adds the focused window geometry.
 
 Explicit observation selectors, cropped captures and coordinate frames are owned

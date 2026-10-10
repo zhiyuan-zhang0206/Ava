@@ -3,7 +3,6 @@
 "tests.path_scoped.services_tests" = [
     "test_computer_mcp_daemon.py",
     "test_computer_mcp_wrapper.py",
-    "test_computer_ocr.py",
     "test_computer_session.py",
     "test_computer_task_sessions.py",
 ]
