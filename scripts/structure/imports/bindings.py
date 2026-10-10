@@ -108,27 +108,54 @@ def module_context(tree: ast.AST, name: str) -> ModuleContext:
     return ModuleContext(tree, name)
 
 
+def _plain_aliases(node: ast.AST) -> tuple[tuple[str, str], ...]:
+    if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
+        return tuple(
+            (target.id, node.value.id) for target in node.targets if isinstance(target, ast.Name)
+        )
+    if (
+        isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and isinstance(node.value, ast.Name)
+    ):
+        return ((node.target.id, node.value.id),)
+    return ()
+
+
+def _direct_mutations(node: ast.AST) -> tuple[str, ...]:
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.ctx, ast.Store | ast.Del)
+        and isinstance(node.value, ast.Name)
+    ):
+        return (node.value.id,)
+    if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+        return (node.target.id,)
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _MUTATORS
+        and isinstance(node.func.value, ast.Name)
+    ):
+        return (node.func.value.id,)
+    return tuple(node.names) if isinstance(node, ast.Global | ast.Nonlocal) else ()
+
+
 def _mutated_names(tree: ast.AST) -> frozenset[str]:
-    """In-module container writes and rebinding statements."""
+    """In-module container writes and rebinding, propagated through plain aliases."""
     mutated: set[str] = set()
+    aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Subscript)
-            and isinstance(node.ctx, ast.Store | ast.Del)
-            and isinstance(node.value, ast.Name)
-        ):
-            mutated.add(node.value.id)
-        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
-            mutated.add(node.target.id)
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in _MUTATORS
-            and isinstance(node.func.value, ast.Name)
-        ):
-            mutated.add(node.func.value.id)
-        elif isinstance(node, ast.Global | ast.Nonlocal):
-            mutated.update(node.names)
+        for left, right in _plain_aliases(node):
+            aliases.setdefault(left, set()).add(right)
+            aliases.setdefault(right, set()).add(left)
+        mutated.update(_direct_mutations(node))
+    pending = list(mutated)
+    while pending:
+        for alias in aliases.get(pending.pop(), ()):
+            if alias not in mutated:
+                mutated.add(alias)
+                pending.append(alias)
     return frozenset(mutated)
 
 
@@ -355,10 +382,10 @@ class Scope:
             return self._elements(iterated, seen | {node.id}, keys=True)
         return None
 
-    def _container(self, node: ast.expr, seen: frozenset[str]) -> ast.expr | None:
+    def _container(self, node: ast.expr, seen: frozenset[str]) -> tuple[ast.expr, Scope] | None:
         """The literal a container expression is bound to, unless it may be mutated."""
         if not isinstance(node, ast.Name):
-            return node
+            return node, self
         if node.id in seen or self.context is None or node.id in self.context.mutated:
             return None
         if node.id not in self.stores and self.parent is not None:
@@ -371,7 +398,10 @@ class Scope:
         self, node: ast.expr, seen: frozenset[str], *, keys: bool
     ) -> tuple[str, ...] | None:
         """Every string a literal table yields: dict keys when iterated, values when indexed."""
-        container = self._container(node, seen)
+        resolved = self._container(node, seen)
+        if resolved is None:
+            return None
+        container, owner = resolved
         if isinstance(container, ast.Dict):
             if any(key is None for key in container.keys):
                 return None  # ``**`` merges an opaque mapping.
@@ -386,7 +416,7 @@ class Scope:
             return None
         found: list[str] = []
         for item in items:
-            values = None if isinstance(item, ast.Starred) else self.strings(item, seen)
+            values = None if isinstance(item, ast.Starred) else owner.strings(item, seen)
             if values is None:
                 return None
             found.extend(values)

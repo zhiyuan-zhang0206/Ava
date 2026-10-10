@@ -420,10 +420,8 @@ def test_reads_rooted_outside_the_checkout_are_external(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),
         "import os\nfrom pathlib import Path\n"
-        "def probe(pid):\n"
-        "    Path(f'/proc/{pid}/stat').read_text()\n"
-        "    (Path('/proc') / str(pid) / 'cgroup').read_text()\n"
-        "    Path(os.devnull).open('rb')\n",
+        "Path('/proc/123/stat').read_text()\n"
+        "Path(os.devnull).open('rb')\n",
     )
     assert found.records == found.unknown == ()
 
@@ -467,3 +465,48 @@ def test_write_only_opens_are_outputs_not_inputs(tmp_path: Path) -> None:
     )
     assert found.records == ()
     assert [gap.kind for gap in found.unknown] == [facts.FactKind.RESOURCE]
+
+
+@pytest.mark.parametrize(
+    "mutation", ["ALIAS['y'] = 'base.db.pool'", "ALIAS.update({'y': 'base.db.pool'})"]
+)
+def test_alias_mutation_keeps_literal_table_import_unknown(tmp_path: Path, mutation: str) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\nTABLE = {'x': 'base.net.retry'}\nALIAS = TABLE\n"
+        + mutation
+        + "\ndef load(key):\n    importlib.import_module(TABLE[key])\n",
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.DYNAMIC_IMPORT
+
+
+def test_literal_table_elements_keep_their_definition_scope(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\nNAME = 'base.net.retry'\nTABLE = {'x': NAME}\n"
+        "def load(key):\n    NAME = 'base.db.pool'\n    importlib.import_module(TABLE[key])\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "(Path('/tmp') / path).read_text()",
+        "Path('/tmp').joinpath(path).read_text()",
+        "Path(f'/tmp/{path}').read_text()",
+    ],
+)
+def test_external_prefix_does_not_prove_dynamic_path_stays_external(
+    tmp_path: Path, expression: str
+) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\ndef read(path):\n    " + expression + "\n",
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.RESOURCE

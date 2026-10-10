@@ -21,8 +21,10 @@ Relative imports, finite dynamic imports, literal Python subprocess modules/code
 recognized repository-rooted resource paths use that same evidence owner and module resolver.
 Finite dynamic imports include the module's own `__name__` and subscripts of, or loops
 over, an unmutated literal table bound in the same module. Literal file anchors include
-`with_name`/`with_suffix` siblings; reads rooted at a literal path outside the checkout
-(such as `/proc` or `os.devnull`) and write-only `open` modes are not repository inputs. Placement
+`with_name`/`with_suffix` siblings; proven literal absolute reads outside the checkout
+(such as `/proc/123/stat` or `os.devnull`) and write-only `open` modes are not repository inputs.
+A fixed external prefix followed by an opaque segment stays unknown: absolute segments
+can reset a joined path, and parent traversal can enter the checkout. Placement
 subject policies do not prune this runtime impact graph. The selector never imports
 application code or executes test code.
 
