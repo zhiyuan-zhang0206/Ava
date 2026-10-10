@@ -11,6 +11,7 @@ import pytest
 
 from agent.graph.exec import _process
 from agent.graph.exec._owned_run import _OwnedRun
+from agent.graph.exec._subprocess import _finish_failed_run
 from base.native_process.turn_identity import HostedServiceResources
 
 
@@ -219,3 +220,27 @@ async def test_native_owner_refuses_replacement_reap_or_reader_handles() -> None
     finally:
         await owner.stop(1)
         await other
+
+
+async def test_unknown_stop_failure_cannot_be_erased_by_successful_stage_tasks() -> None:
+    domain = MagicMock(proc=MagicMock(pid=8757))
+    domain.proc.wait.return_value = 0
+    root = asyncio.create_task(asyncio.sleep(0))
+    owner = _process.DomainCloseOwner(domain, root)
+    reap = owner.start_reap()
+    reader = MagicMock(closed=True, finish=AsyncMock())
+    tail = owner.start_reader_join(reap, reader)
+    await asyncio.gather(root, owner.task, reap, tail)
+    assert not owner._errors
+    sentinel = RuntimeError("unknown stop observation bug")
+    owner.stop = AsyncMock(side_effect=sentinel)  # type: ignore[method-assign]
+
+    failures = await _process.settle_resources(root, reap, owner, tail, request_stop=True)
+    assert len(failures) == 1 and failures[0].error is sentinel
+    body = ValueError("original business failure")
+    settled = await _finish_failed_run(body, root, reap, owner, tail, reader, resources=None)
+    assert not settled
+    assert "unknown stop observation bug" in body.__notes__[0]
+    assert owner.teardown_task is not None
+    receipt = owner.teardown_task.result()
+    assert len(receipt) == 1 and receipt[0].error is sentinel
