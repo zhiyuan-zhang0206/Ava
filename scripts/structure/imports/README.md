@@ -107,8 +107,11 @@ Within one analysis, `ModuleContext.scope()` reuses completed scopes by AST node
 source path and lexical parent. The fact and execution-input visitors share these
 scopes; each scope retains its lexical Call order for transparent-helper checks.
 Binding collection skips nodes that cannot bind names without pruning the public
-lexical walker. `clear_scopes()` releases the query's scope references; neither
-scopes nor helper proofs cross analyses, source files or checkout generations.
+lexical walker. The fact visitor resolves its method dispatch once per AST node
+type within that source analysis. It does not descend into Name or Constant leaves;
+their enclosing operations still resolve values through the completed Scope.
+`clear_scopes()` releases the query's scope references; neither scopes nor helper
+proofs cross analyses, source files or checkout generations.
 
 `read_text()` and `read_bytes()` retain a resource Unknown whenever their receiver
 has no proven repository or external anchor, including factory results, aliases
