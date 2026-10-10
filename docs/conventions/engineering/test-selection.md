@@ -197,6 +197,14 @@ A selector `tests` list contains candidate files, not an executed test count: th
 selected native lane omits the independently executed static lane and flaky tests,
 while the serial lane owns flaky execution. JUnit records remain the execution evidence.
 
+## Measuring reach
+
+`python3 scripts/ci/test_impact_census.py [--top N] [--json]` reports, from the same
+graph, how many source files every test reaches (per top-level package), the unbounded
+inputs and how many every test reaches, the tests that reach any of them (they join
+every subset) with their estimated time, and the heaviest unbounded sites. It is
+read-only and stdlib-only.
+
 ## Duration guard
 
 The timing input is the repository-root
