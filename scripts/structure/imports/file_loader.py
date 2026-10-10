@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Set
+from collections.abc import Iterator, Set
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import bindings
 
-__all__ = ["ExecutionProof", "input_domain", "prove_execution"]
+__all__ = ["ExecutionProof", "input_domain", "prior_calls", "prove_execution"]
 
 
 @dataclass(frozen=True)
@@ -220,3 +220,23 @@ def _relative_pairs(values: tuple[str, ...]) -> tuple[tuple[str, str], ...] | No
     ):
         return None
     return tuple(dict.fromkeys((name, Path(target).as_posix()) for name, target in result))
+
+
+def prior_calls(
+    execution: ast.Call, scope: bindings.Scope
+) -> Iterator[tuple[ast.Call, bindings.Scope]]:
+    """Calls that cannot be proven later than this local execution.
+
+    Local lexical calls retain their order. An ancestor's calls may precede a
+    nested invocation regardless of its definition line; no caller is interpreted.
+    The collector owns recognition and resource resolution in each supplied Scope.
+    """
+    current: bindings.Scope | None = scope
+    while current is not None:
+        for call in current.calls:
+            if current is not scope or (call.lineno, call.col_offset) < (
+                execution.lineno,
+                execution.col_offset,
+            ):
+                yield call, current
+        current = current.parent

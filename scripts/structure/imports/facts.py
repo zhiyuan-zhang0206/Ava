@@ -264,6 +264,10 @@ class _Collector(ast.NodeVisitor):
         if not inputs:
             self.gap(node, "File-loader name and path have no bounded unchanged checkout anchor")
             return
+        changed = self._source_change(node, inputs)
+        if changed:
+            self.gap(*changed, kind=FactKind.RESOURCE)
+            return
         for name, path in inputs:
             self._file_source(node, name, path)
         if found[1] in self.unknown:
@@ -277,6 +281,71 @@ class _Collector(ast.NodeVisitor):
         ):
             return None
         return inputs
+
+    def _source_change(
+        self, execution: ast.Call, inputs: tuple[tuple[str, str], ...]
+    ) -> tuple[ast.Call, str] | None:
+        for call, scope in file_loader.prior_calls(execution, self.scope):
+            reason = self._source_write(call, scope, inputs)
+            if reason:
+                return call, reason
+        return None
+
+    def _source_write(
+        self, node: ast.Call, scope: bindings.Scope, inputs: tuple[tuple[str, str], ...]
+    ) -> str | None:
+        previous, self.scope = self.scope, scope
+        try:
+            target = self._write_target(node)
+            if target is None:
+                return None
+            anchored = self._file_path_text(target)
+            if anchored is None:
+                target = self._write_argument(target)
+            values = scope.strings(anchored if anchored is not None else target)
+            if not values or (anchored is None and any(not Path(v).is_absolute() for v in values)):
+                return "File-loader prior write has no proven checkout or external target"
+            outputs = {(self.index.repo_root / value).resolve() for value in values}
+            sources = {(self.index.repo_root / path).resolve() for _, path in inputs}
+            if outputs & sources:
+                return "File-loader source has a prior recognized write"
+        except (OSError, ValueError, RuntimeError) as error:
+            return f"File-loader prior write target cannot be resolved: {error}"
+        finally:
+            self.scope = previous
+        return None
+
+    def _write_argument(self, target: ast.expr) -> ast.expr:
+        value = self.scope.value(target)
+        if (
+            isinstance(value, ast.Call)
+            and len(value.args) == 1
+            and not value.keywords
+            and self.scope.unmodified_origin(value.func) == "pathlib.Path"
+        ):
+            return value.args[0]
+        return value
+
+    def _write_target(self, node: ast.Call) -> ast.expr | None:
+        method = node.func
+        if isinstance(method, ast.Attribute) and method.attr in {"write_text", "write_bytes"}:
+            return self.scope.value(method.value)
+        if not self._open_function(method) and not (
+            isinstance(method, ast.Attribute) and method.attr == "open"
+        ):
+            return None
+        target = self._read_target(node)
+        if target is None:
+            return node
+        mode = self._open_mode(node)
+        values = self.scope.strings(mode) if mode is not None else ("r",)
+        if (
+            self._readable_open(node)
+            and values
+            and not any(set(value) & set("wax+") for value in values)
+        ):
+            return None
+        return target
 
     def _file_path_text(self, node: ast.expr) -> ast.expr | None:
         value = node
