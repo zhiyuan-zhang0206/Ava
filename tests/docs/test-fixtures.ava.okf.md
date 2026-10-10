@@ -31,9 +31,7 @@ Every test runs with a private `AVA_HOME` and autouse host guards. The default n
 
 ### Opt-in unit capabilities
 
-Consumer-local homes, identity, ledgers and gateway clients:
-[[tests/fixtures/unit/docs/unit-fixtures.ava.okf.md]]. `units` contains only explicit
-setup and agent-allocation helpers.
+Capability ownership: [[tests/fixtures/unit/docs/unit-fixtures.ava.okf.md]].
 
 ### Path-scoped fixtures (the former directory conftests)
 - A conftest's fixtures reach only the tests below it, so a test moved into a package's `tests/` directory would silently lose them. The modules in `tests/path_scoped/` (one per former conftest, plus `api_keys` and `pty_reaper` that several take) are registered for the directories or single test files named by the `path_scopes.toml` files next to the tests (`PATH_SCOPES`, read by `tests/fixtures/path_scopes.py`) when pytest starts collecting that node (`parsefactories(holder=, node=)`, the interface pytest uses for a conftest). A governed test therefore sees exactly the fixture closure it saw under the conftest: the same autouse names in the same order, the same visibility, and a session-scoped autouse fixture (the provider-plugin load for the gateway tests) instantiated only when a governed test runs.
