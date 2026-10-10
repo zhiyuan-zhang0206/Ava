@@ -4,3 +4,4 @@
     "test_im_bridge_telegram.py",
     "test_services_weixin_adapter.py",
 ]
+"tests.fixtures.unit.gateway" = ["test_weixin_chat_identity.py"]

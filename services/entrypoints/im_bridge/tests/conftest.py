@@ -13,6 +13,7 @@ from services.entrypoints.im_bridge.outbound.types import (
     PreparedOutboundSend,
 )
 from services.entrypoints.im_bridge.types import IMAdapter
+from tests.fixtures.unit.homes import unit_home as unit_home
 
 
 @pytest.fixture(autouse=True)

@@ -10,3 +10,5 @@
 "tests.path_scoped.services_tests" = [
     "test_turn_dispatcher.py",
 ]
+"tests.fixtures.unit.homes" = ["."]
+"tests.fixtures.unit.identity" = ["guarded_compact"]
