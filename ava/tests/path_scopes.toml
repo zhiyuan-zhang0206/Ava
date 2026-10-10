@@ -10,3 +10,4 @@
 "tests.path_scoped.integration_tests" = [
     "test_core.py",
 ]
+"tests.fixtures.unit.homes" = ["."]

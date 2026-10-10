@@ -22,8 +22,12 @@ for a genuine cross-package subject proof, and no baseline is introduced.
 
 A rejected single-component root test must move into its subject directory's
 `tests/`. `--suggest PATH ...` explains this same proof. After `git mv`, preserve
-its autouse fixtures in the destination's `path_scopes.toml`. Package-local tests
-are outside this gate's scope; this change does not launch a whole-tree migration.
+its autouse fixtures in a destination-local conftest or existing path scope. Package-local tests
+are outside this gate's scope. The path-scope tests verify declared paths and the
+binding mechanism, not a moved test's previous runtime fixture closure. Removing
+an old declaration and omitting the new one can silently drop autouse fixtures;
+attach before/after runtime fixture evidence to the migration review. This change
+does not launch a whole-tree migration.
 """
 
 from __future__ import annotations
@@ -47,8 +51,10 @@ _CATEGORIES = ("contract", "integration")
 _SUGGEST = "--suggest"
 _GUIDE = (
     "A top-level test needs complete subject evidence whose LCA is root. Otherwise use `git mv` "
-    "into its subject's tests/ directory and preserve path_scopes.toml isolation fixtures "
-    "(tests/ci/test_path_scopes.py checks the fixture binding). Unknown inputs must be resolved; "
+    "into its subject's tests/ directory and preserve isolation fixtures in a local conftest or existing path_scopes.toml "
+    "(tests/ci/test_path_scopes.py checks declared paths and binding, not move completeness). "
+    "Attach before/after runtime fixture closure evidence to the migration review. "
+    "Unknown inputs must be resolved; "
     "replacement-only and sample evidence cannot certify placement. "
     "Rule: scripts/structure/tests_location.py."
 )

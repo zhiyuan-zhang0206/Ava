@@ -23,12 +23,15 @@ Every test runs with a private `AVA_HOME` and autouse host guards. The default n
 - `static_environment` — hook-only static process ownership; loads before its consumer `provisioning`
 - `provisioning` — throwaway pg/redis, `_clean_state`, the DB connection fixtures, and the session hooks (full-run guard, non-test-database refusal, leaked OS-job / runaway-memory / home cleanup)
 - `guards` — autouse host guards and the `_stub_everywhere` helper
-- `units` — gateway / runner unit, per-test unit home and workspace, write-generation ledger, `spawn_agent`
 - `log_capture`, `retry_waits` — opt-in `loguru_records` and `retry_waits` (records the waits `base.host.net.resilience` retry loops request instead of sleeping them; never autouse, because a no-op wait under a wall-clock-bounded loop spins until memory runs away, issue #1001)
 - `path_scopes` — registers the per-directory fixture modules of `tests/path_scoped/` for the paths the `path_scopes.toml` files name (`PATH_SCOPES`, below); a plugin with hooks only, it adds no fixture of its own
 - `_asyncio_stall_probe`, `collection_guard` — hook-only plugins (stall forensics; one collector node per directory)
 - `pytester` — opt-in subprocess harness; no autouse fixtures
 - **List order is load order and is load-bearing.** Same-scope autouse fixtures are set up in registration order and, inside one module, alphabetically — which is why `leak_guard` precedes everything (it must tear down last) and `provisioning` (`_clean_state`) precedes `guards` (`_guard_*`). Adding a plugin means checking its autouse names against that order.
+
+### Opt-in unit capabilities
+
+Capability ownership: [[tests/fixtures/unit/docs/unit-fixtures.ava.okf.md]].
 
 ### Path-scoped fixtures (the former directory conftests)
 - A conftest's fixtures reach only the tests below it, so a test moved into a package's `tests/` directory would silently lose them. The modules in `tests/path_scoped/` (one per former conftest, plus `api_keys` and `pty_reaper` that several take) are registered for the directories or single test files named by the `path_scopes.toml` files next to the tests (`PATH_SCOPES`, read by `tests/fixtures/path_scopes.py`) when pytest starts collecting that node (`parsefactories(holder=, node=)`, the interface pytest uses for a conftest). A governed test therefore sees exactly the fixture closure it saw under the conftest: the same autouse names in the same order, the same visibility, and a session-scoped autouse fixture (the provider-plugin load for the gateway tests) instantiated only when a governed test runs.

@@ -1,7 +1,7 @@
 """Shared isolation fixtures for agent tests.
 
 Registered by `tests/fixtures/path_scopes.py`. The cancel-race fixture lives
-in `agent.graph.llm.tests.cancel_fixture` and is registered as an opt-in root pytest plugin.
+in `agent.graph.llm.tests.cancel_fixture`; its consumers bind it locally.
 """
 
 from __future__ import annotations
