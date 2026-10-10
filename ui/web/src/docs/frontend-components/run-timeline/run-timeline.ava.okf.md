@@ -8,6 +8,13 @@ tags:
 
 # Agent View
 
+The lifetime read uses the shared 35-second HTTP read budget, covering both
+request headers and response-body consumption. Each query passes its cancellation
+signal to the network request: removing the agent or leaving the page cancels
+that read. A timeout follows the existing per-agent failure and Retry flow;
+selection cancellation does not become a business failure. This client deadline
+does not establish a backend history-reconstruction deadline.
+
 `/insights/run/{ids}` (`405` or `405,6657`; the URL follows the agents added and removed, nothing else is kept) draws any number of agents on one timeline; one agent is the view of that agent alone, there is no second page. All agents are equal (no root or lineage), each is a group of rows under its `Agent #id · label` heading with a remove button (never on the last agent), and none is squeezed to one line. A toolbar adds an agent by id and sets two things for all groups: how many tree levels to draw (counted from each agent's topmost level; all by default) and the context bars (Context size row on or off, Messages height equal or by tokens; on and by tokens by default). Each agent is read by its own `GET /api/agents/{id}/run-timeline`; the loaded extent is the union of their windows, a failed agent shows a retry in its own group. There are no lines between agents. Per agent
 (`components/run-timeline/`): one row per tree level, topmost first, layer 0 (the
 message blocks) at the bottom on one lane, lifecycle markers from the audit record on top. A block is one of inbound (human / agent), agent text, thinking, tool call, tool output or a framework note; a work unit is drawn as its thinking, call and output blocks (the backend splits it, `units.display_blocks`), colored with the context breakdown's palette (`lib/context-colors.ts`) and listed in a legend; clicking one shows only that part of the raw message. The page

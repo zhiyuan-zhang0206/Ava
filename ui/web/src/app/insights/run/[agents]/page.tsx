@@ -107,7 +107,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const reads = useQueries({
     queries: ids.map((id) => ({
       queryKey: ["run-timeline", id],
-      queryFn: () => api.getRunTimeline(id, {}),
+      queryFn: ({ signal }) => api.getRunTimeline(id, { signal }),
     })),
     combine: pickRead,
   });
