@@ -158,16 +158,13 @@ async def run(options: DaemonOptions) -> int:
                 len(started),
             )
             await stop.wait()
-        except Exception as primary:
+        except BaseException as primary:
             try:
                 await _finish(started, server, supervisor, lock_fd)
-            except Exception as cleanup:
-                raise ExceptionGroup(
+            except BaseException as cleanup:
+                raise BaseExceptionGroup(
                     "root operation and teardown failed", [primary, cleanup]
                 ) from None
-            raise
-        except BaseException:
-            await _finish(started, server, supervisor, lock_fd)
             raise
         else:
             # Participants first: their loops touch the tree, so they stop while it
@@ -181,28 +178,28 @@ async def _finish(
     started: list[WiringParticipant], server: ControlServer, supervisor: Supervisor, lock_fd: int
 ) -> None:
     """Attempt each owned teardown once, releasing the singleton even on failure."""
-    failures: list[Exception] = []
+    failures: list[BaseException] = []
     try:
         try:
             await stop_participants(started)
-        except Exception as exc:
+        except BaseException as exc:
             failures.append(exc)
     finally:
         try:
             try:
                 await server.close()
-            except Exception as exc:
+            except BaseException as exc:
                 failures.append(exc)
         finally:
             try:
                 try:
                     await supervisor.shutdown()
-                except Exception as exc:
+                except BaseException as exc:
                     failures.append(exc)
             finally:
                 release_instance_lock(lock_fd)
     if failures:
-        raise ExceptionGroup("root teardown failed", failures)
+        raise BaseExceptionGroup("root teardown failed", failures)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
