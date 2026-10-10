@@ -223,6 +223,22 @@ module = "scripts.audit"
 entry_modules = ["scripts.audit.module_moves", "scripts.audit.where_used"]
 
 [[tool.ava.public_contracts.components]]
+module = "base.daemon.schedules.inputs"
+entry_modules = ["base.daemon.schedules.inputs"]
+
+[[tool.ava.public_contracts.components]]
+module = "schedules.entry"
+entry_modules = ["schedules.entry"]
+
+[[tool.ava.public_contracts.components]]
+module = "base.host.env.dotenv_boot"
+entry_modules = ["base.host.env.dotenv_boot"]
+
+[[tool.ava.public_contracts.components]]
+module = "services.agent_runner.agent_ops.boot"
+entry_modules = ["services.agent_runner.agent_ops.boot"]
+
+[[tool.ava.public_contracts.components]]
 module = "base.host.proc"
 entry_modules = ["base.host.proc"]
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess as subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +20,7 @@ import cli.commands.lifecycle.stop as _stop_commands
 import cli.commands.probe as _probe_commands
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.sessions.pty.paths import SERVICE_UNIT
+from base.telemetry import EventPipeline
 from cli.commands.lifecycle.stop import _force_stop
 from cli.tests._commands_helpers import (
     _FakeResponse,
@@ -27,6 +29,8 @@ from cli.tests._commands_helpers import (
     _patch_gateway_http,
 )
 from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _real_reap_cluster_chrome = _stop_commands._reap_cluster_chrome
 
@@ -62,7 +66,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
     # the dev host's pg/redis.
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_status", lambda: 0)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_status", _ignoring_retention(lambda: 0))
     from cli.commands.lifecycle import start as _start_mod
 
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", _ignoring_retention(lambda: 0))
@@ -126,7 +130,11 @@ def _root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 # ─── restart ─────────────────────────────────────────────────────────────────
 
 
-def test_cmd_restart_succeeds_non_interactively(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_restart_succeeds_non_interactively(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """cmd_restart succeeds in a non-interactive context (the detached-updater path) —
     like cmd_start, it needs no tty."""
     import sys as _sys
@@ -144,11 +152,17 @@ def test_cmd_restart_succeeds_non_interactively(monkeypatch: pytest.MonkeyPatch)
         "preflight_start_readiness",
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    rc = _stop_commands.cmd_restart(retained_children=[])
+    rc = _stop_commands.cmd_restart(
+        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+    )
     assert rc == 0
 
 
-def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_restart_calls_stop_then_start(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """cmd_restart invokes stop (require_confirmation=False) then _cmd_start_body in order."""
 
     order: list[str] = []
@@ -163,7 +177,11 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         teardown_extras=True,
         force=False,
         retained_children: object = None,
+        database_factory: Callable[[], Any],
+        producer: Callable[[], EventPipeline],
     ) -> int:
+        assert database_factory is operator_database
+        assert producer is operator_pipeline
         assert require_confirmation is False, "cmd_restart must skip stdin confirmation"
         assert force is False
         assert keep_browser is True and teardown_extras is False, (
@@ -177,8 +195,12 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         order.append("stop")
         return 0
 
-    def fake_cmd_start_body(operation: object, **kwargs: object) -> int:
+    def fake_cmd_start_body(
+        operation: object, database_factory: Callable[[], Any], **kwargs: object
+    ) -> int:
         assert operation is None
+        assert database_factory is operator_database
+        assert kwargs["producer"] is operator_pipeline
         from cli.start_runtime import StartRuntime
 
         assert kwargs["persist_services"] is False
@@ -193,7 +215,9 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         "preflight_start_readiness",
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    rc = _stop_commands.cmd_restart(retained_children=[])
+    rc = _stop_commands.cmd_restart(
+        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+    )
     assert order == ["stop", "start"]
     assert rc == 0
 
@@ -201,6 +225,8 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
 def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """An outer operation's still-running journal is never closed by the nested
     restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
@@ -217,7 +243,16 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda _operation, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    def start_result(
+        operation: object, database_factory: Callable[[], Any], **kwargs: object
+    ) -> int:
+        assert database_factory is operator_database
+        assert kwargs["producer"] is operator_pipeline
+        return 0
+
+    monkeypatch.setattr(_start_commands, "_cmd_start_body", start_result)
+
     finished: list[int] = []
     monkeypatch.setattr(
         status_journal,
@@ -230,7 +265,12 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
         "begin",
         lambda _operation, **_kwargs: False,  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _stop_commands.cmd_restart(retained_children=[]) == 0
+    assert (
+        _stop_commands.cmd_restart(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert finished == []  # the outer operation still owns the journal
 
     monkeypatch.setattr(
@@ -238,11 +278,20 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
         "begin",
         lambda _operation, **_kwargs: True,  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _stop_commands.cmd_restart(retained_children=[]) == 0
+    assert (
+        _stop_commands.cmd_restart(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert finished == [0]
 
 
-def test_cmd_restart_short_circuits_on_stop_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_restart_short_circuits_on_stop_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """If stop returns non-zero, cmd_restart propagates without calling start."""
 
     start_called: list[bool] = []
@@ -251,14 +300,20 @@ def test_cmd_restart_short_circuits_on_stop_failure(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         _start_commands,
         "_cmd_start_body",
-        lambda _operation, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _operation, _database_factory, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    rc = _stop_commands.cmd_restart(retained_children=[])
+    rc = _stop_commands.cmd_restart(
+        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+    )
     assert rc == 1
     assert start_called == [], "start must not run when stop fails"
 
 
-def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_restart_aborts_when_preflight_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """When preflight probes fail, cmd_restart aborts without stopping — and says so
     with its OWN exit code, since "nothing was stopped, host still serving" is what
     the detached updater must not run `ava start` over."""
@@ -276,17 +331,23 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         _start_commands,
         "_cmd_start_body",
-        lambda _operation, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _operation, _database_factory, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
-    rc = _stop_commands.cmd_restart(retained_children=[])
+    rc = _stop_commands.cmd_restart(
+        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+    )
     assert rc == RESTART_DECLINED_EXIT_CODE, "preflight failure must propagate non-zero"
     assert stopped == [], "must not stop services when preflight fails"
     assert start_called == [], "must not start when preflight fails"
 
 
-def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_restart_aborts_when_start_readiness_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """Task #3165: a start-readiness refusal (private-tree roots, ports, venv
     entry points, migrations) stops nothing — the same decline contract as the
     probes gate, with stop and start neither run. The gate is called with
@@ -308,11 +369,13 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         _start_commands,
         "_cmd_start_body",
-        lambda _operation, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _operation, _database_factory, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
-    rc = _stop_commands.cmd_restart(retained_children=[])
+    rc = _stop_commands.cmd_restart(
+        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+    )
 
     assert rc == RESTART_DECLINED_EXIT_CODE, "a readiness refusal must decline, not fail"
     assert stopped == [], "must not stop services when the readiness gate refuses"
@@ -327,7 +390,11 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
 # ─── stop (stdin confirmation) ────────────────────────────────────────────────────────
 
 
-def test_stop_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_aborts_on_no(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """stdin input not y → abort, no kill / down commands called."""
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -335,11 +402,17 @@ def test_stop_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError(f"subprocess.run should not be called: {args}")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _stop_commands.cmd_stop(force=True)
+    rc = _stop_commands.cmd_stop(
+        force=True, database_factory=operator_database, producer=operator_pipeline
+    )
     assert rc == 0
 
 
-def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_proceeds_on_yes(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """A confirmed force stop stops the services but keeps the pty-sessions service,
     closes the terminals through it, then stops the service, and only then the
     private data plane."""
@@ -359,12 +432,20 @@ def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
-    assert _stop_commands.cmd_stop(force=True) == 0
+    assert (
+        _stop_commands.cmd_stop(
+            force=True, database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert events == ["root+terminal-service", "terminals", "root", "infra"]
 
 
 def test_stop_revokes_serving_before_stopping_root(
-    serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    serving_root: RootBirth,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from base.deploy.lifecycle import start_serving
 
@@ -381,12 +462,12 @@ def test_stop_revokes_serving_before_stopping_root(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
-    assert _force_stop(tmp_path, require_confirmation=False) == 0
+    assert _force_stop(tmp_path, require_confirmation=False, producer=operator_pipeline) == 0
     assert observed == [False, False], "serving is revoked before either root stop"
 
 
 def test_do_stop_keep_infra_skips_infra_teardown(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_pipeline: Callable[[], EventPipeline]
 ) -> None:
     events: list[str] = []
     monkeypatch.setattr(
@@ -398,11 +479,18 @@ def test_do_stop_keep_infra_skips_infra_teardown(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
-    assert _force_stop(tmp_path, require_confirmation=False, keep_infra=True) == 0
+    assert (
+        _force_stop(
+            tmp_path, require_confirmation=False, keep_infra=True, producer=operator_pipeline
+        )
+        == 0
+    )
     assert events == ["root", "root"], "the services, then the pty-sessions service"
 
 
-def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_do_stop_keeps_browser_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_pipeline: Callable[[], EventPipeline]
+) -> None:
     calls: list[dict[str, object]] = []
     reaps: list[int] = []
     monkeypatch.setattr(
@@ -415,7 +503,7 @@ def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
-    assert _force_stop(tmp_path, require_confirmation=False) == 0
+    assert _force_stop(tmp_path, require_confirmation=False, producer=operator_pipeline) == 0
     assert calls == [
         {"preserve": frozenset({"browser", SERVICE_UNIT}), "force": True},
         {"preserve": frozenset({"browser"}), "force": True},
@@ -424,7 +512,7 @@ def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 
 def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_pipeline: Callable[[], EventPipeline]
 ) -> None:
     """`--keep-service pty-sessions` keeps the terminals it holds: one services step,
     no terminal closure, no second stop of the service."""
@@ -445,14 +533,19 @@ def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
     )
     assert (
         _force_stop(
-            tmp_path, require_confirmation=False, preserve_sessions=frozenset({SERVICE_UNIT})
+            tmp_path,
+            require_confirmation=False,
+            preserve_sessions=frozenset({SERVICE_UNIT}),
+            producer=operator_pipeline,
         )
         == 0
     )
     assert calls == [{"preserve": frozenset({"browser", SERVICE_UNIT}), "force": True}]
 
 
-def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_do_stop_stop_browser_kills_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_pipeline: Callable[[], EventPipeline]
+) -> None:
     events: list[str] = []
 
     def stop_root(**kwargs: object) -> None:
@@ -465,7 +558,12 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
-    assert _force_stop(tmp_path, require_confirmation=False, keep_browser=False) == 0
+    assert (
+        _force_stop(
+            tmp_path, require_confirmation=False, keep_browser=False, producer=operator_pipeline
+        )
+        == 0
+    )
     assert events == ["root+terminal-service", "browser", "root", "infra"]
 
 
@@ -492,7 +590,10 @@ def test_reap_cluster_chrome_reports_pids_and_survives_a_failure(
 
 
 def test_cmd_stop_stop_browser_flag_threads_through(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """`cmd_stop(stop_browser=...)` maps to `_do_stop(keep_browser=not stop_browser)`."""
     from cli.commands.lifecycle import stop as _stop_mod
@@ -506,9 +607,16 @@ def test_cmd_stop_stop_browser_flag_threads_through(
     monkeypatch.setattr(_stop_mod, "_do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_mod, "_repo_root", lambda: tmp_path)
 
-    _stop_mod.cmd_stop(require_confirmation=False)
+    _stop_mod.cmd_stop(
+        require_confirmation=False, database_factory=operator_database, producer=operator_pipeline
+    )
     assert seen["keep_browser"] is False, "default cmd_stop closes the browser"
-    _stop_mod.cmd_stop(require_confirmation=False, stop_browser=True)
+    _stop_mod.cmd_stop(
+        require_confirmation=False,
+        stop_browser=True,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
     assert seen["keep_browser"] is False, "stop_browser=True takes the browser down"
 
 
@@ -526,7 +634,10 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
 
 
 def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A confirmed `ava stop` best-effort POSTs
     /api/cluster/stopping?machine=<self>&home=<self-home> before the local
@@ -547,7 +658,12 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
     _patch_stop_teardown(monkeypatch, events)
 
-    rc = _stop_commands.cmd_stop(require_confirmation=False, force=True)
+    rc = _stop_commands.cmd_stop(
+        require_confirmation=False,
+        force=True,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
     assert rc == 0
     assert calls[0][0] == "http://gw:8000/api/cluster/stopping"
     assert calls[0][1]["params"] == {"machine": "test-host", "home": str(ava_home())}
@@ -555,7 +671,10 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
 
 
 def test_cmd_stop_aborted_confirm_does_not_announce(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Declining the confirm prompt must leave the roster untouched: the stopping
     announce stamps `machines.stopped_at`, and only the next `ava start` clears
@@ -567,14 +686,19 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
     monkeypatch.setattr("httpx.post", lambda *_a, **_kw: events.append("announce"))  # pyright: ignore[reportUnknownArgumentType]
     _patch_stop_teardown(monkeypatch, events)
 
-    rc = _stop_commands.cmd_stop(force=True)
+    rc = _stop_commands.cmd_stop(
+        force=True, database_factory=operator_database, producer=operator_pipeline
+    )
     assert rc == 0
     assert events == []  # no announce, no teardown
     assert "aborted" in capsys.readouterr().out
 
 
 def test_cmd_stop_proceeds_when_announce_fails(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """If the stopping announce can't reach the gateway, `ava stop` logs and still
     tears down — the announce is best-effort, never a blocker."""
@@ -588,7 +712,12 @@ def test_cmd_stop_proceeds_when_announce_fails(
     events: list[str] = []
     _patch_stop_teardown(monkeypatch, events)
 
-    rc = _stop_commands.cmd_stop(require_confirmation=False, force=True)
+    rc = _stop_commands.cmd_stop(
+        require_confirmation=False,
+        force=True,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
     assert rc == 0
     assert events == ["infra"]  # teardown still ran
     assert "could not announce shutdown" in capsys.readouterr().out

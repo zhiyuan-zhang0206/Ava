@@ -23,6 +23,9 @@ from base.agents.incarnation.exec_request_evidence import (
     survey,
 )
 from base.agents.incarnation.resources import IncarnationResources, ResourceProcess
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process import code_version
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _AGENT = 424242
@@ -616,3 +619,44 @@ def test_cli_force_still_quarantines_retained_evidence(
     assert main(["--agent", str(_AGENT), "--quarantine", request.name, "--force"]) == 0
     assert "quarantined" in capsys.readouterr().out
     assert not request.exists()
+
+
+def test_cli_entry_captures_once_and_keeps_the_database_gated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    image = LoadedCommit(source_root=tmp_path, sha="loaded-before-checkout-moved")
+    capture = Mock(return_value=image)
+    count = Mock(return_value=7)
+    database = Mock()
+    create = Mock(return_value=database)
+    identity = Mock(return_value=(None, None))
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(code_version, "first_parent_count", count)
+    monkeypatch.setattr(exec_request_evidence, "process_name", lambda: "diagnostic")
+    monkeypatch.setattr(exec_request_evidence.Database, "from_settings", create)
+    monkeypatch.setattr(exec_request_evidence, "_row_identity", identity)
+    monkeypatch.setattr(exec_request_evidence, "survey", Mock(return_value=[]))
+    monkeypatch.setattr(exec_request_evidence, "_report", Mock())
+
+    assert main(["--agent", str(_AGENT)]) == 0
+
+    capture.assert_called_once_with()
+    create.assert_called_once()
+    identity.assert_called_once_with(database, _AGENT)
+    gate = create.call_args.kwargs["gate"]
+    assert isinstance(gate, ProcessDbGate)
+    count.assert_not_called()
+    assert gate.application_name() == "ava:diagnostic:v7"
+    count.assert_called_once_with(tmp_path, image.sha)
+    gate.observe_minimum(7)
+    assert not gate.min_read_due()
+
+
+def test_cli_entry_propagates_the_original_database_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = RuntimeError("original database failure")
+    monkeypatch.setattr(exec_request_evidence.Database, "from_settings", Mock(side_effect=failure))
+    with pytest.raises(RuntimeError) as caught:
+        main(["--agent", str(_AGENT)])
+    assert caught.value is failure

@@ -14,14 +14,15 @@ import pytest
 
 import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
+from base.agents.context.clients import DatabaseFactory
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
-from base.events.live.bus import EventBus
+from base.deploy.maintenance.state import MaintenancePhase
 from base.sessions.pty import client
 from base.sessions.pty.paths import SERVICE_UNIT
+from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
@@ -41,14 +42,24 @@ from ops import agent_pause, pty_close_notices
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.path_scoped import pty_jobs as jobs
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_shells import new
 
 
-def _restart_stop(**kwargs: Any) -> int:
+def _restart_stop(
+    *, database_factory: DatabaseFactory, producer: Callable[[], EventPipeline], **kwargs: Any
+) -> int:
     """The stop leg of `ava restart`: no prompt; the data plane and browser stay."""
     return entry._do_stop(
-        Path("/unused"), require_confirmation=False, keep_infra=True, keep_browser=True, **kwargs
+        Path("/unused"),
+        require_confirmation=False,
+        keep_infra=True,
+        keep_browser=True,
+        **kwargs,
+        database_factory=database_factory,
+        producer=producer,
     )
 
 
@@ -58,6 +69,8 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """`--keep-service pty-sessions` leaves the service and its live session as they are:
     the root owner is asked to preserve it, and no terminals phase runs."""
@@ -79,7 +92,15 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
     while psutil.Process(identity.pid).children(recursive=True):
         assert time.monotonic() < deadline
         time.sleep(0.05)
-    assert _restart_stop(preserve_sessions=frozenset({SERVICE_UNIT}), timeout=5) == 0
+    assert (
+        _restart_stop(
+            preserve_sessions=frozenset({SERVICE_UNIT}),
+            timeout=5,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert orchestration.poll() is None
     assert client.has_session(name) and identity.live()
     assert pty_service.process is not None and pty_service.process.poll() is None
@@ -96,6 +117,8 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """`ava restart` (smooth) stops and restarts the application services, closes the
     persistent shells as `ava stop` does (a busy session's owner gets its notice) and
@@ -128,7 +151,11 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     def record(label: str) -> Callable[..., object]:
         return lambda *_args, **_kwargs: events.append(label)
 
-    def record_start(operation: pause_owner.PauseOwnerSnapshot | None, **kwargs: object) -> int:
+    def record_start(
+        operation: pause_owner.PauseOwnerSnapshot | None,
+        _database_factory: DatabaseFactory,
+        **kwargs: object,
+    ) -> int:
         assert operation is None
         assert kwargs["persist_services"] is False
         events.append("services-started")
@@ -157,7 +184,15 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     )
     monkeypatch.setattr(start_commands, "_cmd_start_body", record_start)
 
-    assert entry.cmd_restart(mode="smooth", retained_children=[]) == 0
+    assert (
+        entry.cmd_restart(
+            mode="smooth",
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
 
     assert events == [
         "services-stopped",
@@ -179,6 +214,8 @@ def test_root_stop_refusal_keeps_hold_without_force(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     dependencies(monkeypatch)
     service = launch("ava-worker", term="ignore")
@@ -189,7 +226,10 @@ def test_root_stop_refusal_keeps_hold_without_force(
         raise RuntimeError("root service did not stop")
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", refuse)
-    assert _restart_stop(timeout=0.2) == 1
+    assert (
+        _restart_stop(timeout=0.2, database_factory=operator_database, producer=operator_pipeline)
+        == 1
+    )
     assert service.poll() is None
     assert psutil.Process(service.pid).create_time() == before
     assert admission.held()
@@ -200,6 +240,8 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The services phase keeps the pty-sessions service; the terminals phase closes
     the session through it; only then is the service itself stopped."""
@@ -222,7 +264,16 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     name = "ava-agent-987-shell-2"
     assert new(name, home, {"AVA_HOME": str(home)})
     pty_reaper.track_session(name)
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=5) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=5,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert not client.has_session(name)
     assert root_stops == [(True, [name]), (False, [])], (
         "the service stops only after its terminals closed"
@@ -230,7 +281,9 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
 
 
 def test_normal_start_releases_hold_only_after_successful_readiness(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     drained()
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
@@ -238,22 +291,26 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
     @resume_after_start
-    def start(operation: pause_owner.PauseOwnerSnapshot | None, result: int) -> int:
+    def start(
+        operation: pause_owner.PauseOwnerSnapshot | None,
+        _database_factory: DatabaseFactory,
+        result: int,
+    ) -> int:
         admission.require_start_allowed(operation)
         assert admission.held()
         return result
 
-    assert start(None, 4) == 4
+    assert start(None, operator_database, 4) == 4
     assert admission.held()
     assert "hold released" not in capsys.readouterr().out
-    assert start(None, 0) == 0
+    assert start(None, operator_database, 0) == 0
     assert not admission.held()
     # The start's status snapshot still read paused; the release is reported.
     assert "maintenance hold released" in capsys.readouterr().out
 
 
 def test_delegated_start_leaves_authorization_and_resume_with_child(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     drained()
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
@@ -266,28 +323,50 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
         return 0
 
     @resume_after_start
-    def start(operation: pause_owner.PauseOwnerSnapshot | None) -> StartDelegation:
+    def start(
+        operation: pause_owner.PauseOwnerSnapshot | None, database_factory: DatabaseFactory
+    ) -> StartDelegation:
         assert admission.start_authorized(operation)
         return StartDelegation(child)
 
-    assert start(None) == 0
+    assert start(None, operator_database) == 0
     assert admission.held()
     unpause.assert_not_called()
 
 
-def test_only_explicit_force_enters_legacy_force_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_only_explicit_force_enters_legacy_force_stop(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     normal, force = MagicMock(return_value=0), MagicMock(return_value=0)
     monkeypatch.setattr(command, "stop", normal)
     monkeypatch.setattr(entry, "_force_stop", force)
-    assert entry._do_stop(Path("/unused")) == 0
+    assert (
+        entry._do_stop(
+            Path("/unused"), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     normal.assert_called_once()
     force.assert_not_called()
-    assert entry.cmd_stop(force=True, require_confirmation=False) == 0
+    assert (
+        entry.cmd_stop(
+            force=True,
+            require_confirmation=False,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     force.assert_called_once()
 
 
 def test_repeated_stop_needs_no_live_database_or_host(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     dependencies(monkeypatch)
     drained()
@@ -302,32 +381,17 @@ def test_repeated_stop_needs_no_live_database_or_host(
         "base.deploy.state.host_deploy_state.set_posture",
         MagicMock(side_effect=AssertionError("DB is down")),
     )
-    assert _restart_stop(timeout=1) == 0
-
-
-def test_failed_flush_cannot_be_released_by_a_bare_resume(
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    """Only `ava start` settles a failed receipt; a resume that skips it refuses."""
-    drained()
-    current = admission.require_operation("local", WHEN)
-    assert current.maintenance is not None
-    failed = MaintenanceHold(
-        MaintenancePhase.DRAINING, commands={42: 7}, failures={42: "final flush failed"}
+    assert (
+        _restart_stop(timeout=1, database_factory=operator_database, producer=operator_pipeline)
+        == 0
     )
-    pause_owner.change_maintenance("local", WHEN, current.maintenance, failed)
-    from ops.cluster.pause import unpause_local_cluster
-
-    with pytest.raises(RuntimeError, match="failed continuation/flush"):
-        unpause_local_cluster(database, event_bus)
-    with pytest.raises(RuntimeError, match="failed continuation/flush"):
-        agent_pause.resume_agents(database, event_bus)
-    assert admission.held()
 
 
 def test_two_stop_start_cycles_reuse_identity_not_old_operation(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     dependencies(monkeypatch)
     monkeypatch.setattr(command, "pause_agents", agent_pause.pause_agents)
@@ -335,19 +399,22 @@ def test_two_stop_start_cycles_reuse_identity_not_old_operation(
     monkeypatch.setattr(agent_pause, "machine_name", lambda: "test-machine")
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-    starts = resume_after_start(lambda _operation: 0)
+    starts = resume_after_start(lambda _operation, _database_factory: 0)
     holders: list[str | None] = []
     for _ in range(2):
-        assert _restart_stop(timeout=3) == 0
+        assert (
+            _restart_stop(timeout=3, database_factory=operator_database, producer=operator_pipeline)
+            == 0
+        )
         holders.append(pause_owner.read().holder)
         assert admission.held()
-        assert starts(None) == 0
+        assert starts(None, operator_database) == 0
         assert not admission.held()
     assert holders[0] != holders[1]
 
 
 def test_resource_stop_excludes_concurrent_start(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     from threading import Event, Thread
 
@@ -366,7 +433,7 @@ def test_resource_stop_excludes_concurrent_start(
     start = MagicMock(return_value=0)
 
     def waiting_start() -> None:
-        assert resume_after_start(start)(None) == 0
+        assert resume_after_start(start)(None, operator_database) == 0
         start_finished.set()
 
     starter = Thread(target=waiting_start)
@@ -392,6 +459,8 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Force stops the services with the pty-sessions service kept, then closes the
     terminals through it and stops it, with no drain and no owner notices;
@@ -409,11 +478,24 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
     name = "ava-agent-987-shell-2057-force"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
     if how == "stop":
-        rc = entry.cmd_stop(force=True, require_confirmation=False, stop_browser=False)
+        rc = entry.cmd_stop(
+            force=True,
+            require_confirmation=False,
+            stop_browser=False,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
     elif how == "restart":
-        rc = _restart_stop(force=True)
+        rc = _restart_stop(
+            force=True, database_factory=operator_database, producer=operator_pipeline
+        )
     else:
-        rc = _restart_stop(force=True, preserve_sessions=frozenset({SERVICE_UNIT}))
+        rc = _restart_stop(
+            force=True,
+            preserve_sessions=frozenset({SERVICE_UNIT}),
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
     kept = how == "keep-service"
     assert rc == 0
     assert all(call["force"] is True for call in root_calls)
@@ -492,7 +574,10 @@ def test_compensation_fault_does_not_mask_the_stop_report(
 
 
 def test_stop_compensates_after_a_data_plane_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The 2026-09-12 shape through the real stop() flow: the services phase ran,
     the data-plane phase failed, and the unit is restored instead of left dark.
@@ -513,6 +598,8 @@ def test_stop_compensates_after_a_data_plane_failure(
         announce=False,
         teardown_extras=False,
         timeout=1,
+        database_factory=operator_database,
+        producer=operator_pipeline,
     )
 
     assert rc == 1
@@ -522,7 +609,10 @@ def test_stop_compensates_after_a_data_plane_failure(
 
 
 def test_stop_does_not_compensate_when_the_data_plane_already_stopped(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A failure after the data-plane phase completed (`_mark_stopped`) keeps the
     report-only behavior: the stop's destructive work is done, and a restore would
@@ -544,6 +634,8 @@ def test_stop_does_not_compensate_when_the_data_plane_already_stopped(
         announce=False,
         teardown_extras=False,
         timeout=1,
+        database_factory=operator_database,
+        producer=operator_pipeline,
     )
 
     assert rc == 1
@@ -650,7 +742,12 @@ def test_services_restore_reports_a_child_that_never_returns(
 
 
 @pytest.mark.parametrize("leg", ["stop", "restart"])
-def test_stop_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch, leg: str) -> None:
+def test_stop_refused_inside_an_exec_domain(
+    monkeypatch: pytest.MonkeyPatch,
+    leg: str,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """Issue #2331: an exec-domain stop is SIGKILLed mid-drain with the call's process
     group, and a stop (a restart's stop leg too) closes this unit's persistent
     terminals — the refusal points at a shell no ava session hosts."""
@@ -659,13 +756,18 @@ def test_stop_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch, leg
 
     with pytest.raises(RuntimeError, match="login shell"):
         if leg == "stop":
-            entry.cmd_stop(require_confirmation=False, timeout=1)
+            entry.cmd_stop(
+                require_confirmation=False,
+                timeout=1,
+                database_factory=operator_database,
+                producer=operator_pipeline,
+            )
         else:
-            _restart_stop(timeout=1)
+            _restart_stop(timeout=1, database_factory=operator_database, producer=operator_pipeline)
 
 
 def test_nested_start_receives_the_exact_outer_operation_without_releasing_it(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     drained()
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
@@ -674,11 +776,13 @@ def test_nested_start_receives_the_exact_outer_operation_without_releasing_it(
     operation = admission.authorized_start("local", WHEN)
 
     @resume_after_start
-    def nested(authority: pause_owner.PauseOwnerSnapshot | None) -> int:
+    def nested(
+        authority: pause_owner.PauseOwnerSnapshot | None, database_factory: DatabaseFactory
+    ) -> int:
         assert authority is operation
         admission.require_start_allowed(authority)
         return 0
 
-    assert nested(operation) == 0
+    assert nested(operation, operator_database) == 0
     assert admission.held()
     unpause.assert_not_called()

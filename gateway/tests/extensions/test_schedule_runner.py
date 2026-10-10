@@ -21,6 +21,7 @@ import pytest
 
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules.runner import _script_filename
 from gateway.schedules.tests.runner_inputs import run_schedule as run
 
@@ -501,7 +502,7 @@ def test_script_filename(command: str, expected: str) -> None:
 
 @contextmanager
 def _watch_stalls(
-    monkeypatch: pytest.MonkeyPatch, *, patch_sleep: bool = False
+    monkeypatch: pytest.MonkeyPatch, *, patch_sleep: bool = False, database_gate: ProcessDbGate
 ) -> Generator[list[str], None, None]:
     """Record real guard verdicts without exiting the test process."""
     import gateway.schedules.runner as sr
@@ -516,7 +517,7 @@ def _watch_stalls(
     monkeypatch.setattr(sr, "_stall_action", record_stall)
     if patch_sleep:
         sr._patch_park_detection()
-    stop = sr._start_stall_guard(Database.from_settings(), 1, None)
+    stop = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
     try:
         yield fired
     finally:
@@ -526,14 +527,14 @@ def _watch_stalls(
 
 
 def test_stall_guard_fires_on_a_stalled_main_thread(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """A main-thread frame that does not advance past the timeout trips the
     guard (the stall verdict is recorded; the hard exit itself is os._exit in
     the guard thread and is not exercised in-process)."""
     import time
 
-    with _watch_stalls(monkeypatch) as fired:
+    with _watch_stalls(monkeypatch, database_gate=database_gate) as fired:
         deadline = time.monotonic() + 2.0
         while not fired and time.monotonic() < deadline:
             x = 0
@@ -543,7 +544,7 @@ def test_stall_guard_fires_on_a_stalled_main_thread(
 
 
 def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """A resident schedule parks in time.sleep between fire windows — that is
     the design, not a stall, so the guard must stay quiet."""
@@ -565,7 +566,7 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     # which is indistinguishable from a stall.
     _real_sleep = time.sleep
     sr._patch_park_detection()
-    stop = sr._start_stall_guard(Database.from_settings(), 1, None)
+    stop = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
     try:
         time.sleep(0.4)  # main thread parked in time.sleep the whole time
         assert fired == []
@@ -580,12 +581,12 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
 
 @pytest.mark.parametrize("capture_output", [True, False], ids=["captured", "uncaptured"])
 def test_stall_guard_ignores_a_live_child_wait(
-    monkeypatch: pytest.MonkeyPatch, capture_output: bool
+    monkeypatch: pytest.MonkeyPatch, capture_output: bool, database_gate: ProcessDbGate
 ) -> None:
     """A child wait may outlast the stall budget; its caller owns the timeout."""
     import subprocess
 
-    with _watch_stalls(monkeypatch) as fired:
+    with _watch_stalls(monkeypatch, database_gate=database_gate) as fired:
         subprocess.run(
             [sys.executable, "-c", "import time; time.sleep(0.5)"],
             capture_output=capture_output,
@@ -596,7 +597,7 @@ def test_stall_guard_ignores_a_live_child_wait(
 
 
 def test_stall_guard_fires_on_select_outside_subprocess(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """The select frame used by child waits must still expose socket wedges."""
     import selectors
@@ -605,7 +606,7 @@ def test_stall_guard_fires_on_select_outside_subprocess(
     reader, writer = socket.socketpair()
     with reader, writer, selectors.DefaultSelector() as selector:
         selector.register(reader, selectors.EVENT_READ)
-        with _watch_stalls(monkeypatch) as fired:
+        with _watch_stalls(monkeypatch, database_gate=database_gate) as fired:
             selector.select(timeout=0.5)
             assert fired, "stall guard ignored a socket wait outside subprocess"
             assert "select" in fired[0]
@@ -613,7 +614,7 @@ def test_stall_guard_fires_on_select_outside_subprocess(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="preexec_fn requires POSIX")
 def test_stall_guard_fires_during_subprocess_spawn(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """The caller's timeout does not bound Popen's wait for child startup."""
     import subprocess
@@ -622,7 +623,7 @@ def test_stall_guard_fires_during_subprocess_spawn(
     def slow_spawn() -> None:
         time.sleep(0.5)
 
-    with _watch_stalls(monkeypatch, patch_sleep=True) as fired:
+    with _watch_stalls(monkeypatch, patch_sleep=True, database_gate=database_gate) as fired:
         subprocess.run(
             [sys.executable, "-c", "pass"],
             capture_output=True,
@@ -635,7 +636,7 @@ def test_stall_guard_fires_during_subprocess_spawn(
 
 
 def test_stall_guard_fires_during_subprocess_argument_conversion(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """A blocking PathLike callback is not part of the bounded child wait."""
     import os
@@ -654,7 +655,7 @@ def test_stall_guard_fires_during_subprocess_argument_conversion(
 
         # EOF releases every conversion of the same argument, not just the first.
         wake = threading.Timer(0.5, writer.close)
-        with _watch_stalls(monkeypatch, patch_sleep=True) as fired:
+        with _watch_stalls(monkeypatch, patch_sleep=True, database_gate=database_gate) as fired:
             wake.start()
             try:
                 subprocess.run(  # noqa: S603 - test PathLike always resolves to sys.executable
@@ -672,7 +673,7 @@ def test_stall_guard_fires_during_subprocess_argument_conversion(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX subprocess flush and pipe semantics")
 def test_stall_guard_fires_during_subprocess_stdin_flush(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """communicate's entry flush can block before it checks its deadline."""
     import os
@@ -698,7 +699,7 @@ def test_stall_guard_fires_during_subprocess_stdin_flush(
         assert child.stdin.write(b"x") == 1  # Leave one byte in BufferedWriter.
 
         wake = threading.Timer(0.5, child.terminate)
-        with _watch_stalls(monkeypatch, patch_sleep=True) as fired:
+        with _watch_stalls(monkeypatch, patch_sleep=True, database_gate=database_gate) as fired:
             wake.start()
             try:
                 with pytest.raises(subprocess.TimeoutExpired):
@@ -713,7 +714,7 @@ def test_stall_guard_fires_during_subprocess_stdin_flush(
 
 
 def test_stall_guard_fires_during_subprocess_argument_selector(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """A selector in argument conversion is not communicate's selector wait."""
     import os
@@ -733,7 +734,7 @@ def test_stall_guard_fires_during_subprocess_argument_selector(
 
         # EOF makes every conversion ready; the timeout bounds a broken timer.
         wake = threading.Timer(0.5, writer.close)
-        with _watch_stalls(monkeypatch, patch_sleep=True) as fired:
+        with _watch_stalls(monkeypatch, patch_sleep=True, database_gate=database_gate) as fired:
             wake.start()
             try:
                 subprocess.run(  # noqa: S603 - test PathLike always resolves to sys.executable
@@ -768,18 +769,21 @@ def test_run_hung_subprocess_times_out_and_records_error(
 
 
 def test_stall_verdict_closes_run_row(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     # QA P2-1: a stall closes its run row as failed instead of forever in-progress.
     import gateway.schedules.runner as sr
 
     sid = _insert_schedule(db_conn, script="x = 1\n")
-    run_id = sr._record_run_start(Database.from_settings(), sid)
+    run_id = sr._record_run_start(Database.from_settings(gate=database_gate), sid)
     exited: list[int] = []
     monkeypatch.setattr(sr.os, "_exit", exited.append)
     monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", Mock())
 
-    sr._stall_action(Database.from_settings(), sid, "stalled in foo", run_id)
+    sr._stall_action(Database.from_settings(gate=database_gate), sid, "stalled in foo", run_id)
 
     assert exited == [1]
     assert _runs(db_conn, sid) == [(False, f"stalled ({sr._stall_timeout_s():.0f}s)")]

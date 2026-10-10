@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import types
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -13,6 +14,8 @@ from typing import Any, cast
 import pytest
 
 from base.daemon.health import DaemonProbe
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from services.supervision.ava_root.health import HealthMonitor
 from services.supervision.ava_root.manifest import (
     ROOT_ID,
@@ -61,7 +64,7 @@ def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
 
 @pytest.fixture(autouse=True)
 def _no_host_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
-    def empty(_requested: set[str]) -> list[Diagnostic]:
+    def empty(_requested: set[str], *, database: Callable[[], Database]) -> list[Diagnostic]:
         return []
 
     monkeypatch.setattr(glue, "build_diagnostics", empty)
@@ -271,3 +274,29 @@ def test_static_probe_references_are_read_only() -> None:
 
     with pytest.raises(TypeError):
         operator.setitem(cast(Any, glue.STATIC_PROBES), "svc-host", "wiring_fixture_probe:probe")
+
+
+async def test_reference_station_and_writer_share_one_entry_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+) -> None:
+    gates: list[ProcessDbGate] = []
+
+    def make_database(*, gate: ProcessDbGate) -> Database:
+        gates.append(gate)
+        return database
+
+    def diagnostics(_requested: set[str], *, database: Callable[[], Database]) -> list[Diagnostic]:
+        assert database() is database_handle
+        assert database() is database_handle
+        return []
+
+    database_handle = database
+    monkeypatch.setattr(Database, "from_settings", staticmethod(make_database))
+    monkeypatch.setattr(glue, "build_diagnostics", diagnostics)
+    monkeypatch.setattr(glue, "build_services", lambda: ())
+    rounds = glue.build_wiring(_context(tmp_path, _registry(())))[0]
+    assert isinstance(rounds, RootHealthRounds)
+    assert len(gates) == 2 and gates[0] is gates[1]
+    await rounds.stop()

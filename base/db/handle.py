@@ -2,10 +2,9 @@
 
 Components take a `Database` (or a connection/pool it opened), never the URL or `DbConfig`:
 the URL carries the login, and only the code that dials needs it. A composition root builds
-the handle once (`Database.from_settings()`) and passes it down; `base.db.connect()` /
-`pool()` / `async_pool()` without a handle remain as the process
-default that builds one from the live settings at each call, a shim that the
-`ambient-db` rule (scripts/structure/ambient_state) bans package by package.
+the handle once (`Database.from_settings(gate=gate)`) and passes it down. Every handle
+and cluster dial requires the entry's `ProcessDbGate`; independent pools and live-config
+rebuilds retain that same loaded image, admission posture and minimum-read budget.
 
 The dial decisions stay in `base/db/connections.py` (the `postgres-dial` single owner); this
 class only binds one `DbConfig` to them.
@@ -32,7 +31,7 @@ class Database:
         self,
         config: DbConfig,
         *,
-        gate: ProcessDbGate | None = None,
+        gate: ProcessDbGate,
         local_host: Callable[[], str] | None = None,
     ) -> None:
         self._config = config
@@ -43,7 +42,7 @@ class Database:
     def from_settings(
         cls,
         *,
-        gate: ProcessDbGate | None = None,
+        gate: ProcessDbGate,
         local_host: Callable[[], str] | None = None,
     ) -> Database:
         """The composition-root constructor: the config as the live settings hold it now."""

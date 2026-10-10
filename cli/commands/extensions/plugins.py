@@ -34,6 +34,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from base.agents.context.clients import DatabaseFactory
 from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
 
@@ -139,7 +140,14 @@ def _report_refusal(report: str) -> int:
 
 
 def _install_bare_skill(
-    pkg_dir: Path, name: str, url: str, path: str | None, ref: str | None, *, accept_risk: bool
+    pkg_dir: Path,
+    name: str,
+    url: str,
+    path: str | None,
+    ref: str | None,
+    *,
+    accept_risk: bool,
+    database_factory: DatabaseFactory,
 ) -> int:
     """Install a cloned bare-skill package into the load dir and register it.
 
@@ -155,6 +163,7 @@ def _install_bare_skill(
             path=path,
             ref=ref,
             accept_risk=accept_risk,
+            database_factory=database_factory,
         )
     except SkillScanRefused as e:
         return _report_refusal(e.report)
@@ -290,7 +299,12 @@ def _print_plugin_install(result: Materialized, report: str) -> None:
 
 
 def cmd_plugins_install(
-    url: str, ref: str | None, path: str | None, *, accept_risk: bool = False
+    url: str,
+    ref: str | None,
+    path: str | None,
+    *,
+    accept_risk: bool = False,
+    database_factory: DatabaseFactory,
 ) -> int:
     """`ava plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
     install an external package.
@@ -326,7 +340,15 @@ def cmd_plugins_install(
             return 1
 
         if name is not None:
-            return _install_bare_skill(pkg_dir, name, url, path, ref, accept_risk=accept_risk)
+            return _install_bare_skill(
+                pkg_dir,
+                name,
+                url,
+                path,
+                ref,
+                accept_risk=accept_risk,
+                database_factory=database_factory,
+            )
 
         if _claude_code_plugin.is_claude_code_plugin(pkg_dir):
             return _install_claude_code_plugin(pkg_dir, url, path, ref, accept_risk=accept_risk)

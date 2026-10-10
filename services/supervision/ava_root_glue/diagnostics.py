@@ -16,7 +16,10 @@ from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 
+from base.agents.context.clients import ClientSet
+from base.cluster.machine import machine_name
 from base.daemon.health import DaemonProbe, ProbeVerdict
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from services.supervision.ava_root.health import HealthMonitor, ProbeRunner
 
@@ -156,6 +159,8 @@ class RootHealthRounds:
         health: HealthMonitor,
         diagnostics: DiagnosticMonitor,
         *,
+        clients: ClientSet,
+        image: LoadedCommit,
         interval_s: float = 60.0,
         tasks: asyncio.TaskGroup | None = None,
     ) -> None:
@@ -165,6 +170,8 @@ class RootHealthRounds:
         self._home_id = hashlib.sha256(self._home.encode()).hexdigest()
         self._health = health
         self._diagnostics = diagnostics
+        self._clients = clients
+        self._image = image
         self._interval_s = interval_s
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
@@ -203,7 +210,19 @@ class RootHealthRounds:
             raise RuntimeError("root health rounds require the participant task group")
         from base.log import init_gateway_process, logger
 
-        init_gateway_process(name="ava-root")
+        try:
+            init_gateway_process(
+                name="ava-root",
+                producer=self._clients.event_pipeline,
+                machine_reader=machine_name,
+                image=self._image,
+            )
+        except BaseException as primary:
+            try:
+                self._clients.close(pipeline_timeout=2)
+            except BaseException as cleanup:
+                primary.add_note(f"root pipeline startup cleanup failed: {cleanup!r}")
+            raise
         self._expected_since = time.time()
         logger.info(
             "root health rounds expected",
@@ -253,5 +272,9 @@ class RootHealthRounds:
                 await asyncio.to_thread(telemetry.sync, timeout=2, bounded=True)
             except BaseException as exc:
                 failures.append(exc)
+        try:
+            self._clients.close(pipeline_timeout=2)
+        except BaseException as exc:
+            failures.append(exc)
         if failures:
             raise BaseExceptionGroup("root health rounds teardown failed", failures)

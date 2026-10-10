@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine, Iterator
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -17,14 +18,16 @@ import base.db
 from base.config import settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
+from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.ttl_reaper import cadence, daemon, remote, shells, sweep
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
-    p = base.db.pool(max_size=4)
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    p = base.db.pool(max_size=4, gate=database_gate)
     try:
         yield p
     finally:
@@ -67,14 +70,21 @@ def _park_or_crash(monkeypatch: pytest.MonkeyPatch, *, crashing: str, cancelled:
 
 @pytest.mark.parametrize("crashing", ["sweep", "remote"])
 async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, crashing: str
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    crashing: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     cancelled: list[str] = []
     _park_or_crash(monkeypatch, crashing=crashing, cancelled=cancelled)
 
     with pytest.raises(ExceptionGroup) as raised:
         await daemon._run_loops(
-            pool, Database.from_settings(), EventBus.from_settings(), LivenessGroup()
+            pool,
+            Database.from_settings(gate=database_gate),
+            EventBus.from_settings(),
+            LivenessGroup(),
         )
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
@@ -82,19 +92,22 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
 
 
 async def test_each_loop_reports_its_own_progress(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     liveness = LivenessGroup()
     _park_or_crash(monkeypatch, crashing="sweep", cancelled=[])
 
     with pytest.raises(ExceptionGroup):
-        await daemon._run_loops(pool, Database.from_settings(), EventBus.from_settings(), liveness)
+        await daemon._run_loops(
+            pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), liveness
+        )
 
     assert set(liveness.snapshot()) == {"sweep", "remote"}
 
 
 async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """The exception reaches `main` (exit code 1, supervisor restarts the unit),
     and the pool, the health server and the pidfile are released on the way."""
@@ -130,7 +143,7 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch.setattr(daemon, "_run_loops", crashing_loops)
 
     with pytest.raises(ExceptionGroup):
-        await daemon.run()
+        await daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
 
     assert sorted(released) == ["health", "pidfile", "pool"]
 
@@ -151,11 +164,13 @@ def test_a_phase_is_claimed_once_per_interval(
     assert cadence.claim_due(pool, cadence.TORN_POINTER_SCAN, 3600.0) is False
 
 
-def test_a_claim_survives_a_restart(db_conn: psycopg.Connection, pool: ConnectionPool) -> None:
+def test_a_claim_survives_a_restart(
+    db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
     """The clock is a row, not process state: a fresh pool (a restarted service)
     reads the stamp the previous one wrote."""
     assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 86400.0) is True
-    restarted = base.db.pool(max_size=2)
+    restarted = base.db.pool(max_size=2, gate=database_gate)
     try:
         assert cadence.claim_due(restarted, cadence.FIRE_LOG_PRUNE, 86400.0) is False
     finally:
@@ -225,7 +240,7 @@ async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
 
 
 async def test_the_remote_round_reaps_shells(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     calls: list[str] = []
 
@@ -237,7 +252,9 @@ async def test_the_remote_round_reaps_shells(
 
     monkeypatch.setattr(remote.shells, "reap_expired_shells", reap)
 
-    await remote.remote_round(pool, Database.from_settings(), EventBus.from_settings(), _progress())
+    await remote.remote_round(
+        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), _progress()
+    )
 
     assert calls == ["shells"]
 
@@ -259,8 +276,7 @@ def _rows(*placements: tuple[str, int]) -> list[dict[str, object]]:
 
 
 async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_order(
-    monkeypatch: pytest.MonkeyPatch,
-    event_bus: EventBus,
+    monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
 ) -> None:
     """A slow machine holds up only its own rows: while machine `slow` is wedged
     in a dispatch, machine `fast` finishes both of its rows."""
@@ -285,7 +301,9 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
 
     faked_pool = cast(ConnectionPool, None)  # every pool consumer above is faked
     task = asyncio.create_task(
-        shells.reap_expired_shells(faked_pool, Database.from_settings(), event_bus, _progress())
+        shells.reap_expired_shells(
+            faked_pool, Database.from_settings(gate=database_gate), event_bus, _progress()
+        )
     )
     for _ in range(100):
         if [m for m, _ in finished].count("fast") == 2:
@@ -301,7 +319,7 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
 
 
 async def test_a_dispatch_past_its_deadline_defers_the_row(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """A dispatch that outlives the deadline the RPC client's own budget sizes is
     cut and the row left for the next round, never wedging the loop."""
@@ -313,7 +331,12 @@ async def test_a_dispatch_past_its_deadline_defers_the_row(
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", hang)
     monkeypatch.setattr(shells, "dispatch_deadline_s", lambda: 0.05)
 
-    assert await shells._dispatch_shell_kill(Database.from_settings(), "macmini", 1, 2) is None
+    assert (
+        await shells._dispatch_shell_kill(
+            Database.from_settings(gate=database_gate), "macmini", 1, 2
+        )
+        is None
+    )
 
 
 def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
@@ -330,24 +353,33 @@ def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
 # --- the stop window ---------------------------------------------------------
 
 
-def _sweep_loop(pool: ConnectionPool, progress: LoopProgress) -> Coroutine[Any, Any, None]:
-    return sweep.sweep_loop(pool, Database.from_settings(), EventBus.from_settings(), progress)
+def _sweep_loop(
+    pool: ConnectionPool, progress: LoopProgress, database_gate: ProcessDbGate
+) -> Coroutine[Any, Any, None]:
+    return sweep.sweep_loop(
+        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
+    )
 
 
-def _remote_loop(pool: ConnectionPool, progress: LoopProgress) -> Coroutine[Any, Any, None]:
-    return remote.remote_loop(pool, Database.from_settings(), EventBus.from_settings(), progress)
+def _remote_loop(
+    pool: ConnectionPool, progress: LoopProgress, database_gate: ProcessDbGate
+) -> Coroutine[Any, Any, None]:
+    return remote.remote_loop(
+        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
+    )
 
 
 @pytest.mark.parametrize("loop", [_sweep_loop, _remote_loop], ids=["sweep", "remote"])
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_borrows_no_connection(
     monkeypatch: pytest.MonkeyPatch,
-    loop: Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]],
+    loop: Callable[[ConnectionPool, LoopProgress, ProcessDbGate], Coroutine[Any, Any, None]],
     quiesced: bool,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     pool = MagicMock()
-    task = asyncio.create_task(loop(cast("ConnectionPool", pool), _progress()))
+    task = asyncio.create_task(loop(cast("ConnectionPool", pool), _progress(), database_gate))
     try:
         await asyncio.sleep(0.2)
     finally:

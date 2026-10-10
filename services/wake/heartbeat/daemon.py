@@ -29,12 +29,14 @@ import os
 import signal
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.cluster.machine import validate_machine_name
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
@@ -42,10 +44,14 @@ from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database, publish_inbound_wake
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.emitter import build_pipeline
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S, completion_digest
 from services.wake.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
@@ -647,7 +653,7 @@ async def _liveness_loop(
         await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
 
 
-async def run() -> None:
+async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
     if _is_running():
         _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -662,10 +668,12 @@ async def run() -> None:
     liveness_progress = liveness.register("liveness", _LIVENESS_TIMEOUT_S)
     digest_progress = liveness.register("completion_digest", _DIGEST_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint()
-    health = await start_health_server("heartbeat", endpoint.health_port, liveness=liveness)
+    health = await start_health_server(
+        "heartbeat", endpoint.health_port, liveness=liveness, image=image
+    )
     _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
 
-    db = Database.from_settings()
+    db = database()
     pool = db.pool()
     bus = EventBus.from_settings()
     try:
@@ -697,9 +705,22 @@ def main() -> None:
     """
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="heartbeat")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="heartbeat")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="heartbeat",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        image=image,
+    )
     install_graceful_shutdown("heartbeat")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -710,7 +731,7 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(database=database, image=image))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[heartbeat] interrupted, shutting down")

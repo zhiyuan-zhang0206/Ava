@@ -11,6 +11,7 @@ from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_sn
 from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _make_runtime
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
@@ -90,6 +91,7 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Turn-end fallback: when claim is about to idle (no conversation yet),
     the wrapper must pass full_window=True so the enter snapshot is the full
@@ -102,7 +104,9 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     from agent.graph.claim import node as claim_node_mod
     from agent.graph.claim.node import claim_node
 
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
 
     # stub the body: we only exercise the wrapper + node_lifecycle enter path
     async def _stub_impl(_state, _runtime, _config):
@@ -115,7 +119,7 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     state.messages = [SystemMessage(content="prompt")]
     await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
+        _make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
         _config(
             tid,
         ),

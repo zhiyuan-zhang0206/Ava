@@ -25,6 +25,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -49,6 +50,7 @@ def _runtime(
     extensions: ExtensionRegistry = EMPTY,
     *,
     resources: HostedTurnResources | None = None,
+    database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
     """`ops_pool=None` takes the container path."""
     return Runtime(
@@ -61,7 +63,7 @@ def _runtime(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
             extensions=extensions,
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
@@ -100,14 +102,19 @@ def skills_unit(unit_home: Path, set_machine_identity: Callable[..., None]) -> N
 
 
 async def test_empty_window_lays_down_system_prompt_then_notes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """An empty window is the one condition that triggers establishment: the
     SystemMessage first, then the notes in registry order."""
     tid = create_agent(db_conn)
     notes = _fake_notes(monkeypatch, "memory_discipline", "memory", "agent_id")
 
-    cmd = await init_context_node(AgentState(), _runtime(aops_pool), _config(tid))
+    cmd = await init_context_node(
+        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+    )
 
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert isinstance(msgs[0], SystemMessage)
@@ -117,7 +124,7 @@ async def test_empty_window_lays_down_system_prompt_then_notes(
 
 
 async def test_a_plugin_declaration_reaches_the_head_through_the_context_registry(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """A plugin's declared section and note are laid down because the turn's context carries its
     registry — and are absent from a context that carries none."""
@@ -141,8 +148,12 @@ async def test_a_plugin_declaration_reaches_the_head_through_the_context_registr
         )
     )
 
-    with_plugin = await init_context_node(AgentState(), _runtime(aops_pool, registry), _config(tid))
-    without = await init_context_node(AgentState(), _runtime(aops_pool), _config(tid))
+    with_plugin = await init_context_node(
+        AgentState(), _runtime(aops_pool, registry, database_gate=database_gate), _config(tid)
+    )
+    without = await init_context_node(
+        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+    )
 
     declared: list[AnyMessage] = with_plugin.update["messages"]  # type: ignore[index]
     bare: list[AnyMessage] = without.update["messages"]  # type: ignore[index]
@@ -153,21 +164,29 @@ async def test_a_plugin_declaration_reaches_the_head_through_the_context_registr
 
 
 async def test_intact_window_is_a_pass_through(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A live conversation is left alone — no head, no re-injection, no update."""
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
     state = AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="prev")])
 
-    cmd = await init_context_node(state, _runtime(aops_pool), _config(tid))
+    cmd = await init_context_node(
+        state, _runtime(aops_pool, database_gate=database_gate), _config(tid)
+    )
 
     assert cmd.update is None
     assert cmd.goto == "claim"
 
 
 async def test_parked_tail_lands_behind_the_head(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """What a compaction parks — the summary, then any chats co-batched with it —
     is laid down after the notes, and the requester's resume is honoured."""
@@ -179,7 +198,9 @@ async def test_parked_tail_lands_behind_the_head(
         context_reset=ContextReset(tail=[summary, chat], resume="before_llm"),
     )
 
-    cmd = await init_context_node(state, _runtime(aops_pool), _config(tid))
+    cmd = await init_context_node(
+        state, _runtime(aops_pool, database_gate=database_gate), _config(tid)
+    )
 
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert isinstance(msgs[0], SystemMessage)
@@ -190,7 +211,10 @@ async def test_parked_tail_lands_behind_the_head(
 
 
 async def test_consumed_reset_is_cleared(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The channel is written back to its default, so a later invocation cannot
     replay the same tail into a second window."""
@@ -200,7 +224,9 @@ async def test_consumed_reset_is_cleared(
         context_reset=ContextReset(tail=[HumanMessage(content="s")], resume="llm"),
     )
 
-    cmd = await init_context_node(state, _runtime(aops_pool), _config(tid))
+    cmd = await init_context_node(
+        state, _runtime(aops_pool, database_gate=database_gate), _config(tid)
+    )
 
     reset = cmd.update["context_reset"]  # type: ignore[index]
     assert reset.tail == []  # pyright: ignore[reportUnknownMemberType]
@@ -208,7 +234,7 @@ async def test_consumed_reset_is_cleared(
 
 
 async def test_container_mode_head_is_the_bare_prompt(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """The eval harness has no ops_pool, no workspace, and nothing the notes
     describe — its head is the system prompt alone, so an eval's context stays
@@ -216,7 +242,9 @@ async def test_container_mode_head_is_the_bare_prompt(
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory", "agent_id")  # would be injected if consulted
 
-    cmd = await init_context_node(AgentState(), _runtime(None), _config(tid))
+    cmd = await init_context_node(
+        AgentState(), _runtime(None, database_gate=database_gate), _config(tid)
+    )
 
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -224,7 +252,10 @@ async def test_container_mode_head_is_the_bare_prompt(
 
 
 async def test_head_is_identical_whether_or_not_the_window_had_history(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The regression this node exists to prevent.
 
@@ -246,12 +277,14 @@ async def test_head_is_identical_whether_or_not_the_window_had_history(
     )
     _fake_notes(monkeypatch, *tags)
 
-    cold = await init_context_node(AgentState(), _runtime(aops_pool), _config(tid))
+    cold = await init_context_node(
+        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+    )
     # A compaction reaches this node the same way: the window is already empty
     # (RemoveMessage(REMOVE_ALL) applied), with the summary parked.
     post_compact = await init_context_node(
         AgentState(context_reset=ContextReset(tail=[HumanMessage(content="sum")], resume="llm")),
-        _runtime(aops_pool),
+        _runtime(aops_pool, database_gate=database_gate),
         _config(tid),
     )
 
@@ -271,6 +304,7 @@ async def test_established_head_records_what_the_capability_index_lists(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The `# Capabilities` section it renders is a snapshot of a live filesystem
     scan, so the same act has to record what that snapshot covered — otherwise
@@ -288,7 +322,9 @@ async def test_established_head_records_what_the_capability_index_lists(
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
 
-    cmd = await init_context_node(AgentState(), _runtime(aops_pool), _config(tid))
+    cmd = await init_context_node(
+        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+    )
 
     prompt = str(cmd.update["messages"][0].content)  # type: ignore[index]
     assert "- `ava.skills.alpha` — Alpha desc" in prompt
@@ -300,6 +336,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The whole seam, composed: establish a window, install a skill into the
     live catalog the way an install does, and the standing SystemMessage — frozen
@@ -324,7 +361,9 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
 
-    established = await init_context_node(AgentState(), _runtime(aops_pool), _config(tid))
+    established = await init_context_node(
+        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+    )
     head = established.update["messages"]  # type: ignore[index]
 
     (d / "beta").mkdir(parents=True)
@@ -337,7 +376,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
 
     state = AgentState(messages=head, capabilities=established.update["capabilities"])  # type: ignore[index]
     drift_hook = framework_hooks()["before_llm"][-1]  # the capability-index drift check runs last
-    update = await drift_hook(state, _runtime(aops_pool), _config(tid))
+    update = await drift_hook(state, _runtime(aops_pool, database_gate=database_gate), _config(tid))
 
     assert update is not None
     (note,) = update["messages"]
@@ -351,6 +390,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A simultaneous skill install survives the hook-to-LLM compaction path.
 
@@ -379,7 +419,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     _fake_notes(monkeypatch, "memory")
 
     established = await init_context_node(
-        AgentState(), _runtime(aops_pool, resources=hosted_resources), _config(tid)
+        AgentState(),
+        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate),
+        _config(tid),
     )
 
     # A skill lands mid-window, and the window is simultaneously over the
@@ -417,7 +459,11 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )
     cmd = await make_hook_runner(
         "before_llm", "llm", [(None, hook) for hook in framework_hooks()["before_llm"]]
-    )(state, _runtime(aops_pool, resources=hosted_resources), _config(tid))
+    )(
+        state,
+        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate),
+        _config(tid),
+    )
 
     assert cmd.goto == "llm"
     hook_update = cast("dict[str, object]", cmd.update)
@@ -427,7 +473,10 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     from agent.graph.llm.node import llm_node
 
     cmd = await llm_node(
-        state, _runtime(aops_pool, resources=hosted_resources), _config(tid), ledger=LlmLedger()
+        state,
+        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate),
+        _config(tid),
+        ledger=LlmLedger(),
     )
     assert cmd.goto == "init_context"
     assert isinstance(cmd.update, dict)
@@ -442,7 +491,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
 
     reestablished = await init_context_node(
         AgentState(messages=committed, context_reset=cmd.update["context_reset"]),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        _runtime(aops_pool, resources=hosted_resources),
+        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate),
         _config(tid),
     )
 
@@ -513,7 +562,7 @@ def test_capabilities_snapshot_survives_the_checkpoint_round_trip() -> None:
 
 
 async def test_compacted_takeover_context_restores_explanation_before_summary(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     from agent.hooks.compact import build_compact_transition
 
@@ -526,7 +575,9 @@ async def test_compacted_takeover_context_restores_explanation_before_summary(
     compacted = prior.model_copy(
         update={"messages": [], "context_reset": transition["context_reset"]}
     )
-    cmd = await init_context_node(compacted, _runtime(None), _config(42))
+    cmd = await init_context_node(
+        compacted, _runtime(None, database_gate=database_gate), _config(42)
+    )
     messages = cast(list[Any], cmd.update["messages"])  # type: ignore[index]
     assert isinstance(messages[0], SystemMessage)
     assert messages[1].id == "impersonation-introduction"
@@ -534,4 +585,6 @@ async def test_compacted_takeover_context_restores_explanation_before_summary(
     assert "Finished the fix" in messages[2].content
     restored = compacted.model_copy(update=cmd.update)
     assert restored.impersonation_introduced is True
-    assert (await init_context_node(restored, _runtime(None), _config(42))).update is None
+    assert (
+        await init_context_node(restored, _runtime(None, database_gate=database_gate), _config(42))
+    ).update is None

@@ -140,6 +140,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
             pool=app.state.db_pool,
             db=app.state.db,
             authority=config_authority,
+            image=app.state.process_image,
         )
 
 
@@ -195,6 +196,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
             dispatch_sync,
             kind,
             payload,
+            image=app.state.process_image,
             pool=app.state.db_pool,
             db=app.state.db,
             authority=config_authority,
@@ -253,6 +255,8 @@ async def test_unknown_remote_kind_holds_without_legacy_fallback(
             executor=executor,
             authority=config_authority,
             catalog=model_catalog,
+            database=lambda: app.state.db,
+            image=app.state.process_image,
         )
     assert status == OpStatus.FAILED and "unknown kind" in str(result["error"])
     # Source does not reinterpret an unsupported version as legacy upload_receive.
@@ -366,6 +370,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
         pool=app.state.db_pool,
         db=app.state.db,
         authority=config_authority,
+        image=app.state.process_image,
     )
     assert status == OpStatus.FAILED and result["reason"] == "upload-source-unavailable-v1"
     assert not path.exists()
@@ -465,6 +470,7 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
             dispatch_sync,
             kind,
             payload,
+            image=app.state.process_image,
             pool=app.state.db_pool,
             db=app.state.db,
             authority=config_authority,
@@ -515,6 +521,7 @@ def test_legacy_remote_quota_counts_hidden_ready_and_receiving(
             pool=app.state.db_pool,
             db=app.state.db,
             authority=config_authority,
+            image=app.state.process_image,
         )
     assert not (source.agent_upload_dir(agent, create=False) / "flat.txt").exists()
 
@@ -548,6 +555,7 @@ def test_legacy_remote_overwrite_net_quota_and_network_without_db_borrow(
             pool=pool,
             db=app.state.db,
             authority=config_authority,
+            image=app.state.process_image,
         )
     assert status == OpStatus.COMPLETED and result == {"path": str(target)}
     assert target.read_bytes() == b"abcde"

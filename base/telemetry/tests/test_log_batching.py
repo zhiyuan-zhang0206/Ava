@@ -26,7 +26,8 @@ from typing import Any, cast
 import pytest
 
 from base import log as slog
-from base import telemetry
+from base import paths, telemetry
+from base.db import Database
 from base.telemetry import emitter, loss
 
 
@@ -231,7 +232,7 @@ def _rec(extra: dict[str, Any]) -> Any:
     return {"extra": extra}
 
 
-def test_add_postgres_sink_registers_at_most_once() -> None:
+def test_add_postgres_sink_registers_at_most_once(database: Database) -> None:
     """Two `add_postgres_sink` calls (exec_child's env + request init paths)
     must not double-register the adapter: one loguru record lands exactly one
     mirror row. The 2026-08-24 double registration wrote every post-init
@@ -241,8 +242,13 @@ def test_add_postgres_sink_registers_at_most_once() -> None:
 
     from base.log import logger as _g
 
-    first = slog.add_postgres_sink(process="test-dup-guard")
-    second = slog.add_postgres_sink(process="test-dup-guard")
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    first = slog.add_postgres_sink(
+        process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
+    )
+    second = slog.add_postgres_sink(
+        process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
+    )
     assert second == first, "repeat registration must return the live sink id"
 
     marker = f"dup-guard-{time.time_ns()}"
@@ -267,6 +273,7 @@ def test_add_postgres_sink_registers_at_most_once() -> None:
                     rows.append(obj)
         assert len(rows) == 1, f"expected 1 mirror row, got {len(rows)}"
     finally:
+        pipeline.stop(timeout=2)
         _g.remove(first)
 
 
@@ -376,7 +383,7 @@ def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyP
     # same process (xdist workers share the module) — reset it so the
     # first-failure report cadence assertion is deterministic.
     monkeypatch.setattr(emitter, "_jsonl_failures", 0)
-    monkeypatch.setattr(emitter, "logs_dir", _boom)
+    monkeypatch.setattr(paths, "logs_dir", _boom)
     sink_id = logger.add(
         lambda m: captured.append(m.record["message"]),
         level="WARNING",

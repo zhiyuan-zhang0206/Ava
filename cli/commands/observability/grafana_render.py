@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from base.db import Database
+from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
 
 __all__ = ["cmd_grafana_render"]
@@ -77,7 +77,7 @@ def _report_diff(target: Path, current: str, rendered: str) -> None:
             print(f"  {label}: {printed}", file=sys.stderr)
 
 
-def cmd_grafana_render(*, force: bool, repo_only: bool) -> int:
+def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: DatabaseFactory) -> int:
     """Render the ava-ops dashboard and diff it (default) or write it (--force).
 
     The spec set is the checkout's plugins plus, unless ``--repo_only``, the
@@ -99,7 +99,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool) -> int:
 
     from base.telemetry.metrics.grafana_dashboard_supply import render_dashboard_json
 
-    rendered, failed = render_dashboard_json(Database.from_settings(), repo_only=repo_only)
+    rendered, failed = render_dashboard_json(database_factory(), repo_only=repo_only)
     if failed:
         print(
             f"plugin load failures (skipped, panels missing from this render): {', '.join(failed)}",

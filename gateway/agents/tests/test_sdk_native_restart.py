@@ -15,6 +15,7 @@ from base.agents import GatewayUnavailable
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.plugin_providers import build_model_catalog
 from gateway.agents import lifecycle
 from gateway.app import app
@@ -28,8 +29,10 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _incarnation, target = await managed_work(db_conn, aops_pool)
+    _incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     secret = "sdk-restart-test-secret"  # noqa: S105 -- isolated fixture credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)

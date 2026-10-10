@@ -35,7 +35,7 @@ from gateway.http.auth import request_principal
 from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.auth.webhook import authenticate_webhook
 from ops.roster.service_spec import ServiceSpec, api_access
-from services.agent_runner.agent_ops import _boot as ops_boot
+from services.agent_runner.agent_ops import boot as ops_boot
 from tests.fixtures.gateway_config import gateway_test_client
 
 _HUMAN = "human-" + "h" * 40
@@ -395,9 +395,9 @@ async def _ops_status(digests: frozenset[str] | None, bearer: str | None) -> int
 
 def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway: Path) -> None:
     tokens = _tokens(gateway).api
-    acceptance = ops_boot._ops_acceptance()
+    acceptance = ops_boot.ops_acceptance()
     assert acceptance == frozenset(api.acceptance(gateway).values())
-    assert ops_boot._ops_bind_host(acceptance) == "0.0.0.0"  # noqa: S104
+    assert ops_boot.ops_bind_host(acceptance) == "0.0.0.0"  # noqa: S104
     for token, status in (
         (tokens.gateway, 200),
         (tokens.runner, 200),
@@ -408,7 +408,7 @@ def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway:
     ):
         assert asyncio.run(_ops_status(acceptance, token)) == status
     _unadmit(gateway)
-    assert asyncio.run(_ops_status(ops_boot._ops_acceptance(), tokens.gateway)) == 401
+    assert asyncio.run(_ops_status(ops_boot.ops_acceptance(), tokens.gateway)) == 401
 
 
 def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Path) -> None:
@@ -417,21 +417,21 @@ def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Pa
     It never falls back to the open, unauthenticated posture (None)."""
     tokens = _tokens(gateway).api
     _unadmit(gateway)
-    acceptance = ops_boot._ops_acceptance()
+    acceptance = ops_boot.ops_acceptance()
     assert acceptance == frozenset()
-    assert ops_boot._ops_bind_host(acceptance) == "0.0.0.0"  # noqa: S104
+    assert ops_boot.ops_bind_host(acceptance) == "0.0.0.0"  # noqa: S104
     for token in (tokens.gateway, tokens.runner, _HUMAN, None):
         assert asyncio.run(_ops_status(acceptance, token)) == 401
 
 
 def test_ops_posture_follows_the_api(gateway: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    assert ops_boot._ops_acceptance() is None
-    assert ops_boot._ops_bind_host(None) == "127.0.0.1"
+    assert ops_boot.ops_acceptance() is None
+    assert ops_boot.ops_bind_host(None) == "127.0.0.1"
     # A remote-managed plane keeps no generations: its gateway presents the human secret.
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
-    assert ops_boot._ops_acceptance() == frozenset({api.token_digest(_HUMAN)})
+    assert ops_boot.ops_acceptance() == frozenset({api.token_digest(_HUMAN)})
 
 
 @pytest.fixture
@@ -478,7 +478,7 @@ def test_remote_unit_ops_accepts_its_generation_never_the_human_secret(
     gateway: Path, runner_home: Path
 ) -> None:
     tokens = _tokens(gateway).api
-    acceptance = ops_boot._ops_acceptance()
+    acceptance = ops_boot.ops_acceptance()
     assert acceptance == frozenset(
         {api.token_digest(tokens.gateway), api.token_digest(tokens.runner)}
     )

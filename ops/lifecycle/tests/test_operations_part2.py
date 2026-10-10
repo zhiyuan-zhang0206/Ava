@@ -15,6 +15,7 @@ from uuid import UUID
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
 from base.lm.plugin_providers import build_model_catalog
@@ -25,8 +26,8 @@ from ops.rpc_schemas import (
 )
 
 
-def _db() -> Database:
-    return Database.from_settings()
+def _db(*, database_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(gate=database_gate)
 
 
 @pytest.fixture

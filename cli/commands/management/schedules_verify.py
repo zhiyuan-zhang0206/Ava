@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from base import telemetry
+from base.agents.context.clients import DatabaseFactory
+from base.telemetry import EventPipeline
 
 # One child's budget. task #3696 exception inventory: a self-imposed guard on a
 # single check child — a healthy top-level import set takes seconds, so a child
@@ -69,15 +71,14 @@ def _check_script(script: str) -> str | None:
     return f"tool-error:{tail or f'rc={proc.returncode}'}"
 
 
-def _read_schedule_rows() -> list[tuple[int, str, str]]:
+def _read_schedule_rows(*, database_factory: DatabaseFactory) -> list[tuple[int, str, str]]:
     """All schedules as (id, name, script) — stopped rows included.
 
     A direct read (not `/api/schedules`) so the check works while the gateway is
     down: the DB is the authority for what a runner materializes.
     """
-    from base.db import Database
 
-    with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
+    with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT id, name, script FROM schedules ORDER BY id")
         return [(row[0], row[1], row[2] or "") for row in cur.fetchall()]
 
@@ -153,6 +154,8 @@ def cmd_schedules_verify(
     rows_file: str | None = None,
     notify: bool = True,
     ports: VerifyPorts | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
 ) -> int:
     """`ava schedules verify [--check-file PATH | --rows-file PATH] [--no-notify]` — the dry-import and call-signature sweep.
 
@@ -179,15 +182,21 @@ def cmd_schedules_verify(
     if rows_file is not None:
         notify = False
     ports = ports or VerifyPorts(
-        read_rows=partial(_read_rows_file, rows_file) if rows_file else _read_schedule_rows,
+        read_rows=partial(_read_rows_file, rows_file)
+        if rows_file
+        else partial(_read_schedule_rows, database_factory=database_factory),
         check_script=_check_script,
-        report=_report_verify,
+        report=partial(_report_verify, producer=producer),
     )
     return _verify_sweep(notify=notify, ports=ports)
 
 
 def _report_verify(
-    *, checked: int, reds: list[tuple[int, str, str]], tool_error: str | None
+    *,
+    checked: int,
+    reds: list[tuple[int, str, str]],
+    tool_error: str | None,
+    producer: Callable[[], EventPipeline],
 ) -> None:
     """Emit one `schedule_verify_failed` event for a non-clean sweep.
 
@@ -203,6 +212,7 @@ def _report_verify(
     telemetry.emit(
         "telemetry",
         "schedule_verify_failed",
+        producer=producer,
         level="error",
         source="schedule-verify",
         attributes={
@@ -216,5 +226,9 @@ def _report_verify(
 
 def h_schedules_verify(args: argparse.Namespace) -> int:
     return cmd_schedules_verify(
-        check_file=args.check_file, rows_file=args.rows_file, notify=not args.no_notify
+        check_file=args.check_file,
+        rows_file=args.rows_file,
+        notify=not args.no_notify,
+        database_factory=args.database_factory,
+        producer=args.producer,
     )

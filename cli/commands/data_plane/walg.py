@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.dataplane import walg_binary
 from base.config import ConfigBoot
 from base.db import Database
@@ -36,7 +37,9 @@ def _stamped(line: str) -> None:
     print(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
 
 
-def cmd_walg_run() -> int:
+def cmd_walg_run(
+    *, database_factory: DatabaseFactory, database_for_url: Callable[[str], Database]
+) -> int:
     """Run one daily tick (backup, verify, retention); non-zero only when a step failed.
 
     The OS job runs exactly this, and so can an operator: concurrent runs stand down
@@ -49,10 +52,12 @@ def cmd_walg_run() -> int:
             config.read_process_environment()
         return config.view.walg.walg_config_file
 
-    return tick.run_tick(Database.from_settings(), _stamped, path_reader=path_reader)
+    return tick.run_tick(
+        database_factory(), _stamped, path_reader=path_reader, database_for_url=database_for_url
+    )
 
 
-def cmd_walg_drill() -> int:
+def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
     """Run the recovery drill on the newest backup now; non-zero unless it passed.
 
     The tick runs the same drill once a week before its backup; a success here counts
@@ -65,7 +70,7 @@ def cmd_walg_drill() -> int:
             config.read_process_environment()
         return config.view.walg.walg_config_file
 
-    return tick.run_drill_now(_stamped, path_reader=path_reader)
+    return tick.run_drill_now(_stamped, path_reader=path_reader, database_for_url=database_for_url)
 
 
 def cmd_walg_restore(

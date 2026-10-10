@@ -8,10 +8,14 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.db.tests.fakes import patch_database
 from base.deploy.lifecycle import service_selection
 from base.deploy.maintenance import pause_owner
 from cli.commands.cluster import health as cluster_health
+from cli.commands.cluster.tests.health_probe_inputs import Probe
+from cli.commands.cluster.tests.health_probe_inputs import probe as probe
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _select_excluded(names: set[str]) -> None:
@@ -71,6 +75,8 @@ def alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
 
 @pytest.mark.parametrize("intent", ["disabled", "maintenance"])
 def test_expected_low_population_does_not_rollback_or_promote(
+    probe: Probe,
+    operator_database: DatabaseFactory,
     probe_home: Path,
     rollbacks: list[list[str]],
     alerts: list[dict[str, object]],
@@ -84,8 +90,8 @@ def test_expected_low_population_does_not_rollback_or_promote(
         pause_owner.begin_maintenance("test-maintenance", datetime.now(UTC))
         marker = pause_owner.state_path()
     intent_before = marker.read_bytes()
-    assert cluster_health._agent_population(1) is False
-    assert cluster_health.run_health_probe() == 1
+    assert cluster_health._agent_population(1, database_factory=operator_database) is False
+    assert probe() == 1
 
     assert rollbacks == []
     # Local intent cannot hide a real global population outage: the signal is
@@ -101,7 +107,11 @@ def test_expected_low_population_does_not_rollback_or_promote(
     "intent", ["absent", "other-service", "legacy-pause", "resumed", "invalid"]
 )
 def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
-    probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]], intent: str
+    probe: Probe,
+    probe_home: Path,
+    rollbacks: list[list[str]],
+    alerts: list[dict[str, object]],
+    intent: str,
 ) -> None:
     holder, acquired_at = "test-maintenance", datetime.now(UTC)
     if intent == "other-service":
@@ -126,23 +136,24 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("invalid journal")
 
-    assert cluster_health.run_health_probe() == 1
+    assert probe() == 1
     assert rollbacks == []
 
 
 def test_reenabled_host_keeps_low_population_unhealthy(
-    probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]]
+    probe: Probe, probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]]
 ) -> None:
     _select_excluded({"agent-host"})
-    assert cluster_health.run_health_probe() == 1
+    assert probe() == 1
     assert rollbacks == []
 
     _select_excluded(set())
-    assert cluster_health.run_health_probe() == 1
+    assert probe() == 1
     assert rollbacks == []
 
 
 def test_disabled_host_does_not_explain_gateway_code_failure(
+    probe: Probe,
     probe_home: Path,
     rollbacks: list[list[str]],
     alerts: list[dict[str, object]],
@@ -152,11 +163,13 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
 
-    assert cluster_health.run_health_probe() == 1
+    assert probe() == 1
     assert rollbacks == []
 
 
 def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
+    probe: Probe,
+    operator_database: DatabaseFactory,
     probe_home: Path,
     rollbacks: list[list[str]],
     alerts: list[dict[str, object]],
@@ -168,6 +181,9 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
         raise ConnectionError("private test data plane unavailable")
 
     patch_database(monkeypatch, connect=down)
-    assert cluster_health._agent_population_failure_class(1) == "environment"
-    assert cluster_health.run_health_probe() == 1
+    assert (
+        cluster_health._agent_population_failure_class(1, database_factory=operator_database)
+        == "environment"
+    )
+    assert probe() == 1
     assert rollbacks == []

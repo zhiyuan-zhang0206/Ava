@@ -22,7 +22,7 @@ Every log line is also an **event** in the unified event stream (event-system de
 
 ### Three process entry points
 - `init_subprocess_logger(agent_id)` — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes `agent-{N}.log`.
-- `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Controlled roots supply their immutable loaded image, machine reader and owned pipeline producer; compatibility callers freeze the process commit here. See `base/native_process/loaded_commit.py`.
+- `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Every root supplies its immutable loaded image, machine reader and owned pipeline producer; logging does not capture Git or discover a database factory. See `base/native_process/loaded_commit.py`.
 - `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`): gateway's sinks, no `service_started` row.
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 

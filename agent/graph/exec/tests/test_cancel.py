@@ -51,6 +51,7 @@ from base.clock import Clock
 # fake cancel_event, so they are deterministic and run in the parallel pool.
 from base.config import settings
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices
@@ -73,7 +74,12 @@ def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
 
 
 def _make_runtime(
-    hosted_resources: HostedTurnResources, *, llm=None, ops_pool=None, event_publisher=None
+    hosted_resources: HostedTurnResources,
+    *,
+    llm=None,
+    ops_pool=None,
+    event_publisher=None,
+    database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
     """Test helper: assemble an AvaContext and wrap it in Runtime."""
     if llm is None:
@@ -90,7 +96,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -129,6 +135,7 @@ def _committed_messages(update: dict) -> list:
 async def test_llm_node_cancel_event_race_discards_partial(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event set during LLM stream → llm_node detects it via asyncio.wait
     race → discards the entire partial generation: Command(halted=True,
@@ -146,7 +153,12 @@ async def test_llm_node_cancel_event_race_discards_partial(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.1))
-    runtime = _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub)
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+        llm=fake_llm,
+        event_publisher=pub,
+        database_gate=database_gate,
+    )
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
 
@@ -163,6 +175,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
 async def test_llm_node_cancel_event_race_discards_partial_tool_call(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """cancel arrives mid tool_call stream → partial AIMessage is entirely
     discarded, so **no** tool_result debt is incurred: because no complete
@@ -203,7 +216,12 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.1))
-    runtime = _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub)
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+        llm=fake_llm,
+        event_publisher=pub,
+        database_gate=database_gate,
+    )
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
 
@@ -220,6 +238,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
 async def test_llm_node_cancel_event_race_no_partial_returns_halted(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event set before LLM emits anything → llm_node returns Command(halted=True,
     goto=after_exec) without committing any message; does not raise CancelledError
@@ -235,7 +254,12 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.05))
-    runtime = _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub)
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+        llm=fake_llm,
+        event_publisher=pub,
+        database_gate=database_gate,
+    )
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
     assert _has_cancelled_event(pub, agent_id=7)
@@ -250,6 +274,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
 async def test_llm_node_cancel_event_race_normal_completion(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event not set, LLM stream completes normally → llm_node returns
     Command(goto=before_exec)."""
@@ -270,7 +295,9 @@ async def test_llm_node_cancel_event_race_normal_completion(
     fake_llm.astream.return_value = _fast_stream()
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
 
-    runtime = _make_runtime(hosted_resources=hosted_resources, llm=fake_llm)
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate
+    )
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
 
     assert isinstance(result, Command)
@@ -293,6 +320,7 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     monkeypatch: pytest.MonkeyPatch,
     source: str,
     expected: str,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The real watcher aborts once, preserves partial output, and leaves claim its command."""
     agent_id = create_agent(db_conn)
@@ -321,7 +349,9 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
     result = await exec_node(
         AgentState(messages=[_ai_with_code("pass")], halted=False),
-        _make_runtime(hosted_resources=hosted_resources, ops_pool=aops_pool),
+        _make_runtime(
+            hosted_resources=hosted_resources, ops_pool=aops_pool, database_gate=database_gate
+        ),
         {"configurable": {"thread_id": str(agent_id)}},
     )
     assert calls == 1
@@ -340,6 +370,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event triggers → exec_node, via mock, returns cancelled result → Command
     with wrap_code_output cancelled=True + frontend Cancelled event."""
@@ -354,7 +385,9 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     pub = MagicMock()
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
 
-    runtime = _make_runtime(hosted_resources=hosted_resources, event_publisher=pub)
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources, event_publisher=pub, database_gate=database_gate
+    )
     result = await exec_node(state, runtime, _CONFIG)
 
     assert isinstance(result, Command)
@@ -374,6 +407,7 @@ async def test_exec_node_cancel_event_race_normal_completion(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event not set, the exec completes normally → exec_node returns Command with
     wrap_code_output format ('Code execution output:')."""
@@ -387,9 +421,7 @@ async def test_exec_node_cancel_event_race_normal_completion(
 
     state = AgentState(messages=[_ai_with_code('print("hello")')], halted=False)
 
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-    )
+    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert isinstance(result, Command)
@@ -416,6 +448,7 @@ async def test_exec_node_timeout_path(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """When timeout triggers, exec_node returns a marker but does not halt — the next
     LLM round reads the feedback and changes strategy."""
@@ -429,9 +462,7 @@ async def test_exec_node_timeout_path(
 
     state = AgentState(messages=[_ai_with_code('print("long task")')], halted=False)
 
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-    )
+    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert isinstance(result, Command)
@@ -450,6 +481,7 @@ async def test_exec_node_timeout_empty_output(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """timeout triggers and the thread has no output → (no output) marker still appears."""
 
@@ -462,9 +494,7 @@ async def test_exec_node_timeout_empty_output(
 
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
 
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-    )
+    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     msg = result.update["messages"][0]
@@ -562,6 +592,7 @@ async def test_exec_node_dispatch_system_halt(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """_ExecLifecycle(SystemHalt) → halted=True + NO output write-back.
 
@@ -583,7 +614,9 @@ async def test_exec_node_dispatch_system_halt(
     emitter = MagicMock()
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('ava.self.compact("s")')], halted=False)
-    runtime = _make_runtime(hosted_resources=hosted_resources, event_publisher=emitter)
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources, event_publisher=emitter, database_gate=database_gate
+    )
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
@@ -601,6 +634,7 @@ async def test_exec_node_dispatch_agent_termination(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """_ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
     from ava.self import AgentTermination
@@ -612,9 +646,7 @@ async def test_exec_node_dispatch_agent_termination(
 
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.terminate()")], halted=False)
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-    )
+    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
@@ -628,6 +660,7 @@ async def test_exec_node_dispatch_agent_restart(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """_ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
     with AgentTermination path)."""
@@ -640,9 +673,7 @@ async def test_exec_node_dispatch_agent_restart(
 
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.restart()")], halted=False)
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-    )
+    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
@@ -653,6 +684,7 @@ async def test_exec_node_dispatch_ordinary_exception(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
+    database_gate: ProcessDbGate,
 ) -> None:
     """_ExecCrashed → halted=False + event=exec_failed at INFO (agent
     trial-and-error is not an operator alert; metrics aggregate by event)."""
@@ -670,9 +702,7 @@ async def test_exec_node_dispatch_ordinary_exception(
 
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('raise ValueError("boom")')], halted=False)
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-    )
+    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is False
@@ -688,6 +718,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A future new LifecycleExit subclass that is not handled in the match ladder
     → must fallthrough raise TypeError, not silently land on halted=False (AGENTS.md
@@ -705,9 +736,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
 
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("...")], halted=False)
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-    )
+    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
 
     with pytest.raises(TypeError, match="Unrecognized LifecycleExit subclass"):
         await exec_node(state, runtime, _CONFIG)

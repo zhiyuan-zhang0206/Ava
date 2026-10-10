@@ -1,18 +1,90 @@
 """Real SQL coverage for selectable usage scopes and notification-only budgets."""
 
 import importlib
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.metrics import usage as reader
 
 usage = importlib.import_module(
     "ava_builtins.skills.coordination.ava-being-a-long-running-agent.scripts.agent_usage"
 )
+
+
+def test_polling_keeps_one_captured_entry_gate(
+    database: Database, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    image = LoadedCommit(Path("installed-source"), "loaded-image")
+    captures: list[LoadedCommit] = []
+    gates: list[ProcessDbGate] = []
+    reports = iter([0.0, 1.0])
+    notified: list[tuple[int, ...]] = []
+
+    def capture() -> LoadedCommit:
+        captures.append(image)
+        return image
+
+    def version(owner: CodeVersion) -> int:
+        assert owner.loaded is image
+        return 18
+
+    def build(*, gate: ProcessDbGate) -> Database:
+        gates.append(gate)
+        return database
+
+    def report(_conn: psycopg.Connection, **_kwargs: object) -> dict[str, Any]:
+        return {
+            "totals": {"recorded_cost_usd": next(reports), "unpriced_calls": 0},
+            "agents": [{"agent_id": 1}],
+            "lineage": "self",
+            "start": "start",
+            "end": "end",
+        }
+
+    args = usage.parse_args(
+        [
+            "--agent-id",
+            "1",
+            "--lifetime",
+            "--usd-limit",
+            "1",
+            "--notify-agent",
+            "2",
+            "--poll-seconds",
+            "1",
+        ]
+    )
+    monkeypatch.setattr(usage, "parse_args", lambda: args)
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(CodeVersion, "get", version)
+    monkeypatch.setattr(Database, "from_settings", build)
+    monkeypatch.setattr(usage, "usage_report", report)
+
+    def sleep(_seconds: float) -> None:
+        pass
+
+    def notify(peers: Sequence[int], _message: str) -> None:
+        notified.append(tuple(peers))
+
+    monkeypatch.setattr(usage.time, "sleep", sleep)
+    monkeypatch.setattr(usage, "notify_agents", notify)
+    usage.main()
+    assert captures == [image]
+    assert len(gates) == 1
+    assert gates[0].application_name().endswith(":v18")
+    assert gates[0].min_read_due()
+    assert notified == [(2,)]
+    assert len(capsys.readouterr().out.splitlines()) == 2
 
 
 def seed_agent(conn: psycopg.Connection, parent: int | None = None, *, fork: bool = False) -> int:

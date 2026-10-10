@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,6 +13,9 @@ import cli.commands.converge._brew_pin as cbp
 import cli.commands.converge.host as cv
 from base.config import ConfigBoot
 from base.host import brew_pin
+from base.telemetry import EventPipeline
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 EXPECTED_PINNED_FORMULAE = frozenset(
     {
@@ -30,9 +35,16 @@ EXPECTED_PINNED_FORMULAE = frozenset(
 )
 
 
-def _ctx(tmp_path: Path) -> cv.ConvergeCtx:
+def _ctx(
+    tmp_path: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
+) -> cv.ConvergeCtx:
     return cv.ConvergeCtx(
-        repo=Path("/repo"), ava_home=tmp_path, roles=cv.ALL_ROLES, config=ConfigBoot()
+        repo=Path("/repo"),
+        ava_home=tmp_path,
+        roles=cv.ALL_ROLES,
+        config=ConfigBoot(),
+        database_factory=operator_database,
+        producer=producer,
     )
 
 
@@ -75,11 +87,15 @@ def test_all_formulae_pinned_is_silent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(cbp, "is_macos", lambda: True)
     _brew_output(monkeypatch, set(EXPECTED_PINNED_FORMULAE))
 
-    cbp.ensure_brew_pin(_ctx(tmp_path))
+    cbp.ensure_brew_pin(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     assert capsys.readouterr().err == ""
 
@@ -88,11 +104,15 @@ def test_missing_formula_warns_with_manual_repin_command(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(cbp, "is_macos", lambda: True)
     _brew_output(monkeypatch, set(EXPECTED_PINNED_FORMULAE - {"redis@8.2"}))
 
-    cbp.ensure_brew_pin(_ctx(tmp_path))
+    cbp.ensure_brew_pin(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     warning = capsys.readouterr().err
     assert warning.startswith("  ! brew-pin:")
@@ -104,12 +124,16 @@ def test_uninstalled_manifest_formula_is_not_flagged(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(cbp, "is_macos", lambda: True)
     installed = set(EXPECTED_PINNED_FORMULAE - {"grafana"})
     _brew_output(monkeypatch, installed, installed=installed)
 
-    cbp.ensure_brew_pin(_ctx(tmp_path))
+    cbp.ensure_brew_pin(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     assert capsys.readouterr().err == ""
 
@@ -118,12 +142,16 @@ def test_installed_but_unpinned_formula_still_warns(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(cbp, "is_macos", lambda: True)
     pinned = set(EXPECTED_PINNED_FORMULAE - {"grafana"})
     _brew_output(monkeypatch, pinned, installed=set(EXPECTED_PINNED_FORMULAE))
 
-    cbp.ensure_brew_pin(_ctx(tmp_path))
+    cbp.ensure_brew_pin(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     warning = capsys.readouterr().err
     assert "grafana" in warning
@@ -134,6 +162,8 @@ def test_brew_absent_is_silent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(cbp, "is_macos", lambda: True)
 
@@ -142,7 +172,9 @@ def test_brew_absent_is_silent(
 
     monkeypatch.setattr(brew_pin.subprocess, "run", absent)
 
-    cbp.ensure_brew_pin(_ctx(tmp_path))
+    cbp.ensure_brew_pin(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     assert capsys.readouterr().err == ""
 
@@ -151,6 +183,8 @@ def test_non_macos_is_silent_without_calling_brew(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     monkeypatch.setattr(cbp, "is_macos", lambda: False)
     monkeypatch.setattr(
@@ -159,6 +193,8 @@ def test_non_macos_is_silent_without_calling_brew(
         lambda: pytest.fail("non-macOS converge must not invoke brew"),
     )
 
-    cbp.ensure_brew_pin(_ctx(tmp_path))
+    cbp.ensure_brew_pin(
+        _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    )
 
     assert capsys.readouterr().err == ""

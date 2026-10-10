@@ -32,7 +32,7 @@ observed_metrics.project_events = lambda *args: None
 
 def dispatch(args):
     if sys.argv[1] != "empty":
-        telemetry.init_telemetry(process="cli-health-probe")
+        telemetry.init_telemetry(process="cli-health-probe", pipeline=args.producer())
         telemetry.emit("telemetry", "health_probe_ran", attributes={"unhealthy_checks": 0})
     if sys.argv[1] == "exception":
         raise RuntimeError("handler failure")

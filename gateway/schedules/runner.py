@@ -50,6 +50,7 @@ from loguru import logger
 
 import base.host.proc
 from base.config import settings
+from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.paths import ava_home
 
@@ -480,16 +481,19 @@ def run(
     schedule_id: int,
     revision: int | None = None,
     *,
+    database: Callable[[], Database],
     bind_actor: Callable[[int], None],
     load_plugins: Callable[[], None],
+    inputs: ScheduleInputs,
 ) -> int:
     """Materialize + run the schedule. Returns a process exit code."""
     return _run(
-        Database.from_settings(),
+        database(),
         schedule_id,
         revision,
         bind_actor=bind_actor,
         load_plugins=load_plugins,
+        inputs=inputs,
     )
 
 
@@ -500,6 +504,7 @@ def _run_python_script(
     script_path: Path,
     *,
     load_plugins: Callable[[], None],
+    inputs: ScheduleInputs,
 ) -> None:
     """Run with isolated argv and collect the watchdog before any terminal write."""
     import runpy
@@ -528,7 +533,9 @@ def _run_python_script(
     sys.argv = [str(script_path)]
     try:
         load_plugins()
-        runpy.run_path(str(script_path), run_name="__main__")
+        runpy.run_path(
+            str(script_path), run_name="__main__", init_globals={"AVA_SCHEDULE_INPUTS": inputs}
+        )
     finally:
         sys.argv = runner_argv
         primary = sys.exc_info()[1]
@@ -559,6 +566,7 @@ def _run(
     *,
     bind_actor: Callable[[int], None],
     load_plugins: Callable[[], None],
+    inputs: ScheduleInputs,
 ) -> int:
     loaded = _load(database, schedule_id, revision)
     if loaded is None:
@@ -586,7 +594,7 @@ def _run(
     try:
         if script_name.endswith(".py"):
             _run_python_script(
-                database, schedule_id, run_id, script_path, load_plugins=load_plugins
+                database, schedule_id, run_id, script_path, load_plugins=load_plugins, inputs=inputs
             )
             _finish_completed(
                 database, schedule_id, run_id

@@ -18,9 +18,10 @@ from datetime import UTC, datetime, timedelta
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from base.db import Database
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import schedule_entry
 
 
 # daily_scan.py ships with the ava-self-evolution skill. The load-dir copy is
@@ -135,8 +136,8 @@ def _fire_scan(_slot: datetime, _trigger: None) -> None:
     run_scan()
 
 
-def main() -> None:
-    db = Database.from_settings()
+def main(*, inputs: ScheduleInputs) -> None:
+    db = inputs.database()
     catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=_fire_scan)
     while True:
         # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
@@ -159,4 +160,5 @@ if __name__ == "__main__":
         {"TERMINATED"},
         schedule_name="self-evolution-daily",
     )
-    main()
+    with schedule_entry(globals().get("AVA_SCHEDULE_INPUTS")) as inputs:
+        main(inputs=inputs)

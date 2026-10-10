@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.prompt.capabilities import (
@@ -34,15 +35,16 @@ from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 
-_CONFIG = {"configurable": {"thread_id": "1042"}}
+_CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
 
 
-def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
+def _runtime(*, container: bool = False, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     """The hook reads only `ops_pool` off the runtime: `None` is the
     container/eval signal, anything else is a real agent."""
     return Runtime(
@@ -53,7 +55,7 @@ def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
@@ -86,8 +88,10 @@ def _state(indexed: set[str] | None) -> AgentState:
     return AgentState(capabilities=CapabilitiesState(indexed=indexed))
 
 
-async def _run_hook(indexed: set[str] | None) -> dict | None:
-    return await _newly_installed_skills(_state(indexed), _runtime(), _CONFIG)  # type: ignore[arg-type]
+async def _run_hook(indexed: set[str] | None, database_gate: ProcessDbGate) -> dict | None:
+    return await _newly_installed_skills(
+        _state(indexed), _runtime(database_gate=database_gate), _CONFIG
+    )  # type: ignore[arg-type]
 
 
 # ── the diff ──
@@ -168,7 +172,9 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
 # ── the note ──
 
 
-async def test_hook_names_the_new_skill_in_the_index_line_shape(skills_dir: Path) -> None:
+async def test_hook_names_the_new_skill_in_the_index_line_shape(
+    skills_dir: Path, database_gate: ProcessDbGate
+) -> None:
     """The note has to read as more of the `# Capabilities` listing, so it uses
     the same `- \\`ava.skills.<path>\\` — description` line the index does."""
     _install(skills_dir, "alpha", "Alpha desc")
@@ -179,7 +185,7 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(skills_dir: Path
     )
     _install(skills_dir, "beta", "Beta desc")
 
-    update = await _run_hook(snapshot)
+    update = await _run_hook(snapshot, database_gate=database_gate)
 
     assert update is not None
     (note,) = update["messages"]
@@ -189,7 +195,7 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(skills_dir: Path
 
 
 async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
-    skills_dir: Path,
+    skills_dir: Path, database_gate: ProcessDbGate
 ) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
     snapshot = indexed_skill_identifiers(
@@ -199,15 +205,17 @@ async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
     )
     _install(skills_dir, "beta", "Beta desc")
 
-    update = await _run_hook(snapshot)
+    update = await _run_hook(snapshot, database_gate=database_gate)
     assert update is not None
     advanced = update["capabilities"].indexed  # pyright: ignore[reportUnknownMemberType]
     assert advanced == {"alpha", "beta"}
 
-    assert await _run_hook(advanced) is None  # pyright: ignore[reportUnknownArgumentType]
+    assert await _run_hook(advanced, database_gate=database_gate) is None  # pyright: ignore[reportUnknownArgumentType]
 
 
-async def test_hook_is_silent_when_nothing_was_installed(skills_dir: Path) -> None:
+async def test_hook_is_silent_when_nothing_was_installed(
+    skills_dir: Path, database_gate: ProcessDbGate
+) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
     assert (
         await _run_hook(
@@ -215,14 +223,15 @@ async def test_hook_is_silent_when_nothing_was_installed(skills_dir: Path) -> No
                 AgentSlices.resolve(
                     default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
                 ).prompt
-            )
+            ),
+            database_gate=database_gate,
         )
         is None
     )
 
 
 async def test_no_snapshot_adopts_the_live_catalog_without_announcing_it(
-    skills_dir: Path,
+    skills_dir: Path, database_gate: ProcessDbGate
 ) -> None:
     """A checkpoint written before the snapshot field existed. What that agent's
     standing SystemMessage lists is unknowable here, so the whole catalog must
@@ -230,14 +239,16 @@ async def test_no_snapshot_adopts_the_live_catalog_without_announcing_it(
     _install(skills_dir, "alpha", "Alpha desc")
     _install(skills_dir, "beta", "Beta desc")
 
-    update = await _run_hook(None)
+    update = await _run_hook(None, database_gate=database_gate)
 
     assert update is not None
     assert "messages" not in update
     assert update["capabilities"].indexed == {"alpha", "beta"}  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_a_bulk_install_is_capped_with_a_counted_tail(skills_dir: Path) -> None:
+async def test_a_bulk_install_is_capped_with_a_counted_tail(
+    skills_dir: Path, database_gate: ProcessDbGate
+) -> None:
     """One drift event can carry dozens — a first converge on a fresh box, a
     plugin sync landing a whole pack. The note must not turn into a second full
     index, so it lists a bounded prefix and points at the catalog for the rest."""
@@ -245,7 +256,7 @@ async def test_a_bulk_install_is_capped_with_a_counted_tail(skills_dir: Path) ->
     for i in range(_NEW_SKILLS_MAX_ENTRIES + extra):
         _install(skills_dir, f"skill-{i:02d}", f"Desc {i}")
 
-    update = await _run_hook(set())
+    update = await _run_hook(set(), database_gate=database_gate)
 
     assert update is not None
     (note,) = update["messages"]
@@ -280,7 +291,7 @@ def _pin_compact_ceiling(monkeypatch: pytest.MonkeyPatch, *, hard_tokens: int) -
 
 
 async def test_hook_defers_when_a_compaction_will_replace_the_window(
-    skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    skills_dir: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """Real drift, but a compaction fires the same before_llm pass — so nothing
     may be written at all.
@@ -305,17 +316,21 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
     state = AgentState(messages=over_the_ceiling, capabilities=CapabilitiesState(indexed=snapshot))
 
     _pin_compact_ceiling(monkeypatch, hard_tokens=1)
-    assert await _newly_installed_skills(state, _runtime(), _CONFIG) is None  # type: ignore[arg-type]
+    assert (
+        await _newly_installed_skills(state, _runtime(database_gate=database_gate), _CONFIG) is None
+    )  # type: ignore[arg-type]
 
     # Deferring is not silencing: the same state with no compaction predicted
     # still names beta, so the guard is the only thing suppressing it.
     _pin_compact_ceiling(monkeypatch, hard_tokens=10_000_000)
-    update = await _newly_installed_skills(state, _runtime(), _CONFIG)  # type: ignore[arg-type]
+    update = await _newly_installed_skills(state, _runtime(database_gate=database_gate), _CONFIG)  # type: ignore[arg-type]
     assert update is not None
     assert "ava.skills.beta" in update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_container_mode_writes_nothing(skills_dir: Path) -> None:
+async def test_container_mode_writes_nothing(
+    skills_dir: Path, database_gate: ProcessDbGate
+) -> None:
     """The eval harness has no ops_pool — the same signal `init_context` reduces
     its head by. An eval's context is deterministic by construction, and this
     note's trigger is whatever the host filesystem gained mid-run."""
@@ -328,14 +343,19 @@ async def test_container_mode_writes_nothing(skills_dir: Path) -> None:
     _install(skills_dir, "beta", "Beta desc")
 
     state = _state(snapshot)
-    assert await _newly_installed_skills(state, _runtime(container=True), _CONFIG) is None  # type: ignore[arg-type]
+    assert (
+        await _newly_installed_skills(
+            state, _runtime(container=True, database_gate=database_gate), _CONFIG
+        )
+        is None
+    )  # type: ignore[arg-type]
 
 
 # ── narrowed agents ──
 
 
 async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in(
-    skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    skills_dir: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """An agent narrowed to a specific list gets the same diff with no special
     case: a name that resolved to nothing at build time and resolves now is
@@ -352,7 +372,7 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
     _install(skills_dir, "beta", "Beta desc")
     _install(skills_dir, "gamma", "Gamma desc")
 
-    update = await _run_hook(snapshot)
+    update = await _run_hook(snapshot, database_gate=database_gate)
 
     assert update is not None
     (note,) = update["messages"]
@@ -362,17 +382,20 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
 
 
 async def test_sdk_disabled_skills_never_drift(
-    skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    skills_dir: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """`AVA_SDK_DISABLE=skills` removed the surface on purpose; an install must
     not put it back through the note."""
     monkeypatch.setattr(settings.agent, "sdk_disable", ["skills"])
     _install(skills_dir, "alpha", "Alpha desc")
-    assert await _run_hook(set()) is None
+    assert await _run_hook(set(), database_gate=database_gate) is None
 
 
 async def test_a_stale_config_name_warns_on_each_resolution(
-    skills_dir: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    skills_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Each unresolved resolution remains visible without global suppression."""
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["does-not-exist"])
@@ -380,7 +403,7 @@ async def test_a_stale_config_name_warns_on_each_resolution(
 
     with caplog.at_level("WARNING"):
         for _ in range(3):
-            await _run_hook(set())
+            await _run_hook(set(), database_gate=database_gate)
 
     assert caplog.text.count("does-not-exist") == 3
     assert "skills_to_inject_into_system_prompt" in caplog.text

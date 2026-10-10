@@ -81,13 +81,7 @@ def postgres() -> Generator[str]:
     keeps every future migration covered without special-casing any one of them.
     """
     from base.deploy.schema.migrations import apply_pending_migrations
-    from base.native_process import code_version
 
-    # Every pooled dial of this process carries its code version
-    # (`base.db.code_version_gate`). Resolve it now, at provisioning, so the first
-    # dial cannot land inside a test that fakes `subprocess.run` and cache a
-    # git answer that is not this checkout's.
-    code_version.get()
     with throwaway_postgres(schema_sql=_SCHEMA_SQL.read_text()) as url:
         # Non-autocommit conn: apply_pending_migrations manages its own
         # per-migration transactions + advisory lock.

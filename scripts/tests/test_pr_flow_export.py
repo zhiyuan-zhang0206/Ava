@@ -338,11 +338,17 @@ def test_save_json_failed_replace_keeps_the_prior_file_and_no_tmp(
 
 def test_emit_snapshot_skips_the_pipeline_in_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     emitted: list[object] = []
-    monkeypatch.setattr(pr_flow, "_emit_events", emitted.append)
 
-    snapshot = {"days": {}, "run": {}}
-    pr_flow.emit_snapshot(snapshot, dry_run=True)
+    def emit(snapshot: object, *, pipeline: object) -> None:
+        assert pipeline is writer
+        emitted.append(snapshot)
+
+    writer = object()
+    monkeypatch.setattr(pr_flow, "_emit_events", emit)
+
+    snapshot: dict[str, Any] = {"days": {}, "run": {}}
+    pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer)
     assert emitted == []
 
-    pr_flow.emit_snapshot(snapshot, dry_run=False)
+    pr_flow.emit_snapshot(snapshot, dry_run=False, pipeline=writer)
     assert emitted == [snapshot]

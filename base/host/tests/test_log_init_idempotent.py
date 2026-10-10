@@ -9,14 +9,30 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 import base.log as slog
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import logs_dir
+from base.telemetry.delivery.pipeline import EventPipeline
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _unused_producer() -> EventPipeline:
+    raise AssertionError("the mocked sink must not construct a pipeline")
+
+
+def gateway_inputs() -> dict[str, Any]:
+    """Explicit wiring inputs; sink mocks prevent constructing the test producer."""
+    return {
+        "producer": _unused_producer,
+        "machine_reader": lambda: "test-host",
+        "image": LoadedCommit(_REPO_ROOT, "test-image"),
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -43,9 +59,9 @@ def test_init_gateway_process_idempotent() -> None:
         patch.object(slog, "_add_file_sink") as mock_file_sink,
         patch.object(slog, "add_postgres_sink") as mock_pg,
     ):
-        slog.init_gateway_process()
-        slog.init_gateway_process()
-        slog.init_gateway_process()
+        slog.init_gateway_process(**gateway_inputs())
+        slog.init_gateway_process(**gateway_inputs())
+        slog.init_gateway_process(**gateway_inputs())
 
     # three adds should only happen once: stderr / file / postgres group
     assert mock_add.call_count == 1, "stderr sink should be added only once"
@@ -79,7 +95,7 @@ def test_first_init_wins_subsequent_silent_skip() -> None:
         patch.object(slog, "_add_file_sink") as mock_file_sink,
         patch.object(slog, "add_postgres_sink"),
     ):
-        slog.init_gateway_process()
+        slog.init_gateway_process(**gateway_inputs())
         # second time switching roles — still skip
         slog.init_subprocess_logger(agent_id=1)
 
@@ -94,7 +110,7 @@ def test_init_gateway_process_per_daemon_log_file() -> None:
         patch.object(slog, "_add_file_sink") as mock_file_sink,
         patch.object(slog, "add_postgres_sink"),
     ):
-        slog.init_gateway_process(name="restarter")
+        slog.init_gateway_process(name="restarter", **gateway_inputs())
 
     mock_file_sink.assert_called_once_with(logs_dir() / "restarter.log")
 
@@ -106,7 +122,7 @@ def test_init_gateway_process_default_name_is_gateway() -> None:
         patch.object(slog, "_add_file_sink") as mock_file_sink,
         patch.object(slog, "add_postgres_sink"),
     ):
-        slog.init_gateway_process()
+        slog.init_gateway_process(**gateway_inputs())
 
     mock_file_sink.assert_called_once_with(logs_dir() / "gateway.log")
 
@@ -118,9 +134,15 @@ def test_init_cli_process_idempotent() -> None:
         patch.object(slog, "_add_file_sink") as mock_file_sink,
         patch.object(slog, "add_postgres_sink") as mock_pg,
     ):
-        slog.init_cli_process(name="cli-spawn-update-1")
-        slog.init_cli_process(name="cli-spawn-update-1")
-        slog.init_cli_process(name="cli-spawn-update-1")
+        slog.init_cli_process(
+            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
+        )
+        slog.init_cli_process(
+            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
+        )
+        slog.init_cli_process(
+            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
+        )
 
     assert mock_add.call_count == 1
     assert mock_file_sink.call_count == 1
@@ -136,7 +158,11 @@ def test_init_cli_process_per_invocation_log_file() -> None:
         patch.object(slog, "_add_file_sink") as mock_file_sink,
         patch.object(slog, "add_postgres_sink"),
     ):
-        slog.init_cli_process(name="cli-watchdog-update")
+        slog.init_cli_process(
+            name="cli-watchdog-update",
+            producer=_unused_producer,
+            machine_reader=lambda: "test-host",
+        )
 
     mock_file_sink.assert_called_once_with(logs_dir() / "cli-watchdog-update.log")
 
@@ -179,8 +205,10 @@ def test_init_gateway_process_emits_service_started() -> None:
         patch.object(slog, "add_postgres_sink"),
         patch.object(slog.logger, "info", side_effect=lambda _msg, **kw: infos.append(kw)),  # pyright: ignore[reportUnknownMemberType]
     ):
-        slog.init_gateway_process(name="restarter")
-        slog.init_gateway_process(name="restarter")  # idempotent — still one row
+        slog.init_gateway_process(name="restarter", **gateway_inputs())
+        slog.init_gateway_process(
+            name="restarter", **gateway_inputs()
+        )  # idempotent — still one row
 
     assert len(infos) == 1  # pyright: ignore[reportUnknownArgumentType]
     kw = infos[0]
@@ -209,7 +237,32 @@ def unreachable(*_args, **_kwargs):
 bootstrap.fetch_bootstrap_config = unreachable
 import base.log
 assert "base.config" not in sys.modules
-getattr(base.log, sys.argv[2])(name="probe")
+if sys.argv[2] == "init_cli_process":
+    pipelines = []
+    def producer():
+        from base.telemetry import EventPipeline
+        pipeline = EventPipeline(writer=lambda batch: None)
+        pipelines.append(pipeline)
+        return pipeline
+    try:
+        base.log.init_cli_process(name="probe", producer=producer, machine_reader=lambda: "probe-host")
+    finally:
+        for pipeline in pipelines:
+            pipeline.stop(timeout=1)
+else:
+    from pathlib import Path
+    from base.native_process.loaded_commit import LoadedCommit
+    pipelines = []
+    def producer():
+        from base.telemetry import EventPipeline
+        pipeline = EventPipeline(writer=lambda batch: None)
+        pipelines.append(pipeline)
+        return pipeline
+    try:
+        base.log.init_gateway_process(name="probe", producer=producer, machine_reader=lambda: "probe-host", image=LoadedCommit(Path(sys.argv[1]), None))
+    finally:
+        for pipeline in pipelines:
+            pipeline.stop(timeout=1)
 """
 
 

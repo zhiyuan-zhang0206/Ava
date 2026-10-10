@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from loguru import logger
@@ -10,29 +12,77 @@ from loguru import logger
 import ava
 from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock, clock_config_from_boot
+from base.config import ConfigBoot
+from base.daemon.schedules.inputs import ScheduleInputs
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
+from base.native_process.code_version import CodeVersion
 from base.paths import prod_service_checkout_error
+from base.telemetry import process_name
 from gateway.schedules import runner as engine
 
 
-def _bind_schedule_actor(schedule_id: int) -> None:
+def _bind_schedule_actor(
+    schedule_id: int, *, clients: ClientSet, clock_factory: Callable[[], Clock]
+) -> None:
     """Attribute SDK operations to this schedule using the process's client owner."""
     ava.bind_context(
         AvaContext(
             identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
-            clients=process_context.process_clients(),
+            clients=clients,
+            clock_factory=clock_factory,
         )
     )
 
 
 def run(schedule_id: int, revision: int | None = None) -> int:
     """Run a schedule with the SDK policy inputs owned by this process."""
-    return engine.run(
-        schedule_id,
-        revision,
-        bind_actor=_bind_schedule_actor,
-        load_plugins=ava.ensure_plugins_loaded,
-    )
+    config = ConfigBoot()
+    config.read_process_environment()
+    image = ava.loaded_code_image()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(process=process_name(), version=version.get)
+
+    def database() -> Database:
+        return Database(
+            db_config_from_boot(config),
+            gate=gate,
+            local_host=lambda: config.view.general.machine_host.strip() or "localhost",
+        )
+
+    def clock_factory() -> Clock:
+        return Clock(clock_config_from_boot(config))
+
+    clients = process_context.process_clients(config=config, database=database)
+    primary: BaseException | None = None
+    try:
+        return engine.run(
+            schedule_id,
+            revision,
+            database=database,
+            inputs=ScheduleInputs(database, clients.event_pipeline, image),
+            bind_actor=partial(_bind_schedule_actor, clients=clients, clock_factory=clock_factory),
+            load_plugins=partial(
+                ava.ensure_plugins_loaded,
+                config=config,
+                clock_factory=clock_factory,
+                producer=clients.event_pipeline,
+            ),
+        )
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        try:
+            clients.close(pipeline_timeout=2)
+        except BaseException as cleanup:
+            if primary is None:
+                raise
+            primary.add_note(f"schedule clients cleanup failed: {cleanup!r}")
 
 
 def main() -> None:

@@ -12,6 +12,7 @@ from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.tests.impersonation._impersonation_helpers import _active, _agent, _request, _status
@@ -73,9 +74,16 @@ def test_claude_request_mints_a_scoped_relay_credential(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, provider="claude", thread=None, authority=config_authority)
+    lease = _request(
+        owner,
+        provider="claude",
+        thread=None,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     assert lease["relay_provider"] == "claude"
     assert lease.get("relay_token")
     assert "relay_token_hash" not in lease
@@ -93,9 +101,12 @@ def test_request_validates_and_records_the_batch_window(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, provider="codex", authority=config_authority)
+    lease = _request(
+        owner, provider="codex", authority=config_authority, database_gate=database_gate
+    )
     assert lease["relay_batch_window_seconds"] == 0  # default: deliver immediately
     for bad in (-1, 301, 1.5, True, "30"):
         with pytest.raises(ValueError, match="relay_batch_window_seconds"):
@@ -110,7 +121,9 @@ def test_request_validates_and_records_the_batch_window(
                 relay_batch_window_seconds=bad,  # type: ignore[arg-type] — the runtime check rejects non-ints
             )
     with pytest.raises(leases.ImpersonationError, match="already has"):
-        _request(owner, provider="codex", authority=config_authority)  # first lease still open
+        _request(
+            owner, provider="codex", authority=config_authority, database_gate=database_gate
+        )  # first lease still open
     leases.reject(database, event_bus, lease["id"], owner.agent_id, owner, "window probe done")
     window_off = leases.request(
         database,
@@ -131,9 +144,10 @@ def test_codex_request_defers_relay_credential_to_activation(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority)
+    lease = _request(owner, authority=config_authority, database_gate=database_gate)
     assert lease["relay_provider"] == "codex"
     assert lease["relay_thread_id"]
     assert "relay_token" not in lease
@@ -165,9 +179,10 @@ def test_provision_relay_only_for_the_accepting_incarnation(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority)
+    lease = _request(owner, authority=config_authority, database_gate=database_gate)
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     foreign = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
     with pytest.raises(leases.ImpersonationError):
@@ -187,9 +202,10 @@ def test_provision_relay_revokes_the_previous_credential(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority)
+    lease = _request(owner, authority=config_authority, database_gate=database_gate)
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
     first = leases.provision_relay(database, lease["id"], owner, "first")
@@ -209,18 +225,19 @@ def test_active_lease_binding_inherits_the_replacement_incarnation(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Every restart/host turnover mints a fresh incarnation; the active lease's
     accepting binding must follow it so relay supervision can re-provision."""
     owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority)
+    lease = _active(owner, authority=config_authority, database_gate=database_gate)
     replacement = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
     db_conn.execute(
         "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
         (replacement.generation, replacement.owner, owner.agent_id),
     )
     db_conn.commit()
-    state = _status(replacement)
+    state = _status(replacement, database_gate=database_gate)
     assert state["status"] == "active"
     assert (state["accepted_generation"], state["accepted_owner"]) == (
         str(replacement.generation),
@@ -251,9 +268,16 @@ def test_relay_inbox_uses_the_scoped_credential_only(
     kind: str,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, provider="claude", thread=None, authority=config_authority)
+    lease = _request(
+        owner,
+        provider="claude",
+        thread=None,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
     insert_inbound_message(
@@ -276,9 +300,16 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, provider="claude", thread=None, authority=config_authority)
+    lease = _request(
+        owner,
+        provider="claude",
+        thread=None,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     leases.relay_heartbeat(database, lease["id"], lease["relay_token"])
     row = leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])
     assert row["relay_heartbeat_at"] is not None
@@ -296,9 +327,10 @@ def test_fail_acceptance_rolls_back_with_reason_and_native_note(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority)
+    lease = _request(owner, authority=config_authority, database_gate=database_gate)
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     result = leases.fail_acceptance(
         database, event_bus, lease["id"], owner, "relay process exited at startup"
@@ -319,9 +351,10 @@ def test_fail_acceptance_requires_an_accepted_lease(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority)
+    lease = _request(owner, authority=config_authority, database_gate=database_gate)
     with pytest.raises(leases.ImpersonationError):
         leases.fail_acceptance(database, event_bus, lease["id"], owner, "too early")
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
@@ -331,10 +364,14 @@ def test_fail_acceptance_requires_an_accepted_lease(
 
 
 def test_record_relay_failure_is_rate_limited(
-    db_conn: psycopg.Connection, database: Database, *, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    database: Database,
+    *,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority)
+    lease = _active(owner, authority=config_authority, database_gate=database_gate)
     assert leases.record_relay_failure(database, lease["id"], owner) is True
     assert leases.record_relay_failure(database, lease["id"], owner) is False
 
@@ -345,13 +382,14 @@ def test_abort_lease_stops_the_takeover_and_keeps_the_request_reason(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A core-component death (task #3998) stops the takeover like an expiry:
     the cause lands in rejection_reason prefixed "aborted: ", the request's own
     reason survives, a non-automatic lease gets the legacy end note, and a
     second abort is a no-op."""
     owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority)
+    lease = _active(owner, authority=config_authority, database_gate=database_gate)
     ended = leases.abort_lease(
         database, event_bus, lease["id"], owner, "the executor process is gone"
     )
@@ -418,9 +456,10 @@ def test_relay_liveness_alert_logs_only_for_stale_active_leases(
     database: Database,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    _active(owner, authority=config_authority)
+    _active(owner, authority=config_authority, database_gate=database_gate)
     errors: list[tuple[str, object]] = []
 
     class FakeLogger:

@@ -23,6 +23,7 @@ from psycopg_pool import ConnectionPool
 from base.agents import ResurrectRefused
 from base.agents.recovery.breaker import PERMANENT_REJECT_REASON_BILLING
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.telemetry import Event
 from ops.agents import wake
@@ -38,10 +39,10 @@ from ops.rpc_schemas import BillingBalanceReport
 
 
 @pytest.fixture()
-def pool() -> Iterator[ConnectionPool]:
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     import base.db
 
-    p = base.db.pool(max_size=4)
+    p = base.db.pool(max_size=4, gate=database_gate)
     yield p
     p.close()
 
@@ -151,14 +152,16 @@ def _capture_events(
     return audits, telemetry
 
 
-def _dispatch_through_the_op(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+def _dispatch_through_the_op(
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+) -> list[int]:
     dispatched: list[int] = []
 
     async def _dispatch(_db: object, **kwargs: Any) -> dict[str, Any]:
         agent_id = int(str(kwargs["payload"]["path"]).split("/")[3])
         dispatched.append(agent_id)
         response = await billing_recovery.resurrect_billing_agent_op(
-            Database.from_settings(), EventBus.from_settings(), agent_id
+            Database.from_settings(gate=database_gate), EventBus.from_settings(), agent_id
         )
         return response.model_dump()
 
@@ -223,6 +226,8 @@ async def test_dry_run_previews_without_writing(
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid = _agent(db_conn)
     _halt(db_conn, aid)
@@ -232,7 +237,7 @@ async def test_dry_run_previews_without_writing(
     monkeypatch.setattr(billing_recovery, "fetch_provider_balance", lambda: _balance(True))
 
     resp = await run_billing_recovery(
-        execute=False, pool=pool, db=Database.from_settings(), bus=event_bus
+        execute=False, pool=pool, db=Database.from_settings(gate=database_gate), bus=event_bus
     )
 
     assert resp.mode == "dry_run" and resp.outcome == "preview"
@@ -251,6 +256,8 @@ async def test_execute_refused_when_balance_gate_fails(
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid = _agent(db_conn)
     _halt(db_conn, aid)
@@ -264,7 +271,7 @@ async def test_execute_refused_when_balance_gate_fails(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _must_not_dispatch)
 
     resp = await run_billing_recovery(
-        execute=True, pool=pool, db=Database.from_settings(), bus=event_bus
+        execute=True, pool=pool, db=Database.from_settings(gate=database_gate), bus=event_bus
     )
 
     assert resp.outcome == "refused"
@@ -277,17 +284,19 @@ async def test_execute_resurrects_the_cohort(
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid = _agent(db_conn)
     _halt(db_conn, aid)
     parked = _agent(db_conn)
     _halt(db_conn, parked, status="idling")
     monkeypatch.setattr(billing_recovery, "fetch_provider_balance", lambda: _balance(True))
-    dispatched = _dispatch_through_the_op(monkeypatch)
+    dispatched = _dispatch_through_the_op(monkeypatch, database_gate=database_gate)
     audits, telemetry = _capture_events(monkeypatch)
 
     resp = await run_billing_recovery(
-        execute=True, pool=pool, db=Database.from_settings(), bus=event_bus
+        execute=True, pool=pool, db=Database.from_settings(gate=database_gate), bus=event_bus
     )
 
     assert resp.outcome == "executed"
@@ -313,18 +322,20 @@ async def test_second_execute_is_an_audited_noop(
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid = _agent(db_conn)
     _halt(db_conn, aid)
     monkeypatch.setattr(billing_recovery, "fetch_provider_balance", lambda: _balance(True))
-    _dispatch_through_the_op(monkeypatch)
+    _dispatch_through_the_op(monkeypatch, database_gate=database_gate)
     _capture_events(monkeypatch)
 
     first = await run_billing_recovery(
-        execute=True, pool=pool, db=Database.from_settings(), bus=event_bus
+        execute=True, pool=pool, db=Database.from_settings(gate=database_gate), bus=event_bus
     )
     second = await run_billing_recovery(
-        execute=True, pool=pool, db=Database.from_settings(), bus=event_bus
+        execute=True, pool=pool, db=Database.from_settings(gate=database_gate), bus=event_bus
     )
 
     assert first.outcome == "executed" and second.outcome == "executed"
@@ -333,7 +344,11 @@ async def test_second_execute_is_an_audited_noop(
 
 
 async def test_concurrent_run_is_refused_by_the_single_flight_lock(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(billing_recovery, "fetch_provider_balance", lambda: _balance(True))
 
@@ -348,7 +363,7 @@ async def test_concurrent_run_is_refused_by_the_single_flight_lock(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _must_not_dispatch)
 
     resp = await run_billing_recovery(
-        execute=True, pool=pool, db=Database.from_settings(), bus=event_bus
+        execute=True, pool=pool, db=Database.from_settings(gate=database_gate), bus=event_bus
     )
 
     assert resp.outcome == "refused"

@@ -13,6 +13,7 @@ from ava.agents import work
 from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
@@ -22,8 +23,10 @@ async def test_sdk_replays_original_command_after_lost_response_and_owner_change
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _incarnation, target = await managed_work(db_conn, aops_pool)
+    _incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     secret = "sdk-cancel-test-secret"  # noqa: S105 — isolated fixture credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)

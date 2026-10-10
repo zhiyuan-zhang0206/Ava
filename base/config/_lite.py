@@ -39,6 +39,7 @@ from base.host.env.config_registry import DOMAIN_ATTRS
 from base.host.env.dotenv_boot import (
     PLACEHOLDER_DB_URL,
     EnvBootResult,
+    apply_process_timezone,
     load_ava_env,
     read_database_delivery,
 )
@@ -390,10 +391,8 @@ class ConfigBoot:
         return self.settings
 
     def _apply_cluster_timezone(self) -> None:
-        from base.config import _apply_timezone_name
-
         name = self.get_field("timezone") if self.field_explicitly_set("timezone") else None
-        _apply_timezone_name(name)
+        apply_process_timezone(name)
 
     def read_process_environment(self) -> None:
         """Capture an existing startup delivery without delivering it again.

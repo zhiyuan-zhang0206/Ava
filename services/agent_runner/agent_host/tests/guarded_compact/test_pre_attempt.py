@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import _insert
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -24,8 +25,12 @@ async def test_pre_attempt_construction_rejected_without_provider_or_starvation(
     add_bindings: AddBindings,
     unsupported: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     if unsupported == "binding":
         binding = model_catalog.bindings["gpt-"]
         model_catalog = add_bindings(

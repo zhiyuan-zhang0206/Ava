@@ -650,7 +650,7 @@ def configured():
     assert (home / "start-intent.json").is_file()
     assert (home / ".env").is_file()
     assert not (home.parent / "clusters.json").exists()
-def log(args):
+def log(args, *, producer):
     assert args == ["start"]
     configured()
     calls.append("logging")
@@ -749,22 +749,43 @@ assert 'base.config' not in sys.modules
     assert result.returncode == 0, result.stderr
 
 
-def test_main_declares_the_cli_exempt_from_the_database_code_gate(
+def test_help_keeps_service_database_admission_unchanged(
     tmp_path: Path,
 ) -> None:
     """`ava stop` writes to the database to drain agents, so a host left on stale
-    code must still be able to run it: the CLI entry point exempts itself first."""
+    code must still be able to run it through its own handles; help preserves the service gate."""
     code = """
-from base.native_process import code_version
+import sys
 from cli import main
-assert code_version.db_gate_applies() is True
 try:
     main.main(['--help'])
 except SystemExit as exc:
     assert exc.code == 0
 else:
     raise AssertionError('help must exit')
-assert code_version.db_gate_applies() is False
+assert 'base.config' not in sys.modules
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from cli.database import operator_database_factory
+
+def unavailable():
+    raise AssertionError('help and operator admission must not read a Git version')
+
+service = ProcessDbGate(version=unavailable, process='service')
+assert service.min_read_due() is True
+seen = []
+def from_settings(*, gate):
+    assert gate.application_name() == 'ava:cli'
+    assert gate.min_read_due() is False
+    seen.append(gate)
+    return object()
+Database.from_settings = from_settings
+factory = operator_database_factory()
+assert not seen
+factory()
+factory()
+assert len(seen) == 2 and seen[0] is seen[1]
+assert service.min_read_due() is True
 """
     result = _run_isolated_program(code, tmp_path)
     assert result.returncode == 0, result.stderr

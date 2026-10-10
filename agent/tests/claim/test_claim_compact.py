@@ -32,6 +32,7 @@ from agent.tests.claim.claim_support import (
 )
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
@@ -84,11 +85,14 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """compact_summary inbound (written by agent ava.compact) → claim returns
     Command containing RemoveMessage(REMOVE_ALL_MESSAGES) sentinel + summary.
     The entire history is replaced, leaving no raw tail. Does **not** call LLM."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     summary_text = "agent-written summary text"
     _insert_inbound_kind(db_conn, tid, summary_text, "compact_summary")
 
@@ -104,7 +108,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     fake_llm = _fake_llm("LLM should not be called")
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=fake_llm),
+        _make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -122,13 +126,16 @@ async def test_claim_compact_summary_bumps_compact_version(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Agent-authored compact (claim path) advances compact.version, matching the
     forced path's before_llm hook — this REMOVE_ALL stripped the messages just the
     same, so Layer 3 subscribers (ava_code's context-file re-injection, the
     reminder re-arm) must see it. Without the bump a self-compact is invisible to
     them."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "agent summary", "compact_summary")
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="old")],
@@ -137,7 +144,11 @@ async def test_claim_compact_summary_bumps_compact_version(
 
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=_fake_llm("LLM should not be called")),
+        _make_runtime(
+            ops_pool=aops_pool,
+            llm=_fake_llm("LLM should not be called"),
+            database_gate=database_gate,
+        ),
         _config(
             tid,
         ),
@@ -152,10 +163,13 @@ async def test_claim_compact_request_calls_backend_llm(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """compact_request inbound (user "/compact") → claim calls generate_summary,
     running backend LLM to generate a summary, then replaces messages."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -168,7 +182,7 @@ async def test_claim_compact_request_calls_backend_llm(
     fake_llm = _fake_llm("LLM-generated summary")
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=fake_llm),
+        _make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -185,12 +199,15 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Task #3323: the claim-path compact run (UI Compact / auto-resurrect)
     emits compact_started before the Compaction LLM call and
     compact_finished(success) when the summary is applied — same compact_id —
     and the summary message carries the durable anchor ava_compact_id."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
     state = AgentState(
         messages=[
@@ -206,6 +223,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
             ops_pool=aops_pool,
             llm=_fake_llm("LLM-generated summary"),
             event_publisher=publisher,
+            database_gate=database_gate,
         ),
         _config(tid),
     )
@@ -224,12 +242,15 @@ async def test_claim_two_compact_requests_second_replaces_first(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Two compact_requests claimed in one batch (double-triggered Compact):
     the later summary wins the payload slot; the earlier run's generated
     summary can never be applied, so its live block closes as `replaced`
     (task #3323) and the applied summary is the second one."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
     state = AgentState(
@@ -246,7 +267,9 @@ async def test_claim_two_compact_requests_second_replaces_first(
 
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=llm, event_publisher=publisher),
+        _make_runtime(
+            ops_pool=aops_pool, llm=llm, event_publisher=publisher, database_gate=database_gate
+        ),
         _config(tid),
     )
 
@@ -264,13 +287,16 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """A batch whose compact_request is followed by an agent compact_summary:
     the request's LLM run produced a summary, but the summary overwrites the
     payload slot, so the run's live block closes as `replaced` (task #3323)
     and the applied summary is the agent-authored one (no live-run anchor).
     """
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
     _insert_inbound_kind(db_conn, tid, "agent-authored summary", "compact_summary")
     state = AgentState(
@@ -284,7 +310,9 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
 
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=llm, event_publisher=publisher),
+        _make_runtime(
+            ops_pool=aops_pool, llm=llm, event_publisher=publisher, database_gate=database_gate
+        ),
         _config(tid),
     )
 
@@ -303,11 +331,14 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """cancel co-batched with an already-run compact_request: the cancel path
     drops the compact payload instead of applying it — the run's live block
     must still close (replaced), and no summary enters the new context."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     state = AgentState(
@@ -324,6 +355,7 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
             ops_pool=aops_pool,
             llm=_fake_llm("never applied"),
             event_publisher=publisher,
+            database_gate=database_gate,
         ),
         _config(tid),
     )
@@ -342,12 +374,15 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """compact_request on no conversation messages (only SystemMessage) is a normal user operation,
     not a fault — consumed as a no-op: does not issue LLM request, does not replace messages,
     does not raise an error (raising would crash the process after the batch is already claimed,
     losing the consumed inbound row)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -356,7 +391,7 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
     fake_llm = _fake_llm("should not be generated")
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=fake_llm),
+        _make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -372,12 +407,15 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """compact_request whose Compaction LLM keeps failing → claim retries
     COMPACT_MAX_ATTEMPTS times, then raises CompactionFailedError (the runloop
     turns that into a turn-abort; the agent stays alive) instead of letting a
     raw provider exception kill the process after the row is consumed."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -397,7 +435,9 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
         await claim_node(
             state,
-            _make_runtime(ops_pool=aops_pool, llm=llm, event_publisher=publisher),
+            _make_runtime(
+                ops_pool=aops_pool, llm=llm, event_publisher=publisher, database_gate=database_gate
+            ),
             _config(
                 tid,
             ),
@@ -414,11 +454,14 @@ async def test_claim_compact_request_retries_then_succeeds(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """compact_request whose first Compaction LLM call fails → retried; a later
     attempt's summary is applied (same retry semantics as the auto-compact
     hook's COMPACT_MAX_ATTEMPTS)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "compact_request")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -435,7 +478,7 @@ async def test_claim_compact_request_retries_then_succeeds(
 
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=llm),
+        _make_runtime(ops_pool=aops_pool, llm=llm, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -454,6 +497,7 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """A chat sent between the agent's ava.self.compact and claim's wake lands in
     the same batch as the compact_summary — it must not be lost, and it must NOT
@@ -462,7 +506,9 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
     delivers it in the freshly established context. Regression: the chat used to
     be parked after the summary (the extra_msgs tail), which the user observed
     as original messages surviving a compact."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     summary_text = "agent summary"
     _insert_inbound_kind(db_conn, tid, summary_text, "compact_summary")
     chat_id = insert_inbound_message(
@@ -478,7 +524,7 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
 
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -507,6 +553,7 @@ async def test_claim_compact_summary_finalizes_claimed_history(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """A compaction finalizes every already-claimed inbound row to 'done'
     BEFORE the REMOVE_ALL wipe. Those rows' HumanMessages live in
@@ -515,7 +562,9 @@ async def test_claim_compact_summary_finalizes_claimed_history(
     missing from the checkpoint, resets them to 'pending', and re-delivers
     already-answered messages — a run of consecutive user messages with the
     compacted replies gone (Task #823)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "agent summary", "compact_summary")
     # Two chats claimed earlier (their HumanMessages are in state.messages,
     # status still 'claimed' — the two-phase path finalizes only at startup).
@@ -537,7 +586,7 @@ async def test_claim_compact_summary_finalizes_claimed_history(
 
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -560,7 +609,11 @@ async def test_claim_compact_summary_finalizes_claimed_history(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_compact_request_batched_with_restart_is_dropped(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
 ):
     """compact_request + restart in same batch → compact_request is the discarded loser:
     does **not** run the backend Compaction LLM (if it raised, the already consumed restart row
@@ -574,7 +627,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, llm=llm),
+        _make_runtime(ops_pool=aops_pool, llm=llm, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -592,7 +645,11 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
 ):
     """compact_summary + restart in same batch → summary is data the agent already wrote itself,
     applied as usual (discarding = silently swallowing the agent's work), while the restart's idle
@@ -616,7 +673,7 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -646,17 +703,20 @@ async def test_claim_compact_summary_alone_does_not_publish_committed(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """compact_summary alone → does not publish InboundCommitted (it goes through state replace
     not inbound append; frontend reload should be triggered by llm_done)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "summary", "compact_summary")
 
     pub = MagicMock()
     state = AgentState(messages=[SystemMessage(content="sys")])
     await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
+        _make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -670,6 +730,7 @@ async def test_claim_compact_summary_with_no_existing_system_message(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """state.messages empty (first round) + compact_summary arrives → claim simultaneously
     injects SystemMessage into new_msgs[0] AND takes it out as sys_msg to prepend again
@@ -680,13 +741,15 @@ async def test_claim_compact_summary_with_no_existing_system_message(
     SystemMessage. Claim now never emits one — the head is `init_context`'s — so
     the invariant is stronger and simpler: a compaction emits the clearing
     sentinel and nothing else."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     summary_text = "first turn summary"
     _insert_inbound_kind(db_conn, tid, summary_text, "compact_summary")
 
     cmd = await claim_node(
         AgentState(),  # messages empty
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -704,17 +767,20 @@ async def test_claim_compact_summary_returns_before_llm_with_halted_false(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """compact_summary path → returns Command(goto=before_llm, halted=False).
 
     Lock down mutant_168 (goto=None), mutant_170 (goto kw deleted), mutant_175-177
     (halted False → True / case change)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "summary text", "compact_summary")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="m1")]),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),

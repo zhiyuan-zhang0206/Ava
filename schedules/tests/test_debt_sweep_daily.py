@@ -15,6 +15,7 @@ import pytest
 
 from ava.agents import AgentStatus as S
 from base.config import settings
+from base.native_process.loaded_commit import LoadedCommit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "debt-sweep-daily-schedule.py"
@@ -64,6 +65,8 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     monkeypatch.setattr(module.ava.agents, "spawn", forbidden)
     monkeypatch.setattr(module.ava.agents, "resurrect", forbidden)
     monkeypatch.setattr(module.ava.agents, "send_message", forbidden)
+    monkeypatch.setattr(module.ava, "loaded_code_image", forbidden)
+    monkeypatch.setattr("schedules.entry.Database.from_settings", forbidden)
     monkeypatch.setattr(module, "catch_up", forbidden)
     monkeypatch.setattr(module, "fire_slot_once", forbidden)
     monkeypatch.setattr(module, "ava_home", forbidden)
@@ -175,8 +178,12 @@ def test_scan_failure_is_passed_to_worker_and_registered(
         prompts.append(prompt)
         return module.WorkerDispatch(agent_id=44, action="spawned")
 
-    def init_gateway_process(name: str) -> None:
-        pass
+    def init_gateway_process(
+        name: str, *, producer: object, machine_reader: object, image: LoadedCommit
+    ) -> None:
+        assert name == module._PROCESS_NAME
+        assert callable(producer) and callable(machine_reader)
+        assert image.sha is None
 
     def record_emit(category: str, event_name: str, **kwargs: object) -> None:
         emitted.append({"category": category, "event_name": event_name, **kwargs})
@@ -186,7 +193,12 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     monkeypatch.setattr(module, "init_gateway_process", init_gateway_process)
     monkeypatch.setattr("base.telemetry.emit", record_emit)
 
-    module._fire(datetime(2026, 9, 21, 22, 30, tzinfo=UTC), None)
+    module._fire(
+        datetime(2026, 9, 21, 22, 30, tzinfo=UTC),
+        None,
+        producer=lambda: None,
+        image=LoadedCommit(REPO_ROOT, None),
+    )
 
     assert len(prompts) == 1
     assert "mechanical scan failed: exit 1" in prompts[0]

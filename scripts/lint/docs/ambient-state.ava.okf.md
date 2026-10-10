@@ -42,4 +42,6 @@ Packages outside `DB_HANDLE_PACKAGES` are checked by `scripts/structure/ambient_
 
 A per-file AST pass does not see a non-empty container mutated only from another module, a `Thread` subclass instantiated elsewhere, `run_coroutine_threadsafe` or executor submits, or whether a `<expr>.create_task` receiver is really a `TaskGroup` (any receiver not named like a loop passes). A value class is resolved from its defining file, so changing a class there can move a verdict in a file that did not change; the full gate run sees it.
 
+The value-instance classification also accepts a resolved value class's classmethod when its body, after an optional docstring, only returns a direct call to its unchanged bound class parameter. The method must have exactly the builtin `classmethod` decorator and no class-body rebinding. Return annotations and method names provide no proof; containers, other calls, branches and unresolved factories remain unknown and are reported. This reuses the constructor's existing value-class form: it does not prove deep immutability of field contents or absence of factory argument effects, and does not waive separate import-time effect rules.
+
 Parent: [[scripts/lint/docs/lint.ava.okf.md|lint]].

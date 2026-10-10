@@ -8,7 +8,7 @@ fails fast on timeout. A loopback-only single box never waits.
 
 import os
 import subprocess
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -18,7 +18,10 @@ import pytest
 
 from base.cluster import ownership, port_preflight
 from base.config import ConfigBoot, settings
+from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as _ci
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 @pytest.fixture(autouse=True)
@@ -405,7 +408,7 @@ def test_redis_conf_always_renders_rdb_save_schedule(
 
 
 def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_pipeline: Callable[[], EventPipeline]
 ) -> None:
     """The runtime URL's ACL user can neither AUTH as `default` nor SHUTDOWN, so
     the explicit force teardown must authenticate with the admin password."""
@@ -424,7 +427,7 @@ def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
     monkeypatch.setattr(_ci.subprocess, "run", _run)
-    assert _ci.stop_cluster_instance() == 0
+    assert _ci.stop_cluster_instance(producer=operator_pipeline) == 0
     assert shutdowns == [(["-p", "16380", "shutdown", "nosave"], "admin-pw")]
 
 

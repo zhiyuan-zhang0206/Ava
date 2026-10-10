@@ -26,6 +26,7 @@ from base.agents.messages.kwargs import AvaMsgType
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -51,7 +52,10 @@ def _write_png(path: Path) -> None:
 
 
 def _make_runtime(
-    hosted_resources: HostedTurnResources, model_name: str | None = None
+    hosted_resources: HostedTurnResources,
+    model_name: str | None = None,
+    *,
+    database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
     """Minimal runtime with fake ops_pool + event_publisher (mirrors
     agent/graph/exec/tests/test_exec_node_timeout.py). A model_name selects the media
@@ -72,7 +76,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -81,7 +85,10 @@ def _make_runtime(
 
 
 async def test_exec_drains_attachment_right_after_output(
-    hosted_resources: HostedTurnResources, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    hosted_resources: HostedTurnResources,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database_gate: ProcessDbGate,
 ) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
@@ -101,7 +108,13 @@ async def test_exec_drains_attachment_right_after_output(
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
     result = await _exec_node_impl(
-        state, _make_runtime(hosted_resources=hosted_resources, model_name="glm-5.3-flash"), _CONFIG
+        state,
+        _make_runtime(
+            hosted_resources=hosted_resources,
+            model_name="glm-5.3-flash",
+            database_gate=database_gate,
+        ),
+        _CONFIG,
     )
 
     update = result.update
@@ -131,6 +144,7 @@ async def test_exec_drains_attachment_right_after_output(
 async def test_exec_without_attachments_appends_no_attach_message(
     hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     async def _fake_run_agent_code(
         *args: object, **kwargs: object
@@ -141,7 +155,13 @@ async def test_exec_without_attachments_appends_no_attach_message(
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
     result = await _exec_node_impl(
-        state, _make_runtime(hosted_resources=hosted_resources, model_name="glm-5.3-flash"), _CONFIG
+        state,
+        _make_runtime(
+            hosted_resources=hosted_resources,
+            model_name="glm-5.3-flash",
+            database_gate=database_gate,
+        ),
+        _CONFIG,
     )
 
     update = result.update

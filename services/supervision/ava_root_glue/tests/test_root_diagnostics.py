@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 from typing import NoReturn, cast
@@ -10,8 +11,11 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.agents.context.clients import ClientSet
 from base.daemon.health import DaemonProbe
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.ownership import OwnedProcess
+from base.telemetry.delivery.pipeline import EventPipeline
 from services.supervision.ava_root.failure_state import UnitFailureFacts
 from services.supervision.ava_root.health import HealthMonitor, ProbeRunner
 from services.supervision.ava_root.probes import ProbeRegistry
@@ -35,6 +39,10 @@ class _EventLog:
     warning = info
     error = info
     log = info
+
+
+def _unused_database() -> NoReturn:
+    raise AssertionError("this diagnostic must not construct a database")
 
 
 def _no_op(**_kwargs: object) -> None:
@@ -216,7 +224,12 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
 ) -> None:
     health = _Health()
     diagnostics = DiagnosticMonitor([Diagnostic("failed", lambda: DaemonProbe.down("failed"))])
-    rounds = RootHealthRounds(health, diagnostics)
+    rounds = RootHealthRounds(
+        health,
+        diagnostics,
+        clients=ClientSet(),
+        image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
+    )
     task = asyncio.create_task(rounds.run_round())
     await asyncio.sleep(0.01)
     assert not any(event["event"] == "root_health_tick" for event in events)
@@ -236,7 +249,13 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
 ) -> None:
     async with asyncio.TaskGroup() as tasks:
         health = _Health()
-        rounds = RootHealthRounds(health, DiagnosticMonitor([]), tasks=tasks)
+        rounds = RootHealthRounds(
+            health,
+            DiagnosticMonitor([]),
+            clients=ClientSet(),
+            image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
+            tasks=tasks,
+        )
         await rounds.start()
         assert events[0]["event"] == "root_health_expected"
         since = events[0]["expected_since_timestamp_seconds"]
@@ -251,10 +270,81 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
         assert not any(event["event"] == "root_health_tick" for event in events)
 
 
+@pytest.mark.parametrize("sha", ["captured-root-image", None])
+async def test_root_logging_owns_only_the_started_pipeline(
+    sha: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    events: list[dict[str, object]],
+) -> None:
+    image = LoadedCommit(source_root=tmp_path, sha=sha)
+    made: list[EventPipeline] = []
+
+    def producer() -> EventPipeline:
+        pipeline = EventPipeline(writer=lambda _events: None)
+        made.append(pipeline)
+        return pipeline
+
+    clients = ClientSet(pipeline_factory=producer)
+    seen: list[LoadedCommit] = []
+
+    def initialize(
+        *, name: str, producer: object, machine_reader: object, image: LoadedCommit
+    ) -> None:
+        assert name == "ava-root"
+        assert callable(producer) and callable(machine_reader)
+        assert producer() is clients.event_pipeline()
+        seen.append(image)
+
+    monkeypatch.setattr("base.log.init_gateway_process", initialize)
+    async with asyncio.TaskGroup() as tasks:
+        rounds = RootHealthRounds(
+            _Health(), DiagnosticMonitor([]), clients=clients, image=image, tasks=tasks
+        )
+        assert made == []
+        await rounds.start()
+        assert seen == [image] and len(made) == 1
+        await rounds.stop()
+        assert made[0].stopped
+
+
+async def test_logging_startup_error_stops_its_constructed_writer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    made: list[EventPipeline] = []
+    error = ValueError("root logging failed after constructing its writer")
+
+    def producer() -> EventPipeline:
+        pipeline = EventPipeline(writer=lambda _events: None)
+        made.append(pipeline)
+        return pipeline
+
+    clients = ClientSet(pipeline_factory=producer)
+
+    def initialize(**_inputs: object) -> NoReturn:
+        clients.event_pipeline()
+        raise error
+
+    monkeypatch.setattr("base.log.init_gateway_process", initialize)
+    async with asyncio.TaskGroup() as tasks:
+        rounds = RootHealthRounds(
+            _Health(),
+            DiagnosticMonitor([]),
+            clients=clients,
+            image=LoadedCommit(source_root=tmp_path, sha=None),
+            tasks=tasks,
+        )
+        with pytest.raises(ValueError) as caught:
+            await rounds.start()
+        assert caught.value is error and len(made) == 1
+        assert made[0].stopped
+
+
 def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(probes, "is_macos", lambda: False)
     monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
-    names = {check.name for check in probes.build_diagnostics(set())}
+    names = {check.name for check in probes.build_diagnostics(set(), database=_unused_database)}
     assert names == {"venv"}
     monkeypatch.setattr(probes, "is_macos", lambda: True)
     monkeypatch.setattr(
@@ -262,14 +352,14 @@ def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> N
         "settings",
         SimpleNamespace(services=SimpleNamespace(permissions_helper_enabled=False)),
     )
-    names = {check.name for check in probes.build_diagnostics(set())}
+    names = {check.name for check in probes.build_diagnostics(set(), database=_unused_database)}
     assert names == {"venv", "brew-pin", "permissions-helper"}
 
 
 def test_station_no_credential_is_unknown_and_does_not_send(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    probe = probes.StationProbe()
+    probe = probes.StationProbe(database=_unused_database)
     answers = Mock(return_value=True)
     monkeypatch.setattr(probe._module, "_station_answers", answers)
     monkeypatch.setattr(
@@ -317,10 +407,14 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
     monkeypatch.setattr(probes, "is_macos", lambda: True)
     monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
     first = next(
-        check for check in probes.build_diagnostics(set()) if check.name == "permissions-helper"
+        check
+        for check in probes.build_diagnostics(set(), database=_unused_database)
+        if check.name == "permissions-helper"
     )
     second = next(
-        check for check in probes.build_diagnostics(set()) if check.name == "permissions-helper"
+        check
+        for check in probes.build_diagnostics(set(), database=_unused_database)
+        if check.name == "permissions-helper"
     )
     assert first.report is not None and second.report is not None
     bad = DaemonProbe.down("lwcr-stuck; helper unavailable")

@@ -3,9 +3,10 @@
 import inspect
 import shutil
 import subprocess
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,9 +15,12 @@ from base.cluster.machine import set_identity
 from base.deploy.git import memory_repo
 from base.host import proc
 from base.packages.plugins.enable_config import write_local
+from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
 from cli.commands.extensions import memory
 from cli.commands.extensions._plugin_scaffold import run_plugin_scaffolds
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 @pytest.fixture(autouse=True)
@@ -205,6 +209,8 @@ def _make_dirty_memory_repo(pool: Path, branch: str) -> None:
 def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Converge must not invoke Git in runtime memory paths, even when poisoned."""
     _install_memory_plugin()
@@ -243,6 +249,8 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
             frozenset({"agent-runner"}),
             ava_home=paths.ava_home(),
             steps=converge_host.CONVERGE_STEPS,
+            database_factory=operator_database,
+            producer=operator_pipeline,
         )
 
     assert not [cwd for cwd in git_cwds if cwd.is_relative_to(memory_pool)]

@@ -23,6 +23,7 @@ import signal
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,7 +32,7 @@ import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name, reachable_host
+from base.cluster.machine import machine_name, reachable_host, validate_machine_name
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
@@ -39,15 +40,19 @@ from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.pty import client as pty_client
 from base.sessions.record import SessionRecord
+from base.telemetry import build_pipeline
 from services.agent_runner.page_server.config import PageServerConfig
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -679,7 +684,7 @@ async def _reconcile_loop(
             _log.exception("[page-server] poll iteration failed")
 
 
-async def run() -> None:
+async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
     if _is_running():
         _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -688,8 +693,10 @@ async def run() -> None:
     liveness = LivenessGroup()
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("page_server", _endpoint().health_port, liveness=liveness)
-    db = Database.from_settings()
+    health = await start_health_server(
+        "page_server", _endpoint().health_port, liveness=liveness, image=image
+    )
+    db = database()
     pool = db.pool()
     config, bus = page_server_config(), EventBus.from_settings()
     try:
@@ -713,8 +720,21 @@ def main() -> None:
     """Initialize the daemon after verifying the database schema version."""
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="page_server")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="page_server", exempt=False)
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="page_server",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        image=image,
+    )
     install_graceful_shutdown("page_server")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -725,7 +745,7 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(database=database, image=image))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[page-server] interrupted, shutting down")

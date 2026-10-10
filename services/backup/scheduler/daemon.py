@@ -21,13 +21,19 @@ from pathlib import Path
 
 from base import telemetry
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.machine import validate_machine_name
 from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.emitter import build_pipeline
 from services.backup.dump import _cluster_tz, is_due
 from services.backup.scheduler.operation.staging import OperationBusyError
 from services.backup.scheduler.recovery_drill import (
@@ -212,7 +218,7 @@ async def _backup_loop(state: _BackupState, *, config: ConfigBoot) -> None:
         await _sleep_until_next_backup_hour(datetime.now(UTC), config=config)
 
 
-async def run(*, config: ConfigBoot) -> None:
+async def run(*, config: ConfigBoot, image: LoadedCommit) -> None:
     """Own the pidfile and health server for the backup scheduler."""
     if _is_running():
         _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -225,6 +231,7 @@ async def run(*, config: ConfigBoot) -> None:
         "pg_backup",
         endpoint.health_port,
         components=lambda: _backup_components(state),
+        image=image,
     )
     _log.info("[pg-backup] healthz listening on :%s", endpoint.health_port)
     try:
@@ -240,8 +247,21 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     config = ConfigBoot()
+    image = LoadedCommit.capture()
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="pg_backup")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="pg_backup")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="pg_backup",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        image=image,
+    )
     install_graceful_shutdown("pg_backup")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -251,7 +271,7 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(config=config))
+        runner.run(run(config=config, image=image))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[pg-backup] interrupted, shutting down")

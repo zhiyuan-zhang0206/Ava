@@ -15,6 +15,7 @@ from base.agents.recovery.breaker import (
     record_permanent_reject_turn,
 )
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
@@ -33,8 +34,14 @@ async def test_record_increments_and_halt_suppresses_until_human(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
 
     assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 1
     reason_row = db_conn.execute(
@@ -65,10 +72,16 @@ async def test_halt_replaces_another_reasons_window(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A bounded `resurrect_failed` window is weaker than the until-human halt:
     the trip replaces it (and an expired window even of its own reason)."""
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
         "wake_suppress_reason = 'resurrect_failed' WHERE id = %s",
@@ -105,12 +118,18 @@ async def test_recorded_reason_is_the_billing_whitelist_value(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """End-to-end anti-drift (task #3919): the reason the breaker WRITES is the
     value the billing batch-recovery whitelist PICKS UP."""
     from ops.lifecycle.billing_recovery import enumerate_candidates
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 1
     assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 2
     db_conn.execute(

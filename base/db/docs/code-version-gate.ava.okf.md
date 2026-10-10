@@ -40,7 +40,7 @@ cannot write the row. Nothing lowers the minimum but an operator.
 pool-backend creation and borrow (`_restore_pooled_session` and its async twin).
 Its second statement re-applies the statement ceiling and the connection's
 `application_name` that `RESET ALL` cleared; on a borrow where
-`code_version_gate.min_read_due()` (the process's first, then at most every
+the retained `ProcessDbGate.min_read_due()` (the process's first, then at most every
 `MIN_REFRESH_INTERVAL_S`) that same statement also selects the minimum, so the
 read adds no round trip. `observe_minimum` then compares: a process below the
 minimum logs `critical` and exits through `hard_exit` with
@@ -50,7 +50,7 @@ swallows an exception from a `check` or `configure` callback and retries to
 `deployment_state` row reads as `0`.
 
 `pool()`, `async_pool()` and pooled `connect()` also start every connection with
-`application_name = ava:<process>:v<version>` (`code_version_gate.application_name`),
+`application_name = ava:<process>:v<version>` (`ProcessDbGate.application_name`),
 resolving the version at construction so a tree without git fails there, on the
 caller's thread. PgBouncer's `SHOW CLIENTS` lists these names.
 
@@ -58,11 +58,10 @@ caller's thread. PgBouncer's `SHOW CLIENTS` lists these names.
 
 - Direct connections (`direct=True`: administrator, migration applier, `pg_dump`) and
   `connect_url` targets. They carry no name and read no minimum.
-- The `ava` CLI: `cli/main.py` calls `code_version.exempt_from_db_gate()` first,
-  because `ava stop` writes to drain agents and a stale host must still run it. It
-  is the only caller (guarded by `tests/components/cli/test_main_dispatch_contract.py`), and
-  it dials as `ava:cli` without resolving a version. Services start with
-  `python -m <module>`, so all of them are gated.
+- The `ava` CLI: one `cli.database.OperatorDatabaseFactory` retains an explicitly
+  exempt gate for its command, because `ava stop` must still drain agents on a
+  stale host. Its ordinary and scratch-URL builders share that owner and dial as
+  `ava:cli` without resolving Git. Service entries retain their own nonexempt gates.
 - A process that predates the gate, and one that holds a single raw connection
   forever.
 

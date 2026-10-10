@@ -734,27 +734,43 @@ async def test_stall_guards_keep_two_roots_and_live_reads_separate(
     first.set_field("node_stall_dump_seconds", 0)
     second.set_field("node_stall_dump_seconds", 3)
     armed: list[float] = []
+    sequence: list[str] = []
 
-    def arm(seconds: float, **_kwargs: Any) -> None:
+    def arm(seconds: float, **kwargs: Any) -> None:
+        assert kwargs == {"repeat": False, "file": sys.__stderr__}
         armed.append(seconds)
+        sequence.append("arm")
 
     monkeypatch.setattr(faulthandler, "dump_traceback_later", arm)
-    monkeypatch.setattr(faulthandler, "cancel_dump_traceback_later", lambda: None)
+    monkeypatch.setattr(
+        faulthandler, "cancel_dump_traceback_later", lambda: sequence.append("cancel")
+    )
 
-    def read_first() -> float:
-        return first.view.agent.node_stall_dump_seconds
+    async def run(owner: ConfigBoot, name: str, *, fail: bool = False) -> None:
+        async with node_lifecycle(
+            "llm",
+            messages=[],
+            ops_pool=None,
+            event_publisher=MagicMock(),
+            agent_id=1,
+            turn_progress=TurnProgress(),
+            read_stall_seconds=lambda: owner.view.agent.node_stall_dump_seconds,
+            timeline_inputs=_TIMELINE_INPUTS,
+            limit_reader=lambda: settings.display.timeline_default_limit,
+        ):
+            sequence.append(name)
+            if fail:
+                raise RuntimeError("body-failed")
 
-    def read_second() -> float:
-        return second.view.agent.node_stall_dump_seconds
-
-    with node_log._stall_dump_guard("llm", read_stall_seconds=read_first):
-        pass
-    with node_log._stall_dump_guard("llm", read_stall_seconds=read_second):
-        pass
+    await run(first, "first")
+    await run(second, "second")
     first.set_field("node_stall_dump_seconds", 7)
     second.set_field("node_stall_dump_seconds", 0)
-    with node_log._stall_dump_guard("llm", read_stall_seconds=read_first):
-        pass
-    with node_log._stall_dump_guard("llm", read_stall_seconds=read_second):
-        pass
+    await run(first, "first")
+    await run(second, "second")
     assert armed == [5, 9]
+    assert sequence == ["first", "arm", "second", "cancel", "arm", "first", "cancel", "second"]
+    with pytest.raises(RuntimeError, match="body-failed"):
+        await run(first, "failed", fail=True)
+    assert armed == [5, 9, 9]
+    assert sequence[-3:] == ["arm", "failed", "cancel"]

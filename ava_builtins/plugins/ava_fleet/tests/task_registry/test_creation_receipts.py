@@ -18,6 +18,7 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -29,14 +30,14 @@ def _facts(db: psycopg.Connection) -> tuple[object, ...]:
 
 
 def test_concurrent_creation_returns_same_original_task(
-    db_conn: psycopg.Connection, root_task_id: int
+    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor, owner = _seed_agent(db_conn), _seed_agent(db_conn)
     barrier = Barrier(2)
     before = db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone()
 
     def create(_index: int) -> task_registry.Task:
-        clients = ClientSet(database=Database.from_settings)
+        clients = ClientSet(database=lambda: Database.from_settings(gate=database_gate))
         try:
             context = AvaContext(identity=AgentIdentity(actor, True), clients=clients)
             barrier.wait()

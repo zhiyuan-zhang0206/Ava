@@ -1,5 +1,8 @@
 """Ordinary start measures real gateway health before releasing a stopped hold."""
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,6 +12,7 @@ from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission
 from base.deploy.state import host_deploy_state
+from base.telemetry import EventPipeline
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _hermetic_start,
 )
@@ -19,6 +23,8 @@ from tests.components.services.test_maintenance_readiness import (
     gateway_configuration as gateway_configuration,
 )
 from tests.components.services.test_maintenance_readiness import held as held
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 pytestmark = pytest.mark.real_service_readiness_gate
 
@@ -27,6 +33,8 @@ pytestmark = pytest.mark.real_service_readiness_gate
 def test_start_measures_real_health_then_resumes_without_early_business_admission(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
 
     _roster(monkeypatch, (("gateway", None),))
@@ -44,7 +52,15 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
             )
 
         monkeypatch.setattr(_probe_commands, "probe_service", probe)
-        assert _start_commands.cmd_start(persist_services=False, retained_children=[]) == 0
+        assert (
+            _start_commands.cmd_start(
+                persist_services=False,
+                retained_children=[],
+                database_factory=operator_database,
+                producer=operator_pipeline,
+            )
+            == 0
+        )
         # Completion must release the real business gate in the same turn,
         # without a sleep that lets an independent posture cache expire.
         resumed = client.get("/api/agents")

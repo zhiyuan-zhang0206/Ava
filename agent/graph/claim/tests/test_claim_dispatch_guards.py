@@ -17,6 +17,7 @@ from agent.tests.claim.claim_support import (
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -30,6 +31,7 @@ async def test_claim_unknown_kind_raises(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Unrecognized inbound kind = framework / DB schema desync — immediately raise,
     do not silently swallow bugs by 'defaulting to chat processing'.
@@ -40,8 +42,10 @@ async def test_claim_unknown_kind_raises(
     """
     from agent.db import ClaimedInbound
 
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
-    runtime = _make_runtime(ops_pool=aops_pool)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
+    runtime = _make_runtime(ops_pool=aops_pool, database_gate=database_gate)
 
     async def fake_claim(
         _db: object,
@@ -77,6 +81,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """The other half of the race: the batch (terminate alone) is claimed, but a
     message lands in the queue before the exit is committed. The claim node's
@@ -88,13 +93,15 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     stays pending in the table."""
     from agent.db import ClaimedInbound
 
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
     chat_id = insert_inbound_message(
         db_conn, tid, "message after the claim", source="user", bus=event_bus, database=database
     )
     await _await_inbound_visible(aops_pool, chat_id)
-    runtime = _make_runtime(ops_pool=aops_pool)
+    runtime = _make_runtime(ops_pool=aops_pool, database_gate=database_gate)
 
     async def fake_claim(
         _pool: AsyncConnectionPool,
@@ -161,18 +168,21 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Veto half 1: a same-batch chat newer than the terminate keeps the agent
     alive."""
     from agent.db import ClaimedInbound
 
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     chat_id = insert_inbound_message(
         db_conn, tid, "message in the batch", source="user", bus=event_bus, database=database
     )
     await _await_inbound_visible(aops_pool, chat_id)
-    runtime = _make_runtime(ops_pool=aops_pool)
+    runtime = _make_runtime(ops_pool=aops_pool, database_gate=database_gate)
 
     async def fake_claim(
         _pool: AsyncConnectionPool,

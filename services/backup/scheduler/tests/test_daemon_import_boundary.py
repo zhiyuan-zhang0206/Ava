@@ -66,6 +66,12 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
 import services.backup.dump as backup
 from base.config import ConfigBoot
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+version = CodeVersion(LoadedCommit.capture())
+gate = ProcessDbGate(version=version.get, process="backup-test")
 config = ConfigBoot()
 settings = config.view
 from services.backup.scheduler import worker
@@ -87,8 +93,13 @@ def _empty_dump(now, *, directory, **_):
 backup._run_backup = _empty_dump
 work = Path({work!r})
 work.mkdir()
+def no_restore(url: str) -> Database:
+    raise AssertionError("dump must not restore")
+
+
 result = worker._execute(
-    {{"kind": "dump", "now": datetime(2026, 10, 2, 3, tzinfo=UTC).isoformat()}}, work, config=config
+    {{"kind": "dump", "now": datetime(2026, 10, 2, 3, tzinfo=UTC).isoformat()}}, work, config=config, database=lambda: Database.from_settings(gate=gate),
+    database_for_url=no_restore
 )
 print(json.dumps({{
     "before": before,

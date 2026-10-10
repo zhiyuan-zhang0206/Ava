@@ -7,7 +7,7 @@ executes in-process against the `ops` op clusters and returns {status, result}.
 
 Usage: .venv/bin/python -m services.agent_runner.agent_ops.daemon — a per-machine
 singleton via pidfile, supervised by the application root. Registers
-its own unit in `machines` once serving (`_register_boot`).
+its own unit in `machines` once serving (`boot.register_boot`).
 
 Idempotency keys: an envelope carrying `idempotency_key` is deduplicated
 against the shared `api_idempotency` table (method='ops' rows — migration
@@ -42,6 +42,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -51,6 +52,7 @@ from pydantic import ValidationError
 
 from base import paths
 from base.agents import AvaAgentError, ResurrectRefused
+from base.agents.context.clients import ClientSet
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.cluster.machine import machine_name
 from base.cluster.transport_encryption import verify_transport_encryption
@@ -61,11 +63,16 @@ from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import write_transaction
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.config_registration import InvalidConfigOverlay
+from base.telemetry import build_pipeline
 from ops import host_config as host_config
 from ops import inventory as inventory
 from ops import lifecycle
@@ -86,15 +93,8 @@ from ops.rpc_schemas import (
     OpStatus,
     is_op_kind,
 )
-from services.agent_runner.agent_ops import health, outbox_flusher
+from services.agent_runner.agent_ops import boot, health, outbox_flusher
 from services.agent_runner.agent_ops import maintenance as maintenance_activity
-from services.agent_runner.agent_ops._boot import (
-    _open_db_pool,
-    _ops_acceptance,
-    _ops_bind_host,
-    _ops_handles,
-    _register_boot,
-)
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -190,6 +190,8 @@ async def _run_arm(
     pool: ConnectionPool,
     executor: ThreadPoolExecutor,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
 ) -> tuple[OpStatus, dict[str, object]]:
     """`_dispatch_sync` on this daemon's executor, with its explicit DB pool.
 
@@ -203,7 +205,15 @@ async def _run_arm(
     try:
         future = loop.run_in_executor(
             executor,
-            functools.partial(_dispatch_sync, kind, payload, pool=pool, authority=authority),
+            functools.partial(
+                _dispatch_sync,
+                kind,
+                payload,
+                pool=pool,
+                authority=authority,
+                database=database,
+                image=image,
+            ),
         )
         maintenance_activity.track_worker(future, workers=workers)
         return await asyncio.shield(future)
@@ -213,7 +223,13 @@ async def _run_arm(
 
 
 def _dispatch_sync(
-    kind: str, payload: dict[str, Any], *, pool: ConnectionPool, authority: ConfigAuthority
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    pool: ConnectionPool,
+    authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
 ) -> tuple[OpStatus, dict[str, object]]:
     """The blocking op arms, bound to this daemon's shared pool.
 
@@ -221,7 +237,14 @@ def _dispatch_sync(
     ceiling, task #4129 I4). The binding stays here so `_run_arm` and the
     worker's explicit pool binding stay in this daemon.
     """
-    return dispatch_sync(kind, payload, pool=pool, db=_ops_handles()[0], authority=authority)
+    return dispatch_sync(
+        kind,
+        payload,
+        pool=pool,
+        db=boot.ops_handles(database=database)[0],
+        authority=authority,
+        image=image,
+    )
 
 
 async def _dispatch(
@@ -234,6 +257,8 @@ async def _dispatch(
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
@@ -265,7 +290,7 @@ async def _dispatch(
     try:
         match kind:
             case "spawn-launch-v2":
-                db, bus = _ops_handles()
+                db, bus = boot.ops_handles(database=database)
                 spawned = await lifecycle.launch_agent_op(
                     db, bus, LaunchAgentRequest.model_validate(payload), pool, catalog=catalog
                 )
@@ -276,14 +301,14 @@ async def _dispatch(
             case "launch-reconcile-v1":
                 from ops.lifecycle.launch_reconcile import reconcile_launch_op
 
-                db, bus = _ops_handles()
+                db, bus = boot.ops_handles(database=database)
                 result = await reconcile_launch_op(
                     db, bus, LaunchReconcileRequest.model_validate(payload), pool
                 )
                 return OpStatus.COMPLETED, result.model_dump(mode="json")
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
-                db, bus = _ops_handles()
+                db, bus = boot.ops_handles(database=database)
                 resp = await lifecycle.lifecycle_op(
                     db,
                     bus,
@@ -304,6 +329,8 @@ async def _dispatch(
                     pool=pool,
                     executor=executor,
                     authority=authority,
+                    database=database,
+                    image=image,
                 )
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
@@ -338,6 +365,8 @@ async def _dispatch_idempotent(
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
@@ -363,6 +392,8 @@ async def _dispatch_idempotent(
                 executor=executor,
                 catalog=catalog,
                 authority=authority,
+                database=database,
+                image=image,
             )
         except psycopg.OperationalError:
             if attempt + 1 >= _DISPATCH_RETRY_ATTEMPTS:
@@ -387,6 +418,8 @@ async def _dispatch_idempotent_pass(
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Replay one immutable request; unresolved execution never frees its identity.
 
@@ -415,6 +448,8 @@ async def _dispatch_idempotent_pass(
             executor=executor,
             catalog=catalog,
             authority=authority,
+            database=database,
+            image=image,
         )
     request_hash = hashlib.sha256(
         json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -439,6 +474,8 @@ async def _dispatch_idempotent_pass(
             executor=executor,
             catalog=catalog,
             authority=authority,
+            database=database,
+            image=image,
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -484,6 +521,8 @@ async def _ops_route(
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
 ) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
@@ -530,6 +569,8 @@ async def _ops_route(
                         executor=executor,
                         catalog=catalog,
                         authority=authority,
+                        database=database,
+                        image=image,
                     )
                 else:
                     status, result = await _dispatch(
@@ -541,6 +582,8 @@ async def _ops_route(
                         executor=executor,
                         catalog=catalog,
                         authority=authority,
+                        database=database,
+                        image=image,
                     )
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -557,7 +600,7 @@ async def _ops_route(
     )
 
 
-async def _main() -> None:
+async def _main(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     ensure_eager()
     catalog = build_model_catalog()
     authority = ConfigAuthority(
@@ -591,9 +634,9 @@ async def _main() -> None:
         )
         sys.exit(1)
 
-    pool = _open_db_pool()
+    pool = boot.open_db_pool(database=database)
     executor = _op_thread_pool()
-    db, bus = _ops_handles()
+    db, bus = boot.ops_handles(database=database)
     # Redeliver recorded delivery failures whenever the data plane allows
     # (task #3757): a resident loop that outlives every sender process, owned with
     # the server by the TaskGroup below.
@@ -605,8 +648,8 @@ async def _main() -> None:
     try:
         # Every /ops dial presents a machine API token of this generation; an
         # open cluster serves /ops unauthenticated on loopback.
-        acceptance = _ops_acceptance()
-        bind_host = _ops_bind_host(acceptance)
+        acceptance = boot.ops_acceptance()
+        bind_host = boot.ops_bind_host(acceptance)
         if bind_host != "127.0.0.1":
             verify_transport_encryption(bind_host, authenticated=acceptance is not None)
         endpoint = _endpoint()
@@ -617,6 +660,8 @@ async def _main() -> None:
             extra_routes={
                 ("POST", "/ops"): functools.partial(
                     _ops_route,
+                    database=database,
+                    image=image,
                     executor=executor,
                     catalog=catalog,
                     authority=authority,
@@ -636,6 +681,7 @@ async def _main() -> None:
                 ),
             },
             auth_digests=acceptance,
+            image=image,
         )
         _log.info(
             "ava-ops up, machine=%s serving POST /ops on %s:%d",
@@ -643,7 +689,7 @@ async def _main() -> None:
             bind_host,
             endpoint.health_port,
         )
-        _register_boot()
+        boot.register_boot(database=database)
         try:
             # One TaskGroup owns the server and the outbox loop: a loop that raises
             # cancels the server and ends the process, and the supervisor restarts it.
@@ -675,24 +721,49 @@ def main(*, argv: list[str] | None = None) -> None:
     # config chain at the entry, before serving.
     from base.config import ensure_eager
 
+    image = LoadedCommit.capture()
     ensure_eager()
-    init_gateway_process(name="ops")
-    install_graceful_shutdown("ops")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="ops", exempt=False)
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    clients = ClientSet(
+        database=database, pipeline_factory=lambda: build_pipeline(database=database)
+    )
     code = 0
+    primary: BaseException | None = None
     # Drain async cleanup explicitly; Runner.close also joins the default
     # executor, which may contain a stuck worker and must not delay this exit.
-    runner = asyncio.Runner()
     try:
-        runner.run(_main())
-    except KeyboardInterrupt:
-        _log.info("[ops] interrupted, shutting down")
-        failures = cancel_and_drain(runner)
-        if failures:
-            _log.error("[ops] async shutdown failed: %r", failures)
+        init_gateway_process(
+            name="ops", producer=clients.event_pipeline, machine_reader=machine_name, image=image
+        )
+        install_graceful_shutdown("ops")
+        runner = asyncio.Runner()
+        try:
+            runner.run(_main(database=database, image=image))
+        except KeyboardInterrupt as exc:
+            primary = exc
+            _log.info("[ops] interrupted, shutting down")
+            failures = cancel_and_drain(runner)
+            if failures:
+                _log.error("[ops] async shutdown failed: %r", failures)
+                code = 1
+        except Exception as exc:
+            primary = exc
+            _log.exception("[ops] daemon crashed — uncaught exception escaped _main()")
             code = 1
-    except Exception:
-        _log.exception("[ops] daemon crashed — uncaught exception escaped _main()")
-        code = 1
+    finally:
+        failure = primary if primary is not None else sys.exception()
+        try:
+            clients.close(pipeline_timeout=2)
+        except Exception as exc:
+            if failure is not None:
+                failure.add_note(f"ops event pipeline shutdown failed: {exc!r}")
+            _log.exception("[ops] event pipeline shutdown failed")
+            code = 1
     _hard_exit(code)
 
 

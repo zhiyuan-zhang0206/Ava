@@ -11,8 +11,9 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import psutil
 import psycopg
@@ -22,6 +23,7 @@ from base.db import create_agent
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.sessions.pty.paths import ledger_path
+from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle.tests.stop_support import (
@@ -38,6 +40,8 @@ from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped import pty_shells
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
@@ -85,6 +89,8 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A busy session verified closed gets one notice, written by the stop
     itself (issue #2044)."""
@@ -93,7 +99,16 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     name = "ava-agent-987-shell-2044-busy"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=15,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert len(written) == 1
     notice = written[0]
     assert notice.agent_id == 987
@@ -119,6 +134,8 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The write is one call inside the `terminals` phase, with the database
     still up: a gateway unit dials its own Postgres directly, a runner-only
@@ -144,7 +161,16 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
     name = "ava-agent-987-shell-2044-order"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=False, timeout=15) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=False,
+            timeout=15,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert events == [f"write:1:direct={direct}", *(["data-plane"] if stops_data_plane else [])]
 
 
@@ -154,6 +180,8 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     db_conn: psycopg.Connection,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """End to end through the real write: the owner of the closed busy session
     has one pending system inbound naming the closure when the stop returns."""
@@ -170,7 +198,16 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
     name = f"ava-agent-{owner}-shell-2044-landed"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=15,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT source, content, payload->'closure'->>'name' FROM inbound_messages "
@@ -190,6 +227,8 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
     capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The database became unreachable after the stop began: the notice is not
     dropped quietly — stderr names its agent and session — and the stop, whose
@@ -207,7 +246,16 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
     name = "ava-agent-987-shell-2044-unreachable"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=15,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     err = capsys.readouterr().err
     assert name in err and "agent 987" in err and "connection refused" in err
 
@@ -216,6 +264,8 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """No service listens: what its ledger last saw running was lost to the service dying,
     before this stop, so the owner is told that — even when the crash had already ended
@@ -230,7 +280,16 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
         ledger_path(), [closure.Target(name, gone, (gone, OwnedProcess(gone.pid, 0.0, None)))]
     )
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=15,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
 
     assert [(notice.name, notice.reason) for notice in written] == [
         (name, pty_close_notices.CRASH_REASON)

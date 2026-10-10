@@ -600,6 +600,60 @@ def test_incomplete_prefix_still_participates_in_a_restored_block(
     assert f"deleted by {deleting[:9]}" in out
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:",
+        "async def restore_deleted_watchdog_fields(config: Config):",
+        "class DeletedDeliveryWatchdogContract(BaseContract):",
+        'monkeypatch.setattr(hc, "init_gateway_process", Mock())',
+        'result = lookup("deleted_delivery_watchdog_contract")',
+        "pytest.raises(psycopg.errors.ReadOnlySqlTransaction),",
+    ],
+)
+def test_a_declaration_string_or_type_reference_is_not_a_solo_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], line: str
+) -> None:
+    code, out, _, _ = _restore_after_delete(
+        _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=line + "\n"
+    )
+    assert code == 0, out
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "restore_deleted_watchdog_fields(config)",
+        "watchdog.deleted_delivery_watchdog_contract = value",
+        "return settings.AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS",
+        'raise psycopg.errors.ReadOnlySqlTransaction("write denied")',
+        "def restore_deleted_watchdog_fields(config): return restore_old_fields(config)",
+    ],
+)
+def test_a_distinctive_call_assignment_or_inline_body_still_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], line: str
+) -> None:
+    code, out, _, _ = _restore_after_delete(
+        _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=line + "\n"
+    )
+    assert code == 1, out
+
+
+def test_non_solo_fragments_still_prove_a_deleted_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    block = (
+        "def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:\n"
+        '    monkeypatch.setattr(hc, "init_gateway_process", Mock())\n'
+        "    pytest.raises(psycopg.errors.ReadOnlySqlTransaction),\n"
+    )
+    code, out, _, _ = _restore_after_delete(
+        _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=block
+    )
+    assert code == 1
+    assert "3 dead line(s)" in out
+
+
 def _pattern_query_alive(repo: Path, candidates: set[str], tmp_path: Path) -> set[str]:
     """The original byte-pattern query, retained only as a parity oracle."""
     patterns = tmp_path / "patterns"

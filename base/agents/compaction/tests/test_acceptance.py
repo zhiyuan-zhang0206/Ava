@@ -13,6 +13,7 @@ from base.agents.compaction.commands import accept, observe
 from base.agents.compaction.models import CompactConflictError, CompactHeldError
 from base.agents.compaction.tests.helpers import source
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 
 
@@ -22,9 +23,14 @@ async def test_fresh_concurrent_acceptance_and_changed_body(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     _, target, *_ = await source(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         receipts = await asyncio.gather(
@@ -67,9 +73,14 @@ async def test_pending_chat_is_not_a_quiescent_source(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     _, target, *_ = await source(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,source) VALUES(%s,'later','user')",
@@ -92,9 +103,14 @@ async def test_pending_compact_fences_generic_claim_without_consuming_chat(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation, target, *_ = await source(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accept(pool, str(target.observation_id), target.source.agent_id, target)
@@ -119,11 +135,16 @@ async def test_acceptance_audit_failure_rolls_back_pointer_and_replay_audits_onc
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     from base.agents.compaction import commands
 
     _, target, *_ = await source(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     original = commands.record_audit
 

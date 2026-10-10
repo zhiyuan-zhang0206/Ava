@@ -13,12 +13,14 @@ from __future__ import annotations
 import sys
 from collections.abc import Mapping
 
-from base.db import Database
+from base.agents.context.clients import DatabaseFactory
 from base.deploy.maintenance import admission
 from base.log import logger
 
 
-def _lost_pointers(failed: Mapping[int, str], commands: Mapping[int, int]) -> dict[int, str]:
+def _lost_pointers(
+    failed: Mapping[int, str], commands: Mapping[int, int], *, database_factory: DatabaseFactory
+) -> dict[int, str]:
     """Why each failed agent's restart pointer cannot be delivered; absent when it can.
 
     An agent outside the hold's restart cohort (parked, or never captured) has no
@@ -30,7 +32,7 @@ def _lost_pointers(failed: Mapping[int, str], commands: Mapping[int, int]) -> di
     owed = [agent for agent in failed if commands.get(agent)]
     if not owed:
         return lost
-    with Database.from_settings().connect() as conn:
+    with database_factory().connect() as conn:
         for agent in owed:
             command = commands[agent]
             row = conn.execute(
@@ -45,7 +47,7 @@ def _lost_pointers(failed: Mapping[int, str], commands: Mapping[int, int]) -> di
     return lost
 
 
-def settle_failed_receipts() -> None:
+def settle_failed_receipts(*, database_factory: DatabaseFactory) -> None:
     """Re-deliver every failed continuation of the standing hold and clear its receipts.
 
     Called once the unit is serving, immediately before the hold releases; the
@@ -57,10 +59,14 @@ def settle_failed_receipts() -> None:
     if current is None or current.maintenance is None or not current.maintenance.failures:
         return
     hold = current.maintenance
-    lost = _lost_pointers(hold.failures, hold.commands)
+    lost = _lost_pointers(hold.failures, hold.commands, database_factory=database_factory)
     cleared = admission.clear_failures()
     lost.update(
-        _lost_pointers({a: c for a, c in cleared.items() if a not in hold.failures}, hold.commands)
+        _lost_pointers(
+            {a: c for a, c in cleared.items() if a not in hold.failures},
+            hold.commands,
+            database_factory=database_factory,
+        )
     )
     for agent, category in sorted(cleared.items()):
         if agent in lost:

@@ -28,13 +28,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import Any
 
 import psycopg
 
 from base import paths
+from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import materialize as mat
 from base.packages.extensions import registry as reg
 from cli.commands.extensions.skill import cmd_skill_install
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _AsMachine = Callable[[Path], AbstractContextManager[Path]]
 
@@ -58,7 +61,10 @@ def _write_skill(d: Path, name: str, body: str = "Original instructions.") -> Pa
 
 
 def test_install_on_home_a_materializes_on_home_b(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    operator_database: Callable[[], Any],
 ) -> None:
     """THE lock. Home B never ran the install and never saw the source tree.
 
@@ -69,7 +75,7 @@ def test_install_on_home_a_materializes_on_home_b(
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
 
     with as_machine(home_a):
-        assert cmd_skill_install(str(src), None, None) == 0
+        assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
         assert (home_a / "skills" / "two-home-demo" / "SKILL.md").is_file()
 
     with as_machine(home_b):
@@ -89,7 +95,10 @@ def test_install_on_home_a_materializes_on_home_b(
 
 
 def test_home_b_is_idempotent_on_a_second_pass(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    operator_database: Callable[[], Any],
 ) -> None:
     """Converge and `ava start` both run this repeatedly; the second pass must
     be a no-op, or every start rewrites trees and 'did anything change' stops
@@ -98,7 +107,7 @@ def test_home_b_is_idempotent_on_a_second_pass(
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
 
     with as_machine(home_a):
-        assert cmd_skill_install(str(src), None, None) == 0
+        assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
 
     with as_machine(home_b):
         first = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
@@ -110,7 +119,10 @@ def test_home_b_is_idempotent_on_a_second_pass(
 
 
 def test_the_row_records_the_installing_machine(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A local-path install is `local:<machine>`, naming WHERE the content came
     from. That provenance is what the adoption sweep will need to resolve two
@@ -120,7 +132,7 @@ def test_the_row_records_the_installing_machine(
     home_a = tmp_path / "home-a"
 
     with as_machine(home_a):
-        assert cmd_skill_install(str(src), None, None) == 0
+        assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
 
     row = reg.get(db_conn, "provenance-demo")
     assert row is not None
@@ -131,7 +143,10 @@ def test_the_row_records_the_installing_machine(
 
 
 def test_disabling_on_the_cluster_stops_new_machines_getting_it(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    operator_database: Callable[[], Any],
 ) -> None:
     """Enablement is CLUSTER policy, which is the half of the model that per-
     machine files could not express. Turning a skill off must reach a machine
@@ -140,7 +155,7 @@ def test_disabling_on_the_cluster_stops_new_machines_getting_it(
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
 
     with as_machine(home_a):
-        assert cmd_skill_install(str(src), None, None) == 0
+        assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
 
     assert reg.set_default_enabled(db_conn, "policy-demo", enabled=False) is True
     db_conn.commit()
@@ -153,7 +168,11 @@ def test_disabling_on_the_cluster_stops_new_machines_getting_it(
 
 
 def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    operator_database: Callable[[], Any],
+    database_gate: ProcessDbGate,
 ) -> None:
     """The user-edit guard, across machines rather than within one.
 
@@ -166,7 +185,7 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
 
     with as_machine(home_a):
-        assert cmd_skill_install(str(src), None, None) == 0
+        assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
 
     with as_machine(home_b):
         assert mat.materialize_skills(db_conn, dest_root=paths.skills_dir()).landed == ["edit-demo"]
@@ -181,13 +200,14 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
         from base import db as base_db
         from base.cluster.machine import machine_name
 
-        reg.register_tree(
-            base_db.pool(),
-            root=newer,
-            name="edit-demo",
-            kind="skill",
-            source=f"local:{machine_name()}",
-        )
+        with base_db.pool(gate=database_gate) as registry_pool:
+            reg.register_tree(
+                registry_pool,
+                root=newer,
+                name="edit-demo",
+                kind="skill",
+                source=f"local:{machine_name()}",
+            )
 
     with as_machine(home_b):
         result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())

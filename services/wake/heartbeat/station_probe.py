@@ -34,10 +34,16 @@ from __future__ import annotations
 import logging
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 
+from base.cluster.machine import validate_machine_name
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.log import init_gateway_process, logger
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.emitter import build_pipeline
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
 
@@ -60,7 +66,7 @@ def _configured_observability_base() -> str:
     return validated_observability_base(settings.observability.observability_url)
 
 
-def resolve_target() -> _StationTarget | None:
+def resolve_target(*, database: Callable[[], Database]) -> _StationTarget | None:
     """The station's dial target from the reachability contract.
 
     The advertised machine_units url when a station unit has registered;
@@ -73,7 +79,7 @@ def resolve_target() -> _StationTarget | None:
     if not base:
         return None
     try:
-        target = resolve_station_target(Database.from_settings(), base)
+        target = resolve_station_target(database(), base)
     except Exception:
         logger.bind(_no_emitter=True, component="station-healthcheck").exception(
             "station probe: cannot read the advertised station address — skipping this round (fail-open)"
@@ -144,8 +150,21 @@ def _station_answers(url: str) -> bool:
 
 
 def main() -> None:
-    init_gateway_process("station")
-    target = resolve_target()
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="station")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="station",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        image=image,
+    )
+    target = resolve_target(database=database)
     if target is None:
         return  # no remote observatory configured — nothing to probe here
     ok = _station_answers(target.url)

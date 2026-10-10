@@ -34,8 +34,8 @@ from pathlib import Path
 from string import Template
 from urllib.parse import unquote, urlsplit
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineRoles
-from base.db import Database
 from base.deploy.release import collector_artifact
 from base.host.atomic_io import write_text_atomic
 from base.telemetry.observability import collector_allowed_for_home
@@ -250,7 +250,7 @@ def gateway_otel_ingress_endpoint() -> str:
     return endpoint.rstrip("/")
 
 
-def station_otel_ingress_endpoint() -> str:
+def station_otel_ingress_endpoint(*, database_factory: DatabaseFactory) -> str:
     """The selected station's ingress, independent of this unit's listen port."""
     from base.config import settings
     from base.telemetry.station_endpoint import validated_observability_base
@@ -263,7 +263,7 @@ def station_otel_ingress_endpoint() -> str:
         )
     from base.telemetry.station_endpoint import resolve_station_target
 
-    return resolve_station_target(Database.from_settings(), base).url
+    return resolve_station_target(database_factory(), base).url
 
 
 def telemetry_bearer() -> str | None:
@@ -367,7 +367,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     }
 
 
-def _otlp_exporters(roles: MachineRoles | None) -> str:
+def _otlp_exporters(roles: MachineRoles | None, *, database_factory: DatabaseFactory) -> str:
     """Role-specific fan-out with stable component/queue identities.
 
     Three shapes (docs/conventions/data/reachability-and-credentials.md):
@@ -390,10 +390,10 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
     obs = settings.observability
     if obs.observability_url:
         return RELAY_EXPORTERS.format(
-            endpoint=_yaml_quote(station_otel_ingress_endpoint()),
+            endpoint=_yaml_quote(station_otel_ingress_endpoint(database_factory=database_factory)),
             authorization=_yaml_quote(_cluster_bearer()),
         )
-    loki_base, prom_base = _lgtm_fanout_bases()
+    loki_base, prom_base = _lgtm_fanout_bases(database_factory=database_factory)
     return BACKEND_EXPORTERS.format(
         tempo_endpoint=_yaml_quote(obs.telemetry_tempo_endpoint.rstrip("/")),
         loki_base=_yaml_quote(loki_base),
@@ -401,14 +401,18 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
     )
 
 
-def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> str:
+def generate_config(
+    repo: Path, ava_home: Path, roles: MachineRoles | None, *, database_factory: DatabaseFactory
+) -> str:
     """Render the sidecar config from the repo template + this unit's settings."""
     from base.cluster import home_label
     from base.cluster.machine import machine_name
     from base.config import settings
 
     obs = settings.observability
-    loki_base, prom_base = _lgtm_fanout_bases(remote=roles != frozenset({"agent-runner"}))
+    loki_base, prom_base = _lgtm_fanout_bases(
+        remote=roles != frozenset({"agent-runner"}), database_factory=database_factory
+    )
     data_plane_block, data_plane_pipeline = _data_plane_receivers(roles, ava_home)
     substitutions = {
         "AVA_HOME": str(ava_home),
@@ -424,13 +428,15 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
         "OTLP_RECEIVER_ENDPOINT": _host_port("127.0.0.1", _otlp_ingress_port()),
         "DATA_PLANE_RECEIVERS": data_plane_block,
         "DATA_PLANE_PIPELINE_RECEIVERS": data_plane_pipeline,
-        "OTLP_EXPORTERS": _otlp_exporters(roles),
+        "OTLP_EXPORTERS": _otlp_exporters(roles, database_factory=database_factory),
     }
     substitutions.update(_remote_receiver_fragments(roles))
     return Template(_config_template(repo)).substitute(substitutions)
 
 
-def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
+def _lgtm_fanout_bases(
+    *, remote: bool = True, database_factory: DatabaseFactory
+) -> tuple[str, str]:
     """The gateway collector's LGTM fan-out base URLs (loki, prometheus).
 
     Two-state on AVA_OBSERVABILITY_URL (task #1791, A3): empty (default) keeps
@@ -448,7 +454,7 @@ def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
         # Remote observatory: every signal enters the station through ONE
         # bearer-authenticated OTLP ingress (WP4) — the direct
         # /otlp fan-out to the station's loopback-bound backends is gone.
-        endpoint = station_otel_ingress_endpoint()
+        endpoint = station_otel_ingress_endpoint(database_factory=database_factory)
         return endpoint, endpoint
     return (
         obs.telemetry_loki_url.rstrip("/") + "/otlp",
@@ -485,7 +491,9 @@ def _write_config(path: Path, rendered: str) -> None:
         print(f"  ! otel-collector: {warning}", file=sys.stderr)
 
 
-def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None) -> None:
+def ensure_otel_collector(
+    repo: Path, ava_home: Path, roles: MachineRoles | None, *, database_factory: DatabaseFactory
+) -> None:
     """Idempotent install: pinned binary present + config regenerated.
 
     Binary download is skipped when the version marker matches. Config is
@@ -520,7 +528,10 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
         print(
             f"  · otel-collector: otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} present"
         )
-    _write_config(dest_dir / "config.yaml", generate_config(repo, ava_home, roles))
+    _write_config(
+        dest_dir / "config.yaml",
+        generate_config(repo, ava_home, roles, database_factory=database_factory),
+    )
 
 
 def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
@@ -551,4 +562,4 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
                 file=sys.stderr,
             )
         return
-    ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles)
+    ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles, database_factory=ctx.database_factory)

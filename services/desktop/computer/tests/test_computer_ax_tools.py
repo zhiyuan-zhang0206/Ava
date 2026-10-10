@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 
 from ...permissions_helper import client as helper
 from ...permissions_helper.client import AxNode, AxTreeResult
@@ -261,10 +262,15 @@ def fake_ax(monkeypatch: pytest.MonkeyPatch) -> FakeAxHelper:
 
 
 async def call_ax(
-    args: dict[str, Any] | None = None, daemon: ComputerMcpDaemon | None = None
+    args: dict[str, Any] | None = None,
+    daemon: ComputerMcpDaemon | None = None,
+    *,
+    database_gate: ProcessDbGate,
 ) -> dict[str, Any]:
     daemon = daemon or ComputerMcpDaemon(
-        computer_use_config(), Database.from_settings(), sock="/nonexistent-test.sock"
+        computer_use_config(),
+        Database.from_settings(gate=database_gate),
+        sock="/nonexistent-test.sock",
     )
     resp = await daemon._dispatch(
         {"id": 1, "method": "call_tool", "tool": "ax_tree", "args": args or {}, "agent_id": None}
@@ -274,8 +280,10 @@ async def call_ax(
     return json.loads(resp["result"]["content"][0]["text"])
 
 
-async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(fake_ax: FakeAxHelper) -> None:
-    out = await call_ax()
+async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(
+    fake_ax: FakeAxHelper, *, database_gate: ProcessDbGate
+) -> None:
+    out = await call_ax(database_gate=database_gate)
     assert out["app"] == "Mail"
     assert out["quality"]["ok"] is True
     assert out["tree"].startswith('[e1] window "Compose" @1000,800 2000x1600')
@@ -284,12 +292,13 @@ async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(fake_ax: FakeAx
 
 
 async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
-    fake_ax: FakeAxHelper,
-    database: Database,
+    fake_ax: FakeAxHelper, database: Database, *, database_gate: ProcessDbGate
 ) -> None:
     daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/nonexistent-test.sock")
-    await call_ax({"app": "Mail"}, daemon)
-    await call_ax({"app": "Mail", "scope": "e2", "max_nodes": 300}, daemon)
+    await call_ax({"app": "Mail"}, daemon, database_gate=database_gate)
+    await call_ax(
+        {"app": "Mail", "scope": "e2", "max_nodes": 300}, daemon, database_gate=database_gate
+    )
     call = fake_ax.calls[-1][1]
     assert (call["app"], call["scope"], call["scope_fp"], call["max_nodes"]) == (
         "Mail",
@@ -299,26 +308,28 @@ async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
     )
 
 
-async def test_ax_tree_scope_without_a_prior_walk_is_refused(fake_ax: FakeAxHelper) -> None:
+async def test_ax_tree_scope_without_a_prior_walk_is_refused(
+    fake_ax: FakeAxHelper, *, database_gate: ProcessDbGate
+) -> None:
     with pytest.raises(ComputerUseError, match="call ax_tree first"):
-        await call_ax({"app": "Mail", "scope": "e2"})
+        await call_ax({"app": "Mail", "scope": "e2"}, database_gate=database_gate)
     assert all(name != "ax_tree" for name, _ in fake_ax.calls)
 
 
 async def test_ax_tree_unusable_window_returns_the_verdict_and_no_tree(
-    fake_ax: FakeAxHelper,
+    fake_ax: FakeAxHelper, *, database_gate: ProcessDbGate
 ) -> None:
     fake_ax.tree = result([])
-    out = await call_ax()
+    out = await call_ax(database_gate=database_gate)
     assert out["tree"] == "" and out["quality"]["reason"] == "no_window"
 
 
 async def test_ax_tree_on_an_old_helper_fails_with_the_rebuild_instruction(
-    fake_ax: FakeAxHelper,
+    fake_ax: FakeAxHelper, *, database_gate: ProcessDbGate
 ) -> None:
     fake_ax.supported = False
     with pytest.raises(ComputerUseError, match="predates ax_tree"):
-        await call_ax()
+        await call_ax(database_gate=database_gate)
     assert all(name != "ax_tree" for name, _ in fake_ax.calls)
 
 
@@ -326,9 +337,11 @@ async def test_ax_tree_on_an_old_helper_fails_with_the_rebuild_instruction(
     "args",
     [{"mode": "everything"}, {"max_nodes": 0}, {"max_nodes": 401}, {"scope": "12"}],
 )
-async def test_ax_tree_rejects_bad_arguments(fake_ax: FakeAxHelper, args: dict[str, Any]) -> None:
+async def test_ax_tree_rejects_bad_arguments(
+    fake_ax: FakeAxHelper, args: dict[str, Any], *, database_gate: ProcessDbGate
+) -> None:
     with pytest.raises(ComputerUseError):
-        await call_ax(args)
+        await call_ax(args, database_gate=database_gate)
     assert fake_ax.calls == []
 
 

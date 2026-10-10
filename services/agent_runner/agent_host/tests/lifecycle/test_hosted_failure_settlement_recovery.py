@@ -23,12 +23,13 @@ from agent.graph.llm_errors import FatalProviderError
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from agent.turn.runloop import PendingTurnFailure, settle_turn_failure
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -60,14 +61,14 @@ async def _prepare_graph(
 
 
 async def _admitted_descendant(
-    conn: psycopg.Connection, pool: AsyncConnectionPool[Any]
+    conn: psycopg.Connection, pool: AsyncConnectionPool[Any], *, database_gate: ProcessDbGate
 ) -> tuple[int, int, RuntimeIncarnation]:
-    ancestor = _agent(conn)
-    await _admit(pool, ancestor)
-    agent = _agent(conn)
+    ancestor = agent_row(conn)
+    await _admit(pool, ancestor, database_gate=database_gate)
+    agent = agent_row(conn)
     conn.execute("UPDATE agents_meta SET spawner=%s WHERE id=%s", (f"agent:{ancestor}", agent))
     conn.commit()
-    return ancestor, agent, await _admit(pool, agent)
+    return ancestor, agent, await _admit(pool, agent, database_gate=database_gate)
 
 
 def _published_errors(publisher: MagicMock) -> list[dict[str, Any]]:
@@ -130,11 +131,15 @@ async def test_abort_survives_database_loss_before_halted_state_write(
     failure: str,
     database: Database,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope(
         expected_error=CompactionFailedError if failure == "compaction" else FatalProviderError
     ) as resources:
-        ancestor, agent, owner = await _admitted_descendant(db_conn, aops_pool)
+        ancestor, agent, owner = await _admitted_descendant(
+            db_conn, aops_pool, database_gate=database_gate
+        )
         model_calls: list[str] = []
         summary = AsyncMock(side_effect=RuntimeError("summary unavailable"))
         provider_failure = FatalProviderError(
@@ -164,7 +169,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
             checkpointer=saver,
             graph=graph,
             bus=EventBus.from_settings(),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
         )
         publisher = MagicMock()
@@ -173,7 +178,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
             event_publisher=publisher,
             llm=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
@@ -241,8 +246,12 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
     monkeypatch: pytest.MonkeyPatch,
     interrupted_at: str,
     database: Database,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    ancestor, agent, owner = await _admitted_descendant(db_conn, aops_pool)
+    ancestor, agent, owner = await _admitted_descendant(
+        db_conn, aops_pool, database_gate=database_gate
+    )
     failure = FatalProviderError("invalid credentials", error_class="permanent", status=401)
     model = AsyncMock(side_effect=failure)
     graph, saver, config, history = await _prepare_graph(aops_pool, agent, model)
@@ -252,7 +261,7 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
         event_publisher=publisher,
         llm=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,

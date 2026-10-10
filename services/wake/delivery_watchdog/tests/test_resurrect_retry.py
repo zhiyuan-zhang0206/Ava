@@ -15,6 +15,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog import attempts, resurrect_guard, resurrect_retry, rounds
@@ -37,11 +38,20 @@ def progress() -> LoopProgress:
 
 
 def _terminated_owner_with_chat(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> tuple[int, int]:
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'exit' "
@@ -55,7 +65,7 @@ def _terminated_owner_with_chat(
         "hello?",
         source="user",
         bus=EventBus.from_settings(),
-        database=Database.from_settings(),
+        database=Database.from_settings(gate=database_gate),
     )
 
 
@@ -105,9 +115,13 @@ async def test_repeated_terminated_results_suppress_and_emit_once(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid, _ = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     calls = _stub_resurrect(monkeypatch, AgentStatus.TERMINATED)
     emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
@@ -122,7 +136,7 @@ async def test_repeated_terminated_results_suppress_and_emit_once(
 
     for _ in range(5):
         await resurrect_retry.resurrect_round(
-            pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+            pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
         )
         _expire_cooldown(db_conn, aid)
 
@@ -148,7 +162,7 @@ async def test_repeated_terminated_results_suppress_and_emit_once(
 
     # The durable selector, not the cooldown, keeps later rounds away.
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
     )
     assert calls == [aid] * 5
 
@@ -162,9 +176,13 @@ async def test_success_resets_failure_and_suppression_escalation_counts(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid, trigger = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     attempts.claim_attempts(pool, attempts.RESURRECT, [aid], 0.0)
     db_conn.execute(
@@ -175,7 +193,9 @@ async def test_success_resets_failure_and_suppression_escalation_counts(
     db_conn.commit()
     _stub_resurrect(monkeypatch, AgentStatus.IDLING)
 
-    await resurrect_retry.resurrect_one(pool, Database.from_settings(), event_bus, aid, trigger)
+    await resurrect_retry.resurrect_one(
+        pool, Database.from_settings(gate=database_gate), event_bus, aid, trigger
+    )
 
     assert _state(db_conn, aid) == (0, 0)
 
@@ -189,9 +209,13 @@ async def test_expired_suppression_escalates_again_with_bounded_backoff(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid, trigger = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     _stub_resurrect(monkeypatch, AgentStatus.TERMINATED)
     monkeypatch.setattr(resurrect_guard.telemetry, "emit", _ignore_emit)
@@ -200,7 +224,7 @@ async def test_expired_suppression_escalates_again_with_bounded_backoff(
     monkeypatch.setattr(settings.daemon, "delivery_watchdog_suppress_max_seconds", 15.0)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
     )
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' WHERE id = %s",
@@ -213,7 +237,7 @@ async def test_expired_suppression_escalates_again_with_bounded_backoff(
     ]
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
     )
 
     row = db_conn.execute(
@@ -235,12 +259,16 @@ async def test_failed_resurrect_enters_a_cooldown_that_lives_in_the_database(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The attempt clock is a row, not process memory: the second round (a
     restarted watchdog sees the same thing) does not retry inside the cooldown,
     and the failure it recorded is still there."""
     aid, _ = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     calls: list[int] = []
 
@@ -251,17 +279,17 @@ async def test_failed_resurrect_enters_a_cooldown_that_lives_in_the_database(
     monkeypatch.setattr(ol, "resurrect_if_terminated", fail)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
     )
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
     )
 
     assert calls == [aid]
     assert _state(db_conn, aid) == (1, 0)
     _expire_cooldown(db_conn, aid)
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
     )
     assert calls == [aid, aid]
     assert _state(db_conn, aid) == (2, 0)
@@ -276,9 +304,13 @@ async def test_cooldown_counts_from_the_attempts_end(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid, _ = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
 
     async def slow_failure(
@@ -291,7 +323,7 @@ async def test_cooldown_counts_from_the_attempts_end(
     monkeypatch.setattr(ol, "resurrect_if_terminated", slow_failure)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
     )
 
     claimed, _ = attempts.claim_attempts(pool, attempts.RESURRECT, [aid], 60.0)
@@ -307,9 +339,13 @@ async def test_hung_rpc_is_cut_at_the_deadline_and_counts_as_a_failure(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid, _ = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
 
     async def hang(_db: object, _bus: EventBus, aid_: int, **_kwargs: object) -> AgentStatus:
@@ -320,7 +356,7 @@ async def test_hung_rpc_is_cut_at_the_deadline_and_counts_as_a_failure(
     monkeypatch.setattr(rounds, "rpc_deadline_s", lambda: 0.05)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
     )
 
     assert _state(db_conn, aid) == (1, 0)
@@ -335,9 +371,13 @@ async def test_cancelled_round_enters_cooldown_without_counting_a_failure(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid, _ = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     started = asyncio.Event()
 
@@ -349,7 +389,7 @@ async def test_cancelled_round_enters_cooldown_without_counting_a_failure(
     monkeypatch.setattr(ol, "resurrect_if_terminated", block)
     round_task = asyncio.create_task(
         resurrect_retry.resurrect_round(
-            pool, Database.from_settings(), event_bus, progress, 5, _THRESHOLD_S
+            pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
         )
     )
     await started.wait()
@@ -371,27 +411,34 @@ async def test_the_cap_bounds_each_round_and_the_backlog_drains_over_rounds(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     first, _ = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     second, _ = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     calls = _stub_resurrect(monkeypatch, AgentStatus.IDLING)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 1, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 1, _THRESHOLD_S
     )
     assert calls == [first]
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 1, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 1, _THRESHOLD_S
     )
     assert calls == [first, second]
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 1, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 1, _THRESHOLD_S
     )
     assert calls == [first, second]
 
@@ -405,11 +452,15 @@ async def test_a_slow_resurrect_is_never_attempted_twice_in_flight(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Single flight is the loop's own sequencing: while the RPC spans many
     intervals the loop is inside the round, so nothing else can start one."""
     aid, _ = _terminated_owner_with_chat(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     release = asyncio.Event()
     calls: list[int] = []
@@ -423,7 +474,13 @@ async def test_a_slow_resurrect_is_never_attempted_twice_in_flight(
     monkeypatch.setattr(resurrect_guard.telemetry, "emit", _ignore_emit)
     loop_task = asyncio.create_task(
         resurrect_retry.resurrect_loop(
-            pool, Database.from_settings(), event_bus, progress, 0.01, 5, _THRESHOLD_S
+            pool,
+            Database.from_settings(gate=database_gate),
+            event_bus,
+            progress,
+            0.01,
+            5,
+            _THRESHOLD_S,
         )
     )
     try:
@@ -446,10 +503,14 @@ async def test_concurrency_within_a_round_is_bounded(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     for _ in range(4):
         _terminated_owner_with_chat(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
     running = 0
     peak = 0
@@ -465,7 +526,7 @@ async def test_concurrency_within_a_round_is_bounded(
     monkeypatch.setattr(ol, "resurrect_if_terminated", tracked)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(), event_bus, progress, 10, _THRESHOLD_S
+        pool, Database.from_settings(gate=database_gate), event_bus, progress, 10, _THRESHOLD_S
     )
 
     assert peak == resurrect_retry._RESURRECT_MAX_CONCURRENCY

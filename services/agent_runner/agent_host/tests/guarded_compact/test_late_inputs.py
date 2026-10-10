@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
@@ -35,13 +36,17 @@ async def test_actual_trigger_orders_uncommitted_chat_against_application_permit
     add_bindings: AddBindings,
     ordering: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     model = SummaryModel(responses=["Original source summary. " * 100])
     binding = model_catalog.bindings["gpt-"]
     model_catalog = add_bindings(
         model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
     )
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     original = compact_apply.authorize
     original_ack = compact_apply.acknowledge
     inserted: list[int] = []

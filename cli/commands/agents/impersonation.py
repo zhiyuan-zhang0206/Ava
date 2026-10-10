@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from base.agents.context.clients import DatabaseFactory
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -218,7 +219,7 @@ def _run_local(args: argparse.Namespace) -> int:
     return 0
 
 
-def _send(args: argparse.Namespace) -> int:
+def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """`impersonate send` — one message to another agent as the leased identity.
 
     Attested through the session's caller-presence rule; the delivered source is
@@ -232,7 +233,7 @@ def _send(args: argparse.Namespace) -> int:
 
     content = sys.stdin.read() if args.content == "-" else args.content
     caller = process_metadata()
-    db = Database.from_settings()
+    db = database_factory()
     lease_id = sessions.private_id(db, args.agent_id, args.session_id)
     lease = control.require_active(db, lease_id, caller)
     source = f"agent:{lease['agent_id']}"
@@ -243,7 +244,7 @@ def _send(args: argparse.Namespace) -> int:
     return 0
 
 
-def _request(args: argparse.Namespace) -> int:
+def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
     from base.agents.impersonation import sessions
     from base.config import Settings, settings
@@ -258,7 +259,7 @@ def _request(args: argparse.Namespace) -> int:
     if args.relay_provider == "codex":
         endpoint = require_control_endpoint(endpoint)
     response = sessions.request(
-        Database.from_settings(),
+        database_factory(),
         EventBus.from_settings(),
         args.agent_id,
         authority=ConfigAuthority(
@@ -309,22 +310,22 @@ def _request(args: argparse.Namespace) -> int:
     return 0
 
 
-def _dispatch(args: argparse.Namespace) -> int:
+def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     from base.agents import impersonation as control
     from base.agents.impersonation import sessions
     from base.agents.impersonation.history import public_session, say
     from base.native_process.ownership import process_metadata
 
     command = args.impersonation_cmd
-    db = Database.from_settings()
+    db = database_factory()
     bus = EventBus.from_settings()
     if command == "request":
-        return _request(args)
+        return _request(args, database_factory=database_factory)
     if command == "list":
         _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
         return 0
     if command == "send":
-        return _send(args)
+        return _send(args, database_factory=database_factory)
     caller = process_metadata()
     args.lease_id = sessions.private_id(db, args.agent_id, args.session_id)
     if command == "status":
@@ -355,10 +356,10 @@ def _dispatch(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_impersonate(args: argparse.Namespace) -> int:
+def cmd_impersonate(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """Run one command, with operational errors confined to stderr."""
     try:
-        return _dispatch(args)
+        return _dispatch(args, database_factory=database_factory)
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"impersonation: {exc}", file=sys.stderr)
         return 1

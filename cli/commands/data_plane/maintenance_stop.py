@@ -22,6 +22,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -38,6 +39,7 @@ from base.cluster.dataplane import pooler as pooler_files
 from base.config import settings
 from base.log import logger
 from base.paths import ava_home
+from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
@@ -158,6 +160,7 @@ async def _request_stop(
     save: bool,
     notes: list[str] | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> None:
     if name == "postgres":
         # SIGINT requests PostgreSQL's fast, checkpointed shutdown; a fast shutdown stuck
@@ -171,7 +174,7 @@ async def _request_stop(
             retained_children=retained_children,
         )
         if escalation is not None:
-            report_postgres_stop_escalation(escalation, notes)
+            report_postgres_stop_escalation(escalation, notes, producer=producer)
     elif name == "redis":
         # Do not use redis-py's shutdown helper: it accepts any connection
         # error as success. Expected EOF is accepted only if the exact PID
@@ -193,6 +196,7 @@ async def _stop(
     notes: list[str] | None = None,
     clients: list[str] | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> list[str]:
     pg = capture_postgres()
     pgb = _capture_pooler()
@@ -241,6 +245,7 @@ async def _stop(
                 save=save,
                 notes=notes,
                 retained_children=retained_children,
+                producer=producer,
             )
             wait_for_exit(trees[name], deadline)
             stopped.append(name)
@@ -270,6 +275,7 @@ def stop(
     notes: list[str] | None = None,
     clients: list[str] | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> list[str]:
     deadline = deadline_after(timeout)
     if sys.platform == "win32":
@@ -278,6 +284,11 @@ def stop(
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
     return asyncio.run(
         _stop(
-            deadline, save=save, notes=notes, clients=clients, retained_children=retained_children
+            deadline,
+            save=save,
+            notes=notes,
+            clients=clients,
+            retained_children=retained_children,
+            producer=producer,
         )
     )

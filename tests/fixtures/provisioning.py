@@ -35,8 +35,11 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.config import ConfigBoot, settings
 from base.db import Database, insert_inbound_message, publish_inbound_wake
+from base.db.code_version_gate import ProcessDbGate
 from base.db.test_db_guard import assert_test_db_url
 from base.events.live.bus import EventBus
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from tests._containers import postgres, redis_server
 from tests._os_jobs import host_ava_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
@@ -50,6 +53,7 @@ from tests.fixtures.static_environment import static_mode
 # Host job inventory as it stood BEFORE this session — `pytest_sessionfinish`
 # diffs against it and fails the run on anything new (see tests/_os_jobs.py).
 _OS_JOBS_AT_START = host_ava_os_jobs()
+_PROCESS_IMAGE_KEY = pytest.StashKey[LoadedCommit]()
 
 
 # ── Container provisioning: the fixture owns the database ──
@@ -66,10 +70,14 @@ _OS_JOBS_AT_START = host_ava_os_jobs()
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _provisioned_db(pytestconfig: pytest.Config, process_config: ConfigBoot) -> Iterator[str]:
+def _provisioned_db(
+    pytestconfig: pytest.Config, process_config: ConfigBoot, database_version: CodeVersion
+) -> Iterator[str]:
     if static_mode(pytestconfig):
         yield UNPROVISIONED_DB_URL
         return
+    # Resolve the native process image before test bodies can replace subprocess.run.
+    database_version.get()
     with postgres() as url:
         # Belt: the throwaway provisioning must itself stay on a test database.
         # If the throwaway db name ever changes, this assertion makes the
@@ -172,6 +180,8 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     if message is not None:
         pytest.exit(message, returncode=1)
+    if _PROCESS_IMAGE_KEY not in config.stash:
+        config.stash[_PROCESS_IMAGE_KEY] = LoadedCommit.capture(config.rootpath)
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -506,10 +516,24 @@ def db_url() -> str:
     return settings.data_plane.db_url
 
 
+@pytest.fixture(scope="session")
+def database_version(pytestconfig: pytest.Config) -> CodeVersion:
+    """Resolve the session entry image before test subprocess doubles are installed."""
+    return CodeVersion(pytestconfig.stash[_PROCESS_IMAGE_KEY])
+
+
 @pytest.fixture
-def database() -> Database:
-    """The `Database` handle a composition root would pass down, bound to the session's test DB."""
-    return Database.from_settings()
+def database_gate(database_version: CodeVersion) -> ProcessDbGate:
+    """One test's nonexempt admission budget, shared by its explicit database builders."""
+    from base.telemetry import process_name
+
+    return ProcessDbGate(process=process_name(), version=database_version.get)
+
+
+@pytest.fixture
+def database(database_gate: ProcessDbGate) -> Database:
+    """The native test handle, sharing its test's explicit admission owner."""
+    return Database.from_settings(gate=database_gate)
 
 
 @pytest.fixture

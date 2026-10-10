@@ -22,8 +22,10 @@ from __future__ import annotations
 import os
 import signal
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import psutil
 import pytest
@@ -31,6 +33,7 @@ import pytest
 from base.deploy.maintenance import admission
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import SERVICE_UNIT, ledger_path
+from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as strict
 from cli.commands.lifecycle import stop as entry
@@ -54,6 +57,8 @@ from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped import pty_shells as support
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_shells import new, wait_for
 
@@ -74,6 +79,8 @@ def test_stop_closes_busy_terminal_job_with_real_signals(
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A regular interruptible foreground job closes via a normal stop, through the
     service, and its owner gets the closure notice."""
@@ -83,7 +90,16 @@ def test_stop_closes_busy_terminal_job_with_real_signals(
     _, running = busy_session(home, name, jobs.TERM_OK, pty_reaper)
     assert running, "the synthetic job never started"
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=15,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert not client.has_session(name)
     assert jobs.wait_exit(running[0].pid), "the job must be closed by the normal stop"
     assert [notice.name for notice in written] == [name]
@@ -96,6 +112,8 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A job that ignores TERM and HUP is SIGKILLed once the stop's grace ends: the
     stop completes well inside its deadline, and the owner still gets the closure
@@ -108,7 +126,16 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     assert running, "the stubborn job never started"
 
     started = time.monotonic()
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=12,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert time.monotonic() - started < 8, "the grace bounds the wait, not the stop deadline"
     assert jobs.wait_exit(running[0].pid, timeout=5), "the job outlived the stop"
     assert not client.has_session(name)
@@ -121,6 +148,8 @@ def test_stop_records_nothing_for_idle_shell(
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """An idle shell (no jobs) closed by stop is silent: the TTL reaper's quiet-empty
     policy, never a blanket close notification (issue #2044 #3).
@@ -140,7 +169,16 @@ def test_stop_records_nothing_for_idle_shell(
         "the login shell never printed its prompt"
     )
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=15,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert not client.has_session(name)
     assert written == []
 
@@ -151,6 +189,8 @@ def test_stop_tolerates_naturally_exited_session(
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A session whose shell exited on its own before the stop is already gone from
     the service: it must not fail the stop."""
@@ -160,7 +200,16 @@ def test_stop_tolerates_naturally_exited_session(
     shell, _ = busy_session(home, name, jobs.TERM_OK, pty_reaper)
     os.kill(shell.pid, signal.SIGKILL)
     assert wait_for(lambda: not client.has_session(name)), "the service kept the dead session"
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=10) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=10,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
 
 
 def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_terminalsclosed_session(
@@ -168,6 +217,8 @@ def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_termin
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The service closes the terminals, so it is stopped only after them: the
     services phase preserves its unit, and a separate phase stops it once no
@@ -186,7 +237,16 @@ def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_termin
     name = "ava-agent-987-shell-2044-order"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=15,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert phases == ["terminals:1"], "terminals are closed after the services phase only"
     assert [SERVICE_UNIT in call["preserve"] for call in root_stops] == [True, False]
     assert client.list_sessions() == []
@@ -199,6 +259,8 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """One session closes; in another the shell itself outlives the stop. The stop is
     incomplete, yet the closed session's notice is recorded before it reports: the
@@ -220,7 +282,16 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
         closure.Outcome(closed=(closed_session(stuck),)),
     )
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=12,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 1
+    )
     assert admission.held(), "the hold must survive an incomplete stop"
     assert stuck in capsys.readouterr().err
     assert [notice.name for notice in written] == [closed], "the closed session's notice was lost"
@@ -230,7 +301,16 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     )
 
     monkeypatch.setattr(command, "pause_agents", _still_drained)
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=12,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert [notice.name for notice in written] == [closed, stuck]
 
 
@@ -240,6 +320,8 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     written: list[pty_close_notices.ClosureNotice],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A known job can survive closure: report it and notify its owner, but release
     stop successfully once the shell and terminal are closed."""
@@ -256,7 +338,16 @@ def test_known_job_leftover_is_reported_without_failing_stop(
         closure.Outcome(),
     )
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=12,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert admission.held(), "a successful stop still fences the stopped unit"
     assert psutil.pid_exists(job.pid)
     err = capsys.readouterr().err
@@ -267,12 +358,25 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     assert written[0].survivors == ((job.pid, "python3"),)
 
     monkeypatch.setattr(command, "pause_agents", _still_drained)
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=12,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
     assert len(written) == 1, "the retry recorded the closed session again"
 
 
 def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
-    home: Path, monkeypatch: pytest.MonkeyPatch, launch: Launcher
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    launch: Launcher,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The report names only survivors that are still their captured process: one that
     exited after the closure's verdict is gone, and the stop completes."""
@@ -285,7 +389,16 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
     stub_closure(
         monkeypatch, closure.Outcome(survivors=(closure.Survivor("gone", gone, "terminal"),))
     )
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert (
+        entry.cmd_stop(
+            require_confirmation=False,
+            keep_infra=True,
+            timeout=12,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 0
+    )
 
 
 @pytest.mark.parametrize(
@@ -297,6 +410,7 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     expected_grace: float,
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """The grace never exceeds the stop's deadline or the ceiling; the SIGKILL leg runs
     with its own bound even when the deadline is already spent."""
@@ -308,7 +422,11 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
 
     monkeypatch.setattr(strict, "_await_no_terminals", settled)
     strict.close_terminals(
-        time.monotonic() + remaining_s, "stop-test", datetime.now(UTC), direct_db=False
+        time.monotonic() + remaining_s,
+        "stop-test",
+        datetime.now(UTC),
+        direct_db=False,
+        database_factory=operator_database,
     )
     ((grace, kill),) = asked
     assert expected_grace - 0.5 <= grace <= expected_grace
@@ -334,7 +452,7 @@ def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
 
 
 def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """The closure evidence waits until the stop's deadline, and at least the SIGKILL
     leg's bound: a session still tearing down past that bound but gone from the
@@ -349,7 +467,13 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
         return [] if time.monotonic() >= cleared_at else [name]
 
     monkeypatch.setattr(strict, "live_terminals", tearing_down)
-    strict.close_terminals(time.monotonic() + 10, "stop-test", datetime.now(UTC), direct_db=False)
+    strict.close_terminals(
+        time.monotonic() + 10,
+        "stop-test",
+        datetime.now(UTC),
+        direct_db=False,
+        database_factory=operator_database,
+    )
     assert time.monotonic() >= cleared_at
 
 
@@ -385,7 +509,11 @@ def test_live_terminals_without_the_service_is_what_its_ledger_still_runs(
 
 @pytest.mark.parametrize("ignores_hangup", [False, True])
 def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
-    ignores_hangup: bool, home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+    ignores_hangup: bool,
+    home: Path,
+    launch: Launcher,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """No service listens, so there is no one to ask: the stop closes from the ledger
     the dead service left, the leftover hung up first and SIGKILLed when it ignores
@@ -398,7 +526,13 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
     ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
     assert strict.live_terminals() == [name]
 
-    strict.close_terminals(time.monotonic() + 10, "stop-test", datetime.now(UTC), direct_db=False)
+    strict.close_terminals(
+        time.monotonic() + 10,
+        "stop-test",
+        datetime.now(UTC),
+        direct_db=False,
+        database_factory=operator_database,
+    )
     assert proc.wait(timeout=10) == (-signal.SIGKILL if ignores_hangup else -signal.SIGHUP)
     assert strict.live_terminals() == []
     assert ledger.read(ledger_path()) == []
@@ -461,8 +595,9 @@ def test_force_close_still_fails_when_known_shell_survives(
 
 @pytest.mark.parametrize("force", [False, True])
 def test_operational_terminal_close_failure_is_not_best_effort_success(
-    monkeypatch: pytest.MonkeyPatch, force: bool
+    monkeypatch: pytest.MonkeyPatch, force: bool, operator_database: Callable[[], Any]
 ) -> None:
+
     def failed_close(_grace_s: float, _kill_s: float) -> closure.Outcome:
         raise client.ServiceError(1, "known group signal denied")
 
@@ -472,5 +607,9 @@ def test_operational_terminal_close_failure_is_not_best_effort_success(
             strict.force_close_terminals()
         else:
             strict.close_terminals(
-                time.monotonic() + 1, "stop-test", datetime.now(UTC), direct_db=False
+                time.monotonic() + 1,
+                "stop-test",
+                datetime.now(UTC),
+                direct_db=False,
+                database_factory=operator_database,
             )

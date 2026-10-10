@@ -13,9 +13,10 @@ import ava
 import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from base.db import Database
 from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import schedule_entry
 
 
 CRON = "20 6 * * *"
@@ -65,7 +66,7 @@ def _day_counts(snapshot: dict[str, Any], day: str, repo: str) -> tuple[int, int
 
 
 def _run_exporter(exporter: Any, repo: str) -> None:
-    if exporter.main(["--repo", repo]) != 0:
+    if exporter.main(["--repo", repo], producer=ava.context.clients.event_pipeline) != 0:
         raise RuntimeError("ci-runs-export exited non-zero")
 
 
@@ -86,8 +87,8 @@ def _fire(slot_end: datetime, _payload: None) -> None:
         _report_failure(f"{type(exc).__name__}: {exc}")
 
 
-def _main_loop() -> None:
-    db = Database.from_settings()
+def _main_loop(*, inputs: ScheduleInputs) -> None:
+    db = inputs.database()
     run_daily_loop(db, CRON, cluster_timezone(), _fire)
 
 
@@ -95,4 +96,5 @@ if __name__ == "__main__":
     ensure_agent_status_members(
         S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics"
     )
-    _main_loop()
+    with schedule_entry(globals().get("AVA_SCHEDULE_INPUTS")) as inputs:
+        _main_loop(inputs=inputs)

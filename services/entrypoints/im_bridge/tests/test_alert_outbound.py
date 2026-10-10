@@ -345,6 +345,7 @@ async def test_actual_daemon_rpc_auth_and_new_path_does_not_claim_legacy_success
     from hashlib import sha256
 
     from base.daemon.health import start_health_server, stop_health_server
+    from base.daemon.tests.health_support import unknown_image
 
     [group] = ingest(pool, [item("a")])
     service = bridge(pool, AlertAdapter())
@@ -353,6 +354,7 @@ async def test_actual_daemon_rpc_auth_and_new_path_does_not_claim_legacy_success
         0,
         extra_routes={("POST", "/send/alert-outbound-v1"): service.handle},
         auth_digests=frozenset({sha256(b"mock-api-token").hexdigest()}),
+        image=unknown_image(),
     )
     try:
         port = server.sockets[0].getsockname()[1]

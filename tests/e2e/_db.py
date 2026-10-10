@@ -25,6 +25,7 @@ import psycopg
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.config import settings
+from base.db import Database
 from tests.components.base.poll_until import poll_until
 from tests.e2e._ports import GATEWAY_URL
 
@@ -86,16 +87,16 @@ def chat_and_wait(agent_id: int, text: str, *, timeout: float = 90.0) -> None:
     poll_until(finished, timeout=timeout, interval=0.3, what=f"agent {agent_id} finishes {text!r}")
 
 
-def enqueue_compact_history_fixture(agent_id: int) -> int:
+def enqueue_compact_history_fixture(agent_id: int, *, database: Database) -> int:
     """Produce the native compact envelope used by history-rendering scenarios.
 
     This is a test fixture for the existing graph/history contract, not public
     manual-compaction admission. Product callers use observed compact-history.
     """
-    from base.db import Database, insert_compact_request_inbound
+    from base.db import insert_compact_request_inbound
     from base.events.live.bus import EventBus
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
         return insert_compact_request_inbound(
-            conn, agent_id, database=Database.from_settings(), bus=EventBus.from_settings()
+            conn, agent_id, database=database, bus=EventBus.from_settings()
         )

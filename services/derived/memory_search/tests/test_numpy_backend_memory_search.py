@@ -19,6 +19,7 @@ import uvicorn
 
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from services.derived.memory_indexer.backends import probe
 from services.derived.memory_indexer.backends.numpy import NumPyBackend
 from services.derived.memory_search.app import build_app
@@ -173,13 +174,15 @@ def test_requires_connect_before_use() -> None:
 # ── preflight probes (CTO ruling 2026-08-30 direction ②) ───────────────────
 
 
-def test_probe_numpy_healthy(memory_search_uri: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_numpy_healthy(
+    memory_search_uri: str, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+) -> None:
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
     assert (
         probe.probe_backend(
             "numpy",
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             uri_reader=lambda: settings.services.memory_search_uri,
         ).message
         is None

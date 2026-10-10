@@ -16,13 +16,14 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.ownership import hosted as hosted_owner
 from agent.ownership.hosted import admit_hosted_runtime
-from agent.tests.claim.test_inbound_ownership import _agent, _insert
+from agent.tests.claim.test_inbound_ownership import _insert, agent_row
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -77,9 +78,11 @@ async def test_real_child_exit_certificate_and_commit_rollback(
     hops: int,
     database: Database,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     pool: ConnectionPool
-    agent = _agent(db_conn)
+    agent = agent_row(db_conn)
     db_conn.execute(
         "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
         (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), agent),
@@ -183,6 +186,7 @@ async def test_real_child_exit_certificate_and_commit_rollback(
             replies,
             expected_first=[],
             model_catalog=model_catalog,
+            database_gate=database_gate,
         )
     finally:
         await _reap_child(child)
@@ -192,8 +196,12 @@ async def test_actual_force_observation_then_admission_recovered_stop(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    target, successor, force = await _force_successor(db_conn, aops_pool)
+    target, successor, force = await _force_successor(
+        db_conn, aops_pool, database_gate=database_gate
+    )
     proof = db_conn.execute(
         "SELECT transfer_chain FROM native_graph_work WHERE id=%s", (target.work_id,)
     ).fetchone()
@@ -219,6 +227,7 @@ async def test_actual_force_observation_then_admission_recovered_stop(
         replies,
         expected_first=["continued"],
         model_catalog=model_catalog,
+        database_gate=database_gate,
     )
 
 
@@ -234,6 +243,7 @@ async def _assert_successor_turns(
     *,
     expected_first: list[str],
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope() as resources:
         receipt = db_conn.execute(
@@ -251,14 +261,14 @@ async def _assert_successor_turns(
             graph=graph,
             machine="claim-test",
             bus=EventBus.from_settings(),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
         )
         ctx = AvaContext(
             ops_pool=aops_pool,
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
@@ -298,10 +308,10 @@ async def _assert_successor_turns(
 
 
 async def _force_successor(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> tuple[NativeWorkTarget, Any, int]:
     pool: ConnectionPool
-    original, target = await managed_work(db_conn, aops_pool)
+    original, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(accept_native_cancel, pool, "before-force", target.agent_id, target)
         _status, _pid, _pages, force, _shell_cutoff = await asyncio.to_thread(
@@ -312,7 +322,7 @@ async def _force_successor(
     )
     await asyncio.to_thread(
         resurrect_agent,
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         target.agent_id,
         resurrected_by="user",
@@ -322,7 +332,7 @@ async def _force_successor(
         target.agent_id,
         "claim-test",
         uuid4(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         expected_from="idling",
     )
     assert successor is not None

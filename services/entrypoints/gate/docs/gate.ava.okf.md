@@ -16,6 +16,16 @@ gateway capability, needs no database, and runs as an ordinary child of
 stop use the same lifecycle as the other application services. Full planned
 application downtime includes the entry listener.
 
+After argument parsing, the daemon captures its loaded image once and owns a
+non-exempt `ProcessDbGate` for `gate`. Its lazy database factory retains that
+image's version reader; the process event pipeline and logging producer share
+the same factory/pipeline and read machine identity through `machine_name`.
+HTTP business behavior still needs no database. Startup/construction failures
+and serving exit stop the owned pipeline with a two-second observation budget,
+after closing any constructed HTTP server. Cleanup faults retain the original
+failure with notes; unfinished telemetry is explicitly reported as degraded,
+without claiming that its worker terminated.
+
 `GET /__ava/healthz` returns the serving Gate's name, home, and PID independently
 of login state, gateway availability, and app availability. It accepts only GET.
 The roster wraps that protocol check with captured root ownership and native

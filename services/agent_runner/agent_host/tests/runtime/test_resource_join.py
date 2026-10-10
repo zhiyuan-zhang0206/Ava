@@ -16,6 +16,7 @@ import pytest
 from ava.sdk_surface.install import Installation
 from base.agents.sdk import call_policy
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
@@ -69,7 +70,7 @@ async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
 
 
 async def test_original_error_joins_before_clients_and_pools_close(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
 ) -> None:
     host = AgentHost(
         policy=configured_policy(),
@@ -79,7 +80,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
         machine="test-box",
         catalog=model_catalog,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
     )
     scope = await host._resource_service.turn()
     failure = ValueError("original late resource error")
@@ -100,7 +101,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
     assert events == ["clients", "pools"]
 
 
-def _exercise_unfinished_main() -> None:
+def _exercise_unfinished_main(*, database_gate: ProcessDbGate) -> None:
     """Production main's existing hard exit must skip a still-owned async task."""
     from base.deploy.schema import migrations
 
@@ -118,7 +119,7 @@ def _exercise_unfinished_main() -> None:
             machine="resource-join-test",
             catalog=cast(ModelCatalog, MagicMock()),
             bus=EventBus.from_settings(),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
         )
         marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
         patch = pytest.MonkeyPatch()

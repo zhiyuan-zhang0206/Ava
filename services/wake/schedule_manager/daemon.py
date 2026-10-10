@@ -29,11 +29,13 @@ import asyncio
 import logging
 import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import validate_machine_name
 from base.config import settings
 from base.daemon import round_loop
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -42,8 +44,12 @@ from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import prod_service_checkout_error
+from base.telemetry.emitter import build_pipeline
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.schedule_manager import requests
 from services.wake.schedule_manager.manager import POLL_INTERVAL_S, REPO_ROOT, ScheduleManager
@@ -123,7 +129,7 @@ async def _run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
         )
 
 
-async def run() -> None:
+async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     """Start the daemon: checkout guard -> pidfile -> healthz -> DB -> loops."""
     refusal = prod_service_checkout_error(REPO_ROOT)
     if refusal is not None:
@@ -135,10 +141,12 @@ async def run() -> None:
 
     liveness = LivenessGroup()
     endpoint = _endpoint()
-    health = await start_health_server("schedule_manager", endpoint.health_port, liveness=liveness)
+    health = await start_health_server(
+        "schedule_manager", endpoint.health_port, liveness=liveness, image=image
+    )
     _log.info("[schedule-manager] healthz listening on :%s", endpoint.health_port)
 
-    pool = Database.from_settings().pool(max_size=_POOL_MAX_SIZE)
+    pool = database().pool(max_size=_POOL_MAX_SIZE)
     try:
         # Automatic seeding is explicit configuration; unseeded previews still use
         # the schedule APIs without launching background workloads.
@@ -155,9 +163,22 @@ def main() -> None:
     """Entry point: init logger + run asyncio loop."""
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="schedule_manager")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="schedule_manager")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="schedule_manager",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        image=image,
+    )
     install_graceful_shutdown("schedule_manager")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -165,7 +186,7 @@ def main() -> None:
     # workers — and a stop signal must never wait on those (see `_hard_exit`).
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(database=database, image=image))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[schedule-manager] interrupted, shutting down")

@@ -19,6 +19,7 @@ from agent.tests.claim.claim_status_support import running_agent as running_agen
 from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
@@ -33,9 +34,12 @@ async def test_claim_first_entry_keeps_boot_claim_running(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """The bootstrap claim already sets running before the first graph entry."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
     db_conn.commit()
@@ -43,7 +47,7 @@ async def test_claim_first_entry_keeps_boot_claim_running(
 
     await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -64,16 +68,19 @@ async def test_claim_subsequent_entry_does_not_disturb_running(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """A subsequent graph entry leaves its already-running row untouched."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     # Don't raise — status is already 'running' when the next turn enters claim_node, 0-row no-op
     await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -145,6 +152,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """chat inbound → claim returns Command(goto='before_llm'), update.messages
     contains HumanMessage after envelope wrapping.
@@ -152,12 +160,14 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     state.messages empty (agent first round) → claim simultaneously injects SystemMessage as
     messages[0] for prompt cache hit across restarts.
     """
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     cmd = await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -184,17 +194,20 @@ async def test_claim_chat_expands_slash_command(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """A `/<name> ...` chat inbound is expanded by the claim node into the
     command's template + the user's note before being wrapped for the model."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(
         db_conn, tid, "/recap just the PRs", source="user", bus=event_bus, database=database
     )
 
     cmd = await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -215,9 +228,12 @@ async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """multiple chat inbounds in same batch → all appended in FIFO order by created_at (none lost)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(db_conn, tid, "first", source="user", bus=event_bus, database=database)
     insert_inbound_message(
         db_conn, tid, "second", source="agent:5", bus=event_bus, database=database
@@ -226,7 +242,7 @@ async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
 
     cmd = await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -249,18 +265,21 @@ async def test_claim_chat_marks_inbound_claimed_immediately(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """chat inbound uses two-phase commit (since 2026-05-27): claim UPDATE pending → claimed;
     a subsequent startup reconcile will move claimed → done; if the process dies midway,
     claimed rows will be reset back to pending by the new process for re-delivery."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     iid = insert_inbound_message(
         db_conn, tid, "msg", source="user", bus=event_bus, database=database
     )
 
     await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -278,6 +297,8 @@ async def test_claim_short_path_does_not_enter_idling(
     running_agent: Callable[[], int],
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """first SELECT already has inbound → does not enter wait branch, status not switched to idling.
 
@@ -293,7 +314,7 @@ async def test_claim_short_path_does_not_enter_idling(
 
     cmd = await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -315,6 +336,7 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """After each chat inbound is envelope-wrapped into state, publish one InboundCommitted
     (frontend relies on this event to trigger reload to fetch the committed version).
@@ -324,7 +346,9 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     """
     import json
 
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     id1 = insert_inbound_message(
         db_conn, tid, "first", source="user", bus=event_bus, database=database
     )
@@ -335,7 +359,7 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     pub = MagicMock()
     await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
+        _make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -357,6 +381,8 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
     kind: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """lifecycle kind (terminate / restart_completed / resurrect) does **not** publish
     InboundCommitted — they are lifecycle markers not user conversations; frontend does not
@@ -370,7 +396,7 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
     pub = MagicMock()
     await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
+        _make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -386,10 +412,13 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """same batch chat + compact_summary → publish only for the chat's inbound_id,
     summary does not emit publish."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     chat_id = insert_inbound_message(
         db_conn, tid, "user msg", source="user", bus=event_bus, database=database
     )
@@ -399,7 +428,7 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
     state = AgentState(messages=[SystemMessage(content="sys")])
     await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
+        _make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -410,14 +439,14 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
     assert committed[0]["inbound_id"] == chat_id
 
 
-async def test_container_mode_continues_without_touching_messages():
+async def test_container_mode_continues_without_touching_messages(*, database_gate: ProcessDbGate):
     """ops_pool=None → container mode skips all inbound dispatch and heads to
     before_llm without writing messages. The system prompt an eval starts from is
     laid down by `init_context`, which runs before claim (see
     agent/graph/tests/test_init_context.py)."""
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="<sys>")]),
-        _make_runtime(ops_pool=None),
+        _make_runtime(ops_pool=None, database_gate=database_gate),
         _config(1),
     )
     assert isinstance(cmd, Command)
@@ -425,12 +454,12 @@ async def test_container_mode_continues_without_touching_messages():
     assert cmd.update == {"halted": False}
 
 
-async def test_container_mode_halted_routes_to_end():
+async def test_container_mode_halted_routes_to_end(*, database_gate: ProcessDbGate):
     """ops_pool=None + state.halted=True → goto END (after eval finishes one round exec exit 42/43 →
     halted=True means this ainvoke should end, no dispatch, no inject)."""
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=None),
+        _make_runtime(ops_pool=None, database_gate=database_gate),
         _config(1),
     )
     assert isinstance(cmd, Command)
@@ -439,12 +468,12 @@ async def test_container_mode_halted_routes_to_end():
     assert cmd.update is None or "messages" not in (cmd.update or {})  # type: ignore[operator]
 
 
-async def test_container_mode_continue_clears_halted():
+async def test_container_mode_continue_clears_halted(*, database_gate: ProcessDbGate):
     """ops_pool=None + state.messages non-empty + halted=False → goto before_llm,
     update={'halted': False} (clear halted state to enter next LLM round)."""
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="hi")]),
-        _make_runtime(ops_pool=None),
+        _make_runtime(ops_pool=None, database_gate=database_gate),
         _config(1),
     )
     assert isinstance(cmd, Command)
@@ -453,7 +482,11 @@ async def test_container_mode_continue_clears_halted():
 
 
 async def test_claim_multi_step_continue_no_inbound(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, running_agent: Callable[[], int]
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    running_agent: Callable[[], int],
+    *,
+    database_gate: ProcessDbGate,
 ):
     """state.halted=False + state.messages non-empty + no pending inbound →
     `_claim_node_impl` does not enter _wait_for_batch, immediately goto before_llm to let LLM
@@ -466,7 +499,7 @@ async def test_claim_multi_step_continue_no_inbound(
     # no INSERT inbound → first SELECT returns empty
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="hi")]),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -491,6 +524,7 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """same batch chat + resurrect → publish only for the chat's inbound_id, lifecycle
     inbound id does not enter committed_chat_ids.
@@ -498,7 +532,9 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     Lock down `committed_chat_ids.append(item.id)` appearing only in CHAT branch —
     mutation moving it to dispatch top / resurrect branch would cause publish for extra
     lifecycle id, frontend fetching timeline would not find reload anchor."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     chat_id = insert_inbound_message(
         db_conn, tid, "user msg", source="user", bus=event_bus, database=database
     )
@@ -508,7 +544,7 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     state = AgentState(messages=[SystemMessage(content="sys")])
     await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
+        _make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -527,17 +563,20 @@ async def test_claim_chat_message_carries_source_metadata(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """chat dispatch passes source=item.source to inbound_message helper, cannot be None.
 
     Lock down mutant_76: `source=item.source` → `source=None`. Verify message's
     additional_kwargs.ava_source equals original item.source ('user'), preventing None leak."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     cmd = await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),
@@ -556,18 +595,21 @@ async def test_claim_node_wrapper_returns_underlying_command(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """`claim_node` is a thin wrapper around `node_lifecycle` enter/exit, **must** return the
     inner `_claim_node_impl`'s Command (cannot drop / change goto / wrap into something else).
     Lock down mutation that removes `await` / `return` from `return await _claim_node_impl(...)`."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(
         db_conn, tid, "wrapper test", source="user", bus=event_bus, database=database
     )
 
     cmd = await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
         _config(
             tid,
         ),

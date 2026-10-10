@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from psycopg import sql
 
 import base.db
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.routers import presets
 from gateway.routers.receipts import creation as creation_receipts
@@ -85,9 +86,12 @@ def test_same_creation_key_with_changed_valid_body_conflicts(
 
 @pytest.mark.parametrize("kind", ["preset", "schedule"])
 def test_concurrent_creation_commits_one_resource_and_receipt(
-    db_conn: psycopg.Connection, kind: str
+    db_conn: psycopg.Connection, kind: str, *, database_gate: ProcessDbGate
 ) -> None:
-    with base.db.pool(max_size=4) as pool, ThreadPoolExecutor(max_workers=4) as workers:
+    with (
+        base.db.pool(max_size=4, gate=database_gate) as pool,
+        ThreadPoolExecutor(max_workers=4) as workers,
+    ):
 
         def create(_worker: int) -> tuple[Any, ...]:
             if kind == "preset":
@@ -129,13 +133,16 @@ def test_receipt_contains_no_raw_opaque_config_request(db_conn: psycopg.Connecti
 
 
 def test_receipt_failure_rolls_back_created_resource_and_version(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     def fail(*_args: object) -> None:
         raise RuntimeError("receipt failed")
 
     monkeypatch.setattr(creation_receipts, "finish", fail)
-    with base.db.pool() as pool, pytest.raises(RuntimeError, match="receipt failed"):
+    with (
+        base.db.pool(gate=database_gate) as pool,
+        pytest.raises(RuntimeError, match="receipt failed"),
+    ):
         schedules._create_blocking(
             pool, schedules.ScheduleCreate(name="rollback", script="pass"), "rollback"
         )
@@ -144,7 +151,9 @@ def test_receipt_failure_rolls_back_created_resource_and_version(
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (0,)
 
 
-def test_creation_identity_is_bound_to_verified_principal(db_conn: psycopg.Connection) -> None:
+def test_creation_identity_is_bound_to_verified_principal(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+) -> None:
     from starlette.requests import Request
 
     from gateway.http.auth.request_principal import AuthPrincipal
@@ -161,7 +170,7 @@ def test_creation_identity_is_bound_to_verified_principal(db_conn: psycopg.Conne
         request.state.auth_principal = AuthPrincipal("mcp_client", subject)
         return creation_receipts.operation_key(request)
 
-    with base.db.pool() as pool:
+    with base.db.pool(gate=database_gate) as pool:
         first = presets._create_blocking(
             pool, presets.PresetCreate(name="one", label="worker"), scoped_key("one")
         )

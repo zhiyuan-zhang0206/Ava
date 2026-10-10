@@ -44,11 +44,16 @@ are committed in the producer's transaction before projection admission; SDK
 capture journals and participant sealing retain their independent durability
 contracts. An unfinished observation barrier is never a commit or seal receipt.
 
+A process binding rejects another live or unfinished writer. A subsequent entry
+can bind its concrete writer only after the prior owner has stopped and joined;
+its original worker error is collected before replacement. Downstream exit
+cleanup still runs through the last concrete binding.
+
 The public `EventPipeline` resource lives in `delivery/pipeline.py`; construction starts
 its worker and requires the root's writer. `build_pipeline(database=...)` binds
 ordinary sinks to that root's database factory. Controlled host/exec logging binds
 this actual writer through `init_telemetry(pipeline=..., machine_reader=...)`;
-legacy process calls remain supported until their own roots migrate. SDK ClientSet roots retain this
+All process entries supply the concrete writer; emission before initialization reports a missing owner without constructing a database or worker. SDK ClientSet roots retain this
 constructor without invoking it until a selected event enqueues. Quiet sync and
 close never build it. Finite close retains an unfinished or failed writer for
 later observation, and an original worker failure propagates after other client

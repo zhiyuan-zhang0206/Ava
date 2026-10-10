@@ -13,8 +13,10 @@ from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
-from services.upkeep.events_maintenance.daemon import events_maintenance_db
-from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
+from services.upkeep.events_maintenance.tests.slices import (
+    events_maintenance_config,
+    events_maintenance_db,
+)
 
 _Loop = Callable[..., Coroutine[Any, Any, None]]
 

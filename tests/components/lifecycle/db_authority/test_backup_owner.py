@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 from collections.abc import Callable, Generator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -30,7 +31,12 @@ from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster import authority
 from base.config import ConfigBoot, settings
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
 from base.host.net.url_secret import url_with_port
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.tests.test_single_box import Born
@@ -122,8 +128,21 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     work.mkdir(mode=0o700)
     # The scheduled worker's own operation, then the controller's publication.
     config = ConfigBoot()
+    version = CodeVersion(LoadedCommit.capture())
+    gate = ProcessDbGate(version=version.get, process="backup-test")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    def database_for_url(url: str) -> Database:
+        return Database(replace(db_config_from_settings(), db_url=url), gate=gate)
+
     result = worker._execute(
-        {"kind": "dump", "now": datetime.now(UTC).isoformat()}, work, config=config
+        {"kind": "dump", "now": datetime.now(UTC).isoformat()},
+        work,
+        config=config,
+        database=database,
+        database_for_url=database_for_url,
     )
     artifact = worker.commit_scheduled_backup(
         work / "artifact" / str(result["artifact"]),
@@ -138,7 +157,9 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
 
     scratch = tmp_path / "scratch"
     scratch.mkdir(mode=0o700)
-    report, _elapsed = restore_drill.run_drill(artifact, foreground=True, scratch_root=scratch)
+    report, _elapsed = restore_drill.run_drill(
+        artifact, database_for_url=database_for_url, foreground=True, scratch_root=scratch
+    )
     assert report.agents == 1
     assert report.sample_agent_id == agent_id
     assert report.sample_message_count == 1

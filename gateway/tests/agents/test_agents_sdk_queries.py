@@ -14,10 +14,11 @@ from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus
 from ava.sdk_surface.install import Installation
 from base.config.service_read import ConfigAuthority
-from gateway.tests.agents.test_agents_sdk import (
-    _sdk_via_inprocess_gateway as _sdk_via_inprocess_gateway,
+from base.db.code_version_gate import ProcessDbGate
+from gateway.tests.agents.sdk_support import (
+    sdk_via_gateway as sdk_via_gateway,
 )
-from gateway.tests.agents.test_agents_sdk import _spawn_agent
+from gateway.tests.agents.sdk_support import spawn_agent
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -189,9 +190,16 @@ class TestListAgents:
         ]
 
     def test_default_scope_includes_all_nonterminated_states(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        ids = [_spawn_agent(config_authority=config_authority) for _ in range(3)]
+        ids = [
+            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            for _ in range(3)
+        ]
         for agent_id, status in zip(ids, ("running", "idling", "terminated"), strict=True):
             db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent_id))
         db_conn.commit()
@@ -202,9 +210,16 @@ class TestListAgents:
         assert page.next_cursor is None
 
     def test_terminated_pages_preserve_cursor_and_search(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        ids = [_spawn_agent(config_authority=config_authority) for _ in range(5)]
+        ids = [
+            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            for _ in range(5)
+        ]
         for agent_id in ids:
             db_conn.execute(
                 "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
@@ -308,9 +323,13 @@ class TestListAgents:
         assert row.spawner == "agent:8"
 
     def test_agent_row_keeps_domain_fields(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
         agent_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
         db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))

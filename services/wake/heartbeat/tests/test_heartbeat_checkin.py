@@ -13,6 +13,7 @@ from base import telemetry
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.lm.catalog import ModelCatalog
@@ -66,8 +67,14 @@ class TestSendHeartbeatCheckin:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
-        aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+        aid = spawn_agent(
+            spawner="user",
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+        )
         _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         # The emitter drains asynchronously (0.5s cadence) — flush() can
         # race the drain thread for the queue, so poll briefly for the line.
@@ -110,6 +117,7 @@ class TestSendHeartbeatCheckin:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A completed check-in must start a durable reminder interval.
 
@@ -123,6 +131,7 @@ class TestSendHeartbeatCheckin:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         with db_conn.cursor() as cur:
@@ -140,6 +149,7 @@ class TestSendHeartbeatCheckin:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The 15-second dispatcher step must not become the reminder cadence."""
         aid = _make_idle(
@@ -147,6 +157,7 @@ class TestSendHeartbeatCheckin:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         with db_conn.cursor() as cur:
@@ -174,11 +185,17 @@ class TestSendHeartbeatCheckin:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The check-in publishes a Redis wake to the target agent's channel so an
         idle agent runs the heartbeat turn now instead of at its next SELECT
         recheck — park a per-agent listener, fire the check-in, assert it wakes."""
-        aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+        aid = spawn_agent(
+            spawner="user",
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+        )
         listener = RedisInboundListener(settings.data_plane.redis_url, aid)
         try:
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
@@ -209,12 +226,14 @@ class TestConsecutiveFailureBackoff:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         # Deadline in the future -> excluded; deadline passed -> selected.
         assert aid not in dict(
@@ -235,6 +254,7 @@ class TestConsecutiveFailureBackoff:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The limit applies AFTER the backoff filter: a backed-off agent must
         not occupy a per-step wake-rate slot that a healthy due agent needs."""
@@ -243,12 +263,14 @@ class TestConsecutiveFailureBackoff:
             status_changed_s_ago=900,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         wedged = _make_idle(
             db_conn,
             status_changed_s_ago=700,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
 
         selected = _select_idle_agents_needing_heartbeat(
@@ -270,6 +292,7 @@ class TestConsecutiveFailureBackoff:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Use the actual PG result in pending state, as the dispatch loop does."""
         aid = _make_idle(
@@ -277,6 +300,7 @@ class TestConsecutiveFailureBackoff:
             status_changed_s_ago=1200,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         pending = _selected(pool)
         _send_heartbeat_checkin(pool, database, event_bus, aid, pending[aid])
@@ -304,6 +328,7 @@ class TestConsecutiveFailureBackoff:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The check-in was sent when the agent had been idle ~6 minutes; a
         cycle later `last_active_at` has not moved (no turn ran) -> streak 1."""
@@ -312,6 +337,7 @@ class TestConsecutiveFailureBackoff:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         pending: dict[int, float] = {aid: 6.0}
         streaks: dict[int, int] = {}
@@ -330,6 +356,7 @@ class TestConsecutiveFailureBackoff:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The check-in produced a turn (`last_active_at` advanced) -> streak
         reset (stays empty / drops)."""
@@ -338,6 +365,7 @@ class TestConsecutiveFailureBackoff:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -361,6 +389,7 @@ class TestConsecutiveFailureBackoff:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """No check-in was sent this cycle (backoff active), but a real wake
         produced a turn — fresh `last_active_at` clears the streak so the
@@ -370,6 +399,7 @@ class TestConsecutiveFailureBackoff:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -392,12 +422,14 @@ class TestConsecutiveFailureBackoff:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (aid,))

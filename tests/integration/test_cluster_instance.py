@@ -18,9 +18,9 @@ import socket
 import subprocess
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -35,6 +35,7 @@ from base.host.env.dotenv_boot import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.pgbouncer import stop_pgbouncer
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _BEARER = "test_bearer_abc123"
 _REDIS_ADMIN = "test_redis_admin_abc123"
@@ -254,12 +255,18 @@ def test_gateway_cold_start_restores_redis_url_identity(
     isolated_cluster: tuple[int, int],
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
+    operator_database: Callable[[], Any],
 ) -> None:
     """Official start restores Redis's own ACL after a real RDB-only shutdown."""
     pg_port, redis_port = isolated_cluster
     home = _gateway_config(monkeypatch, isolated_cluster)
     _born_intent(home)
-    assert ensure_gateway_data_plane(retained_children=retained_children) == 0
+    assert (
+        ensure_gateway_data_plane(
+            retained_children=retained_children, database_factory=operator_database
+        )
+        == 0
+    )
     provision_database("ava_main", base_admin_url=ci.pg_admin_url(pg_port))
     with _admin(pg_port, "ava_main") as conn:
         assert conn.execute("SELECT current_database()").fetchone() == ("ava_main",)
@@ -273,7 +280,12 @@ def test_gateway_cold_start_restores_redis_url_identity(
         capture_output=True,
     )
     assert (home / "redis" / "dump.rdb").is_file()
-    assert ensure_gateway_data_plane(retained_children=retained_children) == 0
+    assert (
+        ensure_gateway_data_plane(
+            retained_children=retained_children, database_factory=operator_database
+        )
+        == 0
+    )
     with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
         assert client.get("continuation") == b"pending"  # pyright: ignore[reportUnknownMemberType]
     with redis.Redis(port=redis_port, password=_REDIS_ADMIN) as admin:
@@ -286,6 +298,7 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     retained_children: list[subprocess.Popen[bytes]],
+    operator_database: Callable[[], Any],
 ) -> None:
     """A fresh single-box home (empty bearer) is born with generated Redis
     credentials, and the official bring-up serves a Redis that refuses an
@@ -321,7 +334,12 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
     monkeypatch.setattr(cluster, "get_record", _record)
     _born_intent(home)
     try:
-        assert ensure_gateway_data_plane(retained_children=retained_children) == 0
+        assert (
+            ensure_gateway_data_plane(
+                retained_children=retained_children, database_factory=operator_database
+            )
+            == 0
+        )
         with (
             redis.Redis(port=redis_port, retry=Retry(NoBackoff(), 0)) as anonymous,
             pytest.raises(redis.AuthenticationError),

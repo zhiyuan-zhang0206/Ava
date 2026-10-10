@@ -1,9 +1,10 @@
 """Data-plane startup ordering, authority and prerequisite contracts."""
 
 import subprocess
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -12,6 +13,7 @@ from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli.commands.data_plane import cluster_instance as _ci
 from tests.factories.data_plane import cluster_record
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _rec() -> cluster.ClusterRecord:
@@ -98,10 +100,12 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     return recorded
 
 
-def test_ordinary_start_regrants_and_checks_before_the_pooler(plane: _Plane) -> None:
+def test_ordinary_start_regrants_and_checks_before_the_pooler(
+    plane: _Plane, operator_database: Callable[[], Any]
+) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-    complete_gateway_data_plane()
+    complete_gateway_data_plane(database_factory=operator_database)
     assert plane.calls == [
         "start",
         "extension",
@@ -117,11 +121,13 @@ def test_ordinary_start_regrants_and_checks_before_the_pooler(plane: _Plane) -> 
     ]
 
 
-def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(plane: _Plane) -> None:
+def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(
+    plane: _Plane, operator_database: Callable[[], Any]
+) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     plane.state["birth"] = True
-    complete_gateway_data_plane()
+    complete_gateway_data_plane(database_factory=operator_database)
     assert plane.calls == [
         "start",
         "extension",
@@ -142,10 +148,12 @@ def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(plane:
     ]
 
 
-def test_release_readiness_performs_no_schema_or_grant_writes(plane: _Plane) -> None:
+def test_release_readiness_performs_no_schema_or_grant_writes(
+    plane: _Plane, operator_database: Callable[[], Any]
+) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-    complete_gateway_data_plane(refresh_schema=False)
+    complete_gateway_data_plane(refresh_schema=False, database_factory=operator_database)
     assert plane.calls == [
         "start",
         "invariant",
@@ -158,7 +166,7 @@ def test_release_readiness_performs_no_schema_or_grant_writes(plane: _Plane) -> 
 
 
 def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
-    plane: _Plane, monkeypatch: pytest.MonkeyPatch
+    plane: _Plane, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     from base.cluster import authority
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
@@ -168,7 +176,7 @@ def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
 
     monkeypatch.setattr(authority, "check_invariant", fail)
     with pytest.raises(authority.CatalogRefusedError, match="foreign grant"):
-        complete_gateway_data_plane()
+        complete_gateway_data_plane(database_factory=operator_database)
     assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor"]
 
 
@@ -185,7 +193,7 @@ class _Authority:
 
 
 def test_memory_vectors_prepared_as_owner_only_for_pgvector(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """The pgvector table is start-time DDL through the owner authority at the
     provider's dimension; any other backend dials nothing."""
@@ -209,11 +217,11 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
     monkeypatch.setattr(factory, "get_descriptor", descriptor)
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
-    prepare_memory_vectors()
+    prepare_memory_vectors(database_factory=operator_database)
     assert calls == []
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
-    prepare_memory_vectors()
+    prepare_memory_vectors(database_factory=operator_database)
     assert calls == [
         f"descriptor:{settings.services.embedding_backend}",
         "owner-session",
@@ -222,7 +230,7 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
 
 
 def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """A remote-managed plane has no local owner authority; its provider URL
     carries the table DDL, exactly as it carries the plane's migrations."""
@@ -253,7 +261,7 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
 
     monkeypatch.setattr(factory, "get_descriptor", descriptor)
 
-    prepare_memory_vectors()
+    prepare_memory_vectors(database_factory=operator_database)
 
     assert calls == ["provider:{'direct': True}", "prepare:provider-connection:768"]
 

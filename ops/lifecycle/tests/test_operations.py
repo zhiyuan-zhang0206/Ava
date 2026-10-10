@@ -22,6 +22,7 @@ from base.agents import ResurrectResult, TerminateResult
 from base.agents.messages.inbound import InboundKind
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -37,8 +38,8 @@ from ops.rpc_schemas import (
 )
 
 
-def _db() -> Database:
-    return Database.from_settings()
+def _db(*, database_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(gate=database_gate)
 
 
 class TestSpawnAgentRequestSourceValidation:
@@ -231,11 +232,14 @@ async def test_restart_agent_op_terminated_short_circuits(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     from ops.tests.pool_support import make_test_pool
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
     db_conn.commit()
     wake = AsyncMock()

@@ -8,7 +8,9 @@ what it waived, no path installs at a tier better than `unreviewed`, and the one
 verb that says "a person read this" is separate from every install.
 """
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,6 +21,7 @@ from cli.commands.extensions.skill import (
     cmd_skill_scan,
     cmd_skill_trust,
 )
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare
@@ -60,11 +63,14 @@ def _write(d: Path, name: str, template: str) -> Path:
 
 
 def test_a_malicious_skill_refuses_and_leaves_nothing_behind(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     src = _write(tmp_path / "helpful-backup", "helpful-backup", _MALICIOUS)
 
-    assert cmd_skill_install(str(src), None, None) == 1
+    assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 1
 
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "credential-exfiltration" in err
@@ -74,7 +80,7 @@ def test_a_malicious_skill_refuses_and_leaves_nothing_behind(
 
 
 def test_one_bad_skill_aborts_a_whole_collection_before_the_first_copy(
-    unit_home: Path, tmp_path: Path
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
 ) -> None:
     """The scan runs over every package before any of them is copied, so a
     poisoned skill in a repo of good ones cannot land its neighbours."""
@@ -82,16 +88,23 @@ def test_one_bad_skill_aborts_a_whole_collection_before_the_first_copy(
     _write(repo / "good-one", "good-one", _BENIGN)
     _write(repo / "helpful-backup", "helpful-backup", _MALICIOUS)
 
-    assert cmd_skill_install(str(repo), None, None) == 1
+    assert cmd_skill_install(str(repo), None, None, database_factory=operator_database) == 1
 
     assert not (unit_home / "skills" / "good-one").exists()
     assert reg.load().packages == []
 
 
-def test_accept_risk_installs_and_records_what_it_waived(unit_home: Path, tmp_path: Path) -> None:
+def test_accept_risk_installs_and_records_what_it_waived(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     src = _write(tmp_path / "helpful-backup", "helpful-backup", _MALICIOUS)
 
-    assert cmd_skill_install(str(src), None, None, accept_risk=True) == 0
+    assert (
+        cmd_skill_install(
+            str(src), None, None, accept_risk=True, database_factory=operator_database
+        )
+        == 0
+    )
 
     entry = reg.get("helpful-backup")
     assert entry is not None
@@ -100,12 +113,14 @@ def test_accept_risk_installs_and_records_what_it_waived(unit_home: Path, tmp_pa
     assert entry.scanned_at is not None
 
 
-def test_a_clean_third_party_install_is_still_unreviewed(unit_home: Path, tmp_path: Path) -> None:
+def test_a_clean_third_party_install_is_still_unreviewed(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     """A clean scan means "no rule matched", never "someone read this" — so the
     tier a passing install lands at is the untrusted one."""
     src = _write(tmp_path / "code-review", "code-review", _BENIGN)
 
-    assert cmd_skill_install(str(src), None, None) == 0
+    assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
 
     entry = reg.get("code-review")
     assert entry is not None
@@ -153,9 +168,11 @@ def test_register_and_enable_fold_the_typed_name_onto_the_real_directory(
     assert [p.name for p in reg.load().packages] == ["wechat_ocr"]
 
 
-def test_trust_is_a_separate_human_verb(unit_home: Path, tmp_path: Path) -> None:
+def test_trust_is_a_separate_human_verb(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     src = _write(tmp_path / "code-review", "code-review", _BENIGN)
-    assert cmd_skill_install(str(src), None, None) == 0
+    assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
 
     assert cmd_skill_trust("code-review") == 0
     assert reg.get("code-review").trust == "reviewed"  # type: ignore[union-attr]
@@ -170,12 +187,15 @@ def test_trust_refuses_an_unknown_package(unit_home: Path, capsys: pytest.Captur
 
 
 def test_scan_reports_an_installed_package_and_exits_on_criticals(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     """`ava skill scan` is the read-before-you-trust companion, and its exit
     code is what a caller gates on: 2 for critical, 0 for notices only."""
     clean = _write(tmp_path / "code-review", "code-review", _BENIGN)
-    assert cmd_skill_install(str(clean), None, None) == 0
+    assert cmd_skill_install(str(clean), None, None, database_factory=operator_database) == 0
     assert cmd_skill_scan("code-review") == 0
     assert "trust=unreviewed" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
@@ -185,19 +205,27 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
 
 
 def test_scan_surfaces_previously_accepted_findings(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     """The waiver has to stay visible after the install that made it, or
     `--accept-risk` is a decision nobody can audit."""
     src = _write(tmp_path / "helpful-backup", "helpful-backup", _MALICIOUS)
-    assert cmd_skill_install(str(src), None, None, accept_risk=True) == 0
+    assert (
+        cmd_skill_install(
+            str(src), None, None, accept_risk=True, database_factory=operator_database
+        )
+        == 0
+    )
 
     assert cmd_skill_scan("helpful-backup") == 2
     assert "previously accepted: credential-exfiltration" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
-    unit_home: Path, tmp_path: Path
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
 ) -> None:
     """Converge owns the builtin stamp for content out of the checkout; a
     human's `reviewed` promotion on a third-party package survives it."""
@@ -206,7 +234,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
     repo = tmp_path / "repo"
     _write(repo / "ava_builtins" / "skills" / "ava-goal", "ava-goal", _BENIGN)
     installed = _write(tmp_path / "code-review", "code-review", _BENIGN)
-    assert cmd_skill_install(str(installed), None, None) == 0
+    assert cmd_skill_install(str(installed), None, None, database_factory=operator_database) == 0
     assert cmd_skill_trust("code-review") == 0
 
     converge_skills(repo, unit_home)

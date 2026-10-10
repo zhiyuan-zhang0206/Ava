@@ -18,16 +18,21 @@ import subprocess
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
-from typing import Literal, Sequence, cast
+from typing import Any, Literal, Sequence, cast
 from zoneinfo import ZoneInfo
 
 import ava
 import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
+from base.cluster.machines import machine_name
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import schedule_entry
 from base.log import init_gateway_process
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.paths import ava_home
@@ -209,7 +214,9 @@ def _slot_day(slot: datetime) -> str:
     return slot.astimezone(ZoneInfo(cluster_timezone())).strftime("%Y-%m-%d")
 
 
-def _fire(slot: datetime, _payload: None) -> None:
+def _fire(
+    slot: datetime, _payload: None, *, producer: Callable[[], Any], image: LoadedCommit
+) -> None:
     try:
         day = _slot_day(slot)
         scan = _run_mechanical_scan(
@@ -217,7 +224,9 @@ def _fire(slot: datetime, _payload: None) -> None:
             _scan_artifact_path(day, slot, ensure_home=True),
         )
         dispatch = ensure_worker(_worker_label(), worker_prompt(day, scan))
-        init_gateway_process(name=_PROCESS_NAME)
+        init_gateway_process(
+            name=_PROCESS_NAME, producer=producer, machine_reader=machine_name, image=image
+        )
         from base import telemetry
 
         telemetry.emit(
@@ -262,9 +271,10 @@ def _dry_run(repo: Path) -> None:
     print("dry-run: no claims, agent operations, telemetry, or database access were performed.")
 
 
-def _main_loop() -> None:
-    db = Database.from_settings()
-    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=_fire)
+def _main_loop(*, inputs: ScheduleInputs) -> None:
+    db = inputs.database()
+    fire = partial(_fire, producer=inputs.producer, image=inputs.image)
+    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=fire)
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)
@@ -275,7 +285,7 @@ def _main_loop() -> None:
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, 3600))
             continue
-        fire_slot_once(db, next_run, None, fire=_fire)
+        fire_slot_once(db, next_run, None, fire=fire)
         last_run_at = datetime.now(UTC)
         time.sleep(120)
 
@@ -289,7 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(argv: Sequence[str] | None = None, *, inputs: ScheduleInputs | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.dry_run and not args.once:
@@ -299,7 +309,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             parser.error("--once requires --dry-run")
         _dry_run((args.repo or _REPO_ROOT).resolve())
         return
-    _main_loop()
+    with schedule_entry(inputs) as entry_inputs:
+        _main_loop(inputs=entry_inputs)
 
 
 if __name__ == "__main__":
@@ -308,4 +319,4 @@ if __name__ == "__main__":
         {"IDLING", "RUNNING", "TERMINATED"},
         schedule_name="debt-sweep-daily",
     )
-    main()
+    main(inputs=globals().get("AVA_SCHEDULE_INPUTS"))

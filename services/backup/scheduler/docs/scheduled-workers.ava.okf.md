@@ -45,3 +45,12 @@ owns PostgreSQL child cleanup. A failed stop preserves the scratch directory;
 no custom family/cwd scan authorizes deleting it.
 
 [[shutdown.ava.okf.md|Backup job shutdown]]
+
+## Process image and database admission
+
+The scheduler captures its loaded image once for logging and health. Each
+operation worker is a separate process: it captures its own image and shares
+one gate between its log database, dump handle and restored-checkpoint reader.
+The worker request carries no gate object. Scratch handles replace only the URL
+in the live dial configuration; publication, direct owner dials and cleanup
+retain their existing contracts.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import errno
 import hashlib
 import os
@@ -13,9 +14,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from base.cluster.machine import validate_machine_name
 from base.config import ConfigBoot
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
 from base.native_process.child_env import inherited_process_env
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
+from base.telemetry.emitter import build_pipeline
 from services.backup.artifact.names import DUMP_NAME_RE
 from services.backup.scheduler.operation.staging import (
     OperationKind,
@@ -186,11 +194,17 @@ def _publish_copy(staged: Path, target: Path, digest: str) -> None:
         copy.unlink(missing_ok=True)
 
 
-def _execute(request: dict[str, object], work: Path, *, config: ConfigBoot) -> dict[str, object]:
+def _execute(
+    request: dict[str, object],
+    work: Path,
+    *,
+    config: ConfigBoot,
+    database: Callable[[], Database],
+    database_for_url: Callable[[str], Database],
+) -> dict[str, object]:
     if set(request) != {"kind", "now"}:
         raise ValueError("invalid logical backup request")
     if request["kind"] == "dump":
-        from base.db import Database
         from services.backup.dump import run_backup
 
         stamp = request["now"]
@@ -198,7 +212,7 @@ def _execute(request: dict[str, object], work: Path, *, config: ConfigBoot) -> d
             raise TypeError("logical dump requires its captured timestamp")
         artifact = run_backup(
             datetime.fromisoformat(stamp),
-            db=Database.from_settings(),
+            db=database(),
             staging=work / "artifact",
             is_remote_reader=lambda: config.view.data_plane.is_remote,
             keep_reader=lambda: config.view.services.backup_keep,
@@ -212,7 +226,7 @@ def _execute(request: dict[str, object], work: Path, *, config: ConfigBoot) -> d
 
         scratch = work / "scratch"
         scratch.mkdir(mode=0o700)
-        run_drill(foreground=True, scratch_root=scratch)
+        run_drill(foreground=True, scratch_root=scratch, database_for_url=database_for_url)
         return {"restored": True}
     raise ValueError("unknown logical backup operation")
 
@@ -223,8 +237,33 @@ def main() -> None:
 
     # The store-verified publish ACK is an INFO record: route it to the log sinks.
     config = ConfigBoot()
-    init_gateway_process(name="pg-backup-worker")
-    publish_result(output, _execute(request, output.parent, config=config))
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="pg-backup-worker")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    def database_for_url(url: str) -> Database:
+        return Database(dataclasses.replace(db_config_from_settings(), db_url=url), gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="pg-backup-worker",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        image=image,
+    )
+    publish_result(
+        output,
+        _execute(
+            request,
+            output.parent,
+            config=config,
+            database=database,
+            database_for_url=database_for_url,
+        ),
+    )
 
 
 if __name__ == "__main__":

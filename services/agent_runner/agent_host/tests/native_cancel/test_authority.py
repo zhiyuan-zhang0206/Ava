@@ -12,6 +12,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.incarnation.native_work_models import NativeWorkUncertainError
 from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
@@ -37,9 +38,10 @@ async def test_force_observation_waits_for_actual_projection_continuation(
     *,
     database: Database,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     pool: ConnectionPool
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 100, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(accept_native_cancel, pool, "pump-barrier", target.agent_id, target)

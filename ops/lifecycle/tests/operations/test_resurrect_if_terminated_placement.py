@@ -9,6 +9,7 @@ import pytest
 from base.agents import ResurrectResult
 from base.agents.messages.inbound import InboundKind
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops import lifecycle
 from ops.cluster import rpc as cluster_rpc
@@ -40,7 +41,7 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.mark.asyncio
     async def test_active_suppression_skips_forward_and_launch(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         from base.agents import AgentStatus
 
@@ -52,13 +53,17 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind=InboundKind.CHAT
+            _db(database_gate=database_gate),
+            event_bus,
+            5,
+            trigger_inbound_id=88,
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         assert status is AgentStatus.TERMINATED
 
     @pytest.mark.asyncio
     async def test_tripped_recovery_breaker_skips_forward_and_launch(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         """A tripped recovery breaker (consecutive permanent provider
         rejections) refuses the automatic resurrect before any home contact,
@@ -73,13 +78,17 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind=InboundKind.CHAT
+            _db(database_gate=database_gate),
+            event_bus,
+            5,
+            trigger_inbound_id=88,
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         assert status is AgentStatus.TERMINATED
 
     @pytest.mark.asyncio
     async def test_local_home_resurrects_in_process(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         """Local-homed resurrect dispatches to ops server first; falls back
         to in-process when the ops server is unreachable."""
@@ -126,7 +135,11 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind=InboundKind.CHAT
+            _db(database_gate=database_gate),
+            event_bus,
+            5,
+            trigger_inbound_id=88,
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         assert status is AgentStatus.IDLING
         # Dispatch was attempted (HTTP-uniform path)
@@ -149,7 +162,7 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.mark.asyncio
     async def test_remote_home_forwards_lifecycle_op(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         captured: dict[str, object] = {}
         from base.agents import AgentStatus
@@ -175,7 +188,11 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
+            _db(database_gate=database_gate),
+            event_bus,
+            7,
+            trigger_inbound_id=99,
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         assert status is AgentStatus.IDLING
         assert captured["target"] == "wsl"
@@ -189,7 +206,12 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.mark.asyncio
     async def test_remote_home_unreachable_skips(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, event_bus: EventBus
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        event_bus: EventBus,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         from base.agents import AgentStatus
         from ops.cluster.rpc import ClusterOpUnreachable
@@ -205,14 +227,18 @@ class TestResurrectIfTerminatedPlacement:
 
         with caplog.at_level("INFO"):
             status = await lifecycle.resurrect_if_terminated(
-                _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
+                _db(database_gate=database_gate),
+                event_bus,
+                7,
+                trigger_inbound_id=99,
+                trigger_inbound_kind=InboundKind.CHAT,
             )
         assert status is AgentStatus.TERMINATED
         assert "home machine unreachable" in caplog.text
 
     @pytest.mark.asyncio
     async def test_unknown_remote_op_failure_propagates(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         from base.agents import AgentStatus
         from ops.cluster.rpc import ClusterOpFailed
@@ -228,13 +254,22 @@ class TestResurrectIfTerminatedPlacement:
 
         with pytest.raises(ClusterOpFailed):
             await lifecycle.resurrect_if_terminated(
-                _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
+                _db(database_gate=database_gate),
+                event_bus,
+                7,
+                trigger_inbound_id=99,
+                trigger_inbound_kind=InboundKind.CHAT,
             )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("remote", [False, True])
     async def test_known_resurrection_refusal_keeps_inbound_queued(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, remote: bool
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        event_bus: EventBus,
+        remote: bool,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         from base.agents import AgentStatus, ResurrectRefused
         from ops.cluster.rpc import ClusterOpFailed
@@ -250,14 +285,18 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", refuse)
         assert (
             await lifecycle.resurrect_if_terminated(
-                _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
+                _db(database_gate=database_gate),
+                event_bus,
+                7,
+                trigger_inbound_id=99,
+                trigger_inbound_kind=InboundKind.CHAT,
             )
             is AgentStatus.TERMINATED
         )
 
     @pytest.mark.asyncio
     async def test_not_terminated_short_circuits(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         from base.agents import AgentStatus
 
@@ -269,7 +308,11 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
+            _db(database_gate=database_gate),
+            event_bus,
+            5,
+            trigger_inbound_id=99,
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         assert status is AgentStatus.RUNNING
 
@@ -290,7 +333,7 @@ class TestResurrectIfTerminatedNotificationGuard:
 
     @pytest.mark.asyncio
     async def test_system_notice_trigger_skips_forward_and_launch(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         from base.agents import AgentStatus
 
@@ -304,13 +347,17 @@ class TestResurrectIfTerminatedNotificationGuard:
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=207124, trigger_inbound_kind=InboundKind.CHAT
+            _db(database_gate=database_gate),
+            event_bus,
+            5,
+            trigger_inbound_id=207124,
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         assert status is AgentStatus.TERMINATED
 
     @pytest.mark.asyncio
     async def test_missing_trigger_row_falls_through(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         """No row -> None -> the normal path runs; stale-work adjudication stays
         with the home runner's final CAS. This drives the real read (the id
@@ -343,14 +390,18 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=10**12, trigger_inbound_kind=InboundKind.CHAT
+            _db(database_gate=database_gate),
+            event_bus,
+            5,
+            trigger_inbound_id=10**12,
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         assert status is AgentStatus.IDLING
         assert calls == [5]
 
     @pytest.mark.asyncio
     async def test_read_failure_propagates(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
     ) -> None:
         """A failed trigger read must not be swallowed into a skip (review
         note A): the error surfaces to the caller, mirroring how a failed
@@ -365,7 +416,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(lifecycle, "_system_notice_source_of_trigger", _boom)
         with pytest.raises(RuntimeError, match="trigger read failed"):
             await lifecycle.resurrect_if_terminated(
-                _db(),
+                _db(database_gate=database_gate),
                 event_bus,
                 5,
                 trigger_inbound_id=207124,
@@ -470,6 +521,8 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         """BLOCK regression (Ava #3242): the watchdog's hosted-turn recovery
         chat is kind='chat', source='system' — the plain notice verdict
@@ -518,7 +571,11 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, aid, trigger_inbound_id=rec_iid, trigger_inbound_kind=InboundKind.CHAT
+            _db(database_gate=database_gate),
+            event_bus,
+            aid,
+            trigger_inbound_id=rec_iid,
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         assert status is AgentStatus.IDLING
         assert calls == [(aid, rec_iid)]
@@ -530,6 +587,8 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A successful spawn is a durable recovery, not only an in-memory result."""
     from base.agents import AgentStatus
@@ -555,7 +614,7 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _spawn_on_home)
 
     status = await lifecycle.resurrect_if_terminated(
-        _db(),
+        _db(database_gate=database_gate),
         event_bus,
         agent_id,
         trigger_inbound_id=trigger_id,

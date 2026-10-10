@@ -13,8 +13,10 @@ No cluster is required: the `machines` reads and the ops probe are stubbed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,6 +25,9 @@ import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_pre
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
+from base.telemetry import EventPipeline
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # ─── Defect 1: the fan-out reconciled against a live probe ───────────────────
 
@@ -46,7 +51,11 @@ def test_roster_flags_a_live_host_that_carries_a_stop_marker() -> None:
 # ─── Defect 3: declined restart vs failed restart ────────────────────────────
 
 
-def test_declined_restart_reports_its_own_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_declined_restart_reports_its_own_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """A preflight refusal stops nothing, so the host is still serving. It must be
     distinguishable from a failure after the stop — the updater shell branches on
     exactly this code to decide whether to run `ava start`."""
@@ -56,12 +65,19 @@ def test_declined_restart_reports_its_own_exit_code(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
-    assert _stop_commands.cmd_restart(retained_children=[]) == RESTART_DECLINED_EXIT_CODE
+    assert (
+        _stop_commands.cmd_restart(
+            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        )
+        == RESTART_DECLINED_EXIT_CODE
+    )
     assert stopped == []  # validate-before-kill: nothing was taken down
 
 
 def test_failed_restart_after_the_stop_is_not_reported_as_declined(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Once the stop has happened the host may be DOWN, so its code must NOT be the
     one the updater treats as "still serving"."""
@@ -72,9 +88,19 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda _operation, **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _stop_commands.cmd_restart(retained_children=[])
+    def start_result(
+        operation: object, database_factory: Callable[[], Any], **kwargs: object
+    ) -> int:
+        assert database_factory is operator_database
+        assert kwargs["producer"] is operator_pipeline
+        return 1
+
+    monkeypatch.setattr(_start_commands, "_cmd_start_body", start_result)
+
+    rc = _stop_commands.cmd_restart(
+        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+    )
     assert rc != 0
     assert rc != RESTART_DECLINED_EXIT_CODE
 
@@ -96,7 +122,7 @@ def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_declined_restart_releases_a_pause_nothing_else_owns(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
 ) -> None:
     """A locally spawned self-heal pauses this host before running `ava restart`. If
     that restart declines, nothing else clears the pause — so a healthy host would
@@ -110,12 +136,12 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
         lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    _stop_commands._release_self_heal_pause()
+    _stop_commands._release_self_heal_pause(database_factory=operator_database)
     assert unpaused == [True]
 
 
 def test_declined_restart_leaves_a_stop_holds_pause_alone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
 ) -> None:
     """A maintenance hold that has entered its stop window owns this pause and
     `ava start` releases it after readiness; unpausing now would reopen the host
@@ -137,5 +163,5 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
         lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    _stop_commands._release_self_heal_pause()
+    _stop_commands._release_self_heal_pause(database_factory=operator_database)
     assert unpaused == []

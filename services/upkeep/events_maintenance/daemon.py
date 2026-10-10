@@ -67,6 +67,7 @@ from typing import cast
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import validate_machine_name
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
@@ -79,9 +80,13 @@ from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.log import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.emitter import build_pipeline
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.upkeep.events_maintenance import alert_reconciler, registry_gauge
 from services.upkeep.events_maintenance.blob_vacuum import (
@@ -115,10 +120,10 @@ def events_maintenance_config() -> EventsMaintenanceConfig:
     )
 
 
-def events_maintenance_db() -> Database:
+def events_maintenance_db(*, gate: ProcessDbGate) -> Database:
     """The handle on the cluster database, built where the daemon (or one of its operator
     commands) starts."""
-    return Database.from_settings()
+    return Database.from_settings(gate=gate)
 
 
 def _endpoint() -> ServiceEndpoint:
@@ -433,7 +438,7 @@ async def _resolution_loop(
         await _sleep_with_liveness(progress, interval)
 
 
-async def run() -> None:
+async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     """Start healthz, register per-loop progress, then enter all resident loops."""
     if _is_running():
         _log.info(
@@ -467,10 +472,11 @@ async def run() -> None:
         endpoint.health_port,
         liveness=liveness,
         components=lambda: _loop_components(liveness),
+        image=image,
     )
     _log.info("[events-maintenance] healthz listening on :%s", endpoint.health_port)
 
-    db = events_maintenance_db()
+    db = database()
     pool = db.pool()
     try:
         # The service TaskGroup owns resident loops and their in-flight passes.
@@ -502,9 +508,22 @@ def main() -> None:
     """
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="events_maintenance")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="events_maintenance")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="events_maintenance",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        image=image,
+    )
     install_graceful_shutdown("events_maintenance")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -515,7 +534,7 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(database=database, image=image))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[events-maintenance] interrupted, shutting down")

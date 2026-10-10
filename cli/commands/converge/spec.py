@@ -12,8 +12,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineRole, MachineRoles
 from base.config import ConfigBoot
+from base.telemetry import EventPipeline
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
 
@@ -29,6 +31,8 @@ class ConvergeCtx:
     ava_home: Path
     roles: MachineRoles | None  # None = unit not configured yet (fresh install)
     config: ConfigBoot
+    database_factory: DatabaseFactory
+    producer: Callable[[], EventPipeline]
     services: frozenset[str] = frozenset()
 
     def read_config(self) -> ConfigBoot:

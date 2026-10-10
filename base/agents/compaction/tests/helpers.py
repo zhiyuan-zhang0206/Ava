@@ -10,6 +10,7 @@ from base.agents.compaction.commands import observe
 from base.agents.compaction.models import CompactTarget
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.source import produce_source
@@ -25,8 +26,9 @@ async def source(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> tuple[Any, ...]:
-    incarnation, work = await managed_work(conn, pool)
+    incarnation, work = await managed_work(conn, pool, database_gate=database_gate)
     graph, saver, config, history = await _prepare_graph(pool, work.agent_id, 1, [])
     await graph.aupdate_state(
         config,

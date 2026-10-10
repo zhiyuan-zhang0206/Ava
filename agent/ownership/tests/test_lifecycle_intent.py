@@ -7,8 +7,9 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 
@@ -16,7 +17,7 @@ from base.events.live.bus import EventBus
 def test_request_cannot_prepopulate_reserved_result(
     db_conn: psycopg.Connection, database: Database, event_bus: EventBus
 ) -> None:
-    agent_id = _agent(db_conn)
+    agent_id = agent_row(db_conn)
     with pytest.raises(ValueError, match="reserved"):
         insert_inbound_message(
             db_conn,
@@ -45,10 +46,10 @@ def _command(conn: psycopg.Connection, agent_id: int, kind: str) -> int:
 
 
 async def test_acceptance_survives_caller_loss_without_ack_or_retarget(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     first = _command(db_conn, agent_id, "restart")
     second = _command(db_conn, agent_id, "terminate")
     async with async_write_transaction(aops_pool) as conn:
@@ -79,10 +80,10 @@ async def test_acceptance_survives_caller_loss_without_ack_or_retarget(
 
 
 async def test_acceptance_rollback_leaves_no_pointer_or_claim(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     inbound = _command(db_conn, agent_id, "terminate")
     with pytest.raises(RuntimeError, match="crash"):
         async with async_write_transaction(aops_pool) as conn:
@@ -97,11 +98,11 @@ async def test_acceptance_rollback_leaves_no_pointer_or_claim(
 
 
 async def test_old_unconditional_writer_still_requires_upgrade_barrier(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     """Schema alone cannot fence an N-1 writer: deployment must stop it first."""
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     inbound = _command(db_conn, agent_id, "restart")
     async with async_write_transaction(aops_pool) as conn:
         await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
@@ -113,16 +114,16 @@ async def test_old_unconditional_writer_still_requires_upgrade_barrier(
 
 
 async def test_pending_pointer_blocks_retention_and_foreign_agent_reference(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     inbound = _command(db_conn, agent_id, "restart")
     async with async_write_transaction(aops_pool) as conn:
         await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
     with pytest.raises(psycopg.errors.ForeignKeyViolation), db_conn.transaction():
         db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (inbound,))
-    other = _agent(db_conn)
+    other = agent_row(db_conn)
     with pytest.raises(psycopg.errors.ForeignKeyViolation), db_conn.transaction():
         db_conn.execute(
             "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (inbound, other)
@@ -130,10 +131,10 @@ async def test_pending_pointer_blocks_retention_and_foreign_agent_reference(
 
 
 async def test_replacement_does_not_inherit_accepted_target(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     inbound = _command(db_conn, agent_id, "restart")
     async with async_write_transaction(aops_pool) as conn:
         intent = await accept_lifecycle_intent(conn, agent_id, incarnation=owner)

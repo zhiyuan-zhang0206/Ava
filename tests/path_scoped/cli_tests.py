@@ -15,7 +15,32 @@ from contextlib import AbstractContextManager, contextmanager
 import pytest
 
 from base.deploy.lifecycle import service_selection as ds
+from base.telemetry import EventPipeline
+from cli.database import (
+    OperatorDatabaseFactory,
+    OperatorEventPipeline,
+    operator_database_factory,
+    operator_event_pipeline,
+)
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
+
+
+@pytest.fixture
+def operator_database() -> OperatorDatabaseFactory:
+    """Borrow one real operator factory for this case's explicit CLI inputs."""
+    return operator_database_factory()
+
+
+@pytest.fixture
+def operator_pipeline(
+    operator_database: OperatorDatabaseFactory,
+) -> Generator[OperatorEventPipeline]:
+    """Borrow one lazy writer for the same command's work and reporter inputs."""
+    producer = operator_event_pipeline(operator_database)
+    try:
+        yield producer
+    finally:
+        producer.close()
 
 
 @pytest.fixture
@@ -117,7 +142,9 @@ def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """
     opened: list[str] = []
 
-    def record(*, name: str) -> None:
+    def record(
+        *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
+    ) -> None:
         opened.append(name)
 
     monkeypatch.setattr("base.log.init_cli_process", record)

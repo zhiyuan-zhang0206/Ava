@@ -51,3 +51,12 @@ The gateway's roster read renders from those rows (`gateway/cluster/snapshots.py
 and dials inline only a missing or stale one (`?fresh=true` dials everything).
 It does not read or grade the retired controller's stranded-hold records, whose
 writer, alert job, and status projection have been removed.
+
+
+## Process composition
+
+The heartbeat executable and standalone station probe each capture one loaded
+image and retain their own `CodeVersion` / `ProcessDbGate`. Work and telemetry
+factories share the entry's gate. Heartbeat health reports the same captured
+image; the station probe passes its factory into `resolve_target(database=...)`
+and keeps the configured-target no-op and fail-open lookup/probe boundaries.

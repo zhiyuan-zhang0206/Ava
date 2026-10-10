@@ -11,6 +11,7 @@ from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id
 from base import telemetry
 from base.db import fetch_one
 from base.db import pool as db_pool
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.routers import tasks
 from services.wake.delivery_watchdog.resurrect_retry import select_terminated_owners_with_pending
@@ -22,6 +23,8 @@ def test_sdk_commit_survives_producer_loss(
     db_conn: psycopg.Connection,
     root_task_id: int,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     actor = _seed_agent(db_conn)
     owner = _seed_agent(db_conn, status="terminated")
@@ -46,7 +49,7 @@ def test_sdk_commit_survives_producer_loss(
     assert len(notes) == 1
     assert notes[0][1]["task_id"] == task_id
     assert notes[0][1]["delivery_resurrect"] is True
-    note_pool = db_pool()
+    note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
     assert select_terminated_owners_with_pending(note_pool, 86400) == [(owner, notes[0][0])]
 
@@ -95,8 +98,7 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
 
 
 def test_aba_assignment_supersedes_old_directions(
-    db_conn: psycopg.Connection,
-    root_task_id: int,
+    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = _seed_agent(db_conn)
     owner_a = _seed_agent(db_conn, status="terminated")
@@ -116,6 +118,6 @@ def test_aba_assignment_supersedes_old_directions(
     assert len(notes) == 3
     assert [note[2] for note in notes] == ["done", "done", "pending"]
     assert all(note[3]["delivery_result"]["outcome"] == "superseded" for note in notes[:2])
-    note_pool = db_pool()
+    note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
     assert select_terminated_owners_with_pending(note_pool, 86400) == [(owner_a, notes[-1][0])]

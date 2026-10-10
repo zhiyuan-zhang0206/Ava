@@ -8,15 +8,21 @@ boundaries; diagnostics never repair them from inside the service subtree.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
+from base.agents.context.clients import ClientSet
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.progress_timeout import (
     CRITICAL_SERVICE_SESSIONS,
     NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
     SERVICE_READY_TIMEOUT_S,
 )
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import build_pipeline
 from ops.roster import build_services
 from services.supervision.ava_root.health import HealthConfig, HealthMonitor
 from services.supervision.ava_root.probes import ProbeError, ProbeRegistry
@@ -24,7 +30,6 @@ from services.supervision.ava_root.selfcheck import SelfCheckConfig, TreeSelfChe
 from services.supervision.ava_root.wiring import WiringContext, WiringParticipant
 from services.supervision.ava_root_glue.diagnostic_probes import build_diagnostics
 from services.supervision.ava_root_glue.diagnostics import (
-    Diagnostic,
     DiagnosticMonitor,
     RootHealthRounds,
 )
@@ -49,6 +54,16 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     if Path.cwd().resolve() != Path(identity.cwd):
         raise RuntimeError("root cwd differs from its loaded runtime")
     context.supervisor.bind_runtime(identity, home=home)
+    image = LoadedCommit.capture(Path(identity.code_root))
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="ava-root")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    clients = ClientSet(
+        database=database, pipeline_factory=lambda: build_pipeline(database=database)
+    )
     registry = ProbeRegistry()
     requested = {unit.id for unit in context.registry.units}
     registry.register_specs(spec for spec in build_services() if spec.session in requested)
@@ -66,7 +81,13 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     return assemble(
         context,
         registry,
-        diagnostics=build_diagnostics(requested),
+        rounds_factory=lambda monitor: RootHealthRounds(
+            monitor,
+            DiagnosticMonitor(build_diagnostics(requested, database=database)),
+            clients=clients,
+            image=image,
+            tasks=context.participant_tasks,
+        ),
         startup_graces=startup_graces,
     )
 
@@ -77,7 +98,7 @@ def assemble(
     *,
     health_config: HealthConfig | None = None,
     selfcheck_config: SelfCheckConfig | None = None,
-    diagnostics: Sequence[Diagnostic] | None = None,
+    rounds_factory: Callable[[HealthMonitor], RootHealthRounds] | None = None,
     startup_graces: Mapping[str, float] | None = None,
 ) -> list[WiringParticipant]:
     """Build the two monitors over `registry` and attach their status surfaces."""
@@ -91,13 +112,8 @@ def assemble(
     check = TreeSelfCheck(
         context.supervisor, config=selfcheck_config, tasks=context.participant_tasks
     )
-    if diagnostics is not None:
-        rounds = RootHealthRounds(
-            monitor,
-            DiagnosticMonitor(diagnostics),
-            interval_s=60 if health_config is None else health_config.interval_s,
-            tasks=context.participant_tasks,
-        )
+    if rounds_factory is not None:
+        rounds = rounds_factory(monitor)
         context.supervisor.attach_health(rounds)
         context.supervisor.attach_metrics(check)
         return [rounds, check]

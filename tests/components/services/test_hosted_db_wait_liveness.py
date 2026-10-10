@@ -20,6 +20,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
@@ -31,7 +32,10 @@ from services.agent_runner.agent_host.dispatcher import (
     TurnScheduler,
 )
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import (
+    _graph,
+    admit_recovery,
+)
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.wake.delivery_watchdog import turn_liveness
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
@@ -170,9 +174,13 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    incarnation = await admit_recovery(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
 
@@ -187,7 +195,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
         graph=graph,
         machine=machine_name(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     host._owner = incarnation.owner
@@ -255,9 +263,14 @@ async def test_gateway_exemption_requires_current_db_identity_and_finite_fresh_p
     proof_kind: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    incarnation = await admit_recovery(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     db_conn.execute(
@@ -310,9 +323,14 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    incarnation = await admit_recovery(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     clock = TurnProgress()
@@ -353,9 +371,14 @@ async def test_success_handoff_clears_on_actual_node_progress(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    incarnation = await admit_recovery(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     clock = TurnProgress()
