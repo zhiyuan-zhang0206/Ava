@@ -185,6 +185,13 @@ and unsupported aliases remain findings. TaskGroups remain available for work
 whose lifetime and failure impact fit their scope; changing a raw spawner's
 receiver name does not establish ownership.
 
+A Task-valued map can also register the original Task directly, followed
+immediately by its actual completion callback. Stop must cancel that map's
+values, await their exact snapshot with a bounded timeout (directly or through
+one awaited same-class helper), and preserve unfinished slots exposed by a
+synchronous lookup. Map keys, replaced snapshots and decorative stop/admission
+gates do not establish these facts.
+
 These facts do not prove correct claimed/abandoned routing, retirement timing,
 admission after stop, generation identity, error classification or every control
 flow path. Reading `Task.exception()` leaves the Task result available to the

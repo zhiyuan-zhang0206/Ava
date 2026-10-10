@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from itertools import pairwise
 
 from scripts.structure.ambient_state.module import Module, dotted
+from scripts.structure.ambient_state.task_owner_span import inline_registration, map_span
 from scripts.structure.ambient_state.thread_owner import (
     Function,
     _assignments,
@@ -609,6 +610,16 @@ def _waited_signals(value: ast.expr, module: Module) -> set[str]:
     return set()
 
 
+def _map_teardown(
+    methods: dict[str, Function], registry: str, receipt: str, module: Module
+) -> bool:
+    return any(
+        any(_raises(helper, receipt) for helper in span)
+        for method in methods.values()
+        if (span := map_span(method, methods, registry, module))
+    )
+
+
 def _teardown(methods: dict[str, Function], registry: str, receipt: str, module: Module) -> bool:
     for method in methods.values():
         if not isinstance(method, ast.AsyncFunctionDef) or not _waited(method, registry, module):
@@ -637,13 +648,18 @@ def owned_calls(module: Module) -> set[int]:
         fields = _init_fields(methods, module)
         for method in methods.values():
             for body in _statements(method):
-                for statement, following in pairwise(body):
+                for index, (statement, following) in enumerate(pairwise(body)):
                     pair = _spawn_assignment(statement)
                     if pair is None:
                         continue
                     task, call = pair
                     registration = _registration(following, task, methods)
-                    if registration and _owned(registration, methods, fields, module):
+                    values = registration is None
+                    if values:
+                        registration = inline_registration(body[index + 1 :], task)
+                    if registration and _owned(
+                        registration, methods, fields, module, values=values
+                    ):
                         accepted.add(id(call))
     return accepted
 
@@ -659,7 +675,12 @@ def _spawn_assignment(statement: ast.stmt) -> tuple[str, ast.Call] | None:
 
 
 def _owned(
-    registration: tuple[str, str], methods: dict[str, Function], fields: set[str], module: Module
+    registration: tuple[str, str],
+    methods: dict[str, Function],
+    fields: set[str],
+    module: Module,
+    *,
+    values: bool = False,
 ) -> bool:
     registry, callback_name = registration
     callback = methods.get(callback_name)
@@ -678,7 +699,7 @@ def _owned(
             receipt
             and _real_receipt(receipt, method, name, methods, module)
             and not _replaced(receipt, methods, (method, name))
-            and _teardown(methods, registry, receipt, module)
+            and (_map_teardown if values else _teardown)(methods, registry, receipt, module)
         ):
             return True
     return False
