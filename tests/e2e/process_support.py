@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import signal
@@ -139,24 +140,12 @@ def wait_for_port(host: str, port: int, timeout: float = 30.0, *, label: str) ->
 def kill_group_or_prove_already_gone(
     proc: subprocess.Popen[bytes] | subprocess.Popen[str], exc: OSError
 ) -> None:
-    """After a teardown `killpg` refusal, prove the group is gone rather than
-    shrugging the refusal off.
+    """After an owned group signal refusal, prove its leader and members are gone.
 
-    Every caller spawns `proc` with `start_new_session=True`, so its pgid
-    equals its pid, and calls this only once its own `killpg` already raised
-    `PermissionError` or `ProcessLookupError`. Under load, the leader can
-    finish exiting in the gap between a caller's own liveness check and its
-    `killpg` call — its earlier SIGTERM completing, or racing this teardown
-    outright — leaving a zombie that is the group's sole member. macOS answers
-    `killpg` on such a zombie-only group with EPERM, not ESRCH (measured: 0/20
-    in isolation, 3/3 under 8 CPU-saturating processes) — the same case
-    `base.sessions.posixproc.process_group_has_live_members` already handles.
-
-    Both halves must hold before the refusal reads as "already gone": the
-    leader itself has actually exited (bounded `wait`, not just believed to),
-    and no other member of its process group is still live. Either check
-    failing re-raises the original OSError — an unexplained refusal is a real
-    teardown failure, not a race to ignore.
+    Callers create a new session (pgid == pid). A leader can exit between the
+    liveness query and killpg; macOS can return EPERM for a zombie-only group.
+    Require both a bounded leader wait and absence of live group members;
+    an unexplained refusal remains a real teardown failure.
     """
     try:
         proc.wait(timeout=5)
@@ -171,13 +160,7 @@ def kill_group_or_prove_already_gone(
 
 
 def kill_group_if_alive(proc: subprocess.Popen[bytes] | subprocess.Popen[str]) -> None:
-    """SIGKILL `proc`'s process group if it is still alive, else do nothing.
-
-    A convenience wrapper around `kill_group_or_prove_already_gone` for a
-    caller with no escalation ladder of its own — a fixture that, once its own
-    assertions proved anything left of `proc`'s group should die, only ever
-    needs the one hard kill.
-    """
+    """SIGKILL an owned live group, proving it gone if the signal is refused."""
     if proc.poll() is None:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -186,6 +169,39 @@ def kill_group_if_alive(proc: subprocess.Popen[bytes] | subprocess.Popen[str]) -
 
 
 _SIGKILL_GRACE_SEC = 2.0
+
+
+def _write_cleanup_receipt(path: Path | None, event: str, **fields: object) -> None:
+    if path is None:
+        return
+    # Diagnostic I/O must not replace the existing cleanup result or exception.
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as output:
+            output.write(
+                json.dumps(
+                    {"event": event, "sender": os.getpid(), "time_ns": time.time_ns(), **fields}
+                )
+                + "\n"
+            )
+
+
+def _signal_cleanup(
+    path: Path | None,
+    event: str,
+    target: int,
+    stop_signal: int,
+    send: Callable[[int, int], None],
+    **fields: object,
+) -> None:
+    fields = {"target": target, "signal": stop_signal, **fields}
+    _write_cleanup_receipt(path, event, outcome="attempt", **fields)
+    try:
+        send(target, stop_signal)
+    except Exception as exc:
+        _write_cleanup_receipt(path, event, outcome=type(exc).__name__, **fields)
+        raise
+    _write_cleanup_receipt(path, event, outcome="sent", **fields)
 
 
 @contextmanager
@@ -199,21 +215,14 @@ def managed_proc(
     stop_timeout: float = 10.0,
     log_path: str | None = None,
     pass_fds: tuple[int, ...] = (),
+    receipt_path: Path | None = None,
 ) -> Generator[subprocess.Popen[str]]:
-    """Start subprocess + clean teardown kill.
+    """Own a new-session process group and tear it down with bounded escalation.
 
-    Uses `start_new_session=True` to make the child a process group leader;
-    on teardown, sends SIGTERM to the whole group -- next dev / uvicorn both fork
-    children; a single SIGTERM to the leader is not enough, need group-level kill.
-
-    If `log_path` is given, appends merged stdout+stderr to that file, retaining
-    earlier launches' failure evidence in the existing artifact path. When None,
-    stdout/stderr inherit (go to pytest terminal).
-
-    Teardown sequence: SIGTERM -> wait(stop_timeout) -> if not reaped, SIGKILL ->
-    wait again (_SIGKILL_GRACE_SEC, default 2s). After SIGKILL, normal reaping is
-    sub-second; short grace prevents unbounded waiting on D state hangs. Still
-    timed out -> raise RuntimeError.
+    Send the requested stop signal, wait stop_timeout, then SIGKILL and wait
+    _SIGKILL_GRACE_SEC; a survivor raises RuntimeError. Append stdout/stderr to
+    log_path when provided, otherwise inherit them. Optional cleanup receipts
+    identify the exact owner and signal operation without changing its result.
     """
     log_file = open(log_path, "a") if log_path is not None else None  # noqa: SIM115, PTH123 -- held for process lifetime, finally close
     stdout: int | object = log_file if log_file is not None else None
@@ -243,14 +252,32 @@ def managed_proc(
         try:
             if proc.poll() is None:
                 try:
-                    os.killpg(proc.pid, stop_signal)
+                    _signal_cleanup(
+                        receipt_path,
+                        "managed_signal",
+                        proc.pid,
+                        stop_signal,
+                        os.killpg,
+                        owner=os.getpid(),
+                        label=label,
+                        kind="group",
+                    )
                 except (PermissionError, ProcessLookupError) as exc:
                     kill_group_or_prove_already_gone(proc, exc)
                 try:
                     proc.wait(timeout=stop_timeout)
                 except subprocess.TimeoutExpired:
                     try:
-                        os.killpg(proc.pid, signal.SIGKILL)
+                        _signal_cleanup(
+                            receipt_path,
+                            "managed_signal",
+                            proc.pid,
+                            signal.SIGKILL,
+                            os.killpg,
+                            owner=os.getpid(),
+                            label=label,
+                            kind="group",
+                        )
                     except (PermissionError, ProcessLookupError) as exc:
                         kill_group_or_prove_already_gone(proc, exc)
                     # Short grace after SIGKILL (default 2s) -- SIGKILL cannot be
@@ -443,12 +470,10 @@ def _looks_like_frontend(cmdline: str) -> bool:
 
 
 def scan_e2e_processes() -> list[E2EProcess]:
-    """Every live process this checkout's e2e suite owns, tagged with its run id.
+    """Observe E2E children identified by their throwaway home or frontend cwd.
 
-    Two identification paths, because the session-scoped frontend does not
-    carry the e2e env (its env snapshot is taken before `_e2e_process_env`
-    lays the e2e values): most processes carry `AVA_HOME=.../ava_e2e_home_...`;
-    the frontend is found by its `.builds/build-<pid>_<ts>` cwd instead.
+    The session frontend predates E2E environment layering, so its own
+    .builds/build-<pid>_<timestamp> directory supplies the alternative run id.
     """
     return ProcessInspection().scan()
 
@@ -471,33 +496,50 @@ def _ps_command_of(pid: int) -> str | None:
 
 
 def _owner_live(
-    owner_pid: int, *, command: Callable[[int], str | None], probe: Callable[[int, int], None]
+    owner_pid: int,
+    *,
+    command: Callable[[int], str | None],
+    probe: Callable[[int, int], None],
+    receipt_path: Path | None = None,
 ) -> bool:
-    """The owning run is really still alive.
+    """Protect live pytest/xdist owners, including unreadable commands.
 
-    `os.kill(pid, 0)` alone is not enough: a dead pytest's pid can be recycled
-    by an unrelated process within days, which would give its run's residue a
-    live-looking owner and hide it forever. An e2e run's owner is a pytest
-    process (serial) or an xdist worker (the `-n` shape), so its command line
-    is the second half of the check.
+    PID liveness alone cannot distinguish a recycled PID. A readable command
+    must still identify a test run; unknown identity never proves stale residue.
     """
     try:
         probe(owner_pid, 0)
     except ProcessLookupError:
+        _write_cleanup_receipt(
+            receipt_path, "owner", owner=owner_pid, probe="gone", preserved=False
+        )
         return False
     except PermissionError:
+        _write_cleanup_receipt(
+            receipt_path, "owner", owner=owner_pid, probe="permission", preserved=True
+        )
         return True
     cmdline = command(owner_pid)
-    return cmdline is not None and any(hint in cmdline for hint in _LIVE_RUN_HINTS)
+    hints = [hint for hint in _LIVE_RUN_HINTS if cmdline is not None and hint in cmdline]
+    preserved = cmdline is None or bool(hints)
+    _write_cleanup_receipt(
+        receipt_path,
+        "owner",
+        owner=owner_pid,
+        probe="alive",
+        command_known=cmdline is not None,
+        hints=hints,
+        preserved=preserved,
+    )
+    return preserved
 
 
 def _identity_holds(pid: int, cmdline: str, *, command: Callable[[int], str | None]) -> bool:
-    """Re-verify a matched process right before signalling it (TOCTOU guard).
+    """Recheck normalized command identity immediately before signalling.
 
-    Between scanning and signalling, a pid can be recycled by an unrelated
-    process; a killpg / os.kill would then hit a foreign process. The command
-    line is the identity token — whitespace-normalized, because `ps eww` and
-    `ps -o command=` may differ only in padding."""
+    A recycled PID must never receive the old process's signal. Unreadable
+    commands cannot prove identity; ps transports may differ only in padding.
+    """
     current = command(pid)
     if current is None:
         return False
@@ -537,9 +579,9 @@ class ProcessInspection:
                 processes.append(process)
         return processes
 
-    def owner_live(self, pid: int) -> bool:
-        """A live PID is an owner only while its command is a pytest/xdist run."""
-        return _owner_live(pid, command=self.command, probe=self.probe)
+    def owner_live(self, pid: int, *, receipt_path: Path | None = None) -> bool:
+        """Preserve a live PID with a pytest/xdist or unreadable command."""
+        return _owner_live(pid, command=self.command, probe=self.probe, receipt_path=receipt_path)
 
     def matches(self, process: E2EProcess) -> bool:
         """Recheck the observed command before signalling a potentially recycled PID."""
@@ -583,20 +625,11 @@ def _sweep_targets(
     include_own: bool,
     owner_live: Callable[[int], bool],
 ) -> tuple[set[int], set[int], set[int]]:
-    """Partition e2e processes into (groups, singles, dead owners) to kill.
+    """Select stale-run children, optionally including this caller's own run.
 
-    A process is a target when its run id's owner is really gone (killed
-    session, crash) — a run whose owner is still a live pytest/xdist worker
-    (a concurrent e2e session on this host, which the suite supports) is never
-    touched. With `include_own=True` the current session's own processes are
-    targets too. A group is killable wholesale ONLY when the matched
-    process IS its group leader (uv/npm/detached server trees, whose members
-    are all its descendants), and the kill is re-verified right before it
-    fires; every non-leader (playwright workers, agents parented to a dead
-    launcher, ordinary group members) stays in `singles`, each verified
-    individually before its signal — a group may hold processes the matched
-    one merely happened to share a session with, and our own pgrp is never
-    killable at all.
+    Protect live foreign owners. Only a matched session leader outside our own
+    group permits killpg; other members receive individual guarded signals.
+    Every target's command identity is rechecked immediately before signalling.
     """
     groups: set[int] = set()
     owners: set[int] = set()
@@ -623,29 +656,44 @@ def _signal_sweep_targets(
     process_by_pid: dict[int, E2EProcess],
     inspection: ProcessInspection,
     stop_signal: int,
+    receipt_path: Path | None,
 ) -> None:
     """Recheck identity independently for each signal phase and target."""
-    for pgid in plan.groups:
-        leader = process_by_pid.get(pgid)
-        if leader is None or not inspection.matches(leader):
+    targets = [(pid, "group") for pid in plan.groups] + [(pid, "single") for pid in plan.singles]
+    for pid, kind in targets:
+        process = process_by_pid.get(pid) if kind == "group" else process_by_pid[pid]
+        if process is None or not inspection.matches(process):
+            _write_cleanup_receipt(
+                receipt_path,
+                "sweep_signal",
+                target=pid,
+                kind=kind,
+                signal=stop_signal,
+                outcome="identity_skip",
+            )
             continue
         with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, stop_signal)
-    for pid in plan.singles:
-        if not inspection.matches(process_by_pid[pid]):
-            continue
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.kill(pid, stop_signal)
+            _signal_cleanup(
+                receipt_path,
+                "sweep_signal",
+                pid,
+                stop_signal,
+                os.killpg if kind == "group" else os.kill,
+                owner=process.run[0],
+                kind=kind,
+            )
 
 
 def sweep_stale_e2e_processes(
-    *, include_own: bool = False, inspection: ProcessInspection | None = None
+    *,
+    include_own: bool = False,
+    inspection: ProcessInspection | None = None,
+    receipt_path: Path | None = None,
 ) -> int:
-    """Kill e2e processes whose owning pytest run is gone; return the count.
+    """Reap guarded stale-run residue; optionally include our own package residue.
 
-    Run at session start (before this run spawns anything) and again at the
-    e2e package teardown with `include_own=True`, so a process that escaped
-    its fixture teardown during THIS session is also reaped.
+    Return the existing planned-target count, including identity-guard skips.
+    Optional receipts observe decisions and signals without granting ownership.
     """
     inspection = inspection or ProcessInspection()
     procs = inspection.scan()
@@ -654,9 +702,20 @@ def sweep_stale_e2e_processes(
         own_pid=os.getpid(),
         own_pgrp=os.getpgrp(),
         include_own=include_own,
-        owner_live=inspection.owner_live,
+        owner_live=lambda pid: inspection.owner_live(pid, receipt_path=receipt_path),
     )
     groups, singles, owners = plan.groups, plan.singles, plan.owners
+    _write_cleanup_receipt(receipt_path, "sweep", include_own=include_own, observed=len(procs))
+    for proc in procs:
+        _write_cleanup_receipt(
+            receipt_path,
+            "decision",
+            target=proc.pid,
+            group=proc.pgid,
+            owner=proc.run[0],
+            run_stamp=proc.run[1],
+            selected=proc.pid in groups or proc.pid in singles,
+        )
     if not groups and not singles:
         return 0
     process_by_pid = {proc.pid: proc for proc in procs}
@@ -664,7 +723,7 @@ def sweep_stale_e2e_processes(
     # killed pytest's pids can be recycled, and an unverified killpg/os.kill
     # would hit whatever now holds them. A leader whose identity no longer
     # holds is skipped; its members are still in `singles` and verified there.
-    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGTERM)
+    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGTERM, receipt_path)
     print(  # noqa: T201 -- must reach the terminal; loguru output is captured
         f"\nE2E RESIDUE: reaped {len(groups) + len(singles)} process(es) left by "
         f"dead pytest run(s) {sorted(owners)} (gateway/agent/daemon/frontend of a "
@@ -672,7 +731,7 @@ def sweep_stale_e2e_processes(
         file=sys.stderr,
     )
     time.sleep(_REAP_GRACE_SEC)
-    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGKILL)
+    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGKILL, receipt_path)
     time.sleep(1.0)
     return len(groups) + len(singles)
 

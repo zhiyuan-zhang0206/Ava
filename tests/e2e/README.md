@@ -38,6 +38,14 @@ HEADED=1 .venv/bin/pytest tests/e2e/flow/test_message_flow.py -v
 On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
 `~/.ava/logs/agent-*.log`. CI failures also upload artifacts.
 
+`tmp/e2e-logs/cleanup-<worker-pid>_<timestamp>.jsonl` records the existing
+residue sweep's observations, owner liveness decisions, selected targets and
+guarded signal attempts/results. The frontend's exact managed-process teardown
+writes to the same receipt. Each event identifies its sender; command visibility
+and pytest/xdist hints are recorded without dumping commands or environment
+values. Diagnostic write failures do not change cleanup behavior. A frontend
+exit code of `-15` alone does not identify its signal sender.
+
 ## Writing a new scenario
 
 1. In `fakes/scenarios/`, add a module, define `SCRIPT: tuple[AIMessage, ...]`
@@ -179,3 +187,11 @@ This validates runtime composition, not unprompted model compliance with skills.
 - Performance baseline
 - pytest-xdist parallelization
 ```
+
+Pure fake and direct unit tests use the repository's normal test isolation without
+starting the E2E process environment. Scenario and E2E database fixtures explicitly
+request that environment, whose package teardown restores every assigned key.
+Frontend prerequisites are checked against the collected fixture dependency closure:
+frontend or Playwright consumers skip before fixture setup when npm or Next is
+missing; tests without those dependencies still execute. Browser fixtures that
+select a frontend dynamically retain the Playwright prerequisite check.

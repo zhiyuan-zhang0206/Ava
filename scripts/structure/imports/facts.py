@@ -73,7 +73,9 @@ class _Collector(ast.NodeVisitor):
         embedded: bool = False,
     ) -> None:
         self.path, self.index, self.tops = path, index, tops
-        self.scope = bindings.Scope(tree, path)
+        name = "__main__" if embedded else bindings.module_name(path)
+        self.context = bindings.module_context(tree, name)
+        self.scope = self.context.scope(tree, path)
         self.depth = len(Path(path).parts) if path else 0
         self.embedded = embedded
         self.resource_seen: set[int] = set()
@@ -119,7 +121,7 @@ class _Collector(ast.NodeVisitor):
         outer, inner = bindings.scope_parts(node)
         for expression in outer:
             self.visit(expression)
-        self.scope = bindings.Scope(node, self.path, parent.nested_parent())
+        self.scope = self.context.scope(node, self.path, parent.nested_parent())
         for statement in inner:
             self.visit(statement)
         self.scope = parent
@@ -254,13 +256,35 @@ class _Collector(ast.NodeVisitor):
                 return "" if parent == "." else parent
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             return self._divided_path(node, seen)
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "joinpath"
-        ):
-            return self._joined_path(node.func.value, node.args, seen)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            return self._method_path(node, node.func, seen)
         return None
+
+    def _method_path(
+        self, node: ast.Call, method: ast.Attribute, seen: frozenset[str]
+    ) -> str | None:
+        if method.attr == "joinpath":
+            return self._joined_path(method.value, node.args, seen)
+        if (
+            method.attr in {"with_name", "with_suffix"}
+            and len(node.args) == 1
+            and not node.keywords
+        ):
+            return self._renamed_path(method.value, method.attr, node.args[0], seen)
+        return None
+
+    def _renamed_path(
+        self, base: ast.expr, method: str, argument: ast.expr, seen: frozenset[str]
+    ) -> str | None:
+        prefix = self._resource_path(base, seen)
+        values = self.scope.strings(argument)
+        if not prefix or values is None or len(values) != 1:
+            return None
+        path = Path(prefix)
+        renamed = (
+            path.with_name(values[0]) if method == "with_name" else path.with_suffix(values[0])
+        )
+        return renamed.as_posix()
 
     def _file_path(self, node: ast.AST) -> str | None:
         ascents = placement_evidence.file_ascents(
@@ -328,11 +352,14 @@ class _Collector(ast.NodeVisitor):
         }:
             return None
         receiver = self.scope.value(node.func.value)
+        file_read = node.func.attr in {"read_text", "read_bytes"}
         if self._resource_path(receiver) is not None:
             return receiver
         if isinstance(receiver, ast.Call) and self.scope.origin(receiver.func) == "pathlib.Path":
-            return receiver.args[0] if receiver.args else None
-        return receiver if self._path_expression(receiver) else None
+            if receiver.args:
+                return receiver.args[0]
+            return receiver if file_read else None
+        return receiver if file_read or self._path_expression(receiver) else None
 
     def _open_function(self, node: ast.expr) -> bool:
         builtin = isinstance(node, ast.Name) and node.id == "open" and not self.scope.bound("open")
@@ -363,9 +390,30 @@ class _Collector(ast.NodeVisitor):
                 return self._path_expression(node.func.value)
         return False
 
+    def _write_only(self, node: ast.Call) -> bool:
+        """An ``open`` whose literal mode cannot read: its file is an output, not an input."""
+        if isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "read_bytes"}:
+            return False
+        mode = self._open_mode(node)
+        values = self.scope.strings(mode) if mode is not None else None
+        return bool(values) and all(
+            "r" not in value and "+" not in value and any(flag in value for flag in "wax")
+            for value in values or ()
+        )
+
+    def _open_mode(self, node: ast.Call) -> ast.expr | None:
+        keyword = next((kw.value for kw in node.keywords if kw.arg == "mode"), None)
+        if keyword is not None:
+            return keyword
+        if self._open_function(node.func):
+            return node.args[1] if len(node.args) > 1 else None
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "open":
+            return node.args[0] if node.args else None
+        return None
+
     def _resource_read(self, node: ast.Call) -> None:
         target = self._read_target(node)
-        if target is None:
+        if target is None or self._write_only(node):
             return
         path = self._resource_path(target)
         if path is not None:
@@ -378,6 +426,8 @@ class _Collector(ast.NodeVisitor):
                 if absolute.is_relative_to(self.index.repo_root):
                     relative = absolute.relative_to(self.index.repo_root).as_posix()
                     self.records.append(Fact(node.lineno, FactKind.RESOURCE, relative))
+            return
+        if self.scope.unmodified_origin(target) == "os.devnull":
             return
         self.gap(
             node,
@@ -401,7 +451,12 @@ def collect(
     """
     collector = _Collector(tree, rel_path, index, tops)
     collector.visit(tree)
-    inputs = executed.inputs(tree, rel_path) if collector.has_launches else executed.Inputs()
+    inputs = (
+        executed.inputs(tree, rel_path, context=collector.context)
+        if collector.has_launches
+        else executed.Inputs()
+    )
+    collector.context.clear_scopes()
     collector.unknown.extend(
         Unknown(g.path, g.line, "Python -c", g.reason, FactKind.EMBEDDED_IMPORT)
         for g in inputs.unresolved
@@ -435,6 +490,7 @@ def _embedded(
         )
     collector = _Collector(tree, path, index, tops, embedded=True)
     collector.visit(tree)
+    collector.context.clear_scopes()
     return Evidence(
         tuple(
             Fact(source.line, FactKind.EMBEDDED_IMPORT, fact.target, fact.names, fact.via)

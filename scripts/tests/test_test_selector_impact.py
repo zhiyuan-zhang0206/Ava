@@ -182,7 +182,9 @@ def test_metrics(plugin):
     )
 
 
-def test_opaque_import_is_visible_full_and_syntax_errors_fail(tmp_path: Path) -> None:
+def test_opaque_import_consumer_always_runs_visibly_and_syntax_errors_fail(
+    tmp_path: Path,
+) -> None:
     root = _repo(tmp_path)
     _write(root, "base/leaf.py")
     _write(
@@ -191,7 +193,9 @@ def test_opaque_import_is_visible_full_and_syntax_errors_fail(tmp_path: Path) ->
         "import importlib\nimportlib.import_module(module_name)\n",
     )
     result = test_selector.select_tests(["base/leaf.py"], repo_root=root)
-    assert (result.decision, result.reason) == ("FULL", "incomplete-impact")
+    # The opaque import may load the changed module, so its test joins every subset.
+    assert result.decision == "SELECTED", result.as_json()
+    assert "tests/consumer/test_dynamic.py" in result.tests
     assert any("tests/consumer/test_dynamic.py:2:" in item for item in result.diagnostics)
     _write(root, "tests/consumer/test_dynamic.py", "def syntax error\n")
     with pytest.raises(SyntaxError):

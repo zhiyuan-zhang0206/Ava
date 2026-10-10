@@ -34,6 +34,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+__all__ = ["is_frozen", "main"]
+
 _REPO = Path(__file__).resolve().parent.parent.parent
 _FROZEN = ("docs/decisions/", "docs/postmortems/")
 _HISTORY_READ_RE = re.compile(r"""git\s+show\s+(?:"[^"]*"|'[^']*'|\S+)""")
@@ -54,13 +56,13 @@ def _is_excluded(name: str) -> bool:
     return not name or is_frozen(name)
 
 
-def _tracked_text() -> list[tuple[str, str]]:
-    paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=_REPO).decode().split("\0")
+def _tracked_text(repo_root: Path) -> list[tuple[str, str]]:
+    paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo_root).decode().split("\0")
     texts: list[tuple[str, str]] = []
     for name in paths:
         if _is_excluded(name):
             continue
-        path = _REPO / name
+        path = repo_root / name
         if path.resolve() == Path(__file__).resolve():
             continue
         # Git tracks a symlink's target path, not the target file's content.
@@ -145,11 +147,16 @@ def _module_pair(value: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None) -> int:
+    """Audit tracked content in an explicit checkout, defaulting to this checkout.
+
+    New module imports use the caller's Python import environment, as in the CLI.
+    Diagnostics and exit codes are shared by command-line and direct callers.
+    """
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("## What it checks")[0])
     parser.add_argument("pairs", nargs="+", metavar="OLD=NEW", type=_module_pair)
     args = parser.parse_args(argv)
-    texts = _tracked_text()
+    texts = _tracked_text(_REPO if repo_root is None else repo_root.resolve())
     failed = False
     for old, new in args.pairs:
         old_count = 0
