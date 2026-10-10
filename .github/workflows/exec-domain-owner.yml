@@ -48,7 +48,7 @@ jobs:
           git rev-parse HEAD > proof/head-sha.txt
           uv run pyright agent/graph/exec/tests/admission_fixture.py base/agents/incarnation/resources.py base/agents/incarnation/resource_admission.py base/agents/incarnation/exec_owner_protocol.py base/agents/incarnation/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/execution/domain_owner.py agent/execution/owner_child.py base/agents/incarnation/tests/test_resources.py tests/components/ava/test_migration_baseline.py agent/tests/test_resource_admission.py agent/graph/exec/tests/resources/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py
           timeout 240 uv run pytest base/agents/incarnation/tests/test_resources.py tests/components/ava/test_migration_baseline.py agent/tests/test_resource_admission.py agent/graph/exec/tests/resources/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py -q --junitxml=proof/resource-fences.xml
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: exec-resource-fences-${{ github.event.pull_request.head.sha }}
@@ -80,7 +80,7 @@ jobs:
           git rev-parse HEAD > proof/head-sha.txt
           uv run pyright base/native_process/exec_domain.py agent/graph/exec/_process.py base/native_process/tests/test_exec_domain_confirmation.py
           uv run pytest --confcutdir=tests/components/agent base/native_process/tests/test_exec_domain_confirmation.py agent/tests/execution/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: exec-native-domain-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
