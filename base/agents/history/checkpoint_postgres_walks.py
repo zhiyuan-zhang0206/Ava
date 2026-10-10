@@ -258,6 +258,17 @@ def _history_queries(
     chain = chains["messages"]
     keys = yield _WRITE_KEYS_SQL, (chain, thread, namespace)
     rows, reset = yield from _fetch_suffix(saver, keys, thread, namespace, target)
+    # A root can legitimately start without a seed. A missing ancestor cannot:
+    # its omitted writes could change every value. A real reset cuts that prefix.
+    if (
+        not reset
+        and seeds["messages"] is None
+        and "messages" not in seed_inline
+        and ancestors
+        and (parent := ancestors[-1]["parent_checkpoint_id"]) is not None
+        and parent not in parents
+    ):
+        raise RuntimeError(f"delta messages ancestry is incomplete at checkpoint {parent}")
     if reset:
         seeds["messages"] = None
         seed_inline.clear()
