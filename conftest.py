@@ -40,7 +40,6 @@ pytest_plugins = [
     "tests.fixtures.guards",
     "cli.commands.tests.health_port_guard",
     "base.deploy.lifecycle.tests.serving_root",
-    "agent.graph.llm.tests.cancel_fixture",
     "tests.fixtures.log_capture",
     "tests.fixtures.retry_waits",
     "tests.fixtures.model_catalog",

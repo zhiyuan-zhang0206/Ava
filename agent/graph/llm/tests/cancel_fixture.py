@@ -1,7 +1,7 @@
 """Shared cancel-race fixture owned by the LLM cancellation package.
 
-The root plugin registration makes this opt-in fixture available to its
-LLM, exec and compact consumers. Tests still execute their real node logic while
+Consumer-local conftests and existing file scopes bind this opt-in fixture to
+its LLM, exec and compact consumers. Tests execute their real node logic while
 controlling the durable-interrupt subscription event.
 """
 
