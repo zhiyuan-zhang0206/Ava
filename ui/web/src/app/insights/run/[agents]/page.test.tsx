@@ -313,6 +313,7 @@ describe("the default window", () => {
       "run-timeline-row-level-1",
       "run-timeline-row-units",
       "run-timeline-row-context",
+      "run-timeline-row-user",
       "run-timeline-row-other",
     ]);
     // The rows are canvases: one per row, no element per node or block.

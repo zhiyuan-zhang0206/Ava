@@ -124,11 +124,14 @@ class RunTimelineUnit(BaseModel):
     request: RunTimelineUsage | None
 
 
-LinkKind = Literal["send_message", "spawn", "fork", "terminate", "restart", "resurrect"]
+LinkKind = Literal["send_message", "spawn", "fork", "terminate", "restart", "resurrect", "notice"]
 
 
 class RunTimelineLink(BaseModel):
-    """One event between two agents. `sender` did it to `receiver`.
+    """One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.
+
+    A `notice` is an agent posting a notice to the user (`agent_notices`, the structured
+    agent-to-user channel): its receiver is None and `preview` its title.
 
     `inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent
     a fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is
@@ -139,15 +142,15 @@ class RunTimelineLink(BaseModel):
 
     kind: LinkKind
     ts: datetime
-    sender: int
-    receiver: int
+    sender: int | None
+    receiver: int | None
     inbound_id: int | None
     fork_from: int | None
     preview: str | None
 
 
 class RunTimelineLinks(BaseModel):
-    """GET /api/insights/run-timeline/links response: the agent-to-agent events with an end in the asked agents, oldest first."""
+    """GET /api/insights/run-timeline/links response: the events between agents (and with the user) with an end in the asked agents, oldest first."""
 
     model_config = ConfigDict(frozen=True)
 

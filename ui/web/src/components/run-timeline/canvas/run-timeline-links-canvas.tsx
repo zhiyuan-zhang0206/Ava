@@ -10,8 +10,7 @@ import { useEffect, useRef, type RefObject } from "react";
 import { curveOf, endTangent, hitLink, LINK_COLORS, type Curve, type ResolvedLink } from "../model/timeline-links";
 import type { AxisMap, Viewport } from "../model/timeline-model";
 
-const ROW_TESTID = { units: "run-timeline-row-units", other: "run-timeline-row-other" } as const;
-const OTHER_GROUP = "agent-view-other-agents";
+const ROW_TESTID = { units: "run-timeline-row-units", user: "run-timeline-row-user", other: "run-timeline-row-other" } as const;
 const HEAD_PX = 5;
 /** How far from a curve a pointer still counts as on it. */
 export const LINK_HIT_PX = 4;
@@ -26,7 +25,7 @@ interface Box {
 }
 
 function boxOf(canvas: HTMLCanvasElement, end: ResolvedLink["from"]): Box | null {
-  const scope = end.row === "other" ? `[data-testid="${OTHER_GROUP}"]` : `[data-testid="agent-view-agent-${end.agent}"]`;
+  const scope = end.row === "units" ? `[data-testid="agent-view-agent-${end.agent}"]` : `[data-testid="agent-view-${end.row}"]`;
   const track = canvas.parentElement?.querySelector(`${scope} [data-testid="${ROW_TESTID[end.row]}"] [data-track]`);
   if (track == null) return null;
   const rect = track.getBoundingClientRect();

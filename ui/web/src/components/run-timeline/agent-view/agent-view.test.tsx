@@ -285,7 +285,7 @@ describe("arrows between agents", () => {
     return { left: 0, top: index * 40, width: 1000, height: 30, right: 1000, bottom: index * 40 + 30, x: 0, y: index * 40, toJSON: () => ({}) };
   };
   const mid = (agent: number | null, row: string) => {
-    const scope = agent === null ? screen.getByTestId("agent-view-other-agents") : group(agent);
+    const scope = agent === null ? screen.getByTestId("agent-view-other") : group(agent);
     const track = within(scope).getByTestId(row).querySelector("[data-track]");
     return (track === null ? 0 : trackRect(track).top) + 15;
   };
@@ -307,8 +307,8 @@ describe("arrows between agents", () => {
   const ready = async () => {
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
     render("7,8");
-    await screen.findByTestId("agent-view-other-agents");
-    await waitFor(() => expect(screen.getAllByTestId("run-timeline-other-event")).toHaveLength(2));
+    await screen.findByTestId("agent-view-other");
+    await waitFor(() => expect(screen.getAllByTestId("run-timeline-link-tick")).toHaveLength(2));
     await paintFrame();
   };
   const strokes = () => drawnLinks().filter((d) => d.op === "stroke");
@@ -343,9 +343,9 @@ describe("arrows between agents", () => {
     await paintFrame();
     expect(strokes()).toHaveLength(0);
     expect(screen.queryByTestId("run-timeline-link-legend")).toBeNull();
-    expect(screen.queryByTestId("agent-view-other-agents")).toBeNull();
+    expect(screen.queryByTestId("agent-view-other")).toBeNull();
     fireEvent.click(screen.getByTestId("agent-view-interactions"));
-    await screen.findByTestId("agent-view-other-agents");
+    await screen.findByTestId("agent-view-other");
     await paintFrame();
     expect(strokes().some((d) => d.color === BLUE)).toBe(true);
     expect(strokes().some((d) => d.color === GREEN)).toBe(false);
@@ -392,9 +392,9 @@ describe("arrows between agents", () => {
 
   it("puts the events of agents not in the view on the Other agents row, and adding one moves its arrow into its own group", async () => {
     await ready();
-    const [first, second] = screen.getAllByTestId("run-timeline-other-event");
-    expect(first.getAttribute("aria-label")).toBe("Fork from agent 7 to agent 98");
-    expect(second.getAttribute("aria-label")).toBe("Terminate from agent 99 to agent 7");
+    const [first, second] = screen.getAllByTestId("run-timeline-link-tick");
+    expect(first.getAttribute("aria-label")).toBe("Fork from #7 to #98");
+    expect(second.getAttribute("aria-label")).toBe("Terminate from #99 to #7");
     fireEvent.click(second);
     const detail = await screen.findByTestId("run-timeline-link-detail");
     expect(detail.textContent).toContain("#99 (not in the view)");
@@ -412,7 +412,7 @@ describe("arrows between agents", () => {
     // the Other agents row, at the event nearest in time (the earlier one on a tie).
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowDown" });
-    const [fork, terminate] = screen.getAllByTestId("run-timeline-other-event");
+    const [fork, terminate] = screen.getAllByTestId("run-timeline-link-tick");
     await waitFor(() => expect(fork.getAttribute("aria-pressed")).toBe("true"));
     expect(terminate.getAttribute("aria-pressed")).toBe("false");
     fireEvent.keyDown(window, { key: "ArrowRight" });
@@ -424,5 +424,65 @@ describe("arrows between agents", () => {
     // Up leaves the row for the last agent's Messages row.
     fireEvent.keyDown(window, { key: "ArrowUp" });
     await waitFor(() => expect(screen.getByTestId("run-timeline-unit-detail")).toBeTruthy());
+  });
+
+  it("puts the user's chat messages and events with the user in the User group, merged into one row", async () => {
+    const human = (i0: number, source: string, minute: number): RunTimelineUnit => ({
+      ...unit(i0, minute, minute + 1, "l"),
+      kind: "inbound",
+      source,
+      inbound_id: 70 + i0,
+    });
+    getRunTimeline.mockImplementation((agent) =>
+      Promise.resolve(
+        agent === 7
+          ? { ...BY_AGENT[7], units: [...BY_AGENT[7].units, human(5, "user", 2), human(6, "ui:page:fleet", 3), { ...human(7, "watcher:3", 4) }] }
+          : (BY_AGENT[agent] ?? response(agent, [10, 20], false)),
+      ),
+    );
+    getRunTimelineLinks.mockResolvedValue({
+      links: [
+        link({ kind: "terminate", ts: at(50), sender: null, receiver: 8 }),
+        link({ kind: "notice", ts: at(55), sender: 7, receiver: null, preview: "need a decision" }),
+      ],
+    });
+    render("7,8");
+    await screen.findByTestId("agent-view-user");
+    await waitFor(() => expect(within(screen.getByTestId("agent-view-user")).getAllByTestId("run-timeline-link-tick")).toHaveLength(4));
+    // The watcher's message is not the user's; the two people's messages, the user's terminate and the agent's notice are.
+    fireEvent.click(within(screen.getByTestId("agent-view-user")).getAllByTestId("run-timeline-link-tick")[3]);
+    const detail = await screen.findByTestId("run-timeline-link-detail");
+    expect(detail.textContent).toContain("User");
+    expect(detail.textContent).toContain("need a decision");
+    expect(screen.queryByTestId("run-timeline-link-add-agent")).toBeNull();
+    // The legend counts them with the rest: two chat messages and one notice (the terminate is its own kind).
+    expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 2");
+    expect(screen.getByTestId("run-timeline-link-legend-notice").textContent).toBe("Notice 1");
+  });
+
+  it("hides the User group or the Other agents group, with their arrows, by its own sub-switch, and greys both out with Interactions off", async () => {
+    await ready();
+    const user = screen.getByTestId<HTMLInputElement>("agent-view-interactions-user");
+    const other = screen.getByTestId<HTMLInputElement>("agent-view-interactions-other");
+    expect([user.checked, other.checked, user.disabled]).toEqual([true, true, false]);
+    const arrows = () => strokes().length;
+    const all = arrows();
+    fireEvent.click(other);
+    await paintFrame();
+    expect(screen.queryByTestId("agent-view-other")).toBeNull();
+    expect(screen.getByTestId("agent-view-user")).toBeTruthy();
+    // Only the arrows between agents in view stay: the message and the spawn.
+    expect(arrows()).toBe(2);
+    expect(all).toBe(4);
+    fireEvent.click(other);
+    fireEvent.click(user);
+    await paintFrame();
+    expect(screen.queryByTestId("agent-view-user")).toBeNull();
+    expect(arrows()).toBe(4);
+    fireEvent.click(screen.getByTestId("agent-view-interactions"));
+    expect([user.disabled, other.disabled]).toEqual([true, true]);
+    fireEvent.click(screen.getByTestId("agent-view-interactions"));
+    // The sub-switches keep their state.
+    expect([user.checked, other.checked]).toEqual([false, true]);
   });
 });

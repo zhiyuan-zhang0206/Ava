@@ -82,9 +82,11 @@ def receiver(model_catalog: ModelCatalog, config_authority: ConfigAuthority) -> 
     return spawn_agent(catalog=model_catalog, authority=config_authority)
 
 
-def read(*agents: int) -> list[links.RunTimelineLink]:
+def read(*agents: int, kinds: tuple[str, ...] | None = None) -> list[links.RunTimelineLink]:
+    """The links of the agents; `kinds` leaves out the user's spawn that creating a test agent records."""
     now = datetime.now(UTC)
-    return links.read(Database.from_settings(), list(agents), now - timedelta(hours=48), now)
+    found = links.read(Database.from_settings(), list(agents), now - timedelta(hours=48), now)
+    return [link for link in found if kinds is None or link.kind in kinds]
 
 
 def test_a_chat_message_goes_from_its_source_to_the_agent_it_was_written_to(
@@ -92,7 +94,7 @@ def test_a_chat_message_goes_from_its_source_to_the_agent_it_was_written_to(
 ) -> None:
     # agent_id is the recipient, target_agent_id repeats the sender.
     inbound_id = message(db_conn, receiver=receiver, sender=405, content="do   the\nthing")
-    [link] = read(receiver)
+    [link] = read(receiver, kinds=("send_message",))
     assert (link.kind, link.sender, link.receiver) == ("send_message", 405, receiver)
     assert (link.inbound_id, link.preview) == (inbound_id, "do the thing")
 
@@ -112,7 +114,7 @@ def test_only_chat_messages_are_links_a_task_assignment_is_not(
         target=405,
         attributes={"inbound_id": 999_999_999},
     )
-    assert [link.inbound_id for link in read(receiver)] == [chat]
+    assert [link.inbound_id for link in read(receiver, kinds=("send_message",))] == [chat]
 
 
 def test_every_kind_reads_the_sender_from_source(db_conn: psycopg.Connection) -> None:
@@ -144,16 +146,48 @@ def test_an_event_with_one_end_in_the_asked_agents_is_returned(
 ) -> None:
     message(db_conn, receiver=receiver, sender=405)
     assert [(e.sender, e.receiver) for e in read(405)] == [(405, receiver)]
-    assert [(e.sender, e.receiver) for e in read(receiver)] == [(405, receiver)]
-    assert read(406) == []
+    assert [(e.sender, e.receiver) for e in read(receiver, kinds=("send_message",))] == [
+        (405, receiver)
+    ]
+    assert read(406, kinds=("send_message",)) == []
 
 
-def test_events_that_are_not_between_two_agents_are_left_out(db_conn: psycopg.Connection) -> None:
-    record(db_conn, "spawn", source="user", agent=6657)
+def test_events_that_are_not_between_agents_or_with_the_user_are_left_out(
+    db_conn: psycopg.Connection,
+) -> None:
     record(db_conn, "resurrect", source="system", agent=6657)
+    record(db_conn, "restart", source="schedule:3", agent=6657)
     record(db_conn, "send_message", source="agent:6657", agent=6657, target=6657)  # to itself
-    record(db_conn, "cancel", source="agent:405", agent=6657)  # not an agent-to-agent kind
+    record(db_conn, "cancel", source="agent:405", agent=6657)  # not a link kind
     assert read(6657, 405) == []
+
+
+def test_an_event_the_user_did_to_an_agent_has_no_sender(db_conn: psycopg.Connection) -> None:
+    record(db_conn, "spawn", source="user", agent=6657, hours_ago=3)
+    record(db_conn, "terminate", source="ui:page:agents", agent=6657, hours_ago=2)
+    assert [(e.kind, e.sender, e.receiver) for e in read(6657)] == [
+        ("spawn", None, 6657),
+        ("terminate", None, 6657),
+    ]
+
+
+def test_a_notice_is_an_agent_posting_to_the_user(
+    db_conn: psycopg.Connection, receiver: int
+) -> None:
+    db_conn.execute(
+        "INSERT INTO agent_notices (local_id, agent_id, title, priority, require_response, expire_at) "
+        "VALUES (1, %s, 'need   a decision', 'P1', false, now() + interval '1 day')",
+        (receiver,),
+    )
+    db_conn.commit()
+    [link] = read(receiver, kinds=("notice",))
+    assert (link.kind, link.sender, link.receiver, link.preview) == (
+        "notice",
+        receiver,
+        None,
+        "need a decision",
+    )
+    assert read(receiver + 1, kinds=("notice",)) == []
 
 
 def test_an_unknown_source_prefix_fails_instead_of_being_skipped(
@@ -170,4 +204,4 @@ def test_a_window_longer_than_a_page_is_read_completely(
     monkeypatch.setattr(links, "_PAGE_SIZE", 2)
     for hours in (5, 4, 3, 2, 1):
         message(db_conn, receiver=receiver, sender=405, hours_ago=hours)
-    assert len(read(receiver)) == 5
+    assert len(read(receiver, kinds=("send_message",))) == 5

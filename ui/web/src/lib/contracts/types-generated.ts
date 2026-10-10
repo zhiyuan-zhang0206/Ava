@@ -7937,7 +7937,10 @@ export interface components {
         };
         /**
          * RunTimelineLink
-         * @description One event between two agents. `sender` did it to `receiver`.
+         * @description One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.
+         *
+         *     A `notice` is an agent posting a notice to the user (`agent_notices`, the structured
+         *     agent-to-user channel): its receiver is None and `preview` its title.
          *
          *     `inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent
          *     a fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is
@@ -7948,16 +7951,16 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "send_message" | "spawn" | "fork" | "terminate" | "restart" | "resurrect";
+            kind: "send_message" | "spawn" | "fork" | "terminate" | "restart" | "resurrect" | "notice";
             /**
              * Ts
              * Format: date-time
              */
             ts: string;
             /** Sender */
-            sender: number;
+            sender: number | null;
             /** Receiver */
-            receiver: number;
+            receiver: number | null;
             /** Inbound Id */
             inbound_id: number | null;
             /** Fork From */
@@ -7967,7 +7970,7 @@ export interface components {
         };
         /**
          * RunTimelineLinks
-         * @description GET /api/insights/run-timeline/links response: the agent-to-agent events with an end in the asked agents, oldest first.
+         * @description GET /api/insights/run-timeline/links response: the events between agents (and with the user) with an end in the asked agents, oldest first.
          */
         RunTimelineLinks: {
             /** Links */

@@ -8,7 +8,7 @@ import type { Selection } from "./timeline-model";
 export type LinkKind = RunTimelineLink["kind"];
 
 /** The kinds in legend order; a kind is told apart by its color alone. */
-export const LINK_KINDS: readonly LinkKind[] = ["send_message", "spawn", "fork", "terminate", "restart", "resurrect"];
+export const LINK_KINDS: readonly LinkKind[] = ["send_message", "spawn", "fork", "terminate", "restart", "resurrect", "notice"];
 
 export const LINK_COLORS: Record<LinkKind, string> = {
   send_message: "#3b82f6",
@@ -17,11 +17,14 @@ export const LINK_COLORS: Record<LinkKind, string> = {
   terminate: "#ef4444",
   restart: "#f59e0b",
   resurrect: "#a855f7",
+  notice: "#ec4899",
 };
 
-/** Where an end sits: the Messages row of an agent in the view, or the Other agents row (`agent` is then the peer). */
+/** The rows an arrow can end in: an agent's Messages row, or the User or Other agents group (`agent` is then the peer, 0 for the user). */
+export type LinkRow = "units" | "user" | "other";
+
 export interface LinkEnd {
-  row: "units" | "other";
+  row: LinkRow;
   agent: number;
   /** Epoch milliseconds: where on the shared axis. */
   ms: number;
@@ -33,20 +36,30 @@ export interface ResolvedLink {
   link: RunTimelineLink;
   from: LinkEnd;
   to: LinkEnd;
-  /** The end that is not in the view, when one is. */
+  /** The agent at the end that is not in the view, when one is (the user is no agent). */
   external: number | null;
+  /** The user's source (`user`, `ui:page:...`), when the user is an end. */
+  userSource: string | null;
   /** The event names an inbound row of the receiver in view but no block carries it: the arrow ends at the event's time, not on a block. */
   unmatched: boolean;
 }
 
 const middle = (unit: Pick<RunTimelineUnit, "start" | "end">) => (Date.parse(unit.start) + Date.parse(unit.end)) / 2;
 
+/** Whether an inbound source is a person (the user's own message), not an agent, a watcher, a shell or the system. */
+export const isHumanSource = (source: string | null) => source !== null && (source === "user" || source.startsWith("ui:page:"));
+
 /**
  * The ends of each link. Both ends of an in-view agent are in its Messages row. The sender stands at
  * the event's time (the block it was working on is not guessed). The receiver is the block of the
  * inbound row the event was delivered as (matched by `inbound_id`), else the event's time. An end
- * whose agent is not in the view lands on the Other agents row at the event's time. A link whose
- * in-view agent has not loaded yet is left out until it has.
+ * whose agent is not in the view lands on the Other agents row at the event's time; the user (no
+ * agent) lands on the User row. A link whose in-view agent has not loaded yet is left out until it
+ * has.
+ *
+ * The user's chat messages have no audit event: they are read from the inbound blocks whose source is
+ * a person, each ending on its own block and starting at the block's time (the time the agent read
+ * it; the time the user sent it is not on the block).
  */
 export function resolveLinks(
   links: readonly RunTimelineLink[],
@@ -56,34 +69,59 @@ export function resolveLinks(
   const out: ResolvedLink[] = [];
   links.forEach((link, index) => {
     const ms = Date.parse(link.ts);
-    const senderIn = inView.has(link.sender);
-    const receiverIn = inView.has(link.receiver);
+    const { sender, receiver } = link;
+    const senderIn = sender !== null && inView.has(sender);
+    const receiverIn = receiver !== null && inView.has(receiver);
     if (!senderIn && !receiverIn) return;
-    if ((senderIn && !loaded.has(link.sender)) || (receiverIn && !loaded.has(link.receiver))) return;
-    const from: LinkEnd = { row: senderIn ? "units" : "other", agent: link.sender, ms };
-    let to: LinkEnd = { row: "other", agent: link.receiver, ms };
+    if ((senderIn && !loaded.has(sender)) || (receiverIn && !loaded.has(receiver))) return;
+    const userEnd = sender === null || receiver === null;
+    const outer = (agent: number | null): LinkEnd => (agent === null ? { row: "user", agent: 0, ms } : { row: "other", agent, ms });
+    const from: LinkEnd = senderIn ? { row: "units", agent: sender, ms } : outer(sender);
+    let to: LinkEnd = outer(receiver);
     let unmatched = false;
     if (receiverIn) {
       const block =
-        link.inbound_id === null ? undefined : loaded.get(link.receiver)?.units.find((unit) => unit.inbound_id === link.inbound_id);
+        link.inbound_id === null ? undefined : loaded.get(receiver)?.units.find((unit) => unit.inbound_id === link.inbound_id);
       unmatched = link.inbound_id !== null && block === undefined;
-      to = { row: "units", agent: link.receiver, ms: block === undefined ? ms : middle(block) };
+      to = { row: "units", agent: receiver, ms: block === undefined ? ms : middle(block) };
     }
     out.push({
-      key: `${link.kind}-${link.ts}-${link.sender}-${link.receiver}-${index}`,
+      key: `${link.kind}-${link.ts}-${link.sender ?? "user"}-${link.receiver ?? "user"}-${index}`,
       link,
       from,
       to,
-      external: senderIn && receiverIn ? null : senderIn ? link.receiver : link.sender,
+      external: userEnd || (senderIn && receiverIn) ? null : senderIn ? receiver : sender,
+      userSource: userEnd ? "user" : null,
       unmatched,
     });
   });
+  for (const [id, data] of loaded) {
+    if (!inView.has(id)) continue;
+    for (const unit of data.units) {
+      if (unit.kind !== "inbound" || !isHumanSource(unit.source)) continue;
+      const ms = Date.parse(unit.start);
+      out.push({
+        key: `user-${id}-${unit.i0}`,
+        link: { kind: "send_message", ts: unit.start, sender: null, receiver: id, inbound_id: unit.inbound_id, fork_from: null, preview: unit.preview },
+        from: { row: "user", agent: 0, ms },
+        to: { row: "units", agent: id, ms: middle(unit) },
+        external: null,
+        userSource: unit.source,
+        unmatched: false,
+      });
+    }
+  }
   return out;
 }
 
-/** The links on the Other agents row, left to right. */
-export function externalLinks(links: readonly ResolvedLink[]): ResolvedLink[] {
-  return links.filter((l) => l.external !== null).sort((a, b) => a.from.ms - b.from.ms);
+/** The end of a link that stands in `row`, when one does. */
+export const endIn = (l: ResolvedLink, row: LinkRow): LinkEnd | undefined => (l.from.row === row ? l.from : l.to.row === row ? l.to : undefined);
+
+/** The links of the User group and of the Other agents group, each left to right. */
+export function groupLinks(links: readonly ResolvedLink[]): { user: ResolvedLink[]; other: ResolvedLink[] } {
+  const side = (row: LinkRow) =>
+    links.filter((l) => endIn(l, row) !== undefined).sort((a, b) => (endIn(a, row)?.ms ?? 0) - (endIn(b, row)?.ms ?? 0));
+  return { user: side("user"), other: side("other") };
 }
 
 /** The key of the neighbour of `current` in `row` (sorted by time), or null past either end. */
@@ -95,9 +133,12 @@ export function stepLink(row: readonly ResolvedLink[], current: string, dir: "le
 }
 
 /** The link of `row` nearest in time to `ms`. */
-export function nearestLink(row: readonly ResolvedLink[], ms: number): string | null {
-  let best: ResolvedLink | null = null;
-  for (const l of row) if (best === null || Math.abs(l.from.ms - ms) < Math.abs(best.from.ms - ms)) best = l;
+export function nearestLink(links: readonly ResolvedLink[], row: LinkRow, ms: number): string | null {
+  let best: { key: string; gap: number } | null = null;
+  for (const l of links) {
+    const gap = Math.abs((endIn(l, row)?.ms ?? Infinity) - ms);
+    if (best === null || gap < best.gap) best = { key: l.key, gap };
+  }
   return best?.key ?? null;
 }
 

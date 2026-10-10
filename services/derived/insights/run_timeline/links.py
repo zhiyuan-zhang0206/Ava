@@ -1,11 +1,10 @@
 """Agent-to-agent events — ``GET /api/insights/run-timeline/links?agents=405,6657&from=&to=``.
 
-Every audit event of the kinds below that one agent did to another, where either end is among the
-asked agents. Who did it is the audit row's `source` (`agent:N`); the agent it was done to is the
+Every audit event of the kinds below that one agent (or the user) did to another, where either end is among the
+asked agents, plus the notices the agents posted to the user. Who did it is the audit row's `source` (`agent:N`); the agent it was done to is the
 row's `agent_id`. `target_agent_id` is not used: its direction differs per event (for a
 send_message it is the sender, for a spawn the spawner, for a fork the agent copied from).
-Events whose source is not an agent (user, system, schedule...) are not agent-to-agent and are
-left out; a send_message counts only when its `inbound_id` names a `kind='chat'` inbound row (a task
+Events whose source is not an agent or the user (system, schedule...) are left out; a send_message counts only when its `inbound_id` names a `kind='chat'` inbound row (a task
 assignment is a system note) -- read per page against `inbound_messages`; a source with an unknown prefix is an error.
 """
 
@@ -28,19 +27,23 @@ from services.derived.insights.run_timeline.schemas import (
 
 router = APIRouter()
 
-_KINDS: list[str] = list(get_args(LinkKind))
+# The kinds read from `audit_events`; a notice comes from `agent_notices`.
+_AUDIT_KINDS: list[str] = [kind for kind in get_args(LinkKind) if kind != "notice"]
 # A transport page, not a display limit: the reader pages until the window is exhausted.
 _PAGE_SIZE = 500
 _PREVIEW_CHARS = 160
 _AGENT_PREFIX = "agent:"
+_HUMAN_SOURCES = ("user", "ui:page:")
 
 
-def sender_of(source: str) -> int | None:
-    """The agent a source names; None for a valid source that is not an agent. Unknown prefixes raise."""
+def sender_of(source: str) -> tuple[bool, int | None]:
+    """`(drawn, agent)` for an audit source: an agent, or the user (agent None); any other valid source is not drawn. Unknown prefixes raise."""
     validate_source(source)
-    if not source.startswith(_AGENT_PREFIX):
-        return None
-    return int(source.removeprefix(_AGENT_PREFIX))
+    if source.startswith(_HUMAN_SOURCES):
+        return True, None
+    if source.startswith(_AGENT_PREFIX):
+        return True, int(source.removeprefix(_AGENT_PREFIX))
+    return False, None
 
 
 def _int(value: object) -> int | None:
@@ -70,10 +73,10 @@ def _chat_inbounds(conn: psycopg.Connection, page: list[dict[str, Any]]) -> set[
 
 
 def _link(row: dict[str, object]) -> RunTimelineLink | None:
-    sender = sender_of(str(row["source"]))
+    drawn, sender = sender_of(str(row["source"]))
     receiver = _int(row["agent_id"])
     # An event an agent did to itself is not between agents.
-    if sender is None or receiver is None or sender == receiver:
+    if not drawn or receiver is None or sender == receiver:
         return None
     raw = row["attributes"]
     attrs = cast(dict[str, object], raw) if isinstance(raw, dict) else {}
@@ -90,8 +93,31 @@ def _link(row: dict[str, object]) -> RunTimelineLink | None:
     )
 
 
+def _notices(
+    conn: psycopg.Connection, agents: list[int], start: datetime, end: datetime
+) -> list[RunTimelineLink]:
+    """Notices the agents posted to the user in the window: the one structured agent-to-user channel."""
+    rows = conn.execute(
+        "SELECT agent_id, created_at, title FROM agent_notices "
+        "WHERE agent_id = ANY(%s) AND created_at >= %s AND created_at <= %s ORDER BY created_at, id",
+        [agents, start, end],
+    ).fetchall()
+    return [
+        RunTimelineLink(
+            kind="notice",
+            ts=created_at,
+            sender=int(agent_id),
+            receiver=None,
+            inbound_id=None,
+            fork_from=None,
+            preview=" ".join(str(title).split())[:_PREVIEW_CHARS],
+        )
+        for agent_id, created_at, title in rows
+    ]
+
+
 def read(db: Database, agents: list[int], start: datetime, end: datetime) -> list[RunTimelineLink]:
-    """The window's agent-to-agent events with an end in `agents`, oldest first."""
+    """The window's events between agents, with the user, with an end in `agents`, oldest first."""
     links: list[RunTimelineLink] = []
     offset = 0
     with db.connect(autocommit=True) as conn:
@@ -99,7 +125,7 @@ def read(db: Database, agents: list[int], start: datetime, end: datetime) -> lis
             page, has_more = audit_rows.query_events(
                 conn,
                 involving_agents=agents,
-                event_names=_KINDS,
+                event_names=_AUDIT_KINDS,
                 from_=start,
                 to=end,
                 limit=_PAGE_SIZE,
@@ -114,7 +140,8 @@ def read(db: Database, agents: list[int], start: datetime, end: datetime) -> lis
                 and (link := _link(row)) is not None
             )
             if not has_more:
-                return links
+                links.extend(_notices(conn, agents, start, end))
+                return sorted(links, key=lambda link: link.ts)
             offset += _PAGE_SIZE
 
 

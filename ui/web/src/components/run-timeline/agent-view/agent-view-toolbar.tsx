@@ -27,6 +27,10 @@ export function AgentViewToolbar({
   onUnitHeights,
   interactions,
   onInteractions,
+  showUser,
+  onShowUser,
+  showOther,
+  onShowOther,
 }: {
   agentIds: readonly number[];
   onAdd: (agent: number) => void;
@@ -42,6 +46,11 @@ export function AgentViewToolbar({
   /** Whether the arrows between agents (and the Other agents group) are shown. */
   interactions: boolean;
   onInteractions: (on: boolean) => void;
+  /** Within Interactions: the User group and its arrows, the Other agents group and its arrows. */
+  showUser: boolean;
+  onShowUser: (on: boolean) => void;
+  showOther: boolean;
+  onShowOther: (on: boolean) => void;
 }) {
   const t = useTranslations("runTimeline");
   const [draft, setDraft] = useState("");
@@ -131,6 +140,26 @@ export function AgentViewToolbar({
           data-testid="agent-view-interactions"
         />
         {t("interactionsLabel")}
+      </label>
+      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground", !interactions && "opacity-50")}>
+        <input
+          type="checkbox"
+          checked={showUser}
+          disabled={!interactions}
+          onChange={(event) => onShowUser(event.target.checked)}
+          data-testid="agent-view-interactions-user"
+        />
+        {t("userGroup")}
+      </label>
+      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground", !interactions && "opacity-50")}>
+        <input
+          type="checkbox"
+          checked={showOther}
+          disabled={!interactions}
+          onChange={(event) => onShowOther(event.target.checked)}
+          data-testid="agent-view-interactions-other"
+        />
+        {t("otherAgents")}
       </label>
     </div>
   );

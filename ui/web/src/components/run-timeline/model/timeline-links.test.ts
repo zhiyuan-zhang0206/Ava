@@ -7,7 +7,9 @@ import {
   curvePoint,
   distanceToCurve,
   endTangent,
-  externalLinks,
+  endIn,
+  groupLinks,
+  isHumanSource,
   hitLink,
   nearestLink,
   nearestUnit,
@@ -16,7 +18,7 @@ import {
   type Curve,
 } from "./timeline-links";
 
-const iso = (minute: number) => new Date(Date.UTC(2026, 9, 4, 12, minute)).toISOString();
+const iso = (minute: number) => new Date(Date.UTC(2026, 9, 4, 12, 0, minute * 60)).toISOString();
 
 const link = (partial: Partial<RunTimelineLink>): RunTimelineLink => ({
   kind: "send_message",
@@ -99,10 +101,10 @@ describe("the Other agents row", () => {
       [2, agent([])],
     ]),
   );
-  const row = externalLinks(resolved);
+  const row = groupLinks(resolved).other;
 
   it("holds only the links with an end outside the view, left to right", () => {
-    expect(row.map((l) => l.from.ms)).toEqual([Date.parse(iso(10)), Date.parse(iso(30))]);
+    expect(row.map((l) => endIn(l, "other")?.ms)).toEqual([Date.parse(iso(10)), Date.parse(iso(30))]);
   });
 
   it("steps to the neighbour and stops at the ends", () => {
@@ -112,8 +114,60 @@ describe("the Other agents row", () => {
   });
 
   it("enters at the event nearest in time", () => {
-    expect(nearestLink(row, Date.parse(iso(27)))).toBe(row[1].key);
-    expect(nearestLink([], 0)).toBeNull();
+    expect(nearestLink(row, "other", Date.parse(iso(27)))).toBe(row[1].key);
+    expect(nearestLink([], "other", 0)).toBeNull();
+  });
+});
+
+describe("the User group", () => {
+  const human = (i0: number, source: string, from: number, to: number, inboundId: number | null): RunTimelineUnit =>
+    ({ ...inbound(inboundId, from, to), i0, i1: i0, source, preview: `from ${source}` });
+  const loaded = new Map([[2, agent([human(1, "user", 20, 22, 5), human(2, "ui:page:fleet", 30, 31, null), human(3, "watcher:7", 40, 41, 9), inbound(8, 50, 51)])]]);
+
+  it("takes a person's chat message from the receiver's own block, with no audit event, and ends it on that block", () => {
+    const user = groupLinks(resolveLinks([], new Set([2]), loaded)).user;
+    expect(user.map((l) => [l.link.kind, l.link.sender, l.link.receiver, l.userSource])).toEqual([
+      ["send_message", null, 2, "user"],
+      ["send_message", null, 2, "ui:page:fleet"],
+    ]);
+    expect(user[0].to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(21)) });
+    expect(user[0].from).toEqual({ row: "user", agent: 0, ms: Date.parse(iso(20)) });
+    expect([user[0].unmatched, user[0].external]).toEqual([false, null]);
+    // A block with no inbound id (an old history) is still exact: it is the block itself.
+    expect(user[1].to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(30.5)) });
+  });
+
+  it("leaves out the messages of agents, watchers, shells and the system", () => {
+    expect(isHumanSource("agent:1")).toBe(false);
+    expect(isHumanSource("watcher:7")).toBe(false);
+    expect(isHumanSource("system")).toBe(false);
+    expect(isHumanSource(null)).toBe(false);
+    expect(groupLinks(resolveLinks([], new Set([2]), loaded)).user).toHaveLength(2);
+  });
+
+  it("draws the user's lifecycle events (no sender) and an agent's notice to the user (no receiver)", () => {
+    const [spawn, notice] = resolveLinks(
+      [link({ kind: "spawn", sender: null, receiver: 2 }), link({ kind: "notice", sender: 2, receiver: null, ts: iso(15) })],
+      new Set([2]),
+      new Map([[2, agent([])]]),
+    );
+    expect(spawn.from.row).toBe("user");
+    expect(spawn.to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(10)) });
+    expect(notice.from).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(15)) });
+    expect(notice.to).toEqual({ row: "user", agent: 0, ms: Date.parse(iso(15)) });
+    expect([spawn.external, notice.external]).toEqual([null, null]);
+  });
+
+  it("leaves out the user's event to an agent that is not in the view", () => {
+    expect(resolveLinks([link({ kind: "spawn", sender: null, receiver: 9 })], new Set([2]), new Map([[2, agent([])]]))).toEqual([]);
+  });
+
+  it("keeps the two groups apart and each left to right", () => {
+    const all = resolveLinks([link({ kind: "spawn", sender: 8, receiver: 2, ts: iso(5) })], new Set([2]), loaded);
+    const grouped = groupLinks(all);
+    expect(grouped.user).toHaveLength(2);
+    expect(grouped.other).toHaveLength(1);
+    expect(grouped.user.map((l) => l.from.ms)).toEqual([...grouped.user.map((l) => l.from.ms)].sort((a, b) => a - b));
   });
 });
 

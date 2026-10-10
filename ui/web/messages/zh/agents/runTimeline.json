@@ -93,8 +93,8 @@
   "linkResurrect": "复活",
   "linkLegendLabel": "箭头颜色",
   "linkLegendToggle": "显示或隐藏{kind}箭头",
-  "linkAria": "{kind}：agent {from} 到 agent {to}",
-  "readoutLink": "{kind} · #{from} → #{to} · {time}",
+  "linkAria": "{kind}：{from} 到 {to}",
+  "readoutLink": "{kind} · {from} → {to} · {time}",
   "linkFrom": "发起",
   "linkTo": "对象",
   "linkNotInView": "#{id}（不在视图中）",
@@ -104,5 +104,7 @@
   "linkMessage": "消息",
   "linksFailed": "无法加载 agent 之间的箭头。",
   "linkUnmatched": "这条消息没有对上接收方的某个块（其历史里没有对应的 inbound id）；箭头落在事件发生的时刻。",
-  "interactionsLabel": "交互"
+  "interactionsLabel": "交互",
+  "userGroup": "用户",
+  "linkNotice": "通知"
 }

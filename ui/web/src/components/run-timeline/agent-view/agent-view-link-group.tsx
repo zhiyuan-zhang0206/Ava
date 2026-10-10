@@ -1,20 +1,22 @@
 "use client";
 
-// The last group of the agent view: the agents that are not in it. One row of events, each the end of
-// an arrow whose other end is an agent in the view, at the time of the event. Adding the peer to the
-// view (from the event's details) moves the arrow to that agent's own group.
+// The last groups of the agent view, each a heading and one row of events with no tree, Messages or
+// Context rows. "Other agents" holds the events whose other end is an agent not in the view; "User"
+// holds the events with the user, who is no agent. Each event is a colored tick at its time and the
+// end of an arrow whose other end is an agent in the view. Neither group can be removed.
 
 import { useTranslations } from "next-intl";
 
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { LINK_COLORS, type ResolvedLink } from "../model/timeline-links";
+import { endIn, LINK_COLORS, type ResolvedLink } from "../model/timeline-links";
 import { projectBox, type AxisMap, type Viewport } from "../model/timeline-model";
 import { RowShell } from "../run-timeline-row-shell";
-import { useLinkKindLabels } from "./agent-view-link-labels";
+import { useLinkEndLabel, useLinkKindLabels } from "./agent-view-link-labels";
 
-export function OtherAgentsGroup({
+export function LinkRowGroup({
+  variant,
   links,
   axis,
   viewU,
@@ -22,7 +24,8 @@ export function OtherAgentsGroup({
   onHover,
   onSelect,
 }: {
-  /** The links whose other end is not in the view, left to right. */
+  variant: "user" | "other";
+  /** The links with an end in this group, left to right. */
   links: readonly ResolvedLink[];
   axis: AxisMap;
   viewU: Viewport;
@@ -32,16 +35,19 @@ export function OtherAgentsGroup({
 }) {
   const t = useTranslations("runTimeline");
   const labels = useLinkKindLabels();
+  const endLabel = useLinkEndLabel();
+  const title = variant === "user" ? t("userGroup") : t("otherAgents");
   return (
-    <section aria-label={t("otherAgents")} data-testid="agent-view-other-agents" className="space-y-1.5">
+    <section aria-label={title} data-testid={`agent-view-${variant}`} className="space-y-1.5">
       <div className={cn(FLEX, "items-center gap-2 pl-[88px] text-xs")}>
-        <span className="truncate font-mono" data-testid="agent-view-other-title">
-          {t("otherAgents")}
+        <span className="truncate font-mono" data-testid={`agent-view-${variant}-title`}>
+          {title}
         </span>
       </div>
-      <RowShell label={t("otherRow")} height="h-5" testId="run-timeline-row-other">
+      <RowShell label={t("otherRow")} height="h-5" testId={`run-timeline-row-${variant}`}>
         {links.map((l) => {
-          const box = projectBox(axis.toU(l.from.ms), axis.toU(l.from.ms), viewU);
+          const ms = endIn(l, variant)?.ms;
+          const box = ms === undefined ? null : projectBox(axis.toU(ms), axis.toU(ms), viewU);
           if (box === null) return null;
           const selected = l.key === selectedKey;
           return (
@@ -49,9 +55,9 @@ export function OtherAgentsGroup({
               key={l.key}
               type="button"
               tabIndex={-1}
-              data-testid="run-timeline-other-event"
+              data-testid="run-timeline-link-tick"
               aria-pressed={selected}
-              aria-label={t("linkAria", { kind: labels[l.link.kind], from: l.link.sender, to: l.link.receiver })}
+              aria-label={t("linkAria", { kind: labels[l.link.kind], from: endLabel(l.link.sender), to: endLabel(l.link.receiver) })}
               onPointerEnter={() => onHover(l.key)}
               onPointerLeave={() => onHover(null)}
               onClick={(event) => {

@@ -17,7 +17,8 @@ export function LinkDetail({ resolved, onAddAgent }: { resolved: ResolvedLink; o
   const t = useTranslations("runTimeline");
   const labels = useLinkKindLabels();
   const { link, external } = resolved;
-  const end = (agent: number) => (agent === external ? t("linkNotInView", { id: agent }) : `#${agent}`);
+  const end = (agent: number | null) =>
+    agent === null ? t("userGroup") : agent === external ? t("linkNotInView", { id: agent }) : `#${agent}`;
   return (
     <div className="space-y-4" data-testid="run-timeline-link-detail">
       <h2 className="text-sm font-semibold">{labels[link.kind]}</h2>
@@ -26,6 +27,9 @@ export function LinkDetail({ resolved, onAddAgent }: { resolved: ResolvedLink; o
           <Metric className="col-span-2" label={t("linkFrom")} value={end(link.sender)} />
           <Metric className="col-span-2" label={t("linkTo")} value={end(link.receiver)} />
           <Metric className="col-span-2" label={t("timeSpan")} value={formatAbsolute(link.ts)} />
+          {resolved.userSource !== null ? (
+            <Metric className="col-span-2" label={t("source")} value={resolved.userSource} />
+          ) : null}
           {link.fork_from !== null ? (
             <Metric className="col-span-2" label={t("linkForkedFrom")} value={`#${link.fork_from}`} />
           ) : null}
