@@ -23,6 +23,12 @@ guarded `panelLayoutStorage`); below that the panel stacks under the chart. The
 
 **Source layout.** `components/run-timeline/model/` owns the pure axis, selection, row layout and hover readout models with their tests. `canvas/` owns rendering, painting, the axis and the shared canvas test helper. `agent-view/` owns agent headings, shared controls and navigation across agents with their tests. Page composition, rows and the details panel stay at the component root; consumers import their owning modules directly.
 
+**Lifetime reads.** Each lifetime read uses the shared 35-second HTTP budget for
+headers and body. Each query passes its cancellation signal: removing an agent
+or leaving the page cancels its request. Timeouts use the per-agent failure and
+Retry flow; selection cancellation is not a business failure. This client budget
+does not impose a backend history-reconstruction deadline.
+
 **Legend highlight.** Each legend entry is a toggle (`run-timeline-legend.tsx`): pressing it highlights every block of that class (`Highlight`: class plus optional source) and fades the rest — other blocks and all summary blocks drop to 0.12 opacity (a selected block keeps its ring). The state lives on the page, so zoom and pan keep it. While an inbound class (human / agent) is highlighted and its blocks come from several senders, a select narrows it to one source (`agent:N` reads "Inbound from agent N"). The context breakdown card's category rows that stand for a block class (user input, agent messages, thinking, text output, tool calls, tool responses, system notes) are the same toggle (`classCategory` / `categoryClass`).
 
 **Hover.** A one-line readout above the rows (`model/run-timeline-readout.ts`) shows what the pointer is over: for a block its kind, message span, read time, source and an 80-character preview; for a node its level, time and message span, summary first line and the agent's own usage (calls, input, output); for a block also the context through it. Hovering a block softly lights its ancestor chain; hovering a node lights its chain and the blocks its message span covers (`hoverLit`). A selection's own lighting wins over hover.
