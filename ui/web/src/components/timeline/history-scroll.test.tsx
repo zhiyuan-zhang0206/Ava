@@ -98,6 +98,61 @@ describe("history entry scroll ownership", () => {
     render(conversation(42, "history-warm-live"));
     expect(viewport().scrollTop).toBe(700);
   });
+  it.each([false, true])("waits for a returned reader through partial layout (anchor=%s)", (anchored) => {
+    height = 900;
+    saveScrollMemory(`history-partial-layout-${anchored}`, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: anchored ? { itemId: "1.0", rank: 0, viewportTop: -700 } : undefined });
+    render(conversation(42, `history-partial-layout-${anchored}`));
+    resize();
+    act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(700);
+  });
+  it("keeps the reading target through strict-mode partial layout", () => {
+    height = 900;
+    saveScrollMemory("history-partial-strict", { contentKey: "42", scrollTop: 700, followBottom: false });
+    render(<StrictMode>{conversation(42, "history-partial-strict")}</StrictMode>);
+    resize();
+    act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(700);
+  });
+  it.each([["send", 600], ["send", 900], ["selection", 600], ["selection", 900]] as const)("allows %s to supersede a target at content height %s", (command, initialHeight) => {
+    height = initialHeight;
+    saveScrollMemory(`history-short-${command}-${initialHeight}`, { contentKey: "42", scrollTop: 700, followBottom: false });
+    const { rerender } = render(conversation(42, `history-short-${command}-${initialHeight}`));
+    resize();
+    if (command === "send") act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    else rerender(conversation(43, `history-short-${command}-${initialHeight}`));
+    act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(4400);
+  });
+  it("lets a reader replace an unreachable saved position by scrolling", () => {
+    height = 900;
+    saveScrollMemory("history-short-reader", { contentKey: "42", scrollTop: 700, followBottom: false });
+    render(conversation(42, "history-short-reader"));
+    resize();
+    act(() => { viewport().scrollTop = 100; fireEvent.scroll(viewport()); });
+    act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(100);
+  });
+  it("keeps the saved reader if the entry leaves before its layout can hold it", () => {
+    height = 900;
+    saveScrollMemory("history-short-leave", { contentKey: "42", scrollTop: 700, followBottom: false });
+    const { rerender } = render(conversation(42, "history-short-leave"));
+    resize();
+    act(() => { fireEvent.scroll(viewport()); });
+    rerender(<QueryClientProvider client={client}><div>Shell page</div></QueryClientProvider>);
+    top = 0; height = 5000;
+    rerender(conversation(42, "history-short-leave"));
+    expect(viewport().scrollTop).toBe(700);
+  });
+  it.each([-100, 0])("keeps the pending target when the controller absorbs a wheel at the bottom (delta=%s)", (deltaY) => {
+    height = 900;
+    saveScrollMemory(`history-short-wheel-${deltaY}`, { contentKey: "42", scrollTop: 700, followBottom: false });
+    render(conversation(42, `history-short-wheel-${deltaY}`));
+    resize();
+    act(() => { fireEvent.wheel(viewport(), { deltaY }); });
+    act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(700);
+  });
   it("keeps a restored reader parked when content grows", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-growth", { contentKey: "42", scrollTop: 700, followBottom: false });
@@ -115,6 +170,13 @@ describe("history entry scroll ownership", () => {
     resize();
     expect(viewport().scrollTop).toBe(4400);
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(5400);
+  });
+  it("returns a saved follower to messages that arrived while away", () => {
+    height = 6000;
+    saveScrollMemory("history-away-growth", { contentKey: "42", scrollTop: 4400, followBottom: true });
+    render(conversation(42, "history-away-growth"));
+    resize();
     expect(viewport().scrollTop).toBe(5400);
   });
   it("restores through a strict-mode effect re-attach", () => {

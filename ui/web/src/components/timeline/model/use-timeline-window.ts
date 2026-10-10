@@ -59,6 +59,26 @@ export function resolveSavedTimelineAnchor(
   };
 }
 
+/** Restore only when this layout can hold the reading position. */
+export function applySavedTimelineScroll(
+  viewport: HTMLElement,
+  saved: SavedScroll,
+  compactBuffer: CompactTransitionBuffer | null,
+  canonicalItems: readonly BackendTimelineItem[],
+): boolean {
+  const max = viewport.scrollHeight - viewport.clientHeight;
+  if (max <= 0) return false;
+  const target = saved.followBottom || !saved.anchor ? null
+    : resolveSavedTimelineAnchor(viewport, saved.anchor, compactBuffer, canonicalItems);
+  if (target?.present && !target.node) return false;
+  const top = saved.followBottom ? max : target?.node
+    ? viewport.scrollTop + target.node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - target.viewportTop
+    : saved.scrollTop;
+  if (top > max) return false;
+  viewport.scrollTop = Math.max(0, top);
+  return true;
+}
+
 export interface WindowGroup {
   key: string;
   rank: number;
