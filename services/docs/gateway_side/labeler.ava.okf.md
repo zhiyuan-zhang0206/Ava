@@ -1,25 +1,27 @@
 ---
 type: doc
 title: Labeler — Agent Auto-Naming
-description: Independent agent label auto-generation process — polls per second for rows in `agents` where `label IS NULL AND NOT label_user_set`
+description: Independent agent label generation with bounded expected retries and explicit service failures
 tags: []
 ---
 
 # Labeler — Agent Auto-Naming
 
 ## What is it
-An independent agent label auto-generation process — polls per second for rows in `agents` where `label IS NULL AND NOT label_user_set`, takes the first chat inbound as prompt, calls LLM to generate a short label name (max `services.labeler_max_chars` characters, default 64). Completely decoupled from Gateway.
+An independent agent label auto-generation process — polls per second for rows in `agents` where the label is NULL or empty and not user-owned, takes the first chat or task-system-note inbound as prompt, calls LLM to generate a short label name (max `services.labeler_max_chars` characters, default 64). Completely decoupled from Gateway.
 
 **Role affiliation**: gateway side (pure agent-runner does not run) — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`; roster derived by `services_for_capabilities` intersecting with local `machine_role()`.
 
 ## Core Responsibilities
 - **Poll unnamed agents**: SELECT agents needing auto-naming every second
-- **LLM label generation**: uses the agent's first chat message as context, calls the LLM from `base/lm/factory.py`
+- **LLM label generation**: uses the agent's first chat or task-system-note message as context, calls the LLM from `base/lm/factory.py`
 - **Reject a non-label**: `services/derived/labeler/labeler.py:_rejection_reason()` classifies an output that is not a label at all (opens with a tag or code fence; opens in the assistant's first-person voice; echoes the system prompt back) as a FAILED generation — `generate_label_async` returns `False` and the daemon's existing exponential backoff retries. Rejection, not repair: `_normalize` still refuses to rewrite a bad output
+- **Expected provider failures**: only a trusted transient error from the actual `ainvoke` call returns `False`: SDK / official LangChain transport errors, HTTP 429 and the shared temporary-status contract. Raw HTTP timeout/connection failures are normalized only at that invocation boundary. Unknown and permanent provider failures retain their original exception; model construction, usage accounting and parsing are outside recovery.
+- **Service failure owner**: exceptions from generation, CAS or polling propagate through `run` cleanup to `main`, which records a traceback and exits nonzero. The current batch stops; no task is claimed or acknowledged. The root health scheduler owns service replacement. Restart clears in-memory backoff/retirement, so a persistent bad row is not durably isolated and may block later items. No new DB retry policy is assumed from `OperationalError` or `PoolTimeout`.
 - **Give up on the unlabelable**: after `services/derived/labeler/daemon.py:_GIVE_UP_AFTER_FAILURES` consecutive failures (~28 minutes of retrying) an agent is RETIRED — permanently excluded from the poll `SELECT`, label left NULL, `label_generate_retired` emitted once. Bounds a permanently-failing agent to a fixed number of LLM calls instead of ~12/hour forever. Per-process, like the rest of the backoff state
-- **Configuration** (`config.py`, `daemon.py`): `labeler_config()` in the daemon (the package's composition root, the only module there that reads `settings`) builds the frozen `LabelerConfig` (`labeler_model`, `labeler_max_chars`); the dispatch loop and `generate_label_async` take it as an argument.
+- **Configuration** (`config.py`, `daemon.py`): `labeler_config()` in the daemon (the package's composition root, the only module there that reads `settings`) builds the frozen `LabelerConfig` (`labeler_model`, `labeler_max_chars`); the dispatch loop and `generate_label_async` take it as an argument alongside the explicit model catalog, override and model settings.
 - **Model inputs**: the daemon builds one explicit catalog and freezes caller tuning through `labeler_model_overrides`. Gateway-profile calls leave agent-only tuning unset, retaining model defaults without reading stripped aliases. A full or agent-side boot retains its explicit runtime tuning. Both paths keep the existing disabled-thinking request and pass the same catalog through construction and usage accounting.
-- **Publish update**: after generating a label, publishes via `base/labels.publish_label_updated`
+- **Publish update**: after the label CAS commits, publishes via `base/agents/labels.py:publish_label_updated`. This live Redis notification remains best-effort; there is no receipt or outbox. A notification failure cannot roll back the label, and a non-empty committed label is not polled for notification replay. The shared EventBus best-effort boundary retains its own policy.
 
 ## Key Dependencies
 - [[agent/db/docs/db.ava.okf.md]] — reads and writes `agents` table

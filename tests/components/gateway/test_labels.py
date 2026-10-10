@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx2
+import openai
 import psycopg
 import pytest
 import redis.asyncio as aredis
@@ -348,7 +350,9 @@ class TestGenerateLabelAsync:
 
         class _ExplodingLLM:
             async def ainvoke(self, _messages: Any) -> Any:
-                raise RuntimeError("api boom")
+                raise openai.APIConnectionError(
+                    request=httpx2.Request("POST", "https://audit.invalid")
+                )
 
         monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ExplodingLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
@@ -360,7 +364,7 @@ class TestGenerateLabelAsync:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        # fail-soft: does not raise
+        # A trusted provider transport failure leaves this agent eligible for retry.
         await generate_label_async(
             tid,
             "p",

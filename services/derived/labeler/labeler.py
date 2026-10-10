@@ -16,6 +16,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks
+from base.lm.errors import is_retryable_provider_error, normalize_provider_transport_error
 from base.lm.factory import build_chat_model
 from services.derived.labeler.config import LabelerConfig
 
@@ -160,89 +161,92 @@ async def generate_label_async(
 ) -> bool | None:
     """Generate a label via the LLM, CAS-write to DB, publish the event.
 
-    Returns True when a label was written; False when generation failed
-    (LLM error / empty result) — the caller records failure-backoff;
-    None when the write was skipped because a non-empty label already
-    exists (user-edited or raced — not an error; an empty-string label is
-    treated as unset and replaced).
+    Returns True when a label was written; False for a trusted transient
+    provider-call failure or an empty/rejected label — the caller records backoff;
+    None when CAS skipped a user-owned label or one already set by another
+    writer. An empty string is treated as unset only when it is not user-owned.
 
-    Does not propagate exceptions from the LLM layer (audit round 2, P1:
-    the daemon's backoff used to key on exceptions this function never
-    raises, making the backoff dead code — the daemon now keys on the
-    return value instead)."""
+    Unknown and permanent provider failures propagate unchanged, as do model
+    construction, usage, parsing and DB errors. Only the invocation boundary
+    normalizes raw HTTP transport failures for the shared retry classification.
+    A committed label is not rolled back or selected again if its best-effort
+    live notification fails. Cancellation always propagates."""
 
+    # thinking is both slow and expensive on the label path, and it
+    # turns response.content into a list-of-blocks, adding consumer
+    # parsing complexity (PR #69 hit a thinking block signature
+    # leaking into the label). Disable at the source so the consumer
+    # typically only needs to handle str content.
+    llm = build_chat_model(
+        config.labeler_model,
+        thinking={"type": "disabled"},
+        catalog=catalog,
+        llm_override=llm_override,
+        overrides=overrides,
+    )
+    messages = [
+        SystemMessage(content=_system_prompt(config.labeler_max_chars)),
+        HumanMessage(content=f"<user_request>{prompt}</user_request>"),
+    ]
     try:
-        # thinking is both slow and expensive on the label path, and it
-        # turns response.content into a list-of-blocks, adding consumer
-        # parsing complexity (PR #69 hit a thinking block signature
-        # leaking into the label). Disable at the source so the consumer
-        # typically only needs to handle str content.
-        llm = build_chat_model(
-            config.labeler_model,
-            thinking={"type": "disabled"},
-            catalog=catalog,
-            llm_override=llm_override,
-            overrides=overrides,
-        )
-        response = await llm.ainvoke(
-            [
-                SystemMessage(content=_system_prompt(config.labeler_max_chars)),
-                HumanMessage(content=f"<user_request>{prompt}</user_request>"),
-            ]
-        )
-        from base.lm.usage import log_usage_from_message
-
-        log_usage_from_message(
-            response,
-            catalog=catalog,
-            model=config.labeler_model,
-            usage_kind="batch",
-            for_agent_id=agent_id,
-        )
-        # Anthropic format: content may be a list (thinking/text blocks)
-        # or a string. thinking blocks carry a signature field — do not
-        # str()-dump the entire blob into label; only concatenate text
-        # blocks.
-        content = message_content(response)
-        if isinstance(content, str):
-            raw = content
-        elif isinstance(content, list):
-            text_parts = [
-                block.get("text", "")
-                for block in content_blocks(content)
-                if isinstance(block, dict) and block.get("type") == "text"
-            ]
-            raw = " ".join(text_parts)
-        else:
-            raw = str(content)
-        label = _normalize(raw, config.labeler_max_chars)
-        if not label:
-            logger.error(
-                "label generate produced empty string for agent {agent_id} (raw={raw!r})",
-                event="label_generate_empty",
-                agent_id=agent_id,
-                raw=raw,
-            )
-            return False
-        reason = _rejection_reason(label, config.labeler_max_chars)
-        if reason:
-            # Not a label — a failed generation. Returning False hands it to the
-            # daemon's existing backoff-and-retry path instead of writing the
-            # model's answer into a user-facing field (issue #178).
-            logger.error(
-                "label generate rejected for agent {agent_id} ({reason}): {label!r}",
-                event="label_generate_rejected",
-                agent_id=agent_id,
-                reason=reason,
-                label=label,
-            )
-            return False
+        response = await llm.ainvoke(messages)
     except Exception as exc:
-        logger.error(
-            "label generate failed for agent {agent_id}: {err}",
+        provider_error = normalize_provider_transport_error(exc)
+        if not is_retryable_provider_error(provider_error):
+            raise
+        logger.opt(exception=True).warning(
+            "label provider call failed for agent {agent_id}: {err}",
             event="label_generate_failed",
             agent_id=agent_id,
             err=repr(exc),
+        )
+        return False
+
+    from base.lm.usage import log_usage_from_message
+
+    log_usage_from_message(
+        response,
+        catalog=catalog,
+        model=config.labeler_model,
+        usage_kind="batch",
+        for_agent_id=agent_id,
+    )
+    # Anthropic format: content may be a list (thinking/text blocks)
+    # or a string. thinking blocks carry a signature field — do not
+    # str()-dump the entire blob into label; only concatenate text
+    # blocks.
+    content = message_content(response)
+    if isinstance(content, str):
+        raw = content
+    elif isinstance(content, list):
+        text_parts = [
+            block.get("text", "")
+            for block in content_blocks(content)
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        raw = " ".join(text_parts)
+    else:
+        raw = str(content)
+    label = _normalize(raw, config.labeler_max_chars)
+    if not label:
+        logger.error(
+            "label generate produced empty string for agent {agent_id} (raw={raw!r})",
+            event="label_generate_empty",
+            agent_id=agent_id,
+            raw=raw,
+        )
+        return False
+    reason = _rejection_reason(label, config.labeler_max_chars)
+    if reason:
+        # Not a label — a failed generation. Returning False hands it to the
+        # daemon's existing backoff-and-retry path instead of writing the
+        # model's answer into a user-facing field (issue #178).
+        logger.error(
+            "label generate rejected for agent {agent_id} ({reason}): {label!r}",
+            event="label_generate_rejected",
+            agent_id=agent_id,
+            reason=reason,
+            label=label,
         )
         return False
 
