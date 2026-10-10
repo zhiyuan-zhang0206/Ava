@@ -16,7 +16,7 @@
 #
 # CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
 # diff through base/deploy/git/repo_change.py, and suites skip when their side is untouched:
-# docs-only skips both test suites; structure still checks all change classes.
+# Documentation without runtime readers skips both suites; structure still checks all classes.
 # Frontend-only skips the backend suite,
 # backend-only skips the frontend suite. e2e runs whenever EITHER side changed
 # (it is the integration net). Draft PRs skip CI entirely until
@@ -31,8 +31,8 @@
 # Flaky-marked backend tests run in their own serial job; the parallel shards
 # exclude them with `-m "not flaky"`, mirroring the frontend flaky isolation.
 #
-# TEST SELECTION (TEST_SELECTION_MODE, default enforce): when the direct
-# import selector returns SELECTED for a real PR, backend-selected runs that
+# TEST SELECTION (TEST_SELECTION_MODE, default enforce): when the runtime-impact
+# selector returns SELECTED for a real PR, backend-selected runs that
 # subset as the backend pytest gate and backend-shard (the 16-way fan-out) is
 # skipped. Every other decision — FULL, SKIP, selector failure — keeps the
 # full fan-out, and Trunk merge-tree branches (trunk-merge/*, trunk-temp/*)
@@ -130,7 +130,8 @@ jobs:
             echo "backend=true"  >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > /tmp/changed.txt
+          git merge-base "$BASE_SHA" HEAD > /tmp/classify-base.txt
+          git diff --name-only "$(cat /tmp/classify-base.txt)"...HEAD > /tmp/changed.txt
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import os
           import sys
@@ -138,11 +139,17 @@ jobs:
 
           sys.path.insert(0, ".")
           from base.deploy.git.repo_change import classify_change
+          from scripts.ci.test_selector import documentation_runtime_tests
 
           paths = Path("/tmp/changed.txt").read_text().splitlines()
           frontend, backend = classify_change(paths)
           if os.environ["HEAD_REF"].startswith(("trunk-merge/", "trunk-temp/")):
               backend = True
+          elif not backend:
+              backend = bool(documentation_runtime_tests(
+                  paths, repo_root=Path.cwd(),
+                  base_ref=Path("/tmp/classify-base.txt").read_text().strip(),
+              ))
           print(f"frontend={str(frontend).lower()}")
           print(f"backend={str(backend).lower()}")
           EOF
@@ -1539,7 +1546,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: [classify, test-select, backend-static, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
-    if: ${{ !cancelled() && needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success') }}
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success') }}
     env:
       # Every coverage-data file the combine expects: all backend-shard matrix
       # groups plus the serial and static buckets. tests/scripts/test_ci_artifact_policy.py
@@ -1558,6 +1565,7 @@ jobs:
           ok=true
           fail() { echo "::error::$1"; ok=false; }
           check() { if [ "$2" != "success" ]; then fail "$1: $2"; fi; }
+          check classify "${{ needs.classify.result }}"
           check backend-structure "${{ needs.backend-structure.result }}"
           if [ "${{ needs.classify.outputs.backend }}" != "true" ]; then
             if [ "$ok" = "false" ]; then exit 1; fi

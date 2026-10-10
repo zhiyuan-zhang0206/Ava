@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import cast
 
 from scripts.structure.imports.facts import FactKind, Unknown, collect
-from scripts.structure.imports.fixture_scopes import discover_scopes
+from scripts.structure.imports.fixture_scopes import declarations
 from scripts.structure.placement import CODE_TOPS, ModuleIndex
 
 _TOPS = tuple(dict.fromkeys((*CODE_TOPS, "tests")))
@@ -71,8 +71,13 @@ def _scope_tests(scope: str, tests: frozenset[str]) -> set[str]:
     return {test for test in tests if test == scope or test.startswith(f"{scope}/")}
 
 
-def _fixture_edges(root: Path, tests: frozenset[str], index: ModuleIndex) -> dict[str, set[str]]:
-    """Each test loads its conftests and the declared path-scoped fixture modules."""
+def _fixture_edges(
+    root: Path,
+    tests: frozenset[str],
+    index: ModuleIndex,
+    incomplete: dict[str, tuple[Unknown, ...]],
+) -> dict[str, set[str]]:
+    """Each test depends on conftests, fixture modules and their declaration inputs."""
     edges: dict[str, set[str]] = {test: set() for test in tests}
     for test in tests:
         edges[test].update(module_files(test.removesuffix(".py").replace("/", "."), index))
@@ -80,9 +85,23 @@ def _fixture_edges(root: Path, tests: frozenset[str], index: ModuleIndex) -> dic
             rel = (parent / "conftest.py").as_posix()
             if (root / rel).is_file():
                 edges[test].add(rel)
-    for module, scope in discover_scopes(root).items():
-        files = module_files(module, index)
-        for path in scope.paths:
+    for declaration in declarations(root):
+        files = module_files(declaration.module, index) | {declaration.source}
+        if (
+            declaration.module.split(".", maxsplit=1)[0] in _TOPS
+            and index.kind(declaration.module) is None
+        ):
+            incomplete[declaration.source] = (
+                *incomplete.get(declaration.source, ()),
+                Unknown(
+                    path=declaration.source,
+                    line=0,
+                    expression=declaration.module,
+                    reason="Declared first-party fixture module is missing",
+                    kind=FactKind.IMPORT,
+                ),
+            )
+        for path in declaration.paths:
             for test in _scope_tests(path, tests):
                 edges[test].update(files)
     return edges
@@ -115,8 +134,8 @@ def plugin_modules(tree: ast.Module) -> tuple[str, ...]:
 def build_impact(root: Path, tests: frozenset[str]) -> Impact:
     """Follow every runtime import/resource fact through source, helpers and fixtures."""
     index = ModuleIndex(root)
-    edges = _fixture_edges(root, tests, index)
     incomplete: dict[str, tuple[Unknown, ...]] = {}
+    edges = _fixture_edges(root, tests, index, incomplete)
     for file in _python_files(root):
         rel = file.relative_to(root).as_posix()
         tree = ast.parse(file.read_text(encoding="utf-8"), filename=rel)
