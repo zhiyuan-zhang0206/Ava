@@ -9,7 +9,6 @@ import hashlib
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -38,6 +37,7 @@ from base.agents.incarnation.resources import (
     register_exec,
 )
 from base.db import Database
+from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -171,13 +171,57 @@ class _OwnedRun:
         self.cancelled = False
         self.settled = False
         self.attached = False
+        self._tasks: set[asyncio.Task[Any]] = set()
+        self._errors: list[BaseException] = []
         self.registration: asyncio.Task[None] | None = None
         self.completion: asyncio.Task[OwnerClosed] | None = None
-        # Installed by `run_owned`, which alone spawns the retained completion task.
-        self.attached_completion: Callable[[], asyncio.Task[OwnerClosed]] = _unbound_completion
         self.bound = (
             time.monotonic() + max(0, (deadline - datetime.now(UTC)).total_seconds()) + KILL_GRACE_S
         )
+
+    def _register(self, task: asyncio.Task[Any]) -> None:
+        self._tasks.add(task)
+        task.add_done_callback(self._completed)
+
+    def _completed(self, task: asyncio.Task[Any]) -> None:
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                self._errors.append(error)
+                logger.opt(exception=error).error(
+                    "managed exec resource task failed: {name}", name=task.get_name()
+                )
+
+    def _raise_failure(self) -> None:
+        if self._errors:
+            raise self._errors[0]
+
+    async def stop(self, timeout: float) -> tuple[asyncio.Task[Any], ...]:
+        """EOF requests native closure; unfinished registration and receipt tasks stay owned."""
+        self.close_stdin()
+        if self._tasks:
+            await asyncio.wait(self._tasks, timeout=timeout)
+        self._raise_failure()
+        return tuple(task for task in self._tasks if not task.done())
+
+    def start_registration(self, ready: OwnerReady) -> asyncio.Task[None]:
+        if self.registration is not None:
+            raise RuntimeError("managed exec registration has already started")
+        self.registration = asyncio.create_task(
+            asyncio.to_thread(_register_attached, self.db, self.context, ready),
+            name=f"exec-owner-register-{self.request_id}",
+        )
+        self._register(self.registration)
+        return self.registration
+
+    def attached_completion(self) -> asyncio.Task[OwnerClosed]:
+        """Keep the same receipt task across cancellation and commit boundaries."""
+        if self.completion is None:
+            self.completion = asyncio.create_task(
+                self.settle_attached_owner(), name=f"exec-owner-complete-{self.request_id}"
+            )
+            self._register(self.completion)
+        return self.completion
 
     def _send(self, action: Literal["permit", "cancel"]) -> None:
         proc = self.proc
@@ -230,14 +274,15 @@ class _OwnedRun:
             self.scope.complete(self.request, ready)
         return receipt
 
-    @staticmethod
-    async def finish_despite_cancellation(task: asyncio.Task[Any]) -> Any:
+    async def finish_despite_cancellation(self, task: asyncio.Task[Any]) -> Any:
         """Wait for one retained owner task even if cancellation repeats."""
-        while not task.done():
+        while not task.done() and time.monotonic() < self.bound:
             try:
-                await asyncio.shield(task)
+                await asyncio.wait({task}, timeout=max(0, self.bound - time.monotonic()))
             except asyncio.CancelledError:
                 continue
+        if not task.done():
+            raise TimeoutError(f"managed exec task remains unfinished: {task.get_name()}")
         return task.result()
 
     def launch(
@@ -246,6 +291,8 @@ class _OwnedRun:
         """Spawn the isolated owner; returns it with its launcher identity."""
         from ._subprocess import _build_child_env
 
+        if self.proc is not None:
+            raise RuntimeError("managed exec owner has already launched")
         env = _build_child_env(
             self.agent_id,
             self.request,
@@ -411,7 +458,10 @@ class _OwnedRun:
         """Whether an attached owner is still unsettled while a hosted scope can retain it."""
         return not (
             self.settled
-            or not self.attached
+            or (
+                not self.attached
+                and not (self.registration is not None and not self.registration.done())
+            )
             or self.proc is None
             or self.ready is None
             or self.reader is None
@@ -421,14 +471,25 @@ class _OwnedRun:
     async def finish_owner(self) -> None:
         # Preserve the original task's strong completion ownership. Host
         # cancellation does not mean the independent owner already closed.
+        if self.registration is not None and not self.attached:
+            try:
+                await asyncio.shield(self.registration)
+            except ResourceEvidenceError:
+                await self.settle_unpermitted_owner()
+                if self.scope is not None:
+                    self.scope.complete(self.request, None)
+                return
+            self.attached = True
+            if (
+                self.scope is not None
+                and self.request in self.scope.unresolved
+                and self.scope.unresolved[self.request] is None
+            ):
+                self.scope.unresolved[self.request] = self.ready
         await asyncio.shield(self.attached_completion())
 
     def crashed(self, label: str, exc: Exception) -> tuple[_ExecCrashed, None]:
         return _ExecCrashed(output=f"{label}: {exc}\n{self.stream.getvalue()}", exc=exc), None
-
-
-def _unbound_completion() -> asyncio.Task[OwnerClosed]:
-    raise RuntimeError("the completion task is created by run_owned")
 
 
 async def run_owned(
@@ -460,15 +521,7 @@ async def run_owned(
         exec_dir=exec_dir,
     )
 
-    def attached_completion() -> asyncio.Task[OwnerClosed]:
-        """Keep one completion task alive across cancellation/commit boundaries."""
-        if owned.completion is None:
-            owned.completion = asyncio.create_task(
-                owned.settle_attached_owner(), name=f"exec-owner-complete-{owned.request_id}"
-            )
-        return owned.completion
-
-    owned.attached_completion = attached_completion
+    primary: BaseException | None = None
     try:
         proc, launcher = owned.launch(config_overlay, birth_config)
         owned.reader = ExecOutputPipe(proc, owned.stream)
@@ -476,25 +529,33 @@ async def run_owned(
         while proc.poll() is None:
             if owned.ready_pending():
                 ready = owned.read_ready(launcher)
-                owned.registration = asyncio.create_task(
-                    asyncio.to_thread(_register_attached, owned.db, owned.context, ready),
-                    name=f"exec-owner-register-{owned.request_id}",
-                )
-                await owned.finish_attach(owned.registration, ready)
+                await owned.finish_attach(owned.start_registration(ready), ready)
             await owned.tick()
         return await owned.collect(proc)
     except asyncio.CancelledError as original:
+        primary = original
         await owned.on_cancelled(original)
         raise
     except ResourceEvidenceError as exc:
+        primary = exc
         await owned.on_refused(exc)
         return owned.crashed("managed exec refused", exc)
     except Exception as exc:
+        primary = exc
         return owned.crashed("managed exec remains unresolved", exc)
     finally:
-        owned.close_stdin()
-        if owned.needs_hand_off():
-            assert owned.scope is not None  # noqa: S101
-            owned.scope.require_service().complete_later(
-                owned.scope, owned.finish_owner(), name=f"exec-owner-close-{owned.request_id}"
-            )
+        try:
+            await owned.stop(max(0, owned.bound - time.monotonic()))
+        except BaseException as cleanup:
+            if primary is None:
+                raise
+            if cleanup is not primary:
+                primary.add_note(
+                    f"managed exec cleanup failed: {type(cleanup).__name__}: {cleanup}"
+                )
+        finally:
+            if owned.needs_hand_off():
+                assert owned.scope is not None  # noqa: S101
+                owned.scope.require_service().complete_later(
+                    owned.scope, owned.finish_owner(), name=f"exec-owner-close-{owned.request_id}"
+                )

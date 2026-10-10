@@ -23,6 +23,7 @@ from ._output_pipe import ExecOutputPipe
 _READER_JOIN_TIMEOUT_S = 5.0
 _EMERGENCY_SETTLE_TIMEOUT_S = 5.0
 _ROOT_EXIT_POLL_S = 0.05
+_RESOURCE_SETTLE_TIMEOUT_S = 3 * _EMERGENCY_SETTLE_TIMEOUT_S
 
 
 TeardownStage = Literal["domain_close", "root_exit", "reap", "reader_join"]
@@ -49,8 +50,24 @@ class ExecTeardownError(RuntimeError):
 class DomainCloseOwner:
     """Sole closer: non-reaping root-exit observation or hard stop triggers it."""
 
-    def __init__(self, domain: ExecProcessDomain, root_exit_task: asyncio.Task[None]) -> None:
+    def __init__(
+        self, domain: ExecProcessDomain, root_exit_task: asyncio.Task[None] | None = None
+    ) -> None:
+        self._tasks: set[asyncio.Task[Any]] = set()
+        self._errors: list[BaseException] = []
+        self.reap_task: asyncio.Task[int] | None = None
+        self.reader_join_task: asyncio.Task[None] | None = None
+        self.teardown_task: asyncio.Task[tuple[TeardownFailure, ...]] | None = None
+        self._reader: ExecOutputPipe | None = None
         self._domain = domain
+        if root_exit_task is None:
+            root_exit_task = asyncio.create_task(
+                observe_root_exit(domain.proc), name=f"exec-root-exit-{domain.proc.pid}"
+            )
+            self._register(root_exit_task)
+        else:
+            self._register(root_exit_task)
+        self.root_exit_task = root_exit_task
         self._close_lock = threading.Lock()
         self._closed = False
         # A future, not an Event: `asyncio.wait` races it against the root exit directly.
@@ -59,6 +76,107 @@ class DomainCloseOwner:
             self._close_after_exit_or_request(root_exit_task),
             name=f"exec-domain-close-{domain.proc.pid}",
         )
+        self._register(self.task)
+
+    def _register(self, task: asyncio.Task[Any]) -> None:
+        if task not in self._tasks:
+            self._tasks.add(task)
+            task.add_done_callback(self._completed)
+
+    def _completed(self, task: asyncio.Task[Any]) -> None:
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                self._errors.append(error)
+                if task is self.task and not self.root_exit_task.done():
+                    self.root_exit_task.cancel()
+                logger.opt(exception=error).error(
+                    "exec resource task failed: {name}", name=task.get_name()
+                )
+
+    def _raise_failure(self) -> None:
+        if self._errors:
+            raise self._errors[0]
+
+    async def stop(
+        self, timeout: float, *, request_stop: bool = True
+    ) -> tuple[asyncio.Task[Any], ...]:
+        """Request native closure; retain unfinished tasks without cancelling native work."""
+        if request_stop:
+            self.request()
+        pending = {task for task in self._tasks if task is not asyncio.current_task()}
+        await asyncio.wait(pending, timeout=timeout)
+        self._raise_failure()
+        return self.unfinished
+
+    async def finish_later(self) -> None:
+        """The actual service keeps this same owner until every stage finishes."""
+        await asyncio.wait(self._tasks)
+        self._raise_failure()
+        if any(task.cancelled() for task in self._tasks):
+            raise RuntimeError("exec resource task was cancelled before settlement")
+
+    @property
+    def unfinished(self) -> tuple[asyncio.Task[Any], ...]:
+        return tuple(task for task in self._tasks if not task.done())
+
+    def start_reap(self) -> asyncio.Task[int]:
+        if self.reap_task is None:
+            self.reap_task = asyncio.create_task(
+                self._reap_after_close(), name=f"exec-reap-{self.pid}"
+            )
+            self._register(self.reap_task)
+        return self.reap_task
+
+    def _bind_reap(self, task: asyncio.Task[int]) -> None:
+        if self.reap_task is None:
+            self.reap_task = task
+        elif self.reap_task is not task:
+            raise RuntimeError("exec reap belongs to another resource owner")
+        self._register(task)
+
+    async def _reap_after_close(self) -> int:
+        await self.wait()
+        return await asyncio.to_thread(self.reap_now, _EMERGENCY_SETTLE_TIMEOUT_S)
+
+    def start_reader_join(
+        self, reap_task: asyncio.Task[int], reader: ExecOutputPipe
+    ) -> asyncio.Task[None]:
+        self._bind_reap(reap_task)
+        if self.reader_join_task is not None:
+            if reader is not self._reader:
+                raise RuntimeError("exec reader join belongs to another output pipe")
+            return self.reader_join_task
+        self._reader = reader
+        self.reader_join_task = asyncio.create_task(
+            self._join_after_reap(reap_task, reader), name=f"exec-reader-join-{self.pid}"
+        )
+        self._register(self.reader_join_task)
+        return self.reader_join_task
+
+    async def _join_after_reap(self, reap_task: asyncio.Task[int], reader: ExecOutputPipe) -> None:
+        await asyncio.wait({reap_task})
+        await reader.finish(_READER_JOIN_TIMEOUT_S)
+        if not reader.closed:
+            raise RuntimeError(
+                f"exec reader for pid {self.pid} remained alive after its process "
+                f"domain closed and {_READER_JOIN_TIMEOUT_S}s join elapsed"
+            )
+
+    def start_teardown(
+        self, reap_task: asyncio.Task[int], reader_join_task: asyncio.Task[None] | None
+    ) -> asyncio.Task[tuple[TeardownFailure, ...]]:
+        self._bind_reap(reap_task)
+        if self.teardown_task is not None:
+            return self.teardown_task
+        self.teardown_task = asyncio.create_task(
+            settle_resources(
+                self.root_exit_task, reap_task, self, reader_join_task, request_stop=True
+            ),
+            name=f"exec-teardown-{self.pid}",
+        )
+        self._register(self.teardown_task)
+        return self.teardown_task
 
     def request(self) -> None:
         if not self._requested.done():
@@ -109,56 +227,35 @@ def signal_child(proc: subprocess.Popen[bytes], sig: int, domain_close: DomainCl
     domain_close.signal_now(sig)
 
 
-def start_root_exit_observer(proc: subprocess.Popen[bytes]) -> asyncio.Task[None]:
+async def observe_root_exit(proc: subprocess.Popen[bytes]) -> None:
     """Observe root exit without reaping/releasing its POSIX pid or pgid.
 
     A gone POSIX process (``NoSuchProcess``) counts as exited.
     """
     identity = psutil.Process(proc.pid)
 
-    async def _observe() -> None:
-        while True:
-            try:
-                status = identity.status()
-            except psutil.NoSuchProcess:
-                return
-            if status in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}:
-                return
-            await asyncio.sleep(_ROOT_EXIT_POLL_S)
-
-    # A failed close must be able to stop observation without leaving a default
-    # executor thread waiting forever on the deliberately retained live child.
-    return asyncio.create_task(_observe(), name=f"exec-root-exit-{proc.pid}")
+    while True:
+        try:
+            status = identity.status()
+        except psutil.NoSuchProcess:
+            return
+        if status in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}:
+            return
+        await asyncio.sleep(_ROOT_EXIT_POLL_S)
 
 
 def start_reap(proc: subprocess.Popen[bytes], domain_close: DomainCloseOwner) -> asyncio.Task[int]:
-    """Run the sole ``Popen.wait`` only after the process domain was closed."""
-
-    async def _reap_after_domain_close() -> int:
-        # Failed closure must retain the direct leader and its group number.
-        await domain_close.wait()
-        return await asyncio.to_thread(domain_close.reap_now, _EMERGENCY_SETTLE_TIMEOUT_S)
-
-    return asyncio.create_task(_reap_after_domain_close(), name=f"exec-reap-{proc.pid}")
+    """The domain owner retains the sole reap task."""
+    if proc is not domain_close._domain.proc:
+        raise RuntimeError("exec reap belongs to another direct owner")
+    return domain_close.start_reap()
 
 
 def start_reader_join(
-    reap_task: asyncio.Task[int], reader: ExecOutputPipe, pid: int
+    reap_task: asyncio.Task[int], reader: ExecOutputPipe, domain_close: DomainCloseOwner
 ) -> asyncio.Task[None]:
-    """Pump one bounded output EOF tail after the root's sole reap attempt."""
-
-    async def _join_after_reap() -> None:
-        # Wait for the reap to settle without reading its result: `settle_resources` reports
-        # a reap failure, and the output tail is still pumped once.
-        await asyncio.wait({reap_task})
-        await reader.finish(_READER_JOIN_TIMEOUT_S)
-        if not reader.closed:
-            raise RuntimeError(
-                f"exec reader for pid {pid} remained alive after its process "
-                f"domain closed and {_READER_JOIN_TIMEOUT_S}s join elapsed"
-            )
-
-    return asyncio.create_task(_join_after_reap(), name=f"exec-reader-join-{pid}")
+    """The domain owner retains the bounded output tail task."""
+    return domain_close.start_reader_join(reap_task, reader)
 
 
 async def wait_with_grace(
@@ -200,11 +297,15 @@ async def settle_resources(
     Failed closure stops exit observation and blocks reap; the bounded output
     tail still runs. The retained child is unresolved, never declared exited.
     """
-    if request_stop:
-        domain_close.request()
-    close_verdict = await asyncio.gather(asyncio.shield(domain_close.task), return_exceptions=True)
-    if isinstance(close_verdict[0], BaseException) and not root_exit_task.done():
-        root_exit_task.cancel()
+    domain_close._bind_reap(reap_task)
+    if reader_join_task is not None:
+        domain_close._register(reader_join_task)
+    try:
+        await domain_close.stop(_RESOURCE_SETTLE_TIMEOUT_S, request_stop=request_stop)
+    except Exception as error:
+        logger.opt(exception=error).warning(
+            "exec stop failure retained in the complete teardown receipt"
+        )
     stages: list[tuple[TeardownStage, asyncio.Future[Any]]] = [
         ("domain_close", domain_close.task),
         ("root_exit", root_exit_task),
@@ -212,15 +313,18 @@ async def settle_resources(
     ]
     if reader_join_task is not None:
         stages.append(("reader_join", reader_join_task))
-    results = await asyncio.gather(
-        *(asyncio.shield(task) for _stage, task in stages),
-        return_exceptions=True,
-    )
-    return tuple(
-        TeardownFailure(stage, result)
-        for (stage, _task), result in zip(stages, results, strict=True)
-        if isinstance(result, BaseException)
-    )
+    failures: list[TeardownFailure] = []
+    for stage, task in stages:
+        if not task.done():
+            failures.append(
+                TeardownFailure(stage, TimeoutError(f"exec {stage} remains unfinished"))
+            )
+        else:
+            try:
+                task.result()
+            except BaseException as error:
+                failures.append(TeardownFailure(stage, error))
+    return tuple(failures)
 
 
 def annotate_original_failure(
@@ -239,22 +343,20 @@ async def finish_teardown_despite_cancellation(
 ) -> tuple[TeardownFailure, ...]:
     """Finish the close→reap→output EOF barrier despite repeated cancellation."""
 
-    async def _cleanup() -> tuple[TeardownFailure, ...]:
-        return await settle_resources(
-            root_exit_task,
-            reap_task,
-            domain_close,
-            reader_join_task,
-            request_stop=True,
-        )
-
-    cleanup = asyncio.create_task(_cleanup(), name=f"exec-teardown-{domain_close.pid}")
-    while not cleanup.done():
+    if root_exit_task is not domain_close.root_exit_task:
+        raise RuntimeError("exec teardown belongs to another root observer")
+    cleanup = domain_close.start_teardown(reap_task, reader_join_task)
+    deadline = asyncio.get_running_loop().time() + _RESOURCE_SETTLE_TIMEOUT_S
+    while not cleanup.done() and asyncio.get_running_loop().time() < deadline:
         try:
-            await asyncio.shield(cleanup)
+            await asyncio.wait(
+                {cleanup}, timeout=max(0, deadline - asyncio.get_running_loop().time())
+            )
         except asyncio.CancelledError:
             continue
-    return await cleanup
+    if cleanup.done():
+        return cleanup.result()
+    return (TeardownFailure("domain_close", TimeoutError("exec teardown remains unfinished")),)
 
 
 def settle_cancelled_owners(
@@ -314,11 +416,11 @@ __all__ = [
     "TeardownFailure",
     "annotate_original_failure",
     "finish_teardown_despite_cancellation",
+    "observe_root_exit",
     "settle_cancelled_owners",
     "settle_resources",
     "signal_child",
     "start_reader_join",
     "start_reap",
-    "start_root_exit_observer",
     "wait_with_grace",
 ]

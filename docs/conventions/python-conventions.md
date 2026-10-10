@@ -170,8 +170,12 @@ replace the Task or immediately remove it. The callback reads that Task's
 exception, retains the original error in an owner field/list, and passes it to an
 observer, directly or through one synchronous same-class helper. The owner's
 async teardown awaits `asyncio.wait` on the same registry or its direct snapshot,
-with an explicit non-None timeout; actual synchronous helper edges cancel work,
-raise from the same error receipt, and provide unfinished Task identities/names
+with an explicit non-None timeout; actual synchronous helper edges cancel work
+or request stop through an owner-created Event/Future consumed by its registered
+worker. An actual retained Popen also permits EOF on its stdin when the same
+worker awaits a bounded wait on that process. These are structural request-stop
+edges, not proof of the native EOF protocol or deadline. Teardown raises from
+the same error receipt and provides unfinished Task identities/names
 from that registry. Scalar task slots, async registration/callbacks, deeper helper chains
 and unsupported aliases remain findings. TaskGroups remain available for work
 whose lifetime and failure impact fit their scope; changing a raw spawner's

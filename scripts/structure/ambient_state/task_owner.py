@@ -394,6 +394,215 @@ def _not_done(condition: ast.expr, task: str) -> bool:
     )
 
 
+def _request_stop(
+    helpers: list[Function], methods: dict[str, Function], registry: str, module: Module
+) -> bool:
+    """A real owner-created signal is set and read by its registered worker."""
+    signals = _signal_fields(methods, module)
+    requested = _requested_signals(helpers, signals)
+    workers = _registered_workers(methods, registry)
+    native = _native_stop(helpers, methods, workers, module)
+    return native or any(
+        _awaits_signal(methods[name], requested, module) for name in workers if name in methods
+    )
+
+
+def _signal_fields(methods: dict[str, Function], module: Module) -> set[str]:
+    init = methods.get("__init__")
+    if init is None:
+        return set()
+    return {
+        field
+        for target, value in _assignments(init)
+        if (field := _field(target)) is not None
+        and _owner_signal(value, module)
+        and not _replaced(field, methods)
+    }
+
+
+def _owner_signal(value: ast.expr, module: Module) -> bool:
+    if not isinstance(value, ast.Call):
+        return False
+    if module.full_name(value.func) == "asyncio.Event":
+        return True
+    return (
+        isinstance(value.func, ast.Attribute)
+        and value.func.attr == "create_future"
+        and isinstance(value.func.value, ast.Call)
+        and module.full_name(value.func.value.func) == "asyncio.get_running_loop"
+    )
+
+
+def _requested_signals(helpers: list[Function], signals: set[str]) -> set[str]:
+    return {
+        field
+        for helper in helpers
+        for call in _calls(helper)
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr in {"set", "set_result"}
+        and (field := _field(call.func.value)) in signals
+    }
+
+
+def _registered_workers(methods: dict[str, Function], registry: str) -> set[str]:
+    workers: set[str] = set()
+    for method in methods.values():
+        for body in _statements(method):
+            for statement, following in pairwise(body):
+                pair = _spawn_assignment(statement)
+                if pair is not None:
+                    name = _registered_worker(pair, following, methods, registry)
+                    if name is not None:
+                        workers.add(name)
+    return workers
+
+
+def _registered_worker(
+    pair: tuple[str, ast.Call], following: ast.stmt, methods: dict[str, Function], registry: str
+) -> str | None:
+    task, call = pair
+    registration = _registration(following, task, methods)
+    if registration is None or registration[0] != registry or not call.args:
+        return None
+    work = call.args[0]
+    if isinstance(work, ast.Call) and (name := _field(work.func)) is not None:
+        return name.removeprefix("self.")
+    return None
+
+
+def _awaits_signal(worker: Function, requested: set[str], module: Module) -> bool:
+    return any(
+        field in requested
+        for node in nodes(worker)
+        if isinstance(node, ast.Await)
+        for field in _waited_signals(node.value, module)
+    )
+
+
+def _native_stop(
+    helpers: list[Function], methods: dict[str, Function], workers: set[str], module: Module
+) -> bool:
+    """EOF on an actually retained Popen pipe, consumed by the same worker wait.
+
+    The EOF protocol and the native deadline remain runtime obligations. A close
+    call on an unrelated or fabricated handle is insufficient.
+    """
+    native = _retained_processes(methods, module)
+    closed = _closed_processes(helpers, native)
+    return any(
+        _awaits_process(methods[name], closed, module) for name in workers if name in methods
+    )
+
+
+def _retained_processes(methods: dict[str, Function], module: Module) -> set[str]:
+    native: set[str] = set()
+    invalid: set[str] = set()
+    for method in methods.values():
+        sources = _popen_sources(method, module)
+        for target, value in _assignments(method):
+            field = _field(target)
+            if field is None:
+                continue
+            if _name(value) in sources:
+                native.add(field)
+            elif not (
+                method.name == "__init__"
+                and isinstance(value, ast.Constant)
+                and value.value is None
+            ):
+                invalid.add(field)
+    return native - invalid
+
+
+def _popen_sources(method: Function, module: Module) -> set[str]:
+    return {
+        target.id
+        for target, value in _assignments(method)
+        if isinstance(target, ast.Name)
+        and isinstance(value, ast.Call)
+        and module.full_name(value.func) == "subprocess.Popen"
+        and not _rebound(method, target.id, value)
+    }
+
+
+def _process_aliases(method: Function) -> dict[str, str]:
+    aliases = {
+        target.id: field
+        for target, value in _assignments(method)
+        if isinstance(target, ast.Name)
+        and (field := _field(value)) is not None
+        and not _rebound(method, target.id, value)
+    }
+    for target, value in _assignments(method):
+        if isinstance(target, ast.Tuple) and isinstance(value, ast.Tuple):
+            for part, raw in zip(target.elts, value.elts, strict=False):
+                field = _field(raw)
+                if (
+                    isinstance(part, ast.Name)
+                    and field is not None
+                    and not _rebound(method, part.id)
+                ):
+                    aliases[part.id] = field
+    return aliases
+
+
+def _process_receiver(node: ast.expr, aliases: dict[str, str]) -> str | None:
+    return aliases.get(node.id) if isinstance(node, ast.Name) else _field(node)
+
+
+def _closed_processes(helpers: list[Function], native: set[str]) -> set[str]:
+    closed: set[str] = set()
+    for helper in helpers:
+        aliases = _process_aliases(helper)
+        for call in _calls(helper):
+            field = _closed_pipe(call, aliases)
+            if field in native:
+                closed.add(field)
+    return closed
+
+
+def _closed_pipe(call: ast.Call, aliases: dict[str, str]) -> str | None:
+    if not isinstance(call.func, ast.Attribute) or call.func.attr != "close":
+        return None
+    pipe = call.func.value
+    if not isinstance(pipe, ast.Attribute) or pipe.attr != "stdin":
+        return None
+    return _process_receiver(pipe.value, aliases)
+
+
+def _awaits_process(worker: Function, closed: set[str], module: Module) -> bool:
+    aliases = _process_aliases(worker)
+    return any(
+        _waited_process(node.value, aliases, module) in closed
+        for node in nodes(worker)
+        if isinstance(node, ast.Await) and isinstance(node.value, ast.Call)
+    )
+
+
+def _waited_process(call: ast.Call, aliases: dict[str, str], module: Module) -> str | None:
+    if module.full_name(call.func) != "asyncio.to_thread" or len(call.args) < 2:
+        return None
+    wait = call.args[0]
+    if not isinstance(wait, ast.Attribute) or wait.attr != "wait":
+        return None
+    bounded = ast.Call(func=wait, args=[call.args[1]], keywords=[])
+    return _process_receiver(wait.value, aliases) if _bounded_join(bounded) else None
+
+
+def _waited_signals(value: ast.expr, module: Module) -> set[str]:
+    if not isinstance(value, ast.Call):
+        return set()
+    if (
+        isinstance(value.func, ast.Attribute)
+        and value.func.attr == "wait"
+        and (field := _field(value.func.value)) is not None
+    ):
+        return {field}
+    if module.full_name(value.func) == "asyncio.wait" and value.args:
+        return {field for node in nodes(value.args[0]) if (field := _field(node)) is not None}
+    return set()
+
+
 def _teardown(methods: dict[str, Function], registry: str, receipt: str, module: Module) -> bool:
     for method in methods.values():
         if not isinstance(method, ast.AsyncFunctionDef) or not _waited(method, registry, module):
@@ -408,7 +617,8 @@ def _teardown(methods: dict[str, Function], registry: str, receipt: str, module:
         )
         raised = any(_raises(helper, receipt) for helper in helpers)
         unfinished = any(_unfinished(helper, registry) for helper in helpers)
-        if cancelled and raised and unfinished:
+        requested = _request_stop(helpers, methods, registry, module)
+        if (cancelled or requested) and raised and unfinished:
             return True
     return False
 

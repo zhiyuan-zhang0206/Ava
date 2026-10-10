@@ -27,11 +27,11 @@ from agent.graph.exec._process import (
     TeardownFailure,
     annotate_original_failure,
     finish_teardown_despite_cancellation,
+    observe_root_exit,
     settle_cancelled_owners,
     settle_resources,
     start_reader_join,
     start_reap,
-    start_root_exit_observer,
     wait_with_grace,
 )
 from agent.graph.exec._result import _ExecCrashed
@@ -168,7 +168,7 @@ async def test_reader_join_uses_its_own_bound() -> None:
     reader_join_task = start_reader_join(
         reap_task,
         reader,  # type: ignore[arg-type]
-        proc.pid,
+        domain_close,
     )
     await _collect_child(
         proc,  # type: ignore[arg-type]
@@ -195,14 +195,17 @@ async def test_reader_join_fails_loud_when_pipe_never_reaches_eof() -> None:
         closed = False
 
     reap_task = asyncio.create_task(asyncio.sleep(0, result=0))
+    domain = MagicMock(proc=MagicMock(pid=999))
+    owner = DomainCloseOwner(domain, asyncio.create_task(asyncio.sleep(0)))
 
     task = start_reader_join(
         reap_task,
         _Reader(),  # type: ignore[arg-type]
-        999,
+        owner,
     )
     with pytest.raises(RuntimeError, match="remained alive"):
         await task
+    await asyncio.gather(owner.task, owner.root_exit_task)
 
 
 async def test_cleanup_failure_retains_leader_and_still_joins_reader() -> None:
@@ -236,7 +239,7 @@ async def test_cleanup_failure_retains_leader_and_still_joins_reader() -> None:
     reader_join_task = start_reader_join(
         reap_task,
         _Reader(),  # type: ignore[arg-type]
-        _Domain.proc.pid,  # type: ignore[arg-type]
+        domain_close,
     )
 
     failures = await settle_resources(
@@ -306,7 +309,7 @@ async def test_dead_status_is_a_terminal_non_reaping_observation(
 
     monkeypatch.setattr("agent.graph.exec._process.psutil.Process", _identity_for_pid)
 
-    await asyncio.wait_for(start_root_exit_observer(proc), timeout=1.0)
+    await asyncio.wait_for(observe_root_exit(proc), timeout=1.0)
 
     proc.poll.assert_not_called()
 
@@ -322,7 +325,7 @@ async def test_missing_process_is_a_terminal_non_reaping_observation(
         "agent.graph.exec._process.psutil.Process", MagicMock(return_value=identity)
     )
 
-    await asyncio.wait_for(start_root_exit_observer(proc), timeout=1.0)
+    await asyncio.wait_for(observe_root_exit(proc), timeout=1.0)
 
     proc.poll.assert_not_called()
 
@@ -418,11 +421,11 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
         new_session=True,
     )
     assert proc.stdout is not None
-    root_exit_task = start_root_exit_observer(proc)
-    domain_close = DomainCloseOwner(domain, root_exit_task)
+    domain_close = DomainCloseOwner(domain)
+    root_exit_task = domain_close.root_exit_task
     reap_task = start_reap(proc, domain_close)
     reader = ExecOutputPipe(proc, StreamingTextIO(max_chars=1_000_000))
-    reader_join_task = start_reader_join(reap_task, reader, proc.pid)
+    reader_join_task = start_reader_join(reap_task, reader, domain_close)
     try:
         deadline = time.monotonic() + 5.0
         while not descendant_pid_path.exists() and time.monotonic() < deadline:
@@ -475,8 +478,8 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         stderr=subprocess.DEVNULL,
     )
     native = OwnedProcess.capture(psutil.Process(proc.pid))
-    root_exit = start_root_exit_observer(proc)
-    closer = DomainCloseOwner(domain, root_exit)
+    closer = DomainCloseOwner(domain)
+    root_exit = closer.root_exit_task
     reap = start_reap(proc, closer)
     original_signal = os.killpg
 
