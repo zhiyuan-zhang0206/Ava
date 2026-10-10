@@ -24,7 +24,6 @@ without an agent id -> 400) are HTTP errors.
 
 from __future__ import annotations
 
-import importlib
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -35,6 +34,7 @@ from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
 
+from base.packages.declared_inputs import declared_import
 from base.packages.plugins import data_registry
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.logql import validate_logql
@@ -114,8 +114,8 @@ def _load_plugin_metrics() -> list[MetricSpec]:
     declared = [
         data_registry.load_declaration(
             path.parent.name,
-            lambda name=path.parent.name: importlib.import_module(
-                f"ava_builtins.plugins.{name}.metrics"
+            lambda name=path.parent.name: declared_import(
+                f"ava_builtins.plugins.{name}.metrics", within=("ava_builtins.plugins.*.metrics",)
             ),
             (path.parent, data_registry.METRICS_KEY),
         )

@@ -18,7 +18,6 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
@@ -38,6 +37,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
+from base.packages.declared_inputs import declared_path
 from base.sessions.page_session import is_page_label
 from ops.cluster import pause as cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
@@ -127,7 +127,7 @@ def check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
 
     Missing/empty/non-int file -> (False, None). Pidfile present but the process
     is gone -> (False, pid)."""
-    pf = Path(pidfile_path)
+    pf = declared_path(pidfile_path)  # runtime state, never a repository file
     try:
         pid = int(pf.read_text().strip())
     except (FileNotFoundError, ValueError):

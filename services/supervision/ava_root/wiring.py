@@ -23,7 +23,6 @@ Contract (v1, W1.2e):
 from __future__ import annotations
 
 import asyncio
-import importlib
 import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
@@ -31,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast, runtime_checkable
 
+from base.packages.declared_inputs import declared_import
 from services.supervision.ava_root.manifest import UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor
 
@@ -87,7 +87,7 @@ def load_wiring(spec: str | None, context: WiringContext) -> tuple[WiringPartici
         return ()
     module_name, attribute = _split_ref(spec)
     try:
-        module = importlib.import_module(module_name)
+        module = declared_import(module_name, within=("services.supervision.ava_root_glue.glue",))
     except Exception as exc:
         raise WiringError(f"cannot import wiring module {module_name!r}: {exc}") from exc
     try:

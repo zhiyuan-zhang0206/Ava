@@ -254,6 +254,13 @@ def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> N
             )
 
 
+def model_class(name: str) -> type[Any]:
+    """The registered domain settings class ``name``, importing its module on first use."""
+    from importlib import import_module
+
+    return cast("type[Any]", getattr(import_module(MODEL_CLASSES[name]), name))
+
+
 @lru_cache(maxsize=1)
 def _build_registry() -> dict[str, _FieldRef]:
     """Walk the sub-models into a flat name->owner registry, failing fast on an
@@ -262,7 +269,6 @@ def _build_registry() -> dict[str, _FieldRef]:
     `scope` (which drives BOOTSTRAP_FIELDS + write routing) can never load, so
     the drift the lint guarded against is impossible rather than merely flagged.
     """
-    from importlib import import_module
 
     from base.config.base import EnvSettings
 
@@ -272,10 +278,7 @@ def _build_registry() -> dict[str, _FieldRef]:
             # Deferred import (see module docstring): the sub-model classes live
             # under the `base.config` package. Importing them only at build time
             # keeps this registry importable before Settings construction.
-            model = cast(
-                "type[EnvSettings]",
-                getattr(import_module(MODEL_CLASSES[model_name]), model_name),
-            )
+            model = cast("type[EnvSettings]", model_class(model_name))
         else:
             # A test-injected synthetic model class (config_lifecycle tests).
             model = model_name

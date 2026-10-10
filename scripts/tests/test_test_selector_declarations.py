@@ -94,3 +94,23 @@ def test_missing_module_in_an_unbound_declaration_does_not_force_full(tmp_path: 
     result = test_selector.select_tests([_TABLE], repo_root=root)
     assert result.decision == "SELECTED", result.as_json()
     assert not result.diagnostics
+
+
+def test_path_scope_readers_are_modeled_by_their_scoped_edges(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _write(
+        root,
+        "tests/fixtures/path_scopes.py",
+        "import importlib\nfrom pathlib import Path\n"
+        "def load(module, current):\n"
+        "    importlib.import_module(module)\n"
+        "    (Path(current) / 'path_scopes.toml').read_text()\n",
+    )
+    _write(root, "conftest.py", 'pytest_plugins = ["tests.fixtures.path_scopes"]\n')
+    impact = build_impact(root, frozenset(test_selector.collectable_test_paths(root)))
+    # The fixture-module import is modeled by the scoped edges; the table read in
+    # this file is not the declared reader's, so it stays visible.
+    assert [item.reason for item in impact.unknown] == [
+        "Resource read has no proven repository or external path anchor"
+    ]
+    assert impact.tests_by_input[_TABLE] == {_TEST}

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from ava.sdk_surface import skill_sources
 from base.log import logger
+from base.packages.declared_inputs import declared_path
 from base.packages.skills.names import SkillIdentity, display_name, match_key
 from base.paths import skills_dir
 
@@ -581,6 +582,16 @@ class _Namespace(_LazySkillDoc, types.ModuleType):
         return sorted(self._tree)
 
 
+def skill_body_path(skill_dir: str | Path) -> Path:
+    """The ``SKILL.md`` of a resolved skill directory, with its repository domain declared."""
+    # Repository skills ship only from these trees; user and plugin installs live outside
+    # the checkout and pass through unchecked.
+    return declared_path(
+        Path(skill_dir) / "SKILL.md",
+        within=("ava_builtins/**/SKILL.md", ".agents/skills/**/SKILL.md"),
+    )
+
+
 def _consume_skill_body(skill: Skill) -> str:
     """Read one skill's SKILL.md body, record the `skill_invoked` attribution,
     and return the consumed shape — a path line (tilde-shortened) then the raw
@@ -590,7 +601,7 @@ def _consume_skill_body(skill: Skill) -> str:
     from pathlib import Path as _Path
 
     info = skill
-    content = (_Path(info["path"]) / "SKILL.md").read_text(encoding="utf-8")
+    content = skill_body_path(info["path"]).read_text(encoding="utf-8")
     _record_skill_invoked(info)
     home = str(_Path.home())
     short = f"~{info['path'][len(home) :]}" if info["path"].startswith(home + "/") else info["path"]

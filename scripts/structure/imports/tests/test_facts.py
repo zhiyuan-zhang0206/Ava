@@ -526,3 +526,66 @@ def test_external_prefix_does_not_prove_dynamic_path_stays_external(
     assert found.records == ()
     assert len(found.unknown) == 1
     assert found.unknown[0].kind == facts.FactKind.RESOURCE
+
+
+def test_declared_domains_expand_to_checkout_modules_and_files(tmp_path: Path) -> None:
+    root = make_repo(
+        tmp_path,
+        {
+            "base/packages/declared_inputs/__init__.py": "",
+            "ava/plugins/__init__.py": "",
+            "ava/plugins/one/__init__.py": "",
+            "ava/plugins/one/metrics.py": "",
+            "ava/plugins/two/__init__.py": "",
+            "ava/plugins/two/metrics/__init__.py": "",
+            "ava/plugins/two/other.py": "",
+            "base/docs/a.ava.okf.md": "",
+            "base/docs/deep/b.ava.okf.md": "",
+            "base/docs/c.md": "",
+        },
+    )
+    found = evidence(
+        root,
+        "from base.packages.declared_inputs import declared_import, declared_path, declared_spec\n"
+        "def load(name, path):\n"
+        "    declared_import(f'ava.plugins.{name}.metrics', within=('ava.plugins.*.metrics',))\n"
+        "    declared_spec(name, within=('base.net.retry',))\n"
+        "    declared_path(path, within=('base/**/*.ava.okf.md', 'base/net/data.json')).read_text()\n"
+        "    declared_path(path).read_text()\n",
+    )
+    assert found.unknown == ()
+    assert sorted(
+        (fact.kind, fact.target) for fact in found.records if fact.kind != facts.FactKind.IMPORT
+    ) == [
+        (facts.FactKind.DYNAMIC_IMPORT, "ava.plugins.one.metrics"),
+        (facts.FactKind.DYNAMIC_IMPORT, "ava.plugins.two.metrics"),
+        (facts.FactKind.DYNAMIC_IMPORT, "base.net.retry"),
+        (facts.FactKind.RESOURCE, "base/docs/a.ava.okf.md"),
+        (facts.FactKind.RESOURCE, "base/docs/deep/b.ava.okf.md"),
+        (facts.FactKind.RESOURCE, "base/net/data.json"),
+    ]
+
+
+def test_declared_domains_must_be_literal_and_literal_modules_must_exist(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path, {"base/packages/declared_inputs/__init__.py": ""}),
+        "from base.packages.declared_inputs import declared_import\n"
+        "def load(name, domain):\n"
+        "    declared_import(name, within=domain)\n"
+        "    declared_import(name, within=('base.net.missing',))\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.packages.declared_inputs"]
+    assert [gap.reason for gap in found.unknown] == [
+        "base.packages.declared_inputs.declared_import domain is not literal text",
+        "First-party module does not exist: base.net.missing",
+    ]
+
+
+def test_the_declaration_door_does_not_report_its_own_bounded_import(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import importlib\ndef declared_import(module, *, within):\n"
+        "    return importlib.import_module(module)\n",
+        path="base/packages/declared_inputs/__init__.py",
+    )
+    assert found.records == found.unknown == ()

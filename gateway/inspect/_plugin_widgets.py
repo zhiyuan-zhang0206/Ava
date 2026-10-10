@@ -28,7 +28,6 @@ family.
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -38,6 +37,7 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.priority import Priority
+from base.packages.declared_inputs import declared_import
 from base.packages.plugins import data_registry
 from base.packages.plugins.inspector import InspectWidgetSpec
 from gateway.inspect._plugin_faces import enabled_face_files
@@ -68,8 +68,9 @@ def _load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[Inspect
     declared = [
         data_registry.load_declaration(
             module.parent.name,
-            lambda name=module.parent.name: importlib.import_module(
-                f"ava_builtins.plugins.{name}.inspector"
+            lambda name=module.parent.name: declared_import(
+                f"ava_builtins.plugins.{name}.inspector",
+                within=("ava_builtins.plugins.*.inspector",),
             ),
             (module.parent, data_registry.WIDGETS_KEY),
         )

@@ -24,7 +24,12 @@ over, an unmutated literal table bound in the same module. Literal file anchors 
 `with_name`/`with_suffix` siblings; proven literal absolute reads outside the checkout
 (such as `/proc/123/stat` or `os.devnull`) and write-only `open` modes are not repository inputs.
 A fixed external prefix followed by an opaque segment stays unknown: absolute segments
-can reset a joined path, and parent traversal can enter the checkout. Placement
+can reset a joined path, and parent traversal can enter the checkout.
+A runtime-chosen module or path goes through a
+[declared input door](../../../base/packages/declared_inputs/docs/declared-inputs.ava.okf.md); its
+literal `within` domain expands to the checkout's matching modules or files, and the
+door rejects undeclared repository targets at runtime. The path-scoped fixture readers
+are modeled by their per-scope edges instead. Placement
 subject policies do not prune this runtime impact graph. The selector never imports
 application code or executes test code.
 

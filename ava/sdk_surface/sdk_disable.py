@@ -10,12 +10,13 @@ per-agent `config_overlay`, the eval-isolation boundary) apply additively on top
 disposable exec child applies its agent overlay after the plugin load.
 """
 
-import importlib.util
 import inspect
 import os as _os
 import sys as _sys
 import types as _types
 from typing import Any
+
+from base.packages.declared_inputs import declared_spec
 
 from . import ava_module
 
@@ -142,7 +143,9 @@ def _refuse_framework_module(entry: str) -> None:
         return  # agent-facing, or already disabled by an earlier entry
     bound = getattr(ava_module(), name, None)
     owner = bound.__name__ if inspect.ismodule(bound) else f"ava.{name}"
-    if importlib.util.find_spec(owner) is not None:
+    # An already-bound module is loaded, so its spec exists; otherwise probe the
+    # package for an `ava.<name>` submodule.
+    if inspect.ismodule(bound) or declared_spec(owner, within=("ava.*",)) is not None:
         raise ValueError(
             f"AVA_SDK_DISABLE entry {entry!r} names the framework module {owner}, "
             "which is not part of the agent-facing SDK (`ava.__all_for_ava__`); "

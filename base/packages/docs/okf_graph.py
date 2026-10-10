@@ -23,6 +23,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from base.packages.declared_inputs import declared_path
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 from base.packages.docs.notes import normalize_tags
 
@@ -239,7 +240,7 @@ def build_graph_data(
 
     for path in paths:
         filepath = str(Path(bundle_dir) / path)
-        with Path(filepath).open(encoding="utf-8") as fh:
+        with declared_path(filepath, within=("**/*.ava.okf.md",)).open(encoding="utf-8") as fh:
             text = fh.read()
 
         fm, body = parse_frontmatter(text)

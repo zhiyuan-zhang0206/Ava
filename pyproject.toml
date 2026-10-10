@@ -1093,6 +1093,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/packages/declared_inputs/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/packages/docs/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

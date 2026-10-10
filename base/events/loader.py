@@ -4,12 +4,12 @@
 domain is a new file there with nothing else to register.
 """
 
-import importlib
 import pkgutil
 from collections.abc import Iterable, Mapping
 
 from base.events import declarations
 from base.events.vocabulary import EventSpec
+from base.packages.declared_inputs import declared_import
 
 
 def merge_events(modules: Iterable[tuple[str, Mapping[str, EventSpec]]]) -> dict[str, EventSpec]:
@@ -31,5 +31,11 @@ def load_events() -> dict[str, EventSpec]:
     """Every declared event, merged in module-name order."""
     names = sorted(info.name for info in pkgutil.iter_modules(declarations.__path__))
     return merge_events(
-        (name, importlib.import_module(f"{declarations.__name__}.{name}").EVENTS) for name in names
+        (
+            name,
+            declared_import(
+                f"{declarations.__name__}.{name}", within=("base.events.declarations.*",)
+            ).EVENTS,
+        )
+        for name in names
     )

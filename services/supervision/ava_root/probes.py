@@ -7,12 +7,12 @@ only the root supervisor owns service mutations.
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
 from base.daemon.health import DaemonProbe
+from base.packages.declared_inputs import declared_import
 
 Probe = Callable[[], DaemonProbe]
 """A total probe: returns a verdict, never raises (the healthcheck contract)."""
@@ -65,7 +65,8 @@ def _resolve_ref(ref: str) -> Probe:
     """
     module_name, attribute = _split_ref(ref)
     try:
-        module = importlib.import_module(module_name)
+        # Shipped units register probe callables; a reference never names a repository module.
+        module = declared_import(module_name, within=())
     except Exception as exc:
         raise ProbeError(f"cannot import probe module {module_name!r}: {exc}") from exc
     try:

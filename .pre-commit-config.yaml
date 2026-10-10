@@ -689,7 +689,7 @@ repos:
         # --all-files pass. The pattern covers the whole package, so a new domain
         # module needs no entry here; CI verifies the recursive source-module
         # closure against it.
-        files: ^(base/events/__init__\.py$|base/events/contract\.py$|base/events/vocabulary\.py$|base/events/loader\.py$|base/events/declarations/|base/events/live/projection\.py$|scripts/codegen/gen_event_registry\.py$|base/events/registry\.md$)
+        files: ^(base/events/__init__\.py$|base/events/contract\.py$|base/events/vocabulary\.py$|base/events/loader\.py$|base/packages/declared_inputs/__init__\.py$|base/events/declarations/|base/events/live/projection\.py$|scripts/codegen/gen_event_registry\.py$|base/events/registry\.md$)
         pass_filenames: false
 
       # base/host/env/config_lite_table.json must stay in sync with the config

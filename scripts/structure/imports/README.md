@@ -98,6 +98,11 @@ Iteration yields a dict's keys and indexing its values, resolved in the table's
 definition scope. Like the one-binding rule, this does not observe writes from other
 modules. Scopes built without a context keep the plain one-binding rules.
 
+`declared.py` expands the literal `within` domain of a `base.packages.declared_inputs` door
+into the checkout's matching modules or files, with the door's own `matches` rule.
+`facts.collect()` records them as dynamic-import or resource facts. A non-literal
+domain stays unknown, and the door's own bounded import is not reported.
+
 `bindings.local_nodes()` preserves lexical depth-first order with an explicit
 iterator stack, so deep expressions do not repeatedly relay each node through
 recursive generators. Nested bodies and definition-time inputs retain the same

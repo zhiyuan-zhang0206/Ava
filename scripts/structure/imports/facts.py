@@ -11,7 +11,15 @@ from pathlib import Path
 
 from scripts.structure import placement_evidence
 
-from . import ModuleSourceLookup, bindings, dependency_evidence, executed, mock_targets, normalize
+from . import (
+    ModuleSourceLookup,
+    bindings,
+    declared,
+    dependency_evidence,
+    executed,
+    mock_targets,
+    normalize,
+)
 
 __all__ = ["Evidence", "Fact", "FactKind", "Unknown", "collect"]
 
@@ -57,6 +65,14 @@ _DYNAMIC_CALLS = frozenset(
         "pytest.importorskip",
     }
 )
+# Runtime-chosen loads whose literal ``within`` domain `declared` expands. The door
+# module's own import of the chosen target is bounded by every caller's declaration.
+_DECLARED = {
+    "base.packages.declared_inputs.declared_import": FactKind.DYNAMIC_IMPORT,
+    "base.packages.declared_inputs.declared_spec": FactKind.DYNAMIC_IMPORT,
+    "base.packages.declared_inputs.declared_path": FactKind.RESOURCE,
+}
+_DECLARATION_DOOR = "base/packages/declared_inputs/__init__.py"
 _PATCH_IMPORTS = frozenset(
     {"unittest.mock.patch", "unittest.mock.patch.multiple", "unittest.mock.patch.dict"}
 )
@@ -151,8 +167,10 @@ class _Collector(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         origin = self.scope.origin(node.func)
-        if origin in _DYNAMIC_CALLS:
+        if origin in _DYNAMIC_CALLS and self.path != _DECLARATION_DOOR:
             self._dynamic(node, origin)
+        if origin in _DECLARED:
+            self._declared(node, origin, _DECLARED[origin])
         if origin in _PATCH_IMPORTS:
             self._patch_import(node, origin)
         if executed.is_launcher(origin):
@@ -188,6 +206,21 @@ class _Collector(ast.NodeVisitor):
             resolved = self._relative_target(node, target) if target.startswith(".") else target
             if resolved:
                 self.module(node, resolved, FactKind.DYNAMIC_IMPORT)
+
+    def _declared(self, node: ast.Call, origin: str, kind: FactKind) -> None:
+        domain = next((keyword.value for keyword in node.keywords if keyword.arg == "within"), None)
+        patterns = () if domain is None else self.scope.literal_items(domain)
+        if patterns is None:
+            self.gap(node, f"{origin} domain is not literal text", kind)
+            return
+        root = self.index.repo_root
+        if kind is FactKind.RESOURCE:
+            self.records.extend(
+                Fact(node.lineno, kind, path, via=origin) for path in declared.files(root, patterns)
+            )
+            return
+        for module in declared.modules(root, patterns):
+            self.module(node, module, kind)
 
     def _patch_import(self, node: ast.Call, origin: str) -> None:
         keyword_name = "in_dict" if origin == "unittest.mock.patch.dict" else "target"

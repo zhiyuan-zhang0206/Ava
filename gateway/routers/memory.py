@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from base.agents import IndexerUnavailable
 from base.config import settings
 from base.db import Database
+from base.packages.declared_inputs import declared_path
 from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
 from base.paths import gateway_memory_dir
 from gateway.agents.eval_guard import deny_isolated_result_read
@@ -567,4 +568,4 @@ def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
             capture_output=True,
             text=True,
         ).stdout.strip()
-        return head, bundle_path.read_bytes()
+        return head, declared_path(bundle_path).read_bytes()

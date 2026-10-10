@@ -70,7 +70,6 @@ entering state guards that metadata is not empty.
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -103,6 +102,7 @@ from base.lm.registry import (
     resolve_available_model,
     resolve_setting,
 )
+from base.packages.declared_inputs import declared_import
 
 
 class _LLMFactory(Protocol):
@@ -288,7 +288,8 @@ def _resolve_override(override: str, model: str, *, agent_id: int | None = None)
             f"(factory_name must be a valid Python identifier)"
         )
     try:
-        module = importlib.import_module(module_path)
+        # Overrides are test seams: the repository modules they may name are e2e fakes.
+        module = declared_import(module_path, within=("tests.e2e.fakes.**",))
     except ImportError as e:
         raise ImportError(
             f"AVA_LLM_OVERRIDE={override!r}: cannot find module {module_path!r} ({e})"

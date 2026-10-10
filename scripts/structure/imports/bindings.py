@@ -385,6 +385,12 @@ class Scope:
             return self._elements(iterated, seen | {node.id}, keys=True)
         return None
 
+    def literal_items(self, node: ast.expr) -> tuple[str, ...] | None:
+        """The strings of a literal tuple, list or set, or of its one unmutated binding."""
+        if self.context is None:
+            return None
+        return self._elements(node, frozenset(), keys=False)
+
     def _container(self, node: ast.expr, seen: frozenset[str]) -> tuple[ast.expr, Scope] | None:
         """The literal a container expression is bound to, unless it may be mutated."""
         if not isinstance(node, ast.Name):

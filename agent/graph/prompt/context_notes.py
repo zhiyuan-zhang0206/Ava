@@ -343,11 +343,12 @@ def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], l
     unreadable. Unreadable bodies warn + skip (same posture as the whole-note
     builder) rather than aborting the note."""
     import ava
+    from ava.skills import skill_body_path
 
     sections: list[str] = []
     injected: list[str] = []
     for skill in skills:
-        skill_md = Path(skill["path"]) / "SKILL.md"
+        skill_md = skill_body_path(skill["path"])
         try:
             body = skill_md.read_text(encoding="utf-8").strip()
         except OSError as exc:

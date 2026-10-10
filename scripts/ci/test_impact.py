@@ -31,6 +31,16 @@ _MODULE_FACTS = frozenset(
 )
 
 
+# The path-scoped fixture readers load the TOML tables and the fixture modules they
+# name. `_fixture_edges` binds each declared module and its TOML source to exactly
+# the tests in its scope, so those runtime-chosen inputs are already modeled here;
+# keeping them as unknown evidence would make every test depend on every table.
+_MODELED_FIXTURE_READERS = {
+    "tests/fixtures/path_scopes.py": FactKind.DYNAMIC_IMPORT,
+    "scripts/structure/imports/fixture_scopes.py": FactKind.RESOURCE,
+}
+
+
 @dataclass(frozen=True)
 class Impact:
     """Unpruned facts projected onto collectable tests, plus incomplete evidence."""
@@ -152,7 +162,8 @@ def build_impact(root: Path, tests: frozenset[str]) -> Impact:
         dependencies.update(
             file for module in plugin_modules(tree) for file in module_files(module, index)
         )
-        incomplete[rel] = evidence.unknown
+        modeled = _MODELED_FIXTURE_READERS.get(rel)
+        incomplete[rel] = tuple(item for item in evidence.unknown if item.kind is not modeled)
 
     reverse = _tests_by_input(edges, tests)
     unknown = {item for dependency in reverse for item in incomplete.get(dependency, ())}
