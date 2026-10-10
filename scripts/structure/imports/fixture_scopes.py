@@ -15,14 +15,15 @@ class Scope(NamedTuple):
     paths: tuple[str, ...]  # directories or test files whose tests the module governs
 
 
-def discover_scopes(root: Path) -> dict[str, Scope]:
-    """Every `path_scopes.toml` under `root`, merged: fixture module -> its scope.
+class Declaration(NamedTuple):
+    source: str  # repository-relative TOML input, retained for reverse impact
+    module: str
+    paths: tuple[str, ...]
 
-    Modules come out alphabetically, so the autouse names register in one alphabetical
-    batch, as in a conftest. Hidden directories (`.git`, `.venv`, `.worktrees`) and
-    `node_modules` are not entered.
-    """
-    found: dict[str, list[str]] = {}
+
+def declarations(root: Path) -> tuple[Declaration, ...]:
+    """Read each declaration once, retaining its source instead of only the merged scope."""
+    found: list[Declaration] = []
     for current, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d not in _SKIPPED_DIRS]
         if SCOPE_FILE not in files:
@@ -33,9 +34,22 @@ def discover_scopes(root: Path) -> dict[str, Scope]:
             listed = cast("list[str]", names)
             if not isinstance(names, list) or not all(isinstance(n, str) for n in listed):
                 raise ValueError(f"{directory}/{SCOPE_FILE}: {module} must be a list of names")
-            found.setdefault(module, []).extend(
-                directory if name == "." else f"{directory}/{name}" for name in listed
-            )
+            paths = tuple(directory if name == "." else f"{directory}/{name}" for name in listed)
+            source = (Path(directory) / SCOPE_FILE).as_posix()
+            found.append(Declaration(source, module, paths))
+    return tuple(sorted(found))
+
+
+def discover_scopes(root: Path) -> dict[str, Scope]:
+    """Every `path_scopes.toml` under `root`, merged: fixture module -> its scope.
+
+    Modules come out alphabetically, so the autouse names register in one alphabetical
+    batch, as in a conftest. Hidden directories (`.git`, `.venv`, `.worktrees`) and
+    `node_modules` are not entered.
+    """
+    found: dict[str, list[str]] = {}
+    for declaration in declarations(root):
+        found.setdefault(declaration.module, []).extend(declaration.paths)
     return {module: Scope(tuple(sorted(paths))) for module, paths in sorted(found.items())}
 
 
