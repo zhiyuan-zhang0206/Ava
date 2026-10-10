@@ -300,12 +300,11 @@ async def settle_resources(
     domain_close._bind_reap(reap_task)
     if reader_join_task is not None:
         domain_close._register(reader_join_task)
+    stop_error: Exception | None = None
     try:
         await domain_close.stop(_RESOURCE_SETTLE_TIMEOUT_S, request_stop=request_stop)
     except Exception as error:
-        logger.opt(exception=error).warning(
-            "exec stop failure retained in the complete teardown receipt"
-        )
+        stop_error = error
     stages: list[tuple[TeardownStage, asyncio.Future[Any]]] = [
         ("domain_close", domain_close.task),
         ("root_exit", root_exit_task),
@@ -324,6 +323,8 @@ async def settle_resources(
                 task.result()
             except BaseException as error:
                 failures.append(TeardownFailure(stage, error))
+    if stop_error is not None and not any(item.error is stop_error for item in failures):
+        failures.append(TeardownFailure("domain_close", stop_error))
     return tuple(failures)
 
 
