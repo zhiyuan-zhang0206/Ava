@@ -22,12 +22,16 @@ over the same attribute, which runs after these autouse fixtures and wins.
 
 from __future__ import annotations
 
+import importlib
+import os
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
 from base.cluster import machines as _machines
 from base.cluster.machine import machine_name
+from base.config import ConfigBoot, field_names, get_field
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -41,6 +45,28 @@ from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
 # One definition shared with the ava and integration modules; imported here so it
 # registers for this module's paths.
 from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
+
+
+@pytest.fixture(autouse=True)
+def gateway_config_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give each in-process gateway the inputs its test explicitly configured.
+
+    Bare unit homes have no delivery file. Preparing their gateway owner is a
+    process bootstrap operation, so restore that delivery before running SDK
+    clients and install the test's existing settings pins through the public API.
+    """
+    gateway_app = importlib.import_module("gateway.app")
+
+    def configured_boot() -> ConfigBoot:
+        values = {name: get_field(name) for name in field_names()}
+        owner = ConfigBoot()
+        with patch.dict(os.environ):
+            owner.ensure_eager()
+        for name, value in values.items():
+            owner.set_field(name, value)
+        return owner
+
+    monkeypatch.setattr(gateway_app, "ConfigBoot", configured_boot)
 
 
 @pytest.fixture(autouse=True)

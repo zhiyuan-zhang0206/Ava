@@ -42,6 +42,7 @@ from tests._os_jobs import host_ava_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
     _TEST_AVA_HOME,
+    TEST_PROCESS_CONFIG,
     UNPROVISIONED_DB_URL,
     UNPROVISIONED_REDIS_URL,
 )
@@ -77,6 +78,7 @@ def _provisioned_db(pytestconfig: pytest.Config) -> Iterator[str]:
         # loosening the session-start guard above.
         assert_test_db_url(url, context="_provisioned_db")
         settings.data_plane.db_url = url
+        TEST_PROCESS_CONFIG.set_field("db_url", url)
         os.environ["AVA_DB_URL"] = url
         _rewrite_test_env_file_line(_TEST_AVA_HOME / ".env", "AVA_DB_URL", url)
         with PostgresSaver.from_conn_string(url) as saver:
@@ -91,6 +93,7 @@ def _provisioned_redis(pytestconfig: pytest.Config) -> Iterator[str]:
         return
     with redis_server() as url:
         settings.data_plane.redis_url = url
+        TEST_PROCESS_CONFIG.set_field("redis_url", url)
         os.environ["AVA_REDIS_URL"] = url
         _rewrite_test_env_file_line(_TEST_AVA_HOME / ".env", "AVA_REDIS_URL", url)
         yield url

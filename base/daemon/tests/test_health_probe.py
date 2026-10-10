@@ -67,6 +67,10 @@ async def test_healthz_body_carries_the_daemons_own_commit(monkeypatch: pytest.M
     try:
         _status, body = await _http_get(port, "/healthz")
         assert json.loads(body)["sha"] == "c0ffee1234"
+        monkeypatch.setattr(health.loaded_commit, "get", lambda: "legacy-updated")
+        status, body = await _http_get(port, "/healthz")
+        assert status == 200
+        assert json.loads(body)["sha"] == "legacy-updated"
     finally:
         await health.stop_health_server(server)
 
@@ -84,6 +88,56 @@ async def test_healthz_reports_an_unfrozen_process_as_unknown(
     try:
         _status, body = await _http_get(port, "/healthz")
         assert json.loads(body)["sha"] is None
+    finally:
+        await health.stop_health_server(server)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sha", ["c0ffee1234", None])
+async def test_healthz_retains_explicit_loaded_image_after_source_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sha: str | None
+) -> None:
+    """A bound server reports its captured image, including an honest unknown."""
+
+    def initial_capture(source_root: Path) -> str | None:
+        assert source_root == tmp_path
+        return sha
+
+    monkeypatch.setattr(health.loaded_commit, "capture_commit", initial_capture)
+    image = health.loaded_commit.LoadedCommit.capture(tmp_path)
+    legacy_calls = 0
+    legacy_sha = ["legacy-before"]
+
+    def legacy_commit() -> str:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return legacy_sha[0]
+
+    def unexpected_capture(_root: Path) -> str | None:
+        raise AssertionError("health requests must not reread the checkout")
+
+    monkeypatch.setattr(health.loaded_commit, "get", legacy_commit)
+    monkeypatch.setattr(health.loaded_commit, "capture_commit", unexpected_capture)
+    port = _find_free_port()
+    pidfile = tmp_path / "agent_host.pid"
+    pidfile.write_text(str(os.getpid()))
+    server = await health.start_health_server("agent_host", port=port, image=image)
+    try:
+        for next_sha in ("checkout-advanced", "legacy-replaced"):
+            legacy_sha[0] = next_sha
+            status, body = await _http_get(port, "/healthz")
+            payload = json.loads(body)
+            assert status == 200
+            assert payload["sha"] == sha
+            assert payload["readiness"] == "ok"
+        probe = await _probe("agent_host", port, pidfile)
+        assert probe.alive is True
+        assert probe.detail == (
+            f"pid {os.getpid()}, code {sha[:7]}" if sha is not None else f"pid {os.getpid()}"
+        )
+        assert legacy_calls == 0
+        assert image.source_root == tmp_path
+        assert image.sha == sha
     finally:
         await health.stop_health_server(server)
 

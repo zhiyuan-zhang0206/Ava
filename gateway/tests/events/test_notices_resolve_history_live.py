@@ -52,7 +52,12 @@ def test_read_with_reply_marks_and_delivers_inbound(
     assert "nice, thanks" in inbound_text
 
     # the read FYI drops off the unread count
-    snap = select_one(db_conn, a, catalog=model_catalog)
+    snap = select_one(
+        db_conn,
+        a,
+        catalog=model_catalog,
+        default_model_reader=lambda: settings.lm.llm_model,
+    )
     assert snap is not None
     assert snap.unread_notice_count == 0
 
@@ -155,7 +160,12 @@ def test_read_on_require_response_is_409(
             headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 409
-    snap = select_one(db_conn, a, catalog=model_catalog)
+    snap = select_one(
+        db_conn,
+        a,
+        catalog=model_catalog,
+        default_model_reader=lambda: settings.lm.llm_model,
+    )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
     assert _pending_rows(db_conn, a) == []
@@ -209,7 +219,12 @@ def test_resolve_cross_agent_path_409(
         )
     assert resp.status_code == 409
     # a's notice is untouched
-    snap = select_one(db_conn, a, catalog=model_catalog)
+    snap = select_one(
+        db_conn,
+        a,
+        catalog=model_catalog,
+        default_model_reader=lambda: settings.lm.llm_model,
+    )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
 

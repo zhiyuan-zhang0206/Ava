@@ -18,7 +18,7 @@ from redis.asyncio.client import PubSub
 
 from agent import state as states
 from agent.graph.claim.node import claim_node
-from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
+from agent.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.tests.claim.test_inbound_ownership import _agent
@@ -190,6 +190,29 @@ async def _assert_new_inbound_resumes_with_history(
     assert _inbound_status(db_conn, compact_id) == ("done",)
 
 
+def _retained_compaction_failure(
+    host: AgentHost, provider_error: RuntimeError
+) -> CompactionFailedError:
+    ((scope, failure),) = host._resource_service.failures
+    assert scope.service is host._resource_service
+    assert isinstance(failure, CompactionFailedError)
+    assert failure.__cause__ is provider_error
+    return failure
+
+
+async def _close_host_with_original_failure(
+    host: AgentHost, original: CompactionFailedError | None, provider_error: RuntimeError
+) -> None:
+    if original is None:
+        await host.aclose()
+        return
+    with pytest.raises(CompactionFailedError) as observed:
+        await host.aclose()
+    assert observed.value is original
+    assert observed.value.__cause__ is provider_error
+    assert host.resources_joined
+
+
 @pytest.mark.parametrize("interval", [1, 100])
 async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound(
     db_conn: psycopg.Connection,
@@ -200,7 +223,8 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
-    summary = AsyncMock(side_effect=RuntimeError("compaction provider unavailable"))
+    provider_error = RuntimeError("compaction provider unavailable")
+    summary = AsyncMock(side_effect=provider_error)
     monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
     replies: list[str] = []
 
@@ -221,6 +245,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         clock_factory=configured_policy().clock_factory,
     )
     host = _build_host_driving_invoke_until_done(aops_pool, saver, graph, ctx, monkeypatch)
+    original_failure: CompactionFailedError | None = None
     async with asyncio.TaskGroup() as tasks:
         try:
             async with redis.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType] — redis stubs
@@ -238,6 +263,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
                 )
                 assert not replies
                 assert summary.await_count == COMPACT_MAX_ATTEMPTS
+                original_failure = _retained_compaction_failure(host, provider_error)
 
                 insert_inbound_message(
                     db_conn,
@@ -256,4 +282,4 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         finally:
             await publisher.aclose()
             await redis.aclose()
-            await host.aclose()
+            await _close_host_with_original_failure(host, original_failure, provider_error)

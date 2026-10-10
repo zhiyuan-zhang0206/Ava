@@ -1,8 +1,10 @@
 """Gateway bootstrap publishes relay routing independently of local listeners."""
 
+import importlib
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -33,6 +35,14 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.10")
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "relay-test-token")
+    owner = config.ConfigBoot()
+    with patch.dict(os.environ, {"AVA_HOME": str(tmp_path)}):
+        owner.ensure_eager()
+    owner.set_field("machine_host", "10.0.0.10")
+    owner.set_field("db_url", config.settings.data_plane.db_url)
+    owner.set_field("telemetry_otlp_port", gateway_port)
+    gateway_app = importlib.import_module("gateway.app")
+    monkeypatch.setattr(gateway_app, "ConfigBoot", lambda: owner)
     with TestClient(app) as client:
         assert client.get("/api/bootstrap").status_code == 401
         response = client.get(

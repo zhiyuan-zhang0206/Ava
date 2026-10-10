@@ -42,7 +42,10 @@ def test_the_pin_table_names_every_overridable_setting() -> None:
 
 @pytest.mark.parametrize("setting", sorted(_PINS))
 def test_an_agent_pin_is_the_resolved_value(setting: str, *, model_catalog: ModelCatalog) -> None:
-    overrides = AgentSlices.resolve({setting: _PINS[setting]}).overrides
+    overrides = AgentSlices.resolve(
+        {setting: _PINS[setting]},
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    ).overrides
     assert (
         resolve_setting(
             setting,
@@ -58,7 +61,9 @@ def test_an_agent_pin_is_the_resolved_value(setting: str, *, model_catalog: Mode
 def test_without_a_pin_the_resolution_is_the_cluster_layering(
     setting: str, *, model_catalog: ModelCatalog
 ) -> None:
-    unpinned = AgentSlices.resolve().overrides
+    unpinned = AgentSlices.resolve(
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    ).overrides
     expected = resolve_setting(
         setting, model=_MODEL, models=model_catalog.models, explicit=get_field(setting)
     )
@@ -87,7 +92,10 @@ def test_a_pin_of_another_setting_leaves_this_one_alone(
     setting: str, *, model_catalog: ModelCatalog
 ) -> None:
     other = next(name for name in sorted(_PINS) if name != setting)
-    overrides = AgentSlices.resolve({other: _PINS[other]}).overrides
+    overrides = AgentSlices.resolve(
+        {other: _PINS[other]},
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    ).overrides
     expected = resolve_setting(
         setting, model=_MODEL, models=model_catalog.models, explicit=get_field(setting)
     )
@@ -106,7 +114,10 @@ def test_an_agent_pin_wins_over_the_cluster_explicit_value(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
-    overrides = AgentSlices.resolve({"reasoning_effort": "low"}).overrides
+    overrides = AgentSlices.resolve(
+        {"reasoning_effort": "low"},
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    ).overrides
     assert (
         resolve_setting(
             "reasoning_effort",
@@ -128,7 +139,10 @@ def test_an_agent_pin_wins_over_the_cluster_explicit_value(
 
 
 def test_a_setting_outside_the_overrides_ignores_them(*, model_catalog: ModelCatalog) -> None:
-    overrides = AgentSlices.resolve(_PINS).overrides
+    overrides = AgentSlices.resolve(
+        _PINS,
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    ).overrides
     assert resolve_setting(
         "llm_retry_max_attempts",
         model=_MODEL,
@@ -153,7 +167,8 @@ def test_the_context_budget_follows_the_agents_thresholds(*, model_catalog: Mode
     pinned = resolve_context_budget(
         _MODEL,
         AgentSlices.resolve(
-            {"auto_compact_fraction": 0.9, "compact_reminder_fraction": 0.5}
+            {"auto_compact_fraction": 0.9, "compact_reminder_fraction": 0.5},
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ).overrides,
         catalog=model_catalog,
     )
@@ -174,7 +189,10 @@ def test_the_context_budget_follows_the_agents_ceiling(*, model_catalog: ModelCa
     ceiling = plain.hard_compact_tokens // 2
     capped = resolve_context_budget(
         _MODEL,
-        AgentSlices.resolve({"auto_compact_ceiling_tokens": ceiling}).overrides,
+        AgentSlices.resolve(
+            {"auto_compact_ceiling_tokens": ceiling},
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ).overrides,
         catalog=model_catalog,
     )
     assert capped.hard_compact_tokens == ceiling
@@ -183,7 +201,11 @@ def test_the_context_budget_follows_the_agents_ceiling(*, model_catalog: ModelCa
 
 def test_without_overrides_the_context_budget_is_unchanged(*, model_catalog: ModelCatalog) -> None:
     assert resolve_context_budget(
-        _MODEL, AgentSlices.resolve().overrides, catalog=model_catalog
+        _MODEL,
+        AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ).overrides,
+        catalog=model_catalog,
     ) == resolve_context_budget(
         _MODEL,
         catalog=model_catalog,
@@ -208,7 +230,10 @@ def test_the_chat_model_is_built_with_the_agents_reasoning_effort(
     )
     assert isinstance(default, ChatAnthropic)
     assert default.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
-    overrides = AgentSlices.resolve({"reasoning_effort": "high"}).overrides
+    overrides = AgentSlices.resolve(
+        {"reasoning_effort": "high"},
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    ).overrides
     pinned = build_chat_model(
         _MODEL, overrides=overrides, catalog=model_catalog, llm_override=settings.lm.llm_override
     )
@@ -216,7 +241,9 @@ def test_the_chat_model_is_built_with_the_agents_reasoning_effort(
     assert pinned.model_kwargs["extra_body"] == {"output_config": {"effort": "high"}}
     unpinned = build_chat_model(
         _MODEL,
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ).overrides,
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
     )
@@ -243,7 +270,10 @@ def test_the_chat_model_is_built_with_the_agents_thinking_budget(
     assert off.thinking is None
     pinned = build_chat_model(
         haiku,
-        overrides=AgentSlices.resolve({"claude_thinking_budget_tokens": 6000}).overrides,
+        overrides=AgentSlices.resolve(
+            {"claude_thinking_budget_tokens": 6000},
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ).overrides,
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
     )
@@ -251,7 +281,9 @@ def test_the_chat_model_is_built_with_the_agents_thinking_budget(
     assert pinned.thinking == {"type": "enabled", "budget_tokens": 6000}
     unpinned = build_chat_model(
         haiku,
-        overrides=AgentSlices.resolve().overrides,
+        overrides=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ).overrides,
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
     )

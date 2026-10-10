@@ -55,7 +55,10 @@ def _spawn_agent(*, config_authority: ConfigAuthority) -> int:
 
 @pytest.fixture(autouse=True)
 def _sdk_via_inprocess_gateway(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    model_installation: Installation,
 ):
     """SDK ↔ Gateway path in-process test apparatus:
     1. monkeypatch session noop — spawn / resurrect / respawn don't really start child python
@@ -63,6 +66,7 @@ def _sdk_via_inprocess_gateway(
        httpx client — SDK calls go through ASGI directly into gateway endpoint, real DB real logic,
        not bound to TCP port
     """
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from base.cluster import machines as _machines
     from base.cluster.machine import machine_name
     from gateway.agents import forward as _agents_forward_router
