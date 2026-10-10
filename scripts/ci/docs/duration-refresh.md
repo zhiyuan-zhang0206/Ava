@@ -37,7 +37,14 @@ After merging complete timings, the workflow creates `.test_durations.source.jso
 with schema version, measured source SHA, Actions run ID and measurement time.
 Both files publish in one Git commit on `ava-bot/test-durations`. The branch is
 rebuilt from the measured source, so its required CI checks see that generation's
-code. One existing bot PR is updated and explicitly receives `ci.yml` dispatch.
+code. One existing bot PR is updated. Creating or pushing a new head to this
+`GITHUB_TOKEN`-created PR starts the existing `pull_request` CI workflow in an
+approval-required state. A maintainer with repository write access reviews the
+two generated files and selects **Approve workflows to run** for that head.
+The publisher does not approve its own workflow. `workflow_dispatch` job checks
+do not satisfy PR required checks, so publication does not dispatch a duplicate
+CI suite. These are [GitHub's bot approval rules](https://docs.github.com/en/actions/concepts/security/github_token)
+and [required-check event rules](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks).
 Admission runs from the workflow's trusted main revision, independently of the
 older measurement source. After publication, `pull_requests/duration_refresh.py` verifies that the open,
 non-draft GitHub Actions bot PR targets main from this repository's fixed bot
@@ -47,8 +54,9 @@ waits for normal readiness and required checks before testing and merging.
 Already-submitted responses are idempotent; submission or validation failures
 fail the workflow visibly. A candidate with no generated diff against its
 measured source publishes nothing. An identical already-published snapshot
-reuses its existing head without a force-push, then still updates the PR,
-dispatches CI and submits it; an unqueued existing PR is not left behind.
+reuses its existing head without a force-push, then still updates and submits the
+PR; its existing approval and CI state remain in effect. An unqueued existing PR
+is not left behind.
 
 The plan reports applied provenance from main separately from the open bot PR's
 published provenance. Pending publication resets the refresh counter to avoid
