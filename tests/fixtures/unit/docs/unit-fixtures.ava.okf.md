@@ -43,8 +43,10 @@ Their four consumer directories use file-level declarations in
 make unrelated tests depend on every gateway router. These declarations use the
 existing pytest/CI scope reader. They add no runtime binding mechanism.
 
-`unit.sdk` supplies the SDK process context and recorder cleanup beside actual
-SDK consumers. The root identity and metering guards depend on ordinary fixture
+`unit.sdk` owns the public fixture capabilities `sdk_environment`,
+`sdk_identity` and `sdk_metering` beside actual SDK consumers. Its exact component
+entry and static `__all__` name these definitions; the lightweight identity slot
+protocol is defined and exported by `identity_restore`. The root identity and metering guards depend on ordinary fixture
 overrides (`sdk_identity`, `sdk_metering`); their defaults carry no SDK state.
 The local environment shares the prepared `process_config`, one lazy ClientSet
 and its clock factory through pytest's session stash. Repinning changes identity

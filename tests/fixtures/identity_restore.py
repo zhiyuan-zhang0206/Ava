@@ -22,6 +22,8 @@ from typing import Any, Protocol
 
 import pytest
 
+__all__ = ["SdkIdentitySlot"]
+
 
 class SdkIdentitySlot(Protocol):
     """The context slot restored by the guard, independent of its SDK implementation."""

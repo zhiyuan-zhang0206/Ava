@@ -6,7 +6,7 @@ import pytest
 @pytest.mark.parametrize(
     "name",
     [
-        "_sdk_environment",
+        "sdk_environment",
         "add_bindings",
         "add_models",
         "config_authority",
