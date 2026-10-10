@@ -29,6 +29,7 @@ class Fact:
     kind: FactKind
     target: str
     names: tuple[str, ...] = ()
+    via: str = ""  # recognized callee, for consumers' separate ownership policies
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,9 @@ _DYNAMIC_CALLS = frozenset(
         "__import__",
         "pytest.importorskip",
     }
+)
+_PATCH_IMPORTS = frozenset(
+    {"unittest.mock.patch", "unittest.mock.patch.multiple", "unittest.mock.patch.dict"}
 )
 
 
@@ -150,6 +154,8 @@ class _Collector(ast.NodeVisitor):
         origin = self.scope.origin(node.func)
         if origin in _DYNAMIC_CALLS:
             self._dynamic(node, origin)
+        if origin in _PATCH_IMPORTS:
+            self._patch_import(node, origin)
         if origin in executed._LAUNCHERS:
             target, reason = executed.module_input(node, self.scope)
             if target is not None:
@@ -182,6 +188,39 @@ class _Collector(ast.NodeVisitor):
             resolved = self._relative_target(node, target) if target.startswith(".") else target
             if resolved:
                 self.module(node, resolved, FactKind.DYNAMIC_IMPORT)
+
+    def _patch_import(self, node: ast.Call, origin: str) -> None:
+        keyword_name = "in_dict" if origin == "unittest.mock.patch.dict" else "target"
+        target = (
+            node.args[0]
+            if node.args
+            else next(
+                (keyword.value for keyword in node.keywords if keyword.arg == keyword_name), None
+            )
+        )
+        values = self.scope.strings(target) if target is not None else None
+        if values is None:
+            value = self.scope.value(target) if target is not None else None
+            if origin != "unittest.mock.patch" and isinstance(
+                value, ast.Dict | ast.List | ast.Tuple | ast.Set
+            ):
+                return  # An actual object target does not invoke patch's string importer.
+            self.gap(node, f"{origin} target is not bounded literal text")
+            return
+        for value in values:
+            self._patch_module(node, origin, value)
+
+    def _patch_module(self, node: ast.Call, origin: str, value: str) -> None:
+        candidate = value.rsplit(".", maxsplit=1)[0] if origin == "unittest.mock.patch" else value
+        if candidate.split(".", maxsplit=1)[0] not in self.tops:
+            return
+        module = self.index.resolve_prefix(candidate, self.tops)
+        if module is None:
+            self.gap(node, f"First-party patch target has no module: {value}")
+            return
+        self.records.append(Fact(node.lineno, FactKind.DYNAMIC_IMPORT, module, via=origin))
+        if module != candidate and self.index.kind(module) != "file":
+            self.gap(node, f"Patch target traverses an unverified package attribute: {value}")
 
     def _relative_target(self, node: ast.Call, target: str) -> str:
         package = (
@@ -394,7 +433,7 @@ def _embedded(source: executed.Source, path: str, index: Lookup, tops: Sequence[
     collector.visit(tree)
     return Evidence(
         tuple(
-            Fact(source.line, FactKind.EMBEDDED_IMPORT, fact.target, fact.names)
+            Fact(source.line, FactKind.EMBEDDED_IMPORT, fact.target, fact.names, fact.via)
             for fact in collector.records
         ),
         tuple(

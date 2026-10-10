@@ -113,10 +113,13 @@ cannot silently become an existing parent package. `from pkg import symbol`
 depends on the package door unless the named submodule exists. Following that
 door's own imports belongs to a consumer's dependency closure.
 
-The collector also recognizes literal dynamic imports, bounded literal pytest
+The collector also recognizes literal dynamic imports, imported `unittest.mock.patch`
+string targets, bounded literal pytest
 string parameters and f-strings, actual Python `-m`/`-c` launches, and literal
 paths anchored by `Path(__file__)` inside the checkout. Lexical bindings
-prevent an unrelated parameter from shadowing another scope's import or path.
+prevent an unrelated parameter or comprehension target from shadowing another
+scope's import or path. Patch target facts retain their callee, so ownership may
+prune patch-only subjects while runtime impact keeps the import dependency.
 It does not execute Python, infer arbitrary builders or prove runtime branch
 coverage. Resource facts describe possible referenced paths; directory facts
 give a conservative subtree, not proof that every child was read. Known paths

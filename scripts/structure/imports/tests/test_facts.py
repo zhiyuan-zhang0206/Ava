@@ -266,6 +266,50 @@ def test_comprehension_does_not_hide_following_python_launcher(tmp_path: Path) -
     assert found.unknown == ()
 
 
+@pytest.mark.parametrize("callee", ["replace", "replace.multiple", "replace.dict"])
+def test_literal_mock_patch_target_is_a_runtime_import(tmp_path: Path, callee: str) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        f"from unittest.mock import patch as replace\n{callee}('base.net.retry._sleep')\n",
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
+def test_opaque_mock_patch_target_retains_its_runtime_gap(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from unittest.mock import patch\ndef load(target):\n return patch(target)\n",
+    )
+    assert found.records == ()
+    assert len(found.unknown) == 1
+    assert found.unknown[0].line == 3
+
+
+def test_local_function_named_patch_is_not_a_dynamic_import(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path), "def patch(target):\n return target\npatch('base.net.retry._sleep')\n"
+    )
+    assert found.records == found.unknown == ()
+
+
+def test_mock_dict_object_target_does_not_invoke_a_string_import(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path), "from unittest.mock import patch\nvalues = {}\npatch.dict(values)\n"
+    )
+    assert found.records == found.unknown == ()
+
+
+def test_mock_patch_runtime_edge_keeps_ownership_policy_separate(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    tree = ast.parse(
+        "import ava\nfrom unittest.mock import patch as replace\nreplace('base.net.retry._sleep')\n"
+    )
+    refs, fallback = placement.placement_references(tree, placement.ModuleIndex(root))
+    assert [ref.module for ref in refs if ref.kind in placement.STRONG_KINDS] == ["ava"]
+    assert not fallback
+
+
 def test_unsupported_path_operation_read_is_explicitly_unknown(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),

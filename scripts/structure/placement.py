@@ -530,7 +530,7 @@ def collect_reference_evidence(
         kind = "import" if fact.kind == facts.FactKind.IMPORT else "embedded-import"
         if fact.kind == facts.FactKind.DYNAMIC_IMPORT:
             kind = "string-target"
-        collector._add(fact.line, kind, fact.target, names=fact.names)
+        collector._add(fact.line, kind, fact.target, via=fact.via, names=fact.names)
     unresolved = [
         executed.Unresolved(u.path, u.line, u.reason)
         for u in evidence.unknown
