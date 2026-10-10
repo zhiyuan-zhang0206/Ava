@@ -130,8 +130,11 @@ jobs:
             echo "backend=true"  >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git merge-base "$BASE_SHA" HEAD > /tmp/classify-base.txt
-          git diff --name-only "$(cat /tmp/classify-base.txt)"...HEAD > /tmp/changed.txt
+          CLASSIFY_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ava-classify.XXXXXX")"
+          export CLASSIFY_TMP
+          trap 'rm -rf "$CLASSIFY_TMP"' EXIT
+          git merge-base "$BASE_SHA" HEAD > "$CLASSIFY_TMP/base.txt"
+          git diff --name-only "$(cat "$CLASSIFY_TMP/base.txt")"...HEAD > "$CLASSIFY_TMP/changed.txt"
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import os
           import sys
@@ -141,14 +144,15 @@ jobs:
           from base.deploy.git.repo_change import classify_change
           from scripts.ci.test_selector import documentation_runtime_tests
 
-          paths = Path("/tmp/changed.txt").read_text().splitlines()
+          scratch = Path(os.environ["CLASSIFY_TMP"])
+          paths = (scratch / "changed.txt").read_text().splitlines()
           frontend, backend = classify_change(paths)
           if os.environ["HEAD_REF"].startswith(("trunk-merge/", "trunk-temp/")):
               backend = True
           elif not backend:
               backend = bool(documentation_runtime_tests(
                   paths, repo_root=Path.cwd(),
-                  base_ref=Path("/tmp/classify-base.txt").read_text().strip(),
+                  base_ref=(scratch / "base.txt").read_text().strip(),
               ))
           print(f"frontend={str(frontend).lower()}")
           print(f"backend={str(backend).lower()}")

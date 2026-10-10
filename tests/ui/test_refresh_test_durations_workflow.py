@@ -66,9 +66,7 @@ def test_refresh_pins_one_source_and_stamps_only_after_complete_merge() -> None:
         for i, step in enumerate(steps)
         if step.get("name") == "Record complete measurement provenance"
     )
-    push_index = next(
-        i for i, step in enumerate(steps) if step.get("name") == "Push a review branch"
-    )
+    push_index = next(i for i, step in enumerate(steps) if step.get("id") == "publish")
     assert merge_index < stamp_index < push_index
 
 
@@ -258,13 +256,13 @@ def test_publisher_rebuilds_old_bot_branch_from_measured_generation(tmp_path: Pa
     fake_gh.chmod(0o755)
     candidate = tmp_path / "durations-candidate"
     steps = _workflow()["jobs"]["refresh"]["steps"]
-    names = (
-        "Prepare an isolated candidate branch",
-        "Stage the refreshed durations",
-        "Push a review branch",
+    selectors = (
+        ("name", "Prepare an isolated candidate branch"),
+        ("name", "Stage the refreshed durations"),
+        ("id", "publish"),
     )
-    for name in names:
-        step = next(step for step in steps if step.get("name") == name)
+    for key, value in selectors:
+        step = next(step for step in steps if step.get(key) == value)
         result = subprocess.run(  # noqa: S603 — shipped publisher shell with a local remote
             ["bash", "-e", "-c", step["run"]],
             cwd=checkout,
@@ -279,10 +277,14 @@ def test_publisher_rebuilds_old_bot_branch_from_measured_generation(tmp_path: Pa
                 "CANDIDATE": str(candidate),
                 "BRANCH": "ava-bot/test-durations",
                 "GITHUB_OUTPUT": str(tmp_path / "output"),
+                "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
             },
         )
         assert result.returncode == 0, result.stdout + result.stderr
     head = git("--git-dir", str(remote), "rev-parse", "refs/heads/ava-bot/test-durations")
+    outputs = dict(line.split("=", 1) for line in (tmp_path / "output").read_text().splitlines())
+    assert outputs["changed"] == "true"
+    assert outputs["head-sha"] == head
     assert git("rev-parse", f"{head}^") == source
     assert git("show", f"{head}:code-generation") == "measured"
     assert json.loads(git("show", f"{head}:.test_durations")) == {"new::test": 0.019}
