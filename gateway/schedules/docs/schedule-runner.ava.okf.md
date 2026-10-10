@@ -34,6 +34,8 @@ uses the remaining shared deadline for both writes. At expiry, it reports
 unfinished recording, signals the recorder to stop before another write, and
 hard-exits even when the current database call cannot cooperate. Unexpected
 worker errors are immediately visible and retained for the original owner's
-close to raise; a script failure remains primary when guard close also fails.
+close to raise; a failed script remains primary when guard close also fails.
+A successful `SystemExit` (`0`, `None` or `False`) is completion and cannot mask
+a guard close failure or produce a completed marker.
 Recoverable frame-read failures and severable database-write failures retain
 their existing warning/recovery behavior.
