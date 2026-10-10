@@ -24,8 +24,8 @@ def test_the_real_e2e_conftest_in_its_pre_fix_shape_is_flagged() -> None:
     """
     src = _E2E_CONFTEST.read_text(encoding="utf-8")
     pre_fix = src.replace(
-        '@pytest.fixture(scope="package", autouse=True)',
-        '@pytest.fixture(scope="session", autouse=True)',
+        '@pytest.fixture(scope="package")',
+        '@pytest.fixture(scope="session")',
         1,
     )
     assert pre_fix != src, "the fixture's decorator no longer matches — update this test"
