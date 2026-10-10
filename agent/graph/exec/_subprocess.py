@@ -293,6 +293,7 @@ async def _finish_failed_run(
         )
     _process.annotate_original_failure(original, failures)
     if failures and request_paths is not None:
+        _retain_domain_completion(domain_close, *request_paths, resources=resources)
         _retain_late_reader_completion(
             _process.ExecTeardownError(failures), *request_paths, reader, resources=resources
         )
@@ -333,6 +334,33 @@ def _finish_request_evidence(
     for path in (request_path, result_path):
         with contextlib.suppress(FileNotFoundError):
             path.unlink()
+
+
+def _retain_domain_owner(
+    resources: HostedTurnResources | None, request: Path, owner: _process.DomainCloseOwner
+) -> None:
+    if resources is not None:
+        resources.unresolved[request] = owner
+
+
+def _retain_domain_completion(
+    owner: _process.DomainCloseOwner | None,
+    request: Path,
+    result: Path,
+    *,
+    resources: HostedTurnResources | None,
+) -> None:
+    """An unfinished native task remains held by the exact original scope."""
+    if resources is None or owner is None or not owner.unfinished:
+        return
+
+    async def finish_original() -> None:
+        await owner.finish_later()
+        _finish_request_evidence(request, result, owner, settled=True, resources=resources)
+
+    resources.require_service().complete_later(
+        resources, finish_original(), name=f"exec-domain-finish-{request.stem}"
+    )
 
 
 def _retain_late_reader_completion(
@@ -494,14 +522,15 @@ async def _run_legacy_subprocess(
                 exc=exc,
             ), None
 
-        root_exit_task = _process.start_root_exit_observer(proc)
-        domain_close = _process.DomainCloseOwner(domain, root_exit_task)
+        domain_close = _process.DomainCloseOwner(domain)
+        root_exit_task = domain_close.root_exit_task
+        _retain_domain_owner(resource_scope, request_path, domain_close)
         reap_task = _process.start_reap(proc, domain_close)
 
         reader = ExecOutputPipe(proc, stream)
         reader.watch()
 
-        reader_join_task = _process.start_reader_join(reap_task, reader, proc.pid)
+        reader_join_task = _process.start_reader_join(reap_task, reader, domain_close)
 
         cancelled, timed_out = await _poll_child(
             proc,
@@ -555,6 +584,7 @@ async def _run_legacy_subprocess(
         )
         raise
     except _process.ExecTeardownError as exc:
+        _retain_domain_completion(domain_close, request_path, result_path, resources=resource_scope)
         _retain_late_reader_completion(
             exc, request_path, result_path, reader, resources=resource_scope
         )
@@ -585,7 +615,11 @@ async def _run_legacy_subprocess(
         raise
     finally:
         _finish_request_evidence(
-            request_path, result_path, domain, settled=resources_settled, resources=resource_scope
+            request_path,
+            result_path,
+            domain_close or domain,
+            settled=resources_settled,
+            resources=resource_scope,
         )
 
 

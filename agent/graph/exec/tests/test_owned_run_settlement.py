@@ -1,6 +1,7 @@
 """Settlement edges of one managed exec that the real-subprocess tests do not reach."""
 
 import asyncio
+import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -24,6 +25,9 @@ def _run(**fields: Any) -> _OwnedRun:
         "attached": True,
         "registration": None,
         "completion": None,
+        "bound": time.monotonic() + 5,
+        "_tasks": set(),
+        "_errors": [],
     }
     for name, value in {**defaults, **fields}.items():
         setattr(run, name, value)

@@ -24,7 +24,19 @@ The host explicitly supplies the original `RuntimeIncarnation`, current
 `NativeWorkTarget`, and `HostedTurnResources` through `AvaContext`. The scope in
 `base/native_process/turn_identity.py` belongs to the actual turn Task, while
 the reusable model cache retains no scope. Copied graph contexts share actual
-disposable exec domains, request evidence, and the original admission reference.
+disposable exec owners, request evidence, and the original admission reference.
+The legacy scope holds the actual `DomainCloseOwner`, including its retained
+root/close/reap/reader Tasks, rather than only the native process handle.
+Native close, reap, and the output tail retain their individual 5-second
+budgets; aggregate observation uses their 15-second total. Native close/reap
+Tasks are not cancelled to satisfy the observation deadline. The same owner
+and its original unfinished Tasks stay in the service completion span until
+they actually finish.
+Managed execution retains registration and exact close-receipt Tasks on the
+same `_OwnedRun`; cancellation observes them only until the original exec bound.
+An unfinished registration crosses that boundary with its original scope and
+Task identity, and its actual eventual outcome is consumed by the existing
+service. Unknown late errors remain visible without cancelling other turns.
 Only successful close/root/reap/reader results remove the exact entry. Formatting
 an `ExecTeardownError` into a tool failure does not erase the evidence. Unknown
 POSIX members are errors, not proof that the process group is empty.
