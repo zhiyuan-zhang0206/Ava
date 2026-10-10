@@ -257,9 +257,9 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
         "helper-signing-smoke",
     ]
     assert aggregator["if"] == (
-        "${{ !cancelled() && (needs.classify.result != 'success' || "
-        "needs.classify.outputs.backend == 'true' || "
-        "needs.backend-structure.result != 'success') }}"
+        "${{ !cancelled() && (needs.classify.result == 'failure' || "
+        "(needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || "
+        "needs.backend-structure.result != 'success'))) }}"
     )
     verify = _step(aggregator, "Verify backend job results")["run"]
     assert '"$TEST_SELECTION_MODE" = "enforce"' in verify
@@ -270,6 +270,34 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
         verify.index('if [ "$TEST_SELECTION_MODE" = "enforce" ]')
     )
     _assert_backend_verdicts(verify, aggregator["needs"][2:])
+
+
+def test_backend_admission_preserves_draft_skip_and_propagates_classify_failure() -> None:
+    condition = _workflow_jobs()["backend"]["if"].removeprefix("${{").removesuffix("}}")
+    for classify, backend, structure, cancelled, expected in (
+        ("skipped", "", "skipped", False, False),  # draft PR
+        ("failure", "", "skipped", False, True),  # runtime analysis failure
+        ("success", "true", "success", False, True),
+        ("success", "false", "success", False, False),
+        ("success", "false", "failure", False, True),
+        ("failure", "", "skipped", True, False),
+    ):
+        closed = condition.replace("!cancelled()", "0 == 1" if cancelled else "1 == 1")
+        for key, value in (
+            ("needs.classify.result", classify),
+            ("needs.classify.outputs.backend", backend),
+            ("needs.backend-structure.result", structure),
+        ):
+            closed = closed.replace(key, repr(value))
+        assert "needs." not in closed
+        result = subprocess.run(  # noqa: S603 - repository predicate with closed test-owned values
+            ["bash", "--noprofile", "--norc", "-c", f"[[ {closed} ]]"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode in (0, 1), result.stderr
+        assert (result.returncode == 0) is expected, (classify, backend, structure, cancelled)
 
 
 def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
