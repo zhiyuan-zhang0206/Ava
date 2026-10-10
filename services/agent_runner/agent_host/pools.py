@@ -46,3 +46,14 @@ def build_control_pool(db: Database) -> AsyncConnectionPool[psycopg.AsyncConnect
         max_size=settings.daemon.host_control_pool_max_size,
         timeout=settings.agent.db_pool_acquire_timeout_seconds,
     )
+
+
+async def close_host_pools(
+    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+) -> None:
+    """Close both pools even if the control-pool close itself fails."""
+    try:
+        await control_pool.close()
+    finally:
+        await workload_pool.close()

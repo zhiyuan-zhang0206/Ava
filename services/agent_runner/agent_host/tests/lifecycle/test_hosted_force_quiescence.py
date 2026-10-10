@@ -38,6 +38,7 @@ from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.daemon import _cancel_turn_route
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.pin_agent import exec_context as ctx_of
 
 
@@ -74,6 +75,7 @@ def _observed_host(
     model_catalog: ModelCatalog,
 ) -> tuple[AgentHost, list[str]]:
     host = AgentHost(
+        policy=configured_policy(),
         pool=pool,
         checkpointer=Mock(),
         graph=graph,
@@ -160,6 +162,7 @@ async def _prove_successor_ignores_old_cancel(
     conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent_id,))
     conn.commit()
     replacement = AgentHost(
+        policy=configured_policy(),
         pool=pool,
         checkpointer=Mock(),
         graph=graph,
@@ -299,6 +302,7 @@ async def test_idle_force_only_original_live_host_can_observe(
 ) -> None:
     agent_id = _agent(db_conn)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -339,6 +343,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
     """A dead host owner must not strand a force when no exec domain survived."""
     agent_id = _agent(db_conn)
     old_host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -386,6 +391,7 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
     the claimed-only boot recovery; the widened candidate predicate settles it."""
     agent_id = _agent(db_conn)
     old_host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -452,6 +458,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
     """A request envelope survives its parent and forbids guessed quiescence."""
     agent_id = _agent(db_conn)
     old_host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -525,6 +532,7 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
     """Old-owner evidence is preserved, not deleted, and stops fencing the force."""
     agent_id = _agent(db_conn)
     old_host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -605,6 +613,7 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
 
     agent_id = _agent(db_conn)
     old_host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -665,6 +674,7 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
 
     agent_id = _agent(db_conn)
     old_host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
@@ -714,6 +724,7 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
     """A live matching child defers; the same evidence recovers on the next boot."""
     agent_id = _agent(db_conn)
     old_host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),

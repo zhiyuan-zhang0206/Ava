@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Callable
 from contextlib import AbstractContextManager, AsyncExitStack, suppress
 from typing import Any
 
@@ -31,7 +32,8 @@ from ._remote import _RemoteMCPClient, connect_remote
 class McpClients:
     """Loop, sessions and daemon client of one context (see the module docstring)."""
 
-    def __init__(self) -> None:
+    def __init__(self, timeout_seconds: Callable[[], float]) -> None:
+        self.timeout_seconds = timeout_seconds
         self._lock = threading.Lock()
         self._portal_cm: AbstractContextManager[BlockingPortal] | None = None
         self._portal: BlockingPortal | None = None

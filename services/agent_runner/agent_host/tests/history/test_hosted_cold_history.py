@@ -30,6 +30,7 @@ from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 def test_unwrapped_saver_does_not_opt_into_reconstruction_cache() -> None:
@@ -106,6 +107,7 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
     )
     monkeypatch.setattr(host_module, "close_hosted_turn", AsyncMock())
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
