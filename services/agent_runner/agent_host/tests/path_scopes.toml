@@ -12,3 +12,32 @@
 ]
 "tests.fixtures.unit.homes" = ["."]
 "tests.fixtures.unit.identity" = ["guarded_compact"]
+"tests.fixtures.model_catalog" = [
+    "guarded_compact/test_application_proof.py",
+    "guarded_compact/test_claim_response.py",
+    "guarded_compact/test_closing_anchor.py",
+    "guarded_compact/test_cold_input.py",
+    "guarded_compact/test_cold_terminal.py",
+    "guarded_compact/test_complete_chain.py",
+    "guarded_compact/test_dead_host.py",
+    "guarded_compact/test_generation_cancel.py",
+    "guarded_compact/test_generation_faults.py",
+    "guarded_compact/test_late_cancel.py",
+    "guarded_compact/test_late_inputs.py",
+    "guarded_compact/test_one_connection.py",
+    "guarded_compact/test_pre_attempt.py",
+    "guarded_compact/test_retained_wake.py",
+    "guarded_compact/test_runner_authority.py",
+    "test_agent_host.py",
+    "test_circuit_breaker.py",
+    "test_circuit_breaker_audit.py",
+    "test_maintenance_prior_failure.py",
+    "test_maintenance_recovery.py",
+]
+"tests.fixtures.unit.config_authority" = [
+    "test_circuit_breaker.py",
+    "test_circuit_breaker_audit.py",
+]
+"tests.fixtures.log_capture" = [
+    "test_circuit_breaker.py",
+]

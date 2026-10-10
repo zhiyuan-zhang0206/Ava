@@ -14,3 +14,6 @@
 ]
 "tests.fixtures.unit.generation" = ["."]
 "tests.fixtures.unit.homes" = ["."]
+"base.deploy.lifecycle.tests.serving_root" = [
+    "test_commands_restart_stop.py",
+]
