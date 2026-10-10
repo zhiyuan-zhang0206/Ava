@@ -1,6 +1,6 @@
 """Measure how far changes reach through the PR test-selection impact graph.
 
-Run: `python3 scripts/audit/impact_census.py [--top N] [--json]` from the repository
+Run: `python -m scripts.audit.impact_census [--top N] [--json]` from the repository
 root (stdlib-only, read-only, no environment). It reports the numbers the locality
 and selector workstreams track (issue #5128):
 
@@ -16,21 +16,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from scripts.ci.test_impact import Impact, build_impact  # noqa: E402 - standalone script
-from scripts.ci.test_selector import (  # noqa: E402 - standalone script
+from scripts.ci.test_impact import Impact, build_impact
+from scripts.ci.test_selector import (
     estimate_seconds,
     load_checkout,
     load_durations,
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)

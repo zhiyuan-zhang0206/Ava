@@ -207,7 +207,7 @@ subsets at or below 80% run.
 
 `scripts.ci.test_selector.load_durations` and `estimate_seconds` own this model
 for the selector and its reporting consumers. The read-only
-`scripts/audit/impact_census.py --json` command reports source reach and unbounded
+`python -m scripts.audit.impact_census --json` command reports source reach and unbounded
 input consumers from the same impact graph, using these functions for estimated
 minutes. Census estimates describe static coupling; they are not measured CI
 execution times or proof that a selected subset is faster.

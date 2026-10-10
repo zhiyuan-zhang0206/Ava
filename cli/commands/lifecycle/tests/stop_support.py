@@ -15,7 +15,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -105,7 +105,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @contextmanager
-def launched_processes(home: Path) -> Iterator[Launcher]:
+def launched_processes(home: Path) -> Generator[Launcher, None, None]:
     """Own fixed-source private sessions until their test and native cleanup finish."""
     processes: list[subprocess.Popen[str]] = []
 
