@@ -49,3 +49,13 @@ def test_unrelated_parameter_does_not_hide_global_private_reach(tmp_path: Path) 
     assert locality.private_imports(tree, "cli/probe.py", ("base", "cli"), root) == {
         "cli/probe.py::base.net.retry._sleep": [2]
     }
+
+
+def test_comprehension_target_does_not_hide_global_private_reach(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    tree = ast.parse(
+        "import base.net.retry as subject\n[subject for subject in []]\nsubject._sleep(1)\n"
+    )
+    assert locality.private_imports(tree, "cli/probe.py", ("base", "cli"), root) == {
+        "cli/probe.py::base.net.retry._sleep": [3]
+    }

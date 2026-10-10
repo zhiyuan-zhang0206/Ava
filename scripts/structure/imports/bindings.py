@@ -10,11 +10,42 @@ from typing import cast
 
 from . import normalize
 
+type ScopeNode = (
+    ast.FunctionDef
+    | ast.AsyncFunctionDef
+    | ast.ClassDef
+    | ast.Lambda
+    | ast.ListComp
+    | ast.SetComp
+    | ast.DictComp
+    | ast.GeneratorExp
+)
+
+_SCOPE_NODES = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Lambda,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
 
 def scope_parts(
-    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda,
+    node: ScopeNode,
 ) -> tuple[tuple[ast.AST, ...], tuple[ast.AST, ...]]:
     """Definition-time expressions use the enclosing scope; only bodies use the new one."""
+    if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+        outer = (node.generators[0].iter,)
+        inner: list[ast.AST] = []
+        for offset, generator in enumerate(node.generators):
+            if offset:
+                inner.append(generator.iter)
+            inner.extend((generator.target, *generator.ifs))
+        inner.extend((node.key, node.value) if isinstance(node, ast.DictComp) else (node.elt,))
+        return outer, tuple(inner)
     if isinstance(node, ast.ClassDef):
         outer = (*node.decorator_list, *node.bases, *node.keywords, *node.type_params)
         return outer, tuple(node.body)
@@ -29,13 +60,15 @@ def scope_parts(
 def local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
     """Walk this lexical scope, keeping nested scope bodies out of its bindings."""
     children = ast.iter_child_nodes(tree)
-    if isinstance(tree, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+    if isinstance(tree, _SCOPE_NODES):
         children = iter(scope_parts(tree)[1])
     for child in children:
         yield child
-        if not isinstance(
-            child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
-        ):
+        if isinstance(child, _SCOPE_NODES):
+            for expression in scope_parts(child)[0]:
+                yield expression
+                yield from local_nodes(expression)
+        else:
             yield from local_nodes(child)
 
 
