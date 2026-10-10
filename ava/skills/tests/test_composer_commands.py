@@ -79,9 +79,32 @@ def test_discover_sorted_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_builtin_commands_discoverable():
-    # End-to-end (no monkeypatch): repo-level commands/ (recap, plan) stay bare.
+    # End-to-end (no monkeypatch): ava_builtins/commands (recap, compact) stay bare.
     names = {c["name"] for c in composer_commands.discover_commands()}
-    assert {"recap", "plan"} <= names
+    assert {"recap", "compact"} <= names
+    assert "plan" not in names
+
+
+def test_removed_builtin_plan_passes_through():
+    assert composer_commands.expand_command("/plan the migration") == "/plan the migration"
+
+
+def test_builtin_source_ignores_legacy_root_and_keeps_user_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo, home = tmp_path / "repo", tmp_path / "home"
+    _write(repo / "ava_builtins" / "commands", "recap.md", "Builtin recap.")
+    _write(repo / "commands", "plan.md", "Old bundled plan.")
+    _write(home / "commands", "recap.md", "User recap.")
+    monkeypatch.setattr(composer_commands, "repo_root", lambda: repo)
+    monkeypatch.setattr(composer_commands, "ava_home", lambda: home)
+    monkeypatch.setattr(composer_commands, "repo_plugins_dir", lambda: repo / "plugins")
+    monkeypatch.setattr(composer_commands, "external_plugin_read_root", lambda: home / "plugins")
+    monkeypatch.setattr(composer_commands.skills, "names", list)
+    commands = {c["name"]: c for c in composer_commands.discover_commands()}
+    assert set(commands) == {"recap"}
+    assert commands["recap"]["body"] == "User recap."
+    assert composer_commands.expand_command("/plan the migration") == "/plan the migration"
 
 
 def test_scan_dir_renders_canonical_namespace_spelling(tmp_path: Path):
@@ -239,22 +262,22 @@ def _chain_catalog(monkeypatch: pytest.MonkeyPatch, *commands: dict) -> None:
 
 def test_chain_expands_every_command_in_the_order_typed(monkeypatch: pytest.MonkeyPatch):
     _chain_catalog(
-        monkeypatch, _file_command("recap", "Recap it."), _file_command("plan", "Plan it.")
+        monkeypatch, _file_command("recap", "Recap it."), _file_command("review", "Review it.")
     )
-    out = composer_commands.expand_command("/recap /plan")
-    assert out.index("Command /recap:\nRecap it.") < out.index("Command /plan:\nPlan it.")
+    out = composer_commands.expand_command("/recap /review")
+    assert out.index("Command /recap:\nRecap it.") < out.index("Command /review:\nReview it.")
     # Reversing the input reverses the expansion — order is the typed order.
-    flipped = composer_commands.expand_command("/plan /recap")
-    assert flipped.index("Command /plan:") < flipped.index("Command /recap:")
+    flipped = composer_commands.expand_command("/review /recap")
+    assert flipped.index("Command /review:") < flipped.index("Command /recap:")
 
 
 def test_chain_gives_each_command_its_own_argument(monkeypatch: pytest.MonkeyPatch):
     _chain_catalog(
-        monkeypatch, _file_command("recap", "Recap it."), _file_command("plan", "Plan it.")
+        monkeypatch, _file_command("recap", "Recap it."), _file_command("review", "Review it.")
     )
-    out = composer_commands.expand_command("/recap just the PRs /plan the migration")
+    out = composer_commands.expand_command("/recap just the PRs /review the migration")
     assert "Command /recap:\nRecap it.\nAdditional message: just the PRs" in out
-    assert "Command /plan:\nPlan it.\nAdditional message: the migration" in out
+    assert "Command /review:\nReview it.\nAdditional message: the migration" in out
 
 
 def test_chain_is_exactly_the_single_expansions_concatenated(monkeypatch: pytest.MonkeyPatch):
@@ -262,13 +285,13 @@ def test_chain_is_exactly_the_single_expansions_concatenated(monkeypatch: pytest
     # framing, no instruction about how to treat the combination. A chain is
     # what each command expands to alone, joined by a blank line.
     _chain_catalog(
-        monkeypatch, _file_command("recap", "Recap it."), _file_command("plan", "Plan it.")
+        monkeypatch, _file_command("recap", "Recap it."), _file_command("review", "Review it.")
     )
     alone = [
         composer_commands.expand_command("/recap"),
-        composer_commands.expand_command("/plan the migration"),
+        composer_commands.expand_command("/review the migration"),
     ]
-    assert composer_commands.expand_command("/recap /plan the migration") == "\n\n".join(alone)
+    assert composer_commands.expand_command("/recap /review the migration") == "\n\n".join(alone)
 
 
 def test_single_command_expands_unchanged(monkeypatch: pytest.MonkeyPatch):
@@ -302,22 +325,22 @@ def test_slash_token_that_is_not_a_command_stays_in_the_argument(monkeypatch: py
 
 
 def test_missing_space_between_commands_is_one_unknown_name(monkeypatch: pytest.MonkeyPatch):
-    # `/recap/plan` is a typo, not a chain: the whole token is the name, it
+    # `/recap/review` is a typo, not a chain: the whole token is the name, it
     # matches nothing, and the message passes through untouched.
     _chain_catalog(
-        monkeypatch, _file_command("recap", "Recap it."), _file_command("plan", "Plan it.")
+        monkeypatch, _file_command("recap", "Recap it."), _file_command("review", "Review it.")
     )
-    assert composer_commands.expand_command("/recap/plan") == "/recap/plan"
+    assert composer_commands.expand_command("/recap/review") == "/recap/review"
 
 
 def test_extra_whitespace_between_commands_still_chains(monkeypatch: pytest.MonkeyPatch):
     _chain_catalog(
-        monkeypatch, _file_command("recap", "Recap it."), _file_command("plan", "Plan it.")
+        monkeypatch, _file_command("recap", "Recap it."), _file_command("review", "Review it.")
     )
-    for raw in ("/recap    /plan", "/recap\n/plan"):
+    for raw in ("/recap    /review", "/recap\n/review"):
         out = composer_commands.expand_command(raw)
         assert "Command /recap:\nRecap it." in out
-        assert "Command /plan:\nPlan it." in out
+        assert "Command /review:\nReview it." in out
         assert "Additional message" not in out
 
 
@@ -334,17 +357,17 @@ def test_unknown_leading_name_passes_the_whole_chain_through(monkeypatch: pytest
 
 def test_chain_expansion_is_source_neutral(monkeypatch: pytest.MonkeyPatch):
     _chain_catalog(
-        monkeypatch, _file_command("recap", "Recap it."), _file_command("plan", "Plan it.")
+        monkeypatch, _file_command("recap", "Recap it."), _file_command("review", "Review it.")
     )
-    assert "User" not in composer_commands.expand_command("/recap /plan")
+    assert "User" not in composer_commands.expand_command("/recap /review")
 
 
 def test_chain_passthrough_when_disabled(monkeypatch: pytest.MonkeyPatch):
     _chain_catalog(
-        monkeypatch, _file_command("recap", "Recap it."), _file_command("plan", "Plan it.")
+        monkeypatch, _file_command("recap", "Recap it."), _file_command("review", "Review it.")
     )
     monkeypatch.setattr(composer_commands.settings.agent, "commands_enabled", False)
-    assert composer_commands.expand_command("/recap /plan") == "/recap /plan"
+    assert composer_commands.expand_command("/recap /review") == "/recap /review"
 
 
 # --- every command expands alike (no special cases) ---

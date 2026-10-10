@@ -337,7 +337,7 @@ function HomeContent({
       if (activeId == null) return false;
       try {
         // One send is one message, whatever was typed. Text invoking several
-        // commands (`/plan … /recap`) is sent whole and expanded server-side
+        // commands (`/recap … /compact`) is sent whole and expanded server-side
         // inside that single inbound, so the agent reads the commands as one
         // composite instruction rather than as unrelated turns.
         if (imageUrls.length === 0) {
