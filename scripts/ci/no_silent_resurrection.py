@@ -48,9 +48,11 @@ warnings go to stderr; the failing message carries the allowance recipe.
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import subprocess
 import sys
+import tokenize
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -189,10 +191,39 @@ def _skipped(path: str) -> bool:
     return path in SKIPPED_FILES or path.startswith(SKIPPED_DIRS)
 
 
+def _qualified_type_reference(tokens: list[tokenize.TokenInfo], index: int) -> bool:
+    """Recognize a CamelCase attribute reference without invoking its constructor."""
+    name = tokens[index].string
+    return (
+        index > 0
+        and tokens[index - 1].string == "."
+        and name[0].isupper()
+        and "_" not in name
+        and _CAMEL_CASE.search(name) is not None
+        and index + 1 < len(tokens)
+        and tokens[index + 1].string != "("
+    )
+
+
 def _has_distinctive_identifier(text: str) -> bool:
-    for token in _IDENTIFIER.findall(text):
-        if len(token) >= DISTINCTIVE_IDENTIFIER_LENGTH and (
-            "_" in token or _CAMEL_CASE.search(token)
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError):
+        # Incomplete or non-Python fragments retain the conservative text rule.
+        return any(
+            len(name) >= DISTINCTIVE_IDENTIFIER_LENGTH and ("_" in name or _CAMEL_CASE.search(name))
+            for name in _IDENTIFIER.findall(text)
+        )
+    for index, token in enumerate(tokens):
+        name = token.string
+        if token.type != tokenize.NAME:
+            continue
+        # A qualified type reference is not an operation on that type. Keep
+        # actual constructor calls and domain attributes as distinctive proof.
+        if (
+            not _qualified_type_reference(tokens, index)
+            and len(name) >= DISTINCTIVE_IDENTIFIER_LENGTH
+            and ("_" in name or _CAMEL_CASE.search(name))
         ):
             return True
     return False
@@ -208,9 +239,13 @@ def _classify(text: str) -> tuple[bool, bool]:
         return False, False
     identifiers = [t for t in _IDENTIFIER.findall(text) if len(t) >= MIN_IDENTIFIER_LENGTH]
     strong = len(identifiers) >= MIN_IDENTIFIERS
-    # An opening prefix omits the arguments/body that establish its contract.
+    # An opening prefix or declaration omits the implementation of its contract.
     # Keep it strong for restored blocks, but never decisive on its own.
-    return strong, strong and not text.endswith("(") and _has_distinctive_identifier(text)
+    declaration = text.startswith(("def ", "async def ", "class ")) and text.endswith(":")
+    return (
+        strong,
+        strong and not text.endswith("(") and not declaration and _has_distinctive_identifier(text),
+    )
 
 
 def _added_runs(merge_base: str, head: str, cwd: Path) -> list[Run]:

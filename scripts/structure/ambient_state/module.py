@@ -421,12 +421,7 @@ def _direct_classmethod(
 def _returns_bound_class(method: ast.FunctionDef) -> bool:
     """Accept only a single return of the classmethod's untouched bound class."""
     body = method.body
-    if (
-        body
-        and isinstance(body[0], ast.Expr)
-        and isinstance(body[0].value, ast.Constant)
-        and isinstance(body[0].value.value, str)
-    ):
+    if ast.get_docstring(method) is not None:
         body = body[1:]
     args = [*method.args.posonlyargs, *method.args.args]
     return (
