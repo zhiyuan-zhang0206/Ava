@@ -2,7 +2,7 @@
 collect one disposable child per execute_code call.
 
 The parent polls every 50ms and owns teardown through direct-child reap,
-root-independent process-domain close, and a bounded output-reader join. POSIX
+root-independent process-domain close, and a bounded output EOF tail. POSIX
 owns a new process group. The child's result
 envelope stays advisory except for lifecycle outcomes. It spawns
 `python -I -B -X utf8 -m agent.execution.child`: isolated mode keeps the inherited cwd
@@ -344,11 +344,11 @@ def _retain_late_reader_completion(
     *,
     resources: HostedTurnResources | None,
 ) -> None:
-    """A failed bounded join may later finish; other failed stages stay unknown.
+    """A pipe exceeding its bounded EOF tail may finish later; other failures stay unknown.
 
     ExecTeardownError includes every failed stage after all owner tasks have
     completed. A reader-only failure therefore positively proves close/root/reap.
-    This callback waits for that same reader, never retries a released POSIX pgid.
+    This observer pumps that same pipe, never retries a released POSIX pgid.
     """
     scope = resources
     if scope is None or reader is None or not failure.failures:
@@ -358,8 +358,8 @@ def _retain_late_reader_completion(
     domain = scope.unresolved[request]
 
     async def complete_reader() -> None:
-        # This is optional observation, not a second join owner. Cancellation
-        # must not strand an executor thread waiting for a detached pipe writer.
+        # The original pipe stays unresolved until actual EOF. Observation
+        # yields between nonblocking reads and does not acquire writer kill authority.
         while not reader.closed:
             reader.pump()
             if not reader.closed:
@@ -548,7 +548,7 @@ async def _run_legacy_subprocess(
     except asyncio.CancelledError as original:
         # The exec node's outer shield (asyncio.wait_for) cancels this task on
         # node timeout. Cancellation is not complete until every owned resource
-        # is settled; otherwise the next exec inherits a zombie/thread leak.
+        # is settled; otherwise the next exec inherits unresolved process/pipe resources.
         resources_settled = await _finish_failed_run(
             original,
             root_exit_task,

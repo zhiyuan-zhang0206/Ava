@@ -451,7 +451,7 @@ async def run_owned(
     config_overlay: dict[str, object] | None,
     birth_config: dict[str, object] | None,
 ) -> tuple[_ExecResult, ResultPayload | None]:
-    """Run one managed exec; this function alone spawns the owner's reader thread and tasks."""
+    """Run one managed exec with its invocation-owned output pipe and completion tasks."""
     owned = _OwnedRun(
         db,
         target,

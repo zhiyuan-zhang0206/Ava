@@ -1,7 +1,7 @@
 """Owned lifetime of one disposable ``execute_code`` process tree.
 
 Each run has exactly one direct-child reap task, one domain-close task, and one
-reader-join task. The direct child owns a POSIX process group.
+bounded output EOF tail task. The direct child owns a POSIX process group.
 """
 
 from __future__ import annotations
@@ -145,11 +145,11 @@ def start_reap(proc: subprocess.Popen[bytes], domain_close: DomainCloseOwner) ->
 def start_reader_join(
     reap_task: asyncio.Task[int], reader: ExecOutputPipe, pid: int
 ) -> asyncio.Task[None]:
-    """Make one bounded reader join after the root's sole reap attempt."""
+    """Pump one bounded output EOF tail after the root's sole reap attempt."""
 
     async def _join_after_reap() -> None:
         # Wait for the reap to settle without reading its result: `settle_resources` reports
-        # a reap failure, and the reader is still joined once.
+        # a reap failure, and the output tail is still pumped once.
         await asyncio.wait({reap_task})
         await reader.finish(_READER_JOIN_TIMEOUT_S)
         if not reader.closed:
@@ -197,8 +197,8 @@ async def settle_resources(
 ) -> tuple[TeardownFailure, ...]:
     """Observe every cleanup owner, then return failures in stable priority.
 
-    Failed closure stops exit observation and blocks reap; the bounded reader
-    join still runs. The retained child is unresolved, never declared exited.
+    Failed closure stops exit observation and blocks reap; the bounded output
+    tail still runs. The retained child is unresolved, never declared exited.
     """
     if request_stop:
         domain_close.request()
@@ -237,7 +237,7 @@ async def finish_teardown_despite_cancellation(
     domain_close: DomainCloseOwner,
     reader_join_task: asyncio.Task[None] | None,
 ) -> tuple[TeardownFailure, ...]:
-    """Finish the close→reap→reader barrier despite repeated cancellation."""
+    """Finish the close→reap→output EOF barrier despite repeated cancellation."""
 
     async def _cleanup() -> tuple[TeardownFailure, ...]:
         return await settle_resources(
