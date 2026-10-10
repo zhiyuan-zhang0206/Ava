@@ -113,7 +113,8 @@ single-box hosts collapse to the local receiver even when their secret is set.
 
 - `base/telemetry/otlp/telemetry_otlp.py:export_batch(events)` — module singleton
   `backend`; no-op when the flag is off; `flush()` / `shutdown()` — test
-  seam / process exit
+  seam / finite process-exit observation. `telemetry_otlp_worker.OtlpWorker`
+  owns the one writer and each partial SDK resource through teardown.
 - `base/telemetry/emitter.py:_export_otlp` — the drain-thread call site
   (suppress-guarded, deferred import)
 - `cli/commands/observability/trace.py:cmd_trace_ship` — `ava trace ship
@@ -134,6 +135,6 @@ single-box hosts collapse to the local receiver even when their secret is set.
 - Exit flush (task #4320) — both providers build with
   `shutdown_on_exit=False`; the single ordered exit seam and its accepted
   semantics: [[exit-flush.ava.okf.md|OTLP exit flush]].
-- The stack's operational story (collector, Grafana) is in
+- Collector/Grafana operations:
   `docs/conventions/runbook.md` (Observability / Tracing).
 - Parent node: [[base.ava.okf.md|Base Library]].
