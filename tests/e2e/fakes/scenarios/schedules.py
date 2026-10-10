@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.e2e.fakes._recording import RecordingModel, say
+from tests.e2e.fakes.scenario_recording import RecordingModel, say
 
 
 def build(model: str, *, agent_id: int | None) -> RecordingModel:

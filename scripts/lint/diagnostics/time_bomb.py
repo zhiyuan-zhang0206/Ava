@@ -87,6 +87,8 @@ sys.path.insert(0, str(_REPO_ROOT))
 from scripts.structure import lint_common  # noqa: E402 - standalone script
 from scripts.structure.lazy_modules import ModuleMap  # noqa: E402 - standalone script
 
+__all__ = ["main"]
+
 _SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 
 # A parameter carrying any of these names is treated as the caller-visible
@@ -197,10 +199,8 @@ def _fixed_instant_names(tree: ast.Module) -> frozenset[str]:
 class _Index:
     """A view of the repo: modules, fixed-instant constants, and per-function summaries.
 
-    Everything is built on demand: a module is read and parsed the first time a call, an
-    import or a judged file resolves into it, so a run that judges a few files touches a few
-    modules instead of the repository. A module is anything under the scanned dirs (and
-    `tests/`) at the path its dotted name spells.
+    Read and parse modules on demand as calls, imports, or judged files reach them.
+    Modules live under the scanned dirs (and `tests/`) at their dotted-name paths.
     """
 
     def __init__(self, root: Path, dirs: tuple[str, ...]) -> None:
@@ -436,9 +436,9 @@ def _is_test_path(rel: str) -> bool:
     return any(pat.search(rel) for pat in _TEST_PATTERNS)
 
 
-def _rel_or_abs(path: Path) -> str:
+def _rel_or_abs(root: Path, path: Path) -> str:
     """Repo-relative posix path, or the absolute path for a target outside the repo."""
-    return path.as_posix().removeprefix(_REPO_ROOT.as_posix() + "/")
+    return path.as_posix().removeprefix(root.as_posix() + "/")
 
 
 def _lint_source(
@@ -448,12 +448,12 @@ def _lint_source(
     for path in paths:
         if path.is_dir():
             for p in sorted(path.rglob("*.py")):
-                rel = _rel_or_abs(p)
+                rel = _rel_or_abs(index.root, p)
                 if _is_test_path(rel) or (scope is not None and rel not in scope):
                     continue
                 errors.extend(_lint_source_file(index, p, rel))
         elif path.suffix == ".py":
-            rel = _rel_or_abs(path)
+            rel = _rel_or_abs(index.root, path)
             if not _is_test_path(rel):
                 errors.extend(_lint_source_file(index, path, rel))
     return errors
@@ -513,11 +513,11 @@ def _lint_tests(index: _Index, paths: list[Path], scope: frozenset[str] | None =
     for path in paths:
         if path.is_dir():
             for p in sorted(path.rglob("*.py")):
-                rel = _rel_or_abs(p)
+                rel = _rel_or_abs(index.root, p)
                 if _is_test_path(rel) and (scope is None or rel in scope):
                     errors.extend(_lint_test_file(index, p, rel))
         elif path.suffix == ".py":
-            rel = _rel_or_abs(path)
+            rel = _rel_or_abs(index.root, path)
             if _is_test_path(rel):
                 errors.extend(_lint_test_file(index, path, rel))
     return errors
@@ -732,7 +732,6 @@ def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
     except (OSError, UnicodeDecodeError, SyntaxError):
         return []
     source_lines = text.splitlines()
-    # Rules 2 and 3 share one traversal; retain only their import/binding nodes.
     nodes = [
         node
         for node in ast.walk(tree)
@@ -764,11 +763,16 @@ def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
     return errors
 
 
-def main(argv: list[str] | None = None) -> int:
+def _repository_root(repo_root: Path | None) -> Path:
+    return _REPO_ROOT if repo_root is None else repo_root.resolve()
+
+
+def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+    """Run the lint, resolve relative targets against repo_root, and emit errors to stderr."""
+    root = _repository_root(repo_root)
     argv = list(sys.argv[1:] if argv is None else argv)
     argv, only = lint_common.split_only(argv)
-    scope = lint_common.changed_scope(only, _REPO_ROOT)
-    root = _REPO_ROOT
+    scope = lint_common.changed_scope(only, root)
     if argv:
         paths = [p if p.is_absolute() else root / p for p in (Path(a) for a in argv)]
         missing = [a for a, p in zip(argv, paths, strict=True) if not p.exists()]
@@ -783,11 +787,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         dirs = _SCAN_DIRS
         index = _Index(root, dirs)
-        # Rules 2 and 3 read test files wherever they live: the top-level tests/ and
-        # each package's own tests/ (`_lint_tests` keeps only test paths).
-        # With `--only` (the commit hook) just the changed files are judged, against the same
-        # whole-repo index; what a changed helper does to files that did not change is
-        # CI's full run to catch.
+        # Judge test files wherever they live; --only narrows verdicts, not the repo index.
         errors = _lint_source(index, lint_common.scan_roots(root, dirs), scope) + _lint_tests(
             index, [root / "tests", *lint_common.scan_roots(root, dirs)], scope
         )

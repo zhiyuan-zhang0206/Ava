@@ -26,7 +26,7 @@ from pathlib import Path
 import psycopg
 
 from base.config import settings
-from tests.e2e.fakes._recording import (
+from tests.e2e.fakes.scenario_recording import (
     RecordingModel,
     exec_call,
     model_inputs,

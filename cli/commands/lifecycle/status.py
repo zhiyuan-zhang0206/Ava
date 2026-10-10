@@ -1,6 +1,6 @@
 """`ava status` — one-screen view of services, infra, host relays, and cron.
 
-Composed from `_print_service_row` (session + probe per spec) +
+Composed from `print_service_row` (session + probe per spec) +
 `print_data_plane_status` (this cluster's own pg/redis) + `print_redis_bridge_status` (authenticated PING
 through the private-network relay), followed by the gateway's own cluster-status
 snapshot (GET `/api/cluster/status`).
@@ -16,11 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.cluster.machine import MachineRoles
+from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
-from cli.commands._probe import (
-    _detect_prod_source_drift,
-    _print_service_row,
-)
 from cli.commands._repo import (
     _repo_root,
     _services_for_roles_annotated,
@@ -30,6 +27,7 @@ from cli.commands._repo import (
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.cluster_instance import print_data_plane_status
 from cli.commands.lifecycle.hold_report import print_hold_section
+from cli.commands.probe import print_service_row
 from ops.roster.service_spec import ServiceSpec
 
 
@@ -79,7 +77,7 @@ def cmd_status() -> int:
     print(header)
     print("-" * len(header))
     for spec, skip_reason in services_to_show:
-        _print_service_row(spec, name_w, skip_reason, root_units=root_units)
+        print_service_row(spec, name_w, skip_reason, root_units=root_units)
 
     # infra section: a runner-only host has no local pg/redis.
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
@@ -120,7 +118,7 @@ def cmd_status() -> int:
     # fleet release. A feature branch here means someone developed in the prod
     # tree instead of a worktree: un-reviewed code on the next restart.
     if roles:
-        drift_branch = _detect_prod_source_drift()
+        drift_branch = cluster_drift.prod_source_branch_drift()
         if drift_branch == "HEAD":
             print(
                 "\n· prod source ($AVA_HOME/source) is detached at the released commit "

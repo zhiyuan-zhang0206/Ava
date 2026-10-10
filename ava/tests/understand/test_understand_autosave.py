@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from ava.tests.understand._understand_helpers import mock_deepseek as mock_deepseek
-from ava.tests.understand._understand_helpers import understand_mod
+from ava.tests.understand.provider_support import ProviderCapture
+from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
+from ava.understand import understand
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 
 
 def test_single_result_saved_to_exec_output(
-    mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Single-call understand saves result to .exec_output/ in workspace."""
 
@@ -35,7 +35,7 @@ def test_single_result_saved_to_exec_output(
 
     monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
 
-    understand_mod.understand([{"prompt": "summarize please", "text": "hello world"}])
+    understand([{"prompt": "summarize please", "text": "hello world"}])
 
     # Check that .exec_output/ was created and contains the result
     exec_dir = ws / ".exec_output"
@@ -48,7 +48,7 @@ def test_single_result_saved_to_exec_output(
 
 
 def test_batch_results_saved_to_exec_output(
-    mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Batch understand saves each result individually."""
 
@@ -66,7 +66,7 @@ def test_batch_results_saved_to_exec_output(
         {"prompt": "question one", "text": "material one"},
         {"prompt": "question two", "text": "material two"},
     ]
-    understand_mod.understand(targets)
+    understand(targets)
 
     exec_dir = ws / ".exec_output"
     files = sorted(exec_dir.glob("understand_*.txt"))
@@ -76,9 +76,9 @@ def test_batch_results_saved_to_exec_output(
 
 
 def test_auto_save_prunes_old_files(
-    mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Old understand output files are pruned, keeping the _OVERFLOW_KEEP most recent."""
+    """Old understand output files are pruned, keeping the 20 most recent results."""
 
     agent_id = 2139
     ws = tmp_path / "prune_ws"
@@ -104,11 +104,10 @@ def test_auto_save_prunes_old_files(
         os.utime(f, (1_700_000_000, 1_700_000_000))
 
     # Run a new understand — should trigger pruning
-    understand_mod.understand([{"prompt": "new question", "text": "new material"}])
+    understand([{"prompt": "new question", "text": "new material"}])
 
     files = sorted(exec_dir.glob("understand_*.txt"))
-    keep = understand_mod._OVERFLOW_KEEP
-    assert len(files) == keep, "the ring is trimmed to exactly _OVERFLOW_KEEP"
+    assert len(files) == 20, "the ring retains the newest 20 results"
 
     # Exactly which files survive is determined, not incidental. Sorted by name
     # the 30 pre-created ones precede today's, so the ring is the 19 highest
@@ -121,7 +120,7 @@ def test_auto_save_prunes_old_files(
 
 
 def test_auto_save_noop_without_agent_id(
-    mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When no agent identity is established, auto-save is skipped gracefully."""
 
@@ -131,11 +130,11 @@ def test_auto_save_noop_without_agent_id(
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
     # Should not raise
-    [result] = understand_mod.understand([{"prompt": "test", "text": "some text"}])
+    [result] = understand([{"prompt": "test", "text": "some text"}])
     assert result == "fake answer"
 
 
-def test_one_question_is_a_one_element_batch(mock_deepseek: dict[str, Any]) -> None:
+def test_one_question_is_a_one_element_batch(mock_deepseek: ProviderCapture) -> None:
     """The single-question ergonomic: a one-element list, unpacked."""
-    [result] = understand_mod.understand([{"prompt": "hello", "text": "world"}])
+    [result] = understand([{"prompt": "hello", "text": "world"}])
     assert result == "fake answer"

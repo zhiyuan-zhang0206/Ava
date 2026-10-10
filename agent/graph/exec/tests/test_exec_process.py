@@ -40,8 +40,8 @@ from agent.graph.exec._subprocess import _collect_child
 from base.db import Database
 from base.native_process.ownership import OwnedProcess
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
-from base.sessions.posixproc import _group_empty
-from tests.e2e._proc import kill_group_or_prove_already_gone
+from base.sessions.posixproc import process_group_has_live_members
+from tests.e2e.process_support import kill_group_or_prove_already_gone
 from tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
@@ -71,18 +71,18 @@ async def _assert_tree_gone(pids: list[int], timeout_s: float = 5.0) -> None:
 
 
 async def _assert_group_gone(pgid: int, timeout_s: float = 5.0) -> None:
-    """Assert the process group's member table is empty after teardown.
+    """Observe no live member in the numeric process group after teardown.
 
     ``killpg(pgid, 0)`` keeps succeeding while any member — including a
     zombie awaiting its reaper — remains in the group table, so a one-shot
     ``ProcessLookupError`` expectation races the OS reaper; poll instead.
-    ``_group_empty`` is the same production check ``base.sessions.posixproc`` uses:
-    macOS answers a zombie-only group's ``killpg(pgid, 0)`` with EPERM, not
-    ESRCH, so a raw ``except ProcessLookupError`` here would leave that EPERM
-    uncaught instead of falling through to its psutil member scan.
+    ``process_group_has_live_members`` is the session supervisor's observation.
+    macOS answers a zombie-only group's ``killpg(pgid, 0)`` with EPERM, not ESRCH,
+    so the observation scans members rather than relying on that signal probe.
+    Native domain closure is established separately by its retained leader.
     """
     deadline = time.monotonic() + timeout_s
-    while not _group_empty(pgid):
+    while process_group_has_live_members(pgid):
         if time.monotonic() >= deadline:
             raise AssertionError(f"process group {pgid} still present after exec teardown")
         await asyncio.sleep(0.05)

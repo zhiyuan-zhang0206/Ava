@@ -16,13 +16,14 @@ def test_an_unchanged_file_is_not_read_again_and_a_changed_one_is(
     root = make_repo(tmp_path, {"cli/commands/run.py": "from base.net import retry\n"})
     tops = ("base", "ava", "cli")
     reads: list[str] = []
-    real = cache._statements
+    real = Path.read_text
 
-    def counting(path: Path, rel: str, scope: tuple[str, ...]) -> str:
-        reads.append(rel)
-        return real(path, rel, scope)
+    def counting(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if path.is_relative_to(root) and path.suffix == ".py":
+            reads.append(path.relative_to(root).as_posix())
+        return real(path, encoding=encoding, errors=errors)
 
-    monkeypatch.setattr(cache, "_statements", counting)
+    monkeypatch.setattr(Path, "read_text", counting)
     cold = cache.production_imports(root, tops)
     assert len(reads) == len(cold)
 

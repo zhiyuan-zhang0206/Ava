@@ -14,8 +14,8 @@ from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineRoles
 from base.config import settings
 from base.log import logger
-from cli.commands._probe import ReadinessWait
 from cli.commands._repo import ServiceSpec, session_name
+from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
 from ops.roster.service_spec import api_access, db_access, profile_marker
 
@@ -435,7 +435,7 @@ def _reconcile_units(
     and `state` its observed process state (task #4872).
     """
     units = _root_units(status)
-    from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
+    from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
     for spec in roster:
         unit = units[spec.session]
@@ -660,7 +660,7 @@ def _wait_for_root_services_ready(
     specs: tuple[ServiceSpec, ...], timeout_s: float
 ) -> ReadinessWait:
     """Wait for core services; optional availability is a diagnostic snapshot."""
-    from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
+    from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
     client = root_client()
     started_at = time.monotonic()

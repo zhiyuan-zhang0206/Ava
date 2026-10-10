@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.converge.host as converge_host
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
+import cli.commands.probe as _probe_commands
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
@@ -107,13 +107,13 @@ def _hermetic_start(
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", _launched)
     monkeypatch.setattr(
         _probe_commands,
-        "_probe_service",
+        "probe_service",
         _ignoring_args(lambda: _probe_commands.ServiceProbe(True, "root", "ready")),
     )
 
     def wait(roster: tuple[ServiceSpec, ...], **_kwargs: object):
         return _probe_commands.ReadinessWait(
-            tuple(spec for spec in roster if not _probe_commands._probe_service(spec).alive),
+            tuple(spec for spec in roster if not _probe_commands.probe_service(spec).alive),
             0.0,
             sessions_gone=False,
         )
@@ -126,7 +126,7 @@ def test_unready_frontend_is_failure_and_never_serving(monkeypatch: pytest.Monke
     def probe(spec: ServiceSpec) -> _probe_commands.ServiceProbe:
         return _probe_commands.ServiceProbe(spec.session != "frontend", "root", "unready")
 
-    monkeypatch.setattr(_probe_commands, "_probe_service", probe)
+    monkeypatch.setattr(_probe_commands, "probe_service", probe)
     assert _start_commands.cmd_start(retained_children=[]) == SERVICES_NOT_READY_EXIT_CODE
     assert not start_serving.is_serving()
 
@@ -303,7 +303,7 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
     _roster(monkeypatch, (("frontend", None),))
     monkeypatch.setattr(
         _probe_commands,
-        "_probe_service",
+        "probe_service",
         _ignoring_args(lambda: _probe_commands.ServiceProbe(ready, "root", "probe")),
     )
     monkeypatch.setattr(

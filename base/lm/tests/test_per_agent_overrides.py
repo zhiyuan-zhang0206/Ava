@@ -8,6 +8,7 @@ the result is what it always was.
 
 from __future__ import annotations
 
+from dataclasses import fields
 from typing import Any
 
 import pytest
@@ -36,7 +37,7 @@ _PINS: dict[str, Any] = {
 
 
 def test_the_pin_table_names_every_overridable_setting() -> None:
-    assert set(_PINS) == set(ModelOverrides.__dataclass_fields__)
+    assert set(_PINS) == {field.name for field in fields(ModelOverrides)}
 
 
 @pytest.mark.parametrize("setting", sorted(_PINS))
@@ -146,7 +147,7 @@ def test_the_context_budget_follows_the_agents_thresholds(*, model_catalog: Mode
         _MODEL,
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     pinned = resolve_context_budget(
@@ -167,7 +168,7 @@ def test_the_context_budget_follows_the_agents_ceiling(*, model_catalog: ModelCa
         _MODEL,
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     ceiling = plain.hard_compact_tokens // 2
@@ -187,7 +188,7 @@ def test_without_overrides_the_context_budget_is_unchanged(*, model_catalog: Mod
         _MODEL,
         catalog=model_catalog,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
 
@@ -202,7 +203,7 @@ def test_the_chat_model_is_built_with_the_agents_reasoning_effort(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert isinstance(default, ChatAnthropic)
@@ -235,7 +236,7 @@ def test_the_chat_model_is_built_with_the_agents_thinking_budget(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert isinstance(off, ChatAnthropic)

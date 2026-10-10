@@ -11,6 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.host.proc import run_bounded
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 from scripts.structure.budgets import quality_budget as quality
@@ -96,7 +97,6 @@ def _git(root: pathlib.Path, *args: str) -> None:
 @pytest.fixture(autouse=True)
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every main() call scans and invokes Git only in its own temporary root."""
-    monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
     _git(tmp_path, "init", "--quiet")
@@ -111,7 +111,7 @@ def test_line_budget_boundary(
 ) -> None:
     _write(tmp_path, f"{scope}/example.py", lines)
 
-    assert lcs.main([]) == (1 if lines > 800 else 0)
+    assert lcs.main([], repo_root=tmp_path) == (1 if lines > 800 else 0)
 
     output = capsys.readouterr().out
     if lines > 800:
@@ -131,12 +131,12 @@ def test_directory_cap_counts_py_pyi_and_subdirectories(
     _write(directory, "README.md", 1)
     _write(directory, "config.json", 1)
     _git(tmp_path, "add", "tests/package")
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
 
     _write(directory, "extra.pyi", 1)
     _git(tmp_path, "add", "tests/package/extra.pyi")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert "tests/package: directory has 21 direct entries" in output
     assert "split it" in output
@@ -148,12 +148,12 @@ def test_directory_budgets_are_recursive_and_independent(
     parent = _entries(tmp_path, "tests/package", 19)
     child = _entries(parent, "child", 20)
     _git(tmp_path, "add", "tests/package")
-    assert lcs.main([str(parent)]) == 0
+    assert lcs.main([str(parent)], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
 
     _write(child, "extra.py", 1)
     _git(tmp_path, "add", "tests/package/child/extra.py")
-    assert lcs.main([str(parent)]) == 1
+    assert lcs.main([str(parent)], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert "tests/package/child: directory has 21 direct entries" in output
     assert "tests/package: directory" not in output
@@ -174,7 +174,7 @@ def test_file_budgets_do_not_traverse_hidden_cache_migrations_or_links(
     (directory / "linked_dir").symlink_to(external, target_is_directory=True)
     (directory / "dangling.py").symlink_to(directory / "missing.py")
 
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -186,7 +186,7 @@ def test_explicit_hidden_cache_migrations_targets_check_directory_but_not_file_s
     directory = _entries(tmp_path, f"tests/{name}", 21)
     path = _write(directory, "oversized.py", 801)
     _git(tmp_path, "add", "-f", "--", str(directory))
-    assert lcs.main([str(path if target_file else directory)]) == 1
+    assert lcs.main([str(path if target_file else directory)], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert f"tests/{name}: directory has 22 direct entries" in output
     assert "file is 801 lines" not in output
@@ -199,7 +199,7 @@ def test_docs_and_frontend_check_directories_without_widening_python_rules(
     directory = _entries(tmp_path, scope, 21)
     _write(directory, "oversized.py", 801)
     _git(tmp_path, "add", scope)
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert f"{scope}: directory has 22 direct entries" in output
     assert "file is 801 lines" not in output
@@ -215,7 +215,7 @@ def test_baseline_introduction_skips_guard_when_absent_from_head(
     _write(tmp_path, "tests/oversized.py", 801)
     _baseline(tmp_path)
 
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     captured = capsys.readouterr()
     assert "hard ceiling" in captured.out
     assert "baseline guard skipped" in captured.err
@@ -225,7 +225,7 @@ def test_non_git_checkout_fails_the_guard(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / ".git").rename(tmp_path / "saved-git")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     captured = capsys.readouterr()
     assert "baseline guard skipped" not in captured.err
     assert "cannot resolve" in captured.out
@@ -235,7 +235,7 @@ def test_missing_default_base_fails_instead_of_using_head(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     captured = capsys.readouterr()
     assert "origin/main" in captured.out
     assert "falling back" not in captured.err
@@ -243,36 +243,72 @@ def test_missing_default_base_fails_instead_of_using_head(
 
 
 def test_explicit_base_compares_the_selected_commit_instead_of_its_merge_base(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _git(tmp_path, "checkout", "--quiet", "-b", "comparison")
-    _write(tmp_path, "README.md", 1)
-    _git(tmp_path, "add", "README.md")
-    _git(tmp_path, "commit", "--quiet", "-m", "Selected comparison revision")
-    expected = lcs._git("rev-parse", "HEAD").stdout.strip()
+    _baseline(tmp_path, ambient_state={"base/q.py::import-time-call:atexit.register": 1})
+    _commit_baseline(tmp_path)
     _git(tmp_path, "checkout", "--quiet", "-")
-    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "comparison")
-    assert lcs._baseline_base() == expected
+    _write_ambient_callbacks(tmp_path, "base/q.py", 1)
+    _baseline(tmp_path, ambient_state={"base/q.py::import-time-call:atexit.register": 1})
+    assert lcs.main([], repo_root=tmp_path, baseline_base="comparison") == 0
+    assert capsys.readouterr().out == ""
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD") == 1
+    assert "added ambient_state entry" in capsys.readouterr().out
 
 
 def test_explicit_fetched_base_works_without_ancestry_in_a_shallow_checkout(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path,
 ) -> None:
-    base = lcs._git("rev-parse", "HEAD").stdout.strip()
+    base = run_bounded(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        timeout=30,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     _write(tmp_path, "README.md", 1)
     _git(tmp_path, "add", "README.md")
     _git(tmp_path, "commit", "--quiet", "-m", "Change after the comparison revision")
     shallow = tmp_path.parent / "shallow"
     _git(tmp_path, "clone", "--quiet", "--depth", "1", tmp_path.as_uri(), str(shallow))
     _git(shallow, "fetch", "--quiet", "--depth", "1", "origin", base)
-    monkeypatch.setattr(lcs, "_REPO_ROOT", shallow)
-    assert lcs._git("merge-base", "HEAD", base).returncode != 0
-    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", base)
-    assert lcs._baseline_base() == base
-    assert lcs.main([]) == 0
+    ancestry = run_bounded(
+        ["git", "-C", str(shallow), "merge-base", "HEAD", base],
+        timeout=30,
+        capture_output=True,
+        text=True,
+    )
+    assert ancestry.returncode != 0
+    assert lcs.main([], repo_root=shallow, baseline_base=base) == 0
 
 
 # Malformed/misfiled/missing baseline shards: test_baseline_shard_validity_gate.py.
+
+
+@pytest.mark.parametrize("ref", ["", "missing-base", "--octopus"])
+def test_explicit_input_base_is_validated_instead_of_using_the_environment(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], ref: str
+) -> None:
+    assert lcs.main([], repo_root=tmp_path, baseline_base=ref) == 1
+    assert f"baseline_base={ref!r} cannot resolve" in capsys.readouterr().out
+
+
+def test_explicit_roots_do_not_share_checkout_state(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    other = tmp_path / "other-checkout"
+    other.mkdir()
+    _baseline(other)
+    _git(other, "init", "--quiet")
+    _git(other, "add", "-A")
+    _git(other, "commit", "--quiet", "-m", "Other checkout")
+    _write(tmp_path, "tests/big.py", 801)
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD") == 1
+    assert "tests/big.py:801:" in capsys.readouterr().out
+    assert lcs.main([], repo_root=other, baseline_base="HEAD") == 0
+    assert capsys.readouterr().out == ""
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD") == 1
+    assert "tests/big.py:801:" in capsys.readouterr().out
 
 
 def test_directory_with_unreadable_member_is_skipped(
@@ -281,11 +317,11 @@ def test_directory_with_unreadable_member_is_skipped(
     package = _entries(tmp_path, "base", 1)
     (package / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
     (package / "dangling.py").symlink_to(package / "missing.py")
-    assert lcs.main([str(package / "bad_utf8.py")]) == 0
-    assert lcs.main([str(package)]) == 0
-    assert lcs.main([]) == 0
+    assert lcs.main([str(package / "bad_utf8.py")], repo_root=tmp_path) == 0
+    assert lcs.main([str(package)], repo_root=tmp_path) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     _write(package, "big.py", 901)
-    assert lcs.main([str(package)]) == 1
+    assert lcs.main([str(package)], repo_root=tmp_path) == 1
     assert "hard ceiling" in capsys.readouterr().out
 
 
@@ -295,7 +331,7 @@ def test_explicit_missing_target_is_an_error(
     good = _write(tmp_path, "tests/ok.py", 1)
     missing = tmp_path / "typo.py"
     for args in ([str(missing)], [str(good), str(missing)]):
-        assert lcs.main(args) == 1
+        assert lcs.main(args, repo_root=tmp_path) == 1
         assert f"error: target path(s) not found: {missing}" in capsys.readouterr().err
 
 
@@ -311,13 +347,13 @@ def test_explicit_docs_target_checks_directories_and_baseline_guard(
     path = _write(directory, "oversized.py", 801)
     args = [str(directory if target_is_directory else path)]
     _git(tmp_path, "add", "docs")
-    assert lcs.main(args) == 1
+    assert lcs.main(args, repo_root=tmp_path) == 1
     captured = capsys.readouterr()
     assert "docs: directory has 22 direct entries" in captured.out
     assert "file is 801 lines" not in captured.out
 
     _baseline(tmp_path, files={"tests/unrelated.py": 801})
-    assert lcs.main(args) == 1
+    assert lcs.main(args, repo_root=tmp_path) == 1
     assert "unknown section 'files'" in capsys.readouterr().err
 
 
@@ -328,12 +364,12 @@ def test_explicit_file_checks_parent_count_without_scanning_siblings(
     target = _write(directory, "selected.py", 1)
     _write(directory, "entry_0.py", 801)
     _git(tmp_path, "add", "tests/package")
-    assert lcs.main([str(target)]) == 0
+    assert lcs.main([str(target)], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
 
     _write(directory, "extra.py", 1)
     _git(tmp_path, "add", "tests/package/extra.py")
-    assert lcs.main([str(target)]) == 1
+    assert lcs.main([str(target)], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert "tests/package: directory has 21 direct entries" in output
     assert "entry_0.py" not in output
@@ -348,7 +384,7 @@ def test_explicit_directory_checks_itself_and_descendants_only(
     _write(selected, "nested/oversized.py", 801)
     _git(tmp_path, "add", "tests/selected", "tests/unrelated")
 
-    assert lcs.main([str(selected)]) == 1
+    assert lcs.main([str(selected)], repo_root=tmp_path) == 1
     output = capsys.readouterr().out
     assert "tests/selected: directory has 21 direct entries" in output
     assert "tests/selected/nested/oversized.py:801:" in output
@@ -359,7 +395,7 @@ def test_explicit_repository_root_reaches_budget_scope(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write(tmp_path, "scripts/oversized.py", 801)
-    assert lcs.main([str(tmp_path)]) == 1
+    assert lcs.main([str(tmp_path)], repo_root=tmp_path) == 1
     assert "scripts/oversized.py:801:" in capsys.readouterr().out
 
 
@@ -385,7 +421,7 @@ def test_ast_rules_retain_the_eight_package_scope(
     path.write_text("if TYPE_CHECKING:\n    import example\nmachine_role()\n", encoding="utf-8")
 
     governed = scope not in {"tests", "scripts"}
-    assert lcs.main([]) == (1 if governed else 0)
+    assert lcs.main([], repo_root=tmp_path) == (1 if governed else 0)
     output = capsys.readouterr().out
     if governed:
         assert f"{scope}/example.py:1:" in output
@@ -397,21 +433,22 @@ def test_ast_rules_retain_the_eight_package_scope(
 
 
 def test_ast_allowlists_and_stale_role_entry_are_preserved(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = _write(tmp_path, "base/example.py", 0)
-    path.write_text(
-        "if typing.TYPE_CHECKING:\n    import example\ndef ask():\n    machine_role()\n",
-        encoding="utf-8",
+    # Exercise actual policy entries instead of replacing the owner's policy.
+    path = _source(
+        tmp_path, "if typing.TYPE_CHECKING:\n    import example\n", "agent/graph/__init__.py"
     )
-    monkeypatch.setattr(lcs, "_TYPE_CHECKING_ALLOWED", frozenset({"base/example.py"}))
-    monkeypatch.setattr(lcs, "_MACHINE_ROLE_ALLOWED", {"base/example.py": "Test host capability"})
-    assert lcs.main([]) == 0
+    role = _source(tmp_path, "def ask():\n    machine_role()\n", "cli/commands/lifecycle/start.py")
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
-
+    role.write_text("value = 1\n", encoding="utf-8")
+    assert lcs.main([], repo_root=tmp_path) == 1
+    assert (
+        "cli/commands/lifecycle/start.py:1: stale machine_role() allowlist entry"
+        in capsys.readouterr().out
+    )
     path.write_text("value = 1\n", encoding="utf-8")
-    assert lcs.main([]) == 1
-    assert "base/example.py:1: stale machine_role() allowlist entry" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("destination_scope", ["base", "docs"])
@@ -426,7 +463,7 @@ def test_explicit_alias_preserves_resolved_ast_scope(
     alias.parent.mkdir(parents=True, exist_ok=True)
     alias.symlink_to(destination)
 
-    assert lcs.main([str(alias)]) == (1 if destination_scope == "base" else 0)
+    assert lcs.main([str(alias)], repo_root=tmp_path) == (1 if destination_scope == "base" else 0)
     output = capsys.readouterr().out
     assert "hard ceiling" not in output
     if destination_scope == "base":
@@ -464,7 +501,7 @@ def test_quality_boundaries(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], kind: str, value: int, rc: int
 ) -> None:
     _source(tmp_path, _branches(value) if kind == "complexity" else _nested(value))
-    assert lcs.main([]) == rc
+    assert lcs.main([], repo_root=tmp_path) == rc
     captured = capsys.readouterr()
     assert (f"tests/q.py::f: {kind} {value}" in captured.out) == bool(rc)
     assert (
@@ -572,12 +609,12 @@ def test_explicit_quality_targets_and_full_flag(
     _source(tmp_path, _branches(14), "tests/other/warn.py")
     args = [str(selected.parent if directory else selected)]
     args.insert(0 if flag_first else len(args), "--complexity-warnings-full")
-    assert lcs.main(args) == 0
+    assert lcs.main(args, repo_root=tmp_path) == 0
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "1 functions in 1 files\ntests/chosen/a.py: 1\n" in captured.err
     assert "tests/other" not in captured.err
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     captured = capsys.readouterr()
     assert "tests/other/hard.py::f" in captured.out
     assert "2 functions in 2 files" in captured.err
@@ -620,7 +657,7 @@ def test_committed_baseline_change_uses_base_revision(
         _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
     else:
         monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
-    assert lcs.main([]) == (1 if delta > 0 else 0)
+    assert lcs.main([], repo_root=tmp_path) == (1 if delta > 0 else 0)
     captured = capsys.readouterr()
     assert (f"raised {kind} entry {key}" in captured.out) == (delta > 0)
     assert "guard skipped" not in captured.err
@@ -636,7 +673,7 @@ def test_explicit_unresolvable_base_fails(
     _git(tmp_path, "init", "--quiet")
     _commit_baseline(tmp_path)
     monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", ref)
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert f"LINT_STRUCTURE_BASELINE_BASE={ref!r} cannot resolve" in capsys.readouterr().out
 
 
@@ -656,7 +693,7 @@ def test_guard_rejects_an_invalid_base_baseline(
     _write_ambient_callbacks(tmp_path, "base/q.py", count)
     _baseline(tmp_path, ambient_state={"base/q.py::import-time-call:atexit.register": count})
 
-    assert lcs.main([]) == rc
+    assert lcs.main([], repo_root=tmp_path) == rc
     captured = capsys.readouterr()
     if previous == "malformed":
         assert "invalid base baseline" in captured.out
@@ -678,7 +715,7 @@ def test_ast_and_radon_share_one_parse(
     monkeypatch.setattr(ast, "parse", parse)
     monkeypatch.setattr(quality, "measure_quality", measure)
     monkeypatch.setattr(quality.ComplexityVisitor, "from_ast", visitor)
-    assert lcs.main([]) == 0
+    assert lcs.main([], repo_root=tmp_path) == 0
     assert parse.call_count == 1
     assert visitor.call_count == 1
     assert visitor.call_args.args[0] is measure.call_args.args[0]
@@ -686,17 +723,30 @@ def test_ast_and_radon_share_one_parse(
 
 @pytest.mark.parametrize("kind", ["files", "directories", "complexity", "nesting"])
 @pytest.mark.parametrize("entries", [{}, {"tests/q.py::f": 999}])
-def test_retired_budget_sections_cannot_be_reintroduced(kind: str, entries: dict[str, int]) -> None:
-    with pytest.raises(ValueError, match=f"unknown section '{kind}'"):
-        lcs._parse_baseline({"tests": json.dumps({kind: entries})})
+def test_retired_budget_sections_cannot_be_reintroduced(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], kind: str, entries: dict[str, int]
+) -> None:
+    directory = _clear_baseline_dir(tmp_path)
+    (directory / "tests.json").write_text(json.dumps({kind: entries}), encoding="utf-8")
+    assert lcs.main([], repo_root=tmp_path) == 1
+    assert f"unknown section '{kind}'" in capsys.readouterr().err
 
 
-def test_zeroed_historical_budgets_do_not_restore_exemptions() -> None:
+def test_zeroed_historical_budgets_do_not_restore_exemptions(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     retired: dict[str, dict[str, int]] = {
         kind: {} for kind in ("files", "directories", "complexity", "nesting")
     }
-    result = lcs._parse_baseline({"tests": json.dumps(retired)}, historical=True)
-    assert set(result) == set(lcs._SITE_SECTIONS)
+    directory = _clear_baseline_dir(tmp_path)
+    (directory / "tests.json").write_text(json.dumps(retired), encoding="utf-8")
+    _commit_baseline(tmp_path)
+    _baseline(tmp_path)
+    assert lcs.main([], repo_root=tmp_path) == 0
+    assert capsys.readouterr().out == ""
     retired["files"] = {"tests/big.py": 900}
-    with pytest.raises(ValueError, match="retired files baseline must be empty"):
-        lcs._parse_baseline({"tests": json.dumps(retired)}, historical=True)
+    (directory / "tests.json").write_text(json.dumps(retired), encoding="utf-8")
+    _commit_baseline(tmp_path)
+    _baseline(tmp_path)
+    assert lcs.main([], repo_root=tmp_path) == 1
+    assert "retired files baseline must be empty" in capsys.readouterr().out

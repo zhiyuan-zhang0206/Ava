@@ -54,39 +54,43 @@ apply those rules to documentation or frontend source.
 
 Enforced by the existing `scripts/lint/code_structure.py` and its pre-commit hook.
 
-## Locality: package doors and single owners
+## Locality: file privacy, component entries and single owners
 
-Two AST rules keep a change, or a reader tracing one, inside one package plus
-its neighbors' public doors. The authoritative rule text — what counts as
-private, what a bypass is, today's single-owner decision — lives in the
-`scripts/lint/code_structure.py` module docstring (Rules 4 and 5); this
-section covers fixing a violation; no locality baseline allowances remain. Rule 8 has
-its own script (`scripts/lint/patch_targets.py`).
+The approved [component contract](../decisions/engineering/design/simplification/2026-10-10-component-public-contracts.md)
+makes `_`-prefixed members and modules private to their definition file,
+including tests and other files in the same component. Standard Python language
+protocols are distinguished by exact names; arbitrary double-underscore library
+metadata is not exempt. Moving a test or a module does not grant private access.
 
-- **Rule 4 — package doors.** Reaching a `_`-prefixed module or name from
-  outside the package that owns it fails, whether by import or by attribute
-  access on an imported module. Fix it either by using a public name through
-  the owner's `__init__.py`, or by promoting the name into the owner's
-  contract on purpose — export it / drop the underscore — so the widened
-  contract shows up in the diff. There is no inline escape hatch and no
-  per-site allowlist: a name another package genuinely needs is, by
-  definition, part of that package's contract, so the fix is to make the
-  contract honest rather than to excuse the reach-in. `ava` is no exception:
-  what the agent sees is the `__all_for_ava__` whitelist
-  ([SDK surface](sdk-docstring-discipline.md)), not the underscore, so an
-  `ava/_*.py` module another package needs is promoted to a public module name
-  without becoming agent-visible. Files under a `tests/` directory are
-  exempt from the import and attribute check, but not from Rule 8.
-- **Rule 8 — tests may not patch another package's private names.**
-  `scripts/lint/patch_targets.py` rejects a patch (`monkeypatch.setattr`,
-  `patch`, `patch.object`, `mocker.patch`, string or object target) of a
-  `_private` name whose owning package does not contain the test's home. The
-  home is the deepest package that holds or directly depends on everything the
-  test imports (its own imports plus what the package imports), not its
-  directory, so moving a test into `<pkg>/tests/` changes no verdict; the ambient environment
-  (`base.config`, `base.paths`, machine identity, `AVA_*`) is exempt. Fix it
-  by patching a public name, giving the owner an injection seam (a parameter,
-  a settings field, a public setter), or moving the test into the owner.
+Non-private spelling permits communication between files in one component.
+Cross-component communication additionally requires an exact entry module in
+`pyproject.toml` and the member in its actual definition owner's literal static
+`__all__`. Large roots are containers; explicitly declared children retain their
+own boundaries. Imported aliases, package barrels and mechanically removing an
+underscore do not create a supported interface. Use an existing capability,
+pass the required dependency explicitly, or verify public behavior.
+
+The migration audit is `scripts/lint/public_contracts.py`. It rejects undeclared
+boundaries and recognized unresolved inputs, with no baseline or consumer
+exceptions. Repository migration and gate activation remain open; the weaker
+legacy verdicts below do not certify the approved contract. Existing import
+layering and single-owner checks remain enforced during this migration.
+
+- **Rule 4 — legacy package-door check.** The currently enabled AST rule in
+  `scripts/lint/code_structure.py` rejects private imports and imported-module
+  attribute access from outside the inferred owning package, and exempts test
+  directories. Those package and test permissions are not authority under the
+  approved file-private contract. New contributions must design a real owner
+  interface rather than depend on those gaps. Agent visibility remains owned
+  by the existing SDK surface metadata and Installation, independently of
+  framework component entries; do not introduce another SDK member list.
+- **Rule 8 — legacy private-patch check.** `scripts/lint/patch_targets.py`
+  currently rejects a private patch outside the test's inferred home, using
+  placement references and the legacy ambient-environment classification.
+  That inferred home and those exclusions grant no authority under the approved
+  file-private contract. Test actual public behavior or pass a clock, transport
+  or identity dependency through the existing composition root. Neither a move
+  nor a same-name forwarding export repairs a private patch.
 - **Rule 6 — no path imports under `ava_builtins/`.** A skill or plugin
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
@@ -129,9 +133,9 @@ What this means for common edits:
 
 - **Splitting a file, or moving code to another file**, cannot carry a frozen
   site to the new file — fix the reach-in or bypass as part of the split.
-- **Moving a module into a subpackage** narrows its owner: siblings that
-  imported its privates become outside importers. Promote what they need, or
-  keep them inside the new package.
+- **Moving a module into a subpackage** can change its component boundary;
+  migrate consumers through the actual owner contract. Private members remain
+  file-local before and after the move.
 - **A new CLI command** binds its `_h_*` handler directly in
   `cli/parsers/<domain>.py` (`set_defaults(func=_h_x)` referring to the
   function defined in that same module) — `cli.main` is not a handler
@@ -339,9 +343,9 @@ or bundled scripts. One skill needing a convenient wrapper is not sufficient
 reason to add a capability to the SDK.
 
 Choose the owner from the operation's contract and actual consumers before
-adding a public API. A script may reuse existing internal readers and runtime
-primitives without turning its selected output or procedure into a new SDK
-method. If size limits or shared implementation require a governed module,
+adding a public API. A script may reuse existing non-agent-facing component capabilities through
+an explicit owner interface without turning its selected output or procedure
+into a new SDK method. If size limits or shared implementation require a governed module,
 keep the workflow entry in the skill and the helper internal; placement under
 `ava/` alone does not justify adding it to `__all_for_ava__`.
 

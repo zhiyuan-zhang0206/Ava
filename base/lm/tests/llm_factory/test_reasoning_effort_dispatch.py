@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
+
 import pytest
 from langchain_anthropic import ChatAnthropic
 
@@ -49,7 +51,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -65,7 +67,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -85,7 +87,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -105,7 +107,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -123,7 +125,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -139,7 +141,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -158,7 +160,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -180,7 +182,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -198,7 +200,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -219,7 +221,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -239,7 +241,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -268,7 +270,7 @@ class TestReasoningEffortDispatch:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
             assert isinstance(llm, ChatAnthropic)
@@ -285,7 +287,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -303,7 +305,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -321,7 +323,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(llm, ChatAnthropic)
@@ -342,7 +344,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatGoogleGenerativeAI)
@@ -360,7 +362,7 @@ class TestReasoningEffortDispatch:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -378,7 +380,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatGoogleGenerativeAI)
@@ -401,7 +403,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatGoogleGenerativeAI)
@@ -425,7 +427,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatMoonshot)
@@ -443,7 +445,7 @@ class TestReasoningEffortDispatch:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -463,7 +465,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ChatMoonshot)
@@ -488,7 +490,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -508,7 +510,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -531,7 +533,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -557,7 +559,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -584,7 +586,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -604,7 +606,7 @@ class TestReasoningEffortDispatch:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -624,7 +626,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -643,7 +645,7 @@ class TestReasoningEffortDispatch:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -669,7 +671,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -695,7 +697,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -722,7 +724,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)
@@ -744,7 +746,7 @@ class TestReasoningEffortDispatch:
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
                 overrides=ModelOverrides.from_pins(
-                    {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
 
@@ -768,7 +770,7 @@ class TestReasoningEffortDispatch:
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
         assert isinstance(m, ReasoningContentChatModel)

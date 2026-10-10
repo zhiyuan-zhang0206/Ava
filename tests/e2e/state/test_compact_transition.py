@@ -14,7 +14,6 @@ from playwright.sync_api import Request
 
 from base.agents import AgentStatus
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
-from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fakes.scenarios.compact_transition import (
     BETWEEN_REPLY,
@@ -24,6 +23,7 @@ from tests.e2e.fakes.scenarios.compact_transition import (
     FIRST_TAIL,
     SECOND_NARRATION,
 )
+from tests.e2e.fixture_environment import E2EEnv
 
 
 @pytest.fixture

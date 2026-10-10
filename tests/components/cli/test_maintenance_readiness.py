@@ -3,8 +3,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import cli.commands._probe as _probe_commands
 import cli.commands.lifecycle.start as _start_commands
+import cli.commands.probe as _probe_commands
 from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission
@@ -40,7 +40,7 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
                 response.status_code == 200, "http", "measured gateway health"
             )
 
-        monkeypatch.setattr(_probe_commands, "_probe_service", probe)
+        monkeypatch.setattr(_probe_commands, "probe_service", probe)
         assert _start_commands.cmd_start(persist_services=False, retained_children=[]) == 0
         # Completion must release the real business gate in the same turn,
         # without a sleep that lets an independent posture cache expire.

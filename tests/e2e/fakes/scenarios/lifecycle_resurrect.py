@@ -12,7 +12,7 @@ import psycopg
 from langchain_core.messages import AIMessage
 
 from base.config import settings
-from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 

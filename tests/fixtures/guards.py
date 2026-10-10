@@ -231,7 +231,7 @@ def _guard_service_readiness(
     code it produces is the subject (cli/commands/lifecycle/tests/startup/test_start_readiness_gate.py)."""
     if request.node.get_closest_marker("real_service_readiness_gate"):
         return
-    from cli.commands._probe import ReadinessWait
+    from cli.commands.probe import ReadinessWait
 
     ready = ReadinessWait((), 0.0, sessions_gone=False)
     monkeypatch.setattr(

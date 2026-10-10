@@ -54,12 +54,23 @@ On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
      "args": {"code": "<python source>"}}]`
    - turn only replies: write `content="..."`, `tool_calls=[]`
    - each must carry `usage_metadata` (claim node asserts it is non-empty)
-4. The test itself uses the `e2e_env` fixture to get `gateway_url / frontend_url / agent_url
+4. Import `E2EEnv` from `tests.e2e.fixture_environment` to annotate the
+   `e2e_env` fixture parameter. This public frozen data contract exposes fixture-owned
+   endpoints, the browser page and the spawned-agent identity; fixture teardown
+   retains responsibility for resource cleanup. The test uses the fixture to get `gateway_url / frontend_url / agent_url
    / page / agent_id`. **Default: `page.goto(e2e_env.agent_url)`** — it already
    carries the `?agent_id={spawned_agent}` deep-link query, letting the useAgents mount effect
    read the URL param and directly init activeId, bypassing the "sidebar agents fetch completes before auto-select"
    race. To test "auto-select fallback when no agent is specified" use bare
    `frontend_url`.
+
+`tests.e2e.fakes.scripted_model` owns `ScriptedFakeChatModel` and
+`ScriptExhaustedError`. Scenarios consume its public LangChain model interface;
+its public `cursor` counts consumed turns, while chunk conversion stays internal.
+`tests.e2e.fakes.scenario_recording` owns `RecordingModel`, `model_inputs`,
+`reset_record`, `scratch_root`, `exec_call` and `say`. Recording scenarios write
+model inputs to session-specific JSONL, allowing test processes to inspect the
+messages received by agent processes and filter calls by agent identity.
 
 `ScriptedFakeChatModel` emits the entire message in a single chunk — does not simulate character-level
 streaming. If future tests need scenarios like "streaming cancellation mid-way", extend the fake to support
@@ -106,7 +117,17 @@ multi-chunk.
 | `flow/test_sdk_effects.py` | `sdk_effects:*` | **execute_code and SDK effects, asserted on the tool output / notes the model is handed back and on disk**: a raising or hard-crashing exec is reported and the agent carries on; `ava.files.edit` missing/ambiguous/replace_all contract; reading injection-like content yields a SECURITY note (source and triggers, never the body); a `/command` expands into the model input and is listed by `ava.agents.commands()`; an uploaded file is announced to the agent and readable at the announced path; an exec timeout kills the child and its own subprocess |
 | `flow/test_schedules_api.py` | `schedules:build` | **Schedule management through real gateway and CLI processes**: REST CRUD and version snapshots; start/stop/restart persist a sync request for the absent manager; runs and transcript reads; draft launches a writer whose model sees the request; `ava schedules` verbs reach the same gateway rows. Session execution is covered separately by SC2/SC3. |
 
-The test files sit in subdirectories by domain, which also keeps `tests/e2e` under its direct-entry budget: `flow/` (full-turn panoramic cases), `lifecycle/` (restart, resurrect, terminate, fork, impersonation), `state/` (browser scroll and navigation state), `visual/` (layout, accessibility and snapshot tests with their `_layout_assertions.py`, `_visual_snapshot.py` helpers and the `__snapshots__/` goldens). The shared helpers (`_db.py`, `_env.py`, `_ports.py`, `_proc.py`, `_settings.py`, `_truncate.py`) and `conftest.py` stay at the top level, so the package-scoped fixtures cover every subdirectory.
+The test files sit in subdirectories by domain, which also keeps `tests/e2e` under its direct-entry budget: `flow/` (full-turn panoramic cases), `lifecycle/` (restart, resurrect, terminate, fork, impersonation), `state/` (browser scroll and navigation state), `visual/` (layout, accessibility and snapshot tests with their `_layout_assertions.py`, `_visual_snapshot.py` helpers and the `__snapshots__/` goldens). The shared helpers (`_db.py`, `fixture_environment.py`, `_ports.py`, `process_support.py`, `_settings.py`, `_truncate.py`) and `conftest.py` stay at the top level, so the package-scoped fixtures cover every subdirectory.
+
+`tests.e2e.process_support` owns managed fixture processes, listener evidence,
+and stale-run cleanup. Consumers query `registered_server()` rather than mutate
+its registry. `ProcessObservation` and `ProcessInspection` describe process
+observations; `ResidueSweepPlan` reports immutable candidate groups, individual
+PIDs, and run owners. The sweep rechecks command identity before every signal
+and preserves live concurrent runs and its own process group. Its return value
+counts planned targets, including targets skipped by that identity guard.
+The fixture `-m tests.e2e.process_support` entry supplies only the explicit test
+serving gate; it does not establish production root custody.
 
 **Differences between fork scenario and lifecycle**: fork creates a **new agent_id** (not reused).
 `build()` distinguishes source / forked process by whether there is a `kind='fork'` inbound for

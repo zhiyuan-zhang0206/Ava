@@ -31,6 +31,8 @@ import psutil
 from base.native_process.os_platform import CREATE_NO_WINDOW, SIGKILL
 from base.native_process.ownership import OwnedProcess, capture_tree
 
+__all__ = ["run_bounded"]
+
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # expected during a teardown, not an error: between enumerating a tree and
 # signalling it, any member may exit on its own.

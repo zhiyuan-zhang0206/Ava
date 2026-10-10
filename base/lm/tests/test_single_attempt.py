@@ -1,6 +1,7 @@
 """Guarded generation constructs a fresh retry-free client; normal callers keep defaults."""
 
 from collections.abc import Mapping
+from dataclasses import fields
 from typing import cast
 
 import pytest
@@ -22,7 +23,7 @@ def test_openai_single_attempt_does_not_mutate_normal_client(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     guarded = build_chat_model(
@@ -31,7 +32,7 @@ def test_openai_single_attempt_does_not_mutate_normal_client(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert isinstance(normal, ChatOpenAI) and isinstance(guarded, ChatOpenAI)
@@ -50,7 +51,7 @@ def test_anthropic_single_attempt_does_not_mutate_normal_client(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     guarded = build_chat_model(
@@ -59,7 +60,7 @@ def test_anthropic_single_attempt_does_not_mutate_normal_client(
         catalog=model_catalog,
         llm_override=settings.lm.llm_override,
         overrides=ModelOverrides.from_pins(
-            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
     )
     assert isinstance(normal, ChatAnthropic) and isinstance(guarded, ChatAnthropic)
@@ -80,7 +81,7 @@ def test_undeclared_binding_fails_before_build(
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
 
@@ -96,7 +97,7 @@ def test_override_cannot_satisfy_single_attempt(
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )
 
@@ -110,7 +111,7 @@ def test_single_attempt_flag_is_strict(flag: object, *, model_catalog: ModelCata
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )  # type: ignore[arg-type]
 
@@ -130,6 +131,6 @@ def test_withdrawn_model_cannot_switch_provider_attempt(
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
             overrides=ModelOverrides.from_pins(
-                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
         )

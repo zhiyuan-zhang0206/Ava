@@ -13,12 +13,16 @@ three things hold, and each lint is held to all of them below:
 from __future__ import annotations
 
 import importlib
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
+from base.host.proc import run_bounded
 from scripts.lint import code_structure
 from scripts.structure import lint_common
 
@@ -88,6 +92,7 @@ class Case:
     clean_path: str = ""
     extra: dict[str, str] = field(default_factory=dict[str, str])
     patches: dict[str, object] = field(default_factory=dict[str, object])
+    explicit_root: bool = False
 
     def clean(self) -> str:
         return self.clean_path or str(
@@ -165,14 +170,20 @@ CASES = [
         "scripts.lint.diagnostics.time_bomb",
         "tests/test_a.py",
         "def test_x():\n    f(since='2026-09-06')\n",
+        explicit_root=True,
     ),
     Case(
         "scripts.content_lint.lint_quiesced_loops",
         "services/x.py",
         "import asyncio\n\n\nasync def f():\n    while True:\n        await asyncio.sleep(1)\n",
     ),
-    Case("scripts.content_lint.lint_no_cjk", "docs/a.md", f"{_CJK}\n"),
-    Case("scripts.content_lint.lint_no_tailnet", "docs/a.md", f"see {_TAILNET_IP}\n"),
+    Case("scripts.content_lint.lint_no_cjk", "docs/a.md", f"{_CJK}\n", explicit_root=True),
+    Case(
+        "scripts.content_lint.lint_no_tailnet",
+        "docs/a.md",
+        f"see {_TAILNET_IP}\n",
+        explicit_root=True,
+    ),
 ]
 
 
@@ -193,34 +204,43 @@ def _write(root: Path, rel: str, text: str) -> None:
     (root / rel).write_text(text, encoding="utf-8")
 
 
+def _bind_legacy_root(lint: ModuleType, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for root_name in ("_REPO_ROOT", "_ROOT"):
+        if hasattr(lint, root_name):
+            monkeypatch.setattr(lint, root_name, root)
+    if hasattr(lint, "_tracked_files"):
+        monkeypatch.setattr(
+            lint,
+            "_tracked_files",
+            lambda: sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()),
+        )
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.module.rsplit(".", 1)[-1])
 def test_only_judges_exactly_the_changed_files(
     case: Case, fake_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lint = importlib.import_module(case.module)
-    for root_name in ("_REPO_ROOT", "_ROOT"):
-        if hasattr(lint, root_name):
-            monkeypatch.setattr(lint, root_name, fake_repo)
+    if case.explicit_root:
+        subprocess.run(["git", "init", "-q"], cwd=fake_repo, check=True)
+    else:
+        _bind_legacy_root(lint, fake_repo, monkeypatch)
     for name, value in case.patches.items():
         if "." in name:  # another module's attribute, which the lint imports at call time
             monkeypatch.setattr(name, value)
         else:
             monkeypatch.setattr(lint, name, value)
-    if hasattr(lint, "_tracked_files"):  # a scratch tree is not a git repository
-        monkeypatch.setattr(
-            lint,
-            "_tracked_files",
-            lambda: sorted(
-                p.relative_to(fake_repo).as_posix() for p in fake_repo.rglob("*") if p.is_file()
-            ),
-        )
     _write(fake_repo, case.bad_path, case.bad_source)
     _write(fake_repo, case.clean(), "x = 1\n")
     for rel, text in case.extra.items():
         _write(fake_repo, rel, text)
     _write(fake_repo, _TOOLING, "")
+    if case.explicit_root:
+        subprocess.run(["git", "add", "--", "."], cwd=fake_repo, check=True)
 
-    main: Callable[[list[str]], int] = lint.main
+    main: Callable[[list[str]], int] = (
+        partial(lint.main, repo_root=fake_repo) if case.explicit_root else lint.main
+    )
     assert main([]) == 1, "the sample must be a violation the full scan reports"
     assert main(["--only", case.bad_path]) == 1, "a changed file gets the full scan's verdict"
     assert main(["--only", case.clean()]) == 0, "a file that did not change is not judged"
@@ -231,22 +251,42 @@ def test_only_judges_exactly_the_changed_files(
 # ── the lints with their own `--only` plumbing ──────────────────────────────
 
 
-def test_code_structure_turns_changed_files_into_explicit_targets(tmp_path: Path) -> None:
+def test_code_structure_turns_changed_files_into_explicit_targets(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     (tmp_path / "base").mkdir()
     (tmp_path / "base/a.py").write_text("x = 1\n")
-    (tmp_path / "scripts/structure").mkdir(parents=True)
-    (tmp_path / "scripts/structure/baseline_shards.py").write_text("x = 1\n")
-    original = code_structure._REPO_ROOT
-    try:
-        code_structure._REPO_ROOT = tmp_path
-        assert code_structure._changed_targets(None) == []
-        assert code_structure._changed_targets(["base/a.py"]) == [str(tmp_path / "base/a.py")]
-        # Tooling or baseline: no explicit targets, so the lint scans everything.
-        assert code_structure._changed_targets(["scripts/structure/baseline_shards.py"]) == []
-    finally:
-        code_structure._REPO_ROOT = original
-    assert code_structure._parse_args(["--only"]) == ([], False, True)
-    assert code_structure._parse_args(["--complexity-warnings-full"]) == ([], True, False)
+    (tmp_path / "base/b.py").write_text("x = 1\n" * 801)
+    directory = tmp_path / "scripts/structure/baseline"
+    directory.mkdir(parents=True)
+    (directory / "README.md").write_text("Structure baseline shards.\n")
+    for args in (
+        ("init", "--quiet"),
+        ("add", "-A"),
+        (
+            "-c",
+            "user.name=Structure test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "Scratch gate",
+        ),
+    ):
+        run_bounded(
+            ["git", "-C", str(tmp_path), *args], timeout=30, capture_output=True
+        ).check_returncode()
+    main = partial(code_structure.main, repo_root=tmp_path, baseline_base="HEAD")
+    assert main([]) == 1
+    assert "base/b.py:801:" in capsys.readouterr().out
+    assert main(["--only", "base/b.py"]) == 1
+    assert main(["--only", "base/a.py"]) == 0
+    assert main(["--only", "base/a.py", "scripts/structure/baseline/README.md"]) == 1
+    assert main(["--only"]) == 0
+    assert main(["--complexity-warnings-full"]) == 1
 
 
 def test_zombie_ignores_checks_only_the_changed_python_files(tmp_path: Path) -> None:

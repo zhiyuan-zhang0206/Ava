@@ -35,7 +35,9 @@ from base.native_process.os_platform import (
 
 # Only the settings-free parser composition entry is imported here. Domain
 # adapters lazy-import runtime commands when their bound handler is dispatched.
-from cli.parsers import build_parser as _build_parser
+from cli import parsers
+
+__all__ = ["main"]
 
 # The verbs that bring this unit up (every in-process `cmd_start`) open the
 # loguru sinks a service process has, under these names. Importing `base.log`
@@ -239,8 +241,7 @@ def main(
     _opt_into_lite_config(args_in)
 
     children = [] if retained_children is None else retained_children
-    parser = _build_parser(retained_children=children)
-    args = parser.parse_args(argv)
+    args = parsers.parse_args(argv, retained_children=children)
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
             _init_cli_logging(args_in)

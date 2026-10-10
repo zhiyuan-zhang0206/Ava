@@ -49,6 +49,17 @@ from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, run_dir
 from base.sessions.record import SessionRecord
 
+__all__ = [
+    "graceful_signal",
+    "has_session",
+    "kill_session",
+    "list_sessions",
+    "new_session",
+    "process_group_has_live_members",
+    "session_log_path",
+    "session_started_at",
+]
+
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # benign during a teardown race.
 _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
@@ -295,29 +306,34 @@ def _signal_group(pgid: int | None, sig: int) -> None:
         os.killpg(pgid, sig)
 
 
-def _group_empty(pgid: int | None) -> bool:
-    """True when no LIVE process remains in the group (identity unknown → True).
+def process_group_has_live_members(pgid: int | None) -> bool:
+    """Whether an observed non-zombie process belongs to numeric group `pgid`.
 
-    Fast path: a gone group is empty. A surviving group is checked member by
-    member: a zombie still occupies the group (and makes ``os.killpg(pgid, 0)``
-    succeed) until init/launchd reaps it, and the graceful verdict must not
-    wait on that reap latency — same class as the zombie-aware liveness of
-    task #1303."""
+    None, a nonpositive group ID, or a gone/zombie-only group returns False.
+    A surviving group is scanned after the zero-signal probe: macOS can reject
+    that probe for a zombie-only group, and zombies await their reaper without
+    keeping the session alive. Members that disappear or cannot be inspected
+    are skipped, as in the session supervisor's best-effort liveness check.
+
+    This is a momentary observation, not process identity, signal authority or
+    closure proof. Group IDs can be reused and members can change during the
+    scan; False does not certify absence when visibility is incomplete.
+    """
     if pgid is None or pgid <= 0:
-        return True
+        return False
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:
-        return True
-    except OSError:  # noqa: S110 - macOS EPERM for a zombie-only group falls through to the member scan below (the authoritative reading)
+        return False
+    except OSError:  # noqa: S110 - macOS EPERM for a zombie-only group falls through to the member scan.
         pass
     for process in psutil.process_iter():
         try:
             if os.getpgid(process.pid) == pgid and process.status() != psutil.STATUS_ZOMBIE:
-                return False
+                return True
         except (psutil.Error, ProcessLookupError):
             continue
-    return True
+    return False
 
 
 def _terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> bool:
@@ -363,7 +379,7 @@ def _terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> 
         while time.monotonic() < deadline:
             if (
                 not _process_is_live(proc)
-                and _group_empty(pgid)
+                and not process_group_has_live_members(pgid)
                 and all(not _process_is_live(c) for c in children)
             ):
                 return True
@@ -465,7 +481,7 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
     """
     if _process_for_record(rec) is not None:
         return False, "process is still live", None
-    if rec.pgid is not None and not _group_empty(rec.pgid):
+    if rec.pgid is not None and process_group_has_live_members(rec.pgid):
         return (
             False,
             f"leader is gone but process group {rec.pgid} still has live members "

@@ -71,7 +71,6 @@ def _git(
 @pytest.fixture(autouse=True)
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every main() call scans only its own temporary root."""
-    monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
 
 
@@ -97,7 +96,7 @@ def test_malformed_baseline_shard_is_an_actionable_error(
 ) -> None:
     directory = _clear_baseline_dir(tmp_path)
     (directory / "tests.json").write_text(content, encoding="utf-8")
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     assert f"{baseline_shards.SHARD_DIR}: invalid baseline" in capsys.readouterr().err
 
 
@@ -113,7 +112,7 @@ def test_duplicate_baseline_entry_across_shards_is_an_actionable_error(
         json.dumps({"ambient_state": {"base/q.py::import-time-call:atexit.register": 2}}),
         encoding="utf-8",
     )
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     captured = capsys.readouterr()
     assert f"{baseline_shards.SHARD_DIR}: invalid baseline" in captured.err
     assert (
@@ -128,7 +127,7 @@ def test_missing_baseline_directory_is_an_actionable_error(
     """No shard directory (not even its README.md) can only be an accidental
     deletion — read_worktree() fails fast rather than silently reading it as an
     empty baseline."""
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     captured = capsys.readouterr()
     assert f"{baseline_shards.SHARD_DIR}: invalid baseline" in captured.err
     assert "missing" in captured.err
@@ -158,7 +157,7 @@ def test_an_empty_committed_baseline_still_enforces_the_guard(
         encoding="utf-8",
     )
 
-    assert lcs.main([]) == 1
+    assert lcs.main([], repo_root=tmp_path) == 1
     captured = capsys.readouterr()
     assert "guard skipped" not in captured.err
     assert "added ambient_state entry base/new.py::import-time-call:atexit.register" in captured.out

@@ -46,10 +46,11 @@ def _ensure_gateway_data_plane(
 def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     """Refuse known core-port conflicts; optional capabilities cannot block start."""
     # Read through the probe owner so the safety fixture guards this lookup.
-    import cli.commands._probe as _probe_commands
+    import cli.commands.probe as _probe_commands
+    from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
-    occupied = _probe_commands._occupied_health_ports(
-        tuple(s for s in roster if s.session in _probe_commands.CRITICAL_SERVICE_SESSIONS)
+    occupied = _probe_commands.occupied_health_ports(
+        tuple(s for s in roster if s.session in CRITICAL_SERVICE_SESSIONS)
     )
     if not occupied:
         return 0
@@ -354,7 +355,7 @@ def _print_gateway_hint() -> None:
 
 
 def _critical_launch_failures(launch: Any) -> tuple[str, ...]:
-    from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
+    from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
     names = {session_name(name) for name in CRITICAL_SERVICE_SESSIONS}
     return tuple(name for name in launch.failed if name in names)
@@ -362,7 +363,7 @@ def _critical_launch_failures(launch: Any) -> tuple[str, ...]:
 
 def _readiness_verdict(launch: Any, wait: Any) -> int | None:
     """Report all failures, but gate serving only on selected core services."""
-    import cli.commands._probe as _probe_commands
+    import cli.commands.probe as _probe_commands
 
     if launch.failed:
         print(
@@ -371,10 +372,10 @@ def _readiness_verdict(launch: Any, wait: Any) -> int | None:
             file=sys.stderr,
         )
     if wait.unready:
-        _probe_commands._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
+        _probe_commands.print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
     if wait.non_critical_unready:
-        _probe_commands._print_non_critical_unready_services(wait.non_critical_unready)
-        _probe_commands._report_non_critical_unready_services(wait.non_critical_unready)
+        _probe_commands.print_non_critical_unready_services(wait.non_critical_unready)
+        _probe_commands.report_non_critical_unready_services(wait.non_critical_unready)
     if wait.unready or _critical_launch_failures(launch):
         return SERVICES_NOT_READY_EXIT_CODE
     return None

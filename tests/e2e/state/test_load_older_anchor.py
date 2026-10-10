@@ -25,8 +25,8 @@ import httpx
 import pytest
 from playwright.sync_api import Page, Route
 
-from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
+from tests.e2e.fixture_environment import E2EEnv
 
 # Records (scrollTop, scrollHeight, item count, first real item + its viewport
 # top) on every frame + scroll event, into window.__tl.samples.

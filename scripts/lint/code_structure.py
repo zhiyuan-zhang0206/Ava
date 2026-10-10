@@ -136,6 +136,8 @@ from scripts.structure.budgets import (  # noqa: E402 — standalone script
     quality_budget,
 )
 
+__all__ = ["main"]
+
 _HARD_CEILING = 800
 # Baseline sections whose frozen `path::target` site counts must match reality exactly.
 _SITE_SECTIONS = (*locality.EXTERNAL_SECTIONS, ambient_state.SECTION)
@@ -326,7 +328,7 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
-def _budget_files(targets: list[Path]) -> set[Path]:
+def _budget_files(targets: list[Path], repo_root: Path) -> set[Path]:
     """Collect the existing Python file-budget scope without following links."""
     files: set[Path] = set()
     visited: set[Path] = set()
@@ -342,8 +344,8 @@ def _budget_files(targets: list[Path]) -> set[Path]:
                 files.add(entry)
 
     for target in targets:
-        for scope in (_REPO_ROOT / name for name in _STRUCTURE_DIRS):
-            selected = directory_budget.selected_under(target, scope, _REPO_ROOT)
+        for scope in (repo_root / name for name in _STRUCTURE_DIRS):
+            selected = directory_budget.selected_under(target, scope, repo_root)
             if selected is None:
                 continue
             if selected.is_dir():
@@ -392,26 +394,27 @@ def _carried_scope(scope: tuple[str, ...], renames: dict[str, str]) -> tuple[str
     return tuple(sorted(set(scope) | carried))
 
 
-def _git(*args: str) -> subprocess.CompletedProcess[str]:
+def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 — local git query, no shell
-        ["git", "-C", str(_REPO_ROOT), *args], capture_output=True, text=True, check=False
+        ["git", "-C", str(repo_root), *args], capture_output=True, text=True, check=False
     )
 
 
-def _baseline_base() -> str:
+def _baseline_base(repo_root: Path, explicit: str | None) -> str:
     """Resolve an explicit snapshot or the actual merge base with origin/main."""
-    if "LINT_STRUCTURE_BASELINE_BASE" in os.environ:
-        ref = os.environ["LINT_STRUCTURE_BASELINE_BASE"]
-        result = _git("rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
+    ref = explicit if explicit is not None else os.environ.get("LINT_STRUCTURE_BASELINE_BASE")
+    if ref is not None:
+        result = _git(repo_root, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
         if result.returncode:
-            raise ValueError(f"LINT_STRUCTURE_BASELINE_BASE={ref!r} cannot resolve to a commit")
+            source = "baseline_base" if explicit is not None else "LINT_STRUCTURE_BASELINE_BASE"
+            raise ValueError(f"{source}={ref!r} cannot resolve to a commit")
     else:
-        result = _git("merge-base", "--", "HEAD", "origin/main")
+        result = _git(repo_root, "merge-base", "--", "HEAD", "origin/main")
         result.check_returncode()
     return result.stdout.strip()
 
 
-def _rename_map(base: str) -> dict[str, str]:
+def _rename_map(repo_root: Path, base: str) -> dict[str, str]:
     """Old -> new paths for the renames git -M detects between `base` and the working tree.
 
     A detected rename carries remaining frozen site keys to the new path: move the
@@ -425,7 +428,15 @@ def _rename_map(base: str) -> dict[str, str]:
     once, and past the limit git silently stops pairing edited moves.
     """
     result = _git(
-        "diff", "-M", "-B", "-l0", "--name-status", "--diff-filter=RC", "--no-color", base
+        repo_root,
+        "diff",
+        "-M",
+        "-B",
+        "-l0",
+        "--name-status",
+        "--diff-filter=RC",
+        "--no-color",
+        base,
     )
     result.check_returncode()
     renames: dict[str, str] = {}
@@ -492,10 +503,14 @@ def _section_guard(
 
 
 def _baseline_guard(
-    baseline: dict[str, dict[str, int]], *, base: str, renames: dict[str, str] | None = None
+    baseline: dict[str, dict[str, int]],
+    *,
+    repo_root: Path,
+    base: str,
+    renames: dict[str, str] | None = None,
 ) -> list[str]:
     try:
-        shards = baseline_shards.read_at(_REPO_ROOT, base)
+        shards = baseline_shards.read_at(repo_root, base)
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return [f"{baseline_shards.SHARD_DIR}: {exc}"]
     if shards is None:
@@ -509,7 +524,7 @@ def _baseline_guard(
     except ValueError as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
     try:
-        rules_was, rules_now = baseline_shards.read_rules(_REPO_ROOT, base)
+        rules_was, rules_now = baseline_shards.read_rules(repo_root, base)
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid rule versions: {exc}"]
     errors: list[str] = []
@@ -531,24 +546,26 @@ def _baseline_guard(
     return errors
 
 
-def _check_budgets(targets: list[Path], directory_targets: list[Path]) -> list[str]:
-    files = _budget_files(targets)
+def _check_budgets(
+    targets: list[Path], directory_targets: list[Path], repo_root: Path
+) -> list[str]:
+    files = _budget_files(targets, repo_root)
     errors: list[str] = []
     for path in sorted(files):
         try:
             count = len(path.read_text(encoding="utf-8").splitlines())
         except (OSError, UnicodeDecodeError):
             continue  # Preserve the shared lint contract for unreadable members.
-        name = path.relative_to(_REPO_ROOT).as_posix()
+        name = path.relative_to(repo_root).as_posix()
         if count > _HARD_CEILING:
             errors.append(
                 f"{name}:{count}: file is {count} lines, over the {_HARD_CEILING}-line hard ceiling — split it"
             )
-    listing = _git("ls-files", "-z")
+    listing = _git(repo_root, "ls-files", "-z")
     listing.check_returncode()
     children = directory_budget.tracked_children(listing.stdout)
     for name in sorted(
-        directory_budget.selected_directories(children, directory_targets, _REPO_ROOT)
+        directory_budget.selected_directories(children, directory_targets, repo_root)
     ):
         count = len(children[name])
         if count > _DIRECTORY_CEILING:
@@ -558,17 +575,17 @@ def _check_budgets(targets: list[Path], directory_targets: list[Path]) -> list[s
     return errors
 
 
-def _ast_rule_files(argv: list[str]) -> set[Path]:
+def _ast_rule_files(argv: list[str], repo_root: Path) -> set[Path]:
     # Preserve the AST rules' original resolved-target scope, including aliases.
-    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _AST_DIRS]
+    targets = [Path(a).resolve() for a in argv] if argv else [repo_root / d for d in _AST_DIRS]
     return set(_iter_py_files(targets))
 
 
 def _collect_locality(
-    tree: ast.Module, rel: str, sites: dict[str, locality.Sites], scanned: set[str]
+    tree: ast.Module, rel: str, sites: dict[str, locality.Sites], scanned: set[str], repo_root: Path
 ) -> None:
     scanned.add(rel)
-    for kind, found in locality.measure(tree, rel, _SCAN_DIRS, _REPO_ROOT).items():
+    for kind, found in locality.measure(tree, rel, _SCAN_DIRS, repo_root).items():
         sites[kind].update(found)
     sites[path_imports.SECTION].update(path_imports.measure(tree, rel))
 
@@ -585,10 +602,11 @@ def _check_ast_and_quality(
     baseline: dict[str, dict[str, int]],
     *,
     full: bool,
+    repo_root: Path,
     renames: dict[str, str] | None = None,
 ) -> list[str]:
-    files = _budget_files(targets)
-    ast_files = _ast_rule_files(argv)
+    files = _budget_files(targets, repo_root)
+    ast_files = _ast_rule_files(argv, repo_root)
     locality.reset_caches()
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
     sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
@@ -596,7 +614,7 @@ def _check_ast_and_quality(
     errors: list[str] = []
     for path in sorted(files | ast_files):
         try:
-            rel = path.relative_to(_REPO_ROOT).as_posix()
+            rel = path.relative_to(repo_root).as_posix()
         except ValueError:
             continue
         ast_rules, ambient = _governed(path, rel, ast_files)
@@ -611,74 +629,89 @@ def _check_ast_and_quality(
             errors.extend(
                 f"{rel}:{line}: {message}" for line, message in _scan_file(path, rel, tree)
             )
-            _collect_locality(tree, rel, sites, scanned)
+            _collect_locality(tree, rel, sites, scanned, repo_root)
         if ambient:
-            errors.extend(ambient_state.collect(tree, rel, _REPO_ROOT, sites, scanned))
+            errors.extend(ambient_state.collect(tree, rel, repo_root, sites, scanned))
         if path in files:
             for kind, values in quality_budget.measure_quality(tree, rel).items():
                 measurements[kind].update(values)
     errors.extend(quality_budget.quality_errors(measurements))
     errors.extend(
-        locality.site_errors(
-            sites, baseline, scanned=scanned, repo_root=_REPO_ROOT, renames=renames
-        )
+        locality.site_errors(sites, baseline, scanned=scanned, repo_root=repo_root, renames=renames)
     )
-    errors.extend(locality.missing_allowlist_errors(_REPO_ROOT))
-    errors.extend(ambient_state.missing_allowlist_errors(_REPO_ROOT))
+    errors.extend(locality.missing_allowlist_errors(repo_root))
+    errors.extend(ambient_state.missing_allowlist_errors(repo_root))
     quality_budget.render_warnings(measurements["complexity"], full=full)
     return errors
 
 
-def _changed_targets(only: list[str] | None) -> list[str]:
+def _changed_targets(only: list[str] | None, repo_root: Path) -> list[str]:
     """The `--only` changed files as explicit targets; none (the full scan) when the tooling changed."""
-    scope = lint_common.changed_scope(only, _REPO_ROOT)
-    return [] if scope is None else [str(_REPO_ROOT / rel) for rel in sorted(scope)]
+    scope = lint_common.changed_scope(only, repo_root)
+    return [] if scope is None else [str(repo_root / rel) for rel in sorted(scope)]
 
 
-def _parse_args(argv: list[str]) -> tuple[list[str], bool, bool]:
+def _parse_args(argv: list[str], repo_root: Path) -> tuple[list[str], bool, bool]:
     """(explicit targets, unfold complexity warnings, nothing to judge) from the command line."""
     full = "--complexity-warnings-full" in argv
     argv, only = lint_common.split_only([a for a in argv if a != "--complexity-warnings-full"])
-    targets = [*argv, *_changed_targets(only)]
+    targets = [*argv, *_changed_targets(only, repo_root)]
     return targets, full, only == [] and not targets
 
 
-def _budget_scopes(argv: list[str]) -> tuple[list[Path], list[Path]]:
+def _budget_scopes(argv: list[str], repo_root: Path) -> tuple[list[Path], list[Path]]:
     """Explicit paths share one scope; a full run counts directories across the repo."""
     if argv:
         # Keep tracked symlinks lexical: count their names without following targets.
         selected = [Path(os.path.abspath(a)) for a in argv]  # noqa: PTH100 — normalize without following symlinks
         return selected, selected
-    return [_REPO_ROOT / directory for directory in _STRUCTURE_DIRS], [_REPO_ROOT]
+    return [repo_root / directory for directory in _STRUCTURE_DIRS], [repo_root]
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv, full, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:])
+def main(
+    argv: list[str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    baseline_base: str | None = None,
+) -> int:
+    """Run the gate for CLI arguments against an explicit checkout and comparison commit.
+
+    Omitted arguments use sys.argv; target paths retain cwd-relative CLI semantics.
+    The comparison defaults to LINT_STRUCTURE_BASELINE_BASE, then the merge base
+    of HEAD and origin/main.
+    Diagnostics use stdout/stderr and the return value is the CLI exit status.
+    """
+    repo_root = repo_root.resolve() if repo_root is not None else _REPO_ROOT
+    argv, full, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:], repo_root)
     if nothing_changed:
         return 0
     missing = [arg for arg in argv if not os.path.lexists(arg)]
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return 1
-    targets, directory_targets = _budget_scopes(argv)
+    targets, directory_targets = _budget_scopes(argv, repo_root)
     try:
-        baseline = _parse_baseline(baseline_shards.read_worktree(_REPO_ROOT))
+        baseline = _parse_baseline(baseline_shards.read_worktree(repo_root))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         print(f"{baseline_shards.SHARD_DIR}: invalid baseline: {exc}", file=sys.stderr)
         return 1
     try:
-        base = _baseline_base()
-        renames = _rename_map(base)
+        base = _baseline_base(repo_root, baseline_base)
+        renames = _rename_map(repo_root, base)
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"{baseline_shards.SHARD_DIR}: cannot establish baseline comparison: {exc}")
         return 1
-    errors = _baseline_guard(baseline, base=base, renames=renames)
+    errors = _baseline_guard(baseline, repo_root=repo_root, base=base, renames=renames)
     try:
-        errors.extend(_check_budgets(targets, directory_targets))
+        errors.extend(_check_budgets(targets, directory_targets, repo_root))
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"cannot read tracked directory structure: {exc}", file=sys.stderr)
         return 1
-    errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full, renames=renames))
+    errors.extend(
+        _check_ast_and_quality(
+            argv, targets, baseline, full=full, repo_root=repo_root, renames=renames
+        )
+    )
     for error in errors:
         print(error)
     if errors:

@@ -78,7 +78,7 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
     return code, buf.getvalue()
 
 
-# --- pure helpers -------------------------------------------------------
+# --- Source classification and package ownership through the report -----
 
 
 @pytest.mark.parametrize(
@@ -103,8 +103,21 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
         ("scripts/install-cli-tools.sh", True),
     ],
 )
-def test_is_src_classification(rel_path: str, expected: bool) -> None:
-    assert cochange._is_src(rel_path) is expected
+def test_source_classification_in_report(
+    tmp_path: pathlib.Path, rel_path: str, expected: bool
+) -> None:
+    _init_repo(tmp_path)
+    _commit(tmp_path, "fix: classify a changed path", {rel_path: "x = 1\n"})
+
+    report = _run(tmp_path)
+
+    assert report["commit_count"] == 1
+    assert report["widest_fix"][0]["spread"] == (1 if expected else 0)
+    assert report["spread_by_type"]["fix"] == {
+        "n": 1,
+        "p50": 1 if expected else 0,
+        "p90": 1 if expected else 0,
+    }
 
 
 @pytest.mark.parametrize(
@@ -118,21 +131,39 @@ def test_is_src_classification(rel_path: str, expected: bool) -> None:
         ("migrations/x.sql", "migrations"),
     ],
 )
-def test_package_of_file(rel_path: str, expected: str) -> None:
-    assert cochange._package_of_file(rel_path) == expected
+def test_package_ownership_in_report(tmp_path: pathlib.Path, rel_path: str, expected: str) -> None:
+    _init_repo(tmp_path)
+    _commit(tmp_path, "fix: locate a changed file's owner", {rel_path: "x = 1\n"})
+
+    report = _run(tmp_path)
+
+    assert report["widest_fix"][0]["packages"] == [expected]
+    assert report["widest_fix"][0]["spread"] == 1
 
 
 @pytest.mark.parametrize(
-    ("raw", "expected"),
+    ("old", "new"),
     [
-        ("old.py => new.py", ("old.py", "new.py")),
-        ("dir/{old => new}/file.py", ("dir/old/file.py", "dir/new/file.py")),
-        ("pkg_a/{mod.py => renamed.py}", ("pkg_a/mod.py", "pkg_a/renamed.py")),
-        ("gateway/routers/foo.py", (None, "gateway/routers/foo.py")),
+        ("old.py", "new.py"),
+        ("dir/old/file.py", "dir/new/file.py"),
+        ("pkg_a/mod.py", "pkg_a/renamed.py"),
     ],
 )
-def test_numstat_paths_split_a_rename(raw: str, expected: tuple[str | None, str]) -> None:
-    assert cochange._numstat_paths(raw) == expected
+def test_rename_history_uses_the_current_path(tmp_path: pathlib.Path, old: str, new: str) -> None:
+    _init_repo(tmp_path)
+    _commit(tmp_path, "fix: paired original files", {old: "x = 1\n", "control/mod.py": "x = 1\n"})
+    (tmp_path / new).parent.mkdir(parents=True, exist_ok=True)
+    _git(tmp_path, "mv", old, new)
+    _git(tmp_path, "commit", "--quiet", "-m", "refactor: move source")
+
+    report = _run(tmp_path, "--min-support", "1", "--min-confidence", "0")
+
+    assert len(report["strong_pairs"]) == 1
+    row = report["strong_pairs"][0]
+    assert {row["a"], row["b"]} == {new, "control/mod.py"}
+    assert row["c"] == 1
+    assert row["n_a"] == row["n_b"] == 1
+    assert old not in {row["a"], row["b"]}
 
 
 @pytest.mark.parametrize(
@@ -146,14 +177,55 @@ def test_numstat_paths_split_a_rename(raw: str, expected: tuple[str | None, str]
         ("no conventional prefix here", "other"),
     ],
 )
-def test_commit_type_bucketing(subject: str, expected: str) -> None:
-    assert cochange._commit_type(subject) == expected
+def test_commit_type_bucketing_in_report(
+    tmp_path: pathlib.Path, subject: str, expected: str
+) -> None:
+    _init_repo(tmp_path)
+    _commit(tmp_path, subject, {"pkg_a/mod.py": "x = 1\n"})
+
+    report = _run(tmp_path)
+
+    assert report["spread_by_type"] == {expected: {"n": 1, "p50": 1, "p90": 1}}
+    assert report["fix_count"] == (1 if expected == "fix" else 0)
 
 
-def test_percentile_nearest_rank() -> None:
-    assert cochange._percentile([1, 2, 3], 0.5) == 2
-    assert cochange._percentile([1, 2, 3], 0.9) == 3
-    assert cochange._percentile([], 0.5) == 0
+@pytest.mark.parametrize(
+    ("spreads", "p50", "p90"),
+    [
+        ((1, 2, 3), 2, 3),
+        ((3, 1, 2), 2, 3),
+        ((1, 2), 2, 2),
+        ((1,), 1, 1),
+        ((1, 2, 3, 4, 5, 6, 7, 8, 9, 10), 6, 10),
+        ((0,), 0, 0),
+    ],
+)
+def test_report_percentiles_at_population_boundaries(
+    tmp_path: pathlib.Path, spreads: tuple[int, ...], p50: int, p90: int
+) -> None:
+    _init_repo(tmp_path)
+    for index, spread in enumerate(spreads):
+        files = {f"pkg_{number}/mod.py": f"x = {index}\n" for number in range(spread)}
+        if not files:
+            files = {"docs/note.md": "No source changed.\n"}
+        _commit(tmp_path, f"fix: change {spread} packages", files)
+
+    report = _run(tmp_path)
+
+    assert report["spread_by_type"]["fix"] == {"n": len(spreads), "p50": p50, "p90": p90}
+
+
+def test_report_with_an_empty_commit_window(tmp_path: pathlib.Path) -> None:
+    _init_repo(tmp_path)
+    _commit(tmp_path, "fix: seed outside window", {"pkg_a/mod.py": "x = 1\n"})
+
+    report = _run(tmp_path, "--commits", "0")
+
+    assert report["commit_count"] == 0
+    assert report["spread_by_type"] == {}
+    assert report["fix_count"] == report["fix_wide_count"] == 0
+    assert report["fix_wide_share"] == 0
+    assert report["widest_fix"] == report["strong_pairs"] == report["package_pairs"] == []
 
 
 # --- Metric A: spread + percentiles by type, and the fix >= 3 share -----

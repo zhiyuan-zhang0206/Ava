@@ -13,6 +13,8 @@ from scripts.structure import placement_evidence
 
 from . import ModuleSourceLookup, bindings, dependency_evidence, executed, mock_targets, normalize
 
+__all__ = ["Evidence", "Fact", "FactKind", "Unknown", "collect"]
+
 
 class FactKind(StrEnum):
     IMPORT = "import"
@@ -152,7 +154,7 @@ class _Collector(ast.NodeVisitor):
             self._dynamic(node, origin)
         if origin in _PATCH_IMPORTS:
             self._patch_import(node, origin)
-        if origin in executed._LAUNCHERS:
+        if executed.is_launcher(origin):
             self.has_launches = True
             target, reason = executed.module_input(node, self.scope)
             if target is not None:

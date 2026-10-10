@@ -1,7 +1,7 @@
 """ScriptedFakeChatModel self unit test — cursor / chunk encoding / exhaustion.
 
 A silently broken fake = silently green e2e, so the fake's own non-trivial logic
-(cursor advancement / tool_call_chunks JSON encoding / IndexError out-of-bounds)
+(cursor advancement / tool_call_chunks JSON encoding / script exhaustion)
 must have unit coverage.
 """
 
@@ -11,11 +11,12 @@ import json
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, message_chunk_to_message
+from langchain_core.messages.tool import ToolCall
 
-from tests.e2e.fakes._chat_model import ScriptedFakeChatModel, ScriptExhaustedError
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, ScriptExhaustedError
 
 
-def _msg(content: str = "", *, tool_call: dict | None = None) -> AIMessage:
+def _msg(content: str = "", *, tool_call: ToolCall | None = None) -> AIMessage:
     return AIMessage(
         content=content,
         tool_calls=[tool_call] if tool_call else [],
@@ -27,37 +28,37 @@ async def test_cursor_advances_per_astream_call() -> None:
     fake = ScriptedFakeChatModel(script=(_msg("hi"), _msg("bye")))
     assert fake.cursor == 0
 
-    chunks_a = [c async for c in fake._astream(messages=[])]
+    chunks_a = [c async for c in fake.astream([])]
     assert fake.cursor == 1
-    assert len(chunks_a) == 1
+    assert [c.content for c in chunks_a if c.content] == ["hi"]
     # langchain stub — message.content has Unknown slots.
-    assert chunks_a[0].message.content == "hi"  # pyright: ignore[reportUnknownMemberType]
+    assert chunks_a[0].content == "hi"  # pyright: ignore[reportUnknownMemberType]
 
-    chunks_b = [c async for c in fake._astream(messages=[])]
+    chunks_b = [c async for c in fake.astream([])]
     assert fake.cursor == 2
-    assert chunks_b[0].message.content == "bye"  # pyright: ignore[reportUnknownMemberType]
+    assert chunks_b[0].content == "bye"  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_script_exhausted_raises_distinct_error() -> None:
     fake = ScriptedFakeChatModel(script=(_msg("only"),))
-    [_ async for _ in fake._astream(messages=[])]
+    [_ async for _ in fake.astream([])]
 
     with pytest.raises(ScriptExhaustedError, match="exhausted at turn 1"):
-        [_ async for _ in fake._astream(messages=[])]
+        [_ async for _ in fake.astream([])]
 
 
 async def test_tool_call_chunk_args_serialized_to_json() -> None:
     """LangChain ToolCallChunk `args` must be a JSON string — the upper layer
     `message_chunk_to_message` will parse it back to a dict. Verify encoding + roundtrip."""
-    tool_call = {
+    tool_call: ToolCall = {
         "id": "call_1",
         "name": "execute_code",
         "args": {"code": "print('\u4e2d\u6587 + quotes')"},
     }
     fake = ScriptedFakeChatModel(script=(_msg(tool_call=tool_call),))
 
-    chunks = [c async for c in fake._astream(messages=[])]
-    chunk_msg = chunks[0].message
+    chunks = [c async for c in fake.astream([])]
+    chunk_msg = chunks[0]
     assert isinstance(chunk_msg, AIMessageChunk)
     assert len(chunk_msg.tool_call_chunks) == 1
     args_str = chunk_msg.tool_call_chunks[0]["args"]
@@ -84,8 +85,23 @@ async def test_bind_tools_shares_cursor_with_unbound() -> None:
     fake = ScriptedFakeChatModel(script=(_msg("a"), _msg("b")))
     bound = fake.bind_tools(tools=[])
 
-    [_ async for _ in bound._astream(messages=[])]
+    [_ async for _ in bound.astream([])]
     assert fake.cursor == 1  # bound call advanced the original fake's cursor
 
-    [_ async for _ in fake._astream(messages=[])]
+    [_ async for _ in fake.astream([])]
     assert fake.cursor == 2
+
+
+async def test_public_calls_share_cursor_and_preserve_metadata() -> None:
+    reply = _msg("stream")
+    reply.response_metadata = {"model_provider": "anthropic", "stop_reason": "max_tokens"}
+    fake = ScriptedFakeChatModel(script=(_msg("sync"), _msg("async"), reply))
+    assert fake.invoke([]).content == "sync"
+    assert (await fake.ainvoke([])).content == "async"
+    chunks = list(fake.stream([]))
+    assert chunks[0].response_metadata["stop_reason"] == "max_tokens"
+    assert chunks[0].usage_metadata == reply.usage_metadata
+    assert fake.cursor == 3
+    with pytest.raises(ScriptExhaustedError):
+        fake.invoke([])
+    assert fake.cursor == 3

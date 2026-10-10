@@ -24,7 +24,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from scripts.structure import imports
-from scripts.structure.placement import PATCH_TOPS
+from scripts.structure.placement import CODE_TOPS
+
+__all__ = [
+    "Point",
+    "extract_points",
+]
 
 _STDLIB = frozenset(sys.stdlib_module_names)
 _KNOWN_THIRD_PARTY = frozenset(
@@ -123,7 +128,7 @@ def _joinpath_literal(node: ast.AST) -> str | None:
     consts = [
         a.value for a in node.args if isinstance(a, ast.Constant) and isinstance(a.value, str)
     ]
-    return "/".join(consts) if consts and consts[0] in PATCH_TOPS else None
+    return "/".join(consts) if consts and consts[0] in CODE_TOPS else None
 
 
 class _Names:
@@ -195,7 +200,7 @@ class _Names:
             return self._path_expr(inner, depth + 1)
         parts = _const_chain(node)
         for position, part in enumerate(parts):
-            if part and part.split("/")[0] in PATCH_TOPS:
+            if part and part.split("/")[0] in CODE_TOPS:
                 return _literal_run(parts[position:])
         return _joinpath_literal(node)
 
@@ -243,7 +248,7 @@ class _Names:
         if (
             loaded
             and chain
-            and (chain[0] in _STDLIB or chain[0] in PATCH_TOPS or chain[0] in _KNOWN_THIRD_PARTY)
+            and (chain[0] in _STDLIB or chain[0] in CODE_TOPS or chain[0] in _KNOWN_THIRD_PARTY)
         ):
             return ".".join(
                 chain
