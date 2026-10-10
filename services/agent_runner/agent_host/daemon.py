@@ -111,6 +111,8 @@ from .force_termination import kill_terminating_agent_shells
 from .host import AgentHost
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
+from .pools import close_host_pools as _close_host_pools
+from .runtime import HostCachePolicy, HostPolicy
 from .stdout_log import _rotate_stdout_log_forever
 
 _log = logging.getLogger("services.agent_runner.agent_host.daemon")
@@ -482,17 +484,6 @@ async def _open_host_pools(
     await _recover_hosted_forces_at_boot(control_pool, machine)
 
 
-async def _close_host_pools(
-    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-) -> None:
-    """Close both pools even if the control-pool close itself fails."""
-    try:
-        await control_pool.close()
-    finally:
-        await workload_pool.close()
-
-
 async def _close_joined_host_pools(
     host: AgentHost | None,
     workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
@@ -603,6 +594,15 @@ async def run() -> None:
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
+            policy=HostPolicy(
+                max_concurrent_turns=settings.daemon.host_max_concurrent_turns,
+                cache=lambda: HostCachePolicy(
+                    idle_ttl_seconds=settings.daemon.host_agent_idle_ttl_seconds,
+                    size=settings.daemon.host_agent_cache_size,
+                ),
+                default_model=lambda: settings.lm.llm_model,
+                llm_override=lambda: settings.lm.llm_override,
+            ),
             clients=process_clients(database=lambda: db),
             extensions=installation.registry,
             plugin_configs=installation.configs,

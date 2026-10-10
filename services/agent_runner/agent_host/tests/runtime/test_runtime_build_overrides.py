@@ -11,6 +11,7 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 @pytest.mark.parametrize("pinned", [True, False])
@@ -36,7 +37,13 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
     monkeypatch.setattr(host_module, "repair_dangling_tool_use_at_startup", AsyncMock())
     monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
     host = AgentHost(
-        pool=Mock(), checkpointer=Mock(), graph=Mock(), bus=Mock(), db=Mock(), catalog=model_catalog
+        policy=configured_policy(),
+        pool=Mock(),
+        checkpointer=Mock(),
+        graph=Mock(),
+        bus=Mock(),
+        db=Mock(),
+        catalog=model_catalog,
     )
     pins = {"reasoning_effort": "low", "claude_thinking_budget_tokens": 777} if pinned else {}
     slices = AgentSlices.resolve({"llm_model": "pinned-model", **pins})
