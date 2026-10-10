@@ -36,6 +36,31 @@ _SHAPES = {
 }
 
 
+def test_selected_subset_prepares_disk_pg_storage_before_its_native_tests(tmp_path: Path) -> None:
+    job = _JOBS["backend-selected"]
+    scratch = job["env"]["AVA_PG_THROWAWAY_BASE"].replace(
+        "${{ runner.temp }}", str(tmp_path / "runner-temp")
+    )
+    steps = job["steps"]
+    prepare = next(step for step in steps if step.get("id") == "prepare-pg-scratch")
+    native = next(step for step in steps if step.get("id") == "run-subset")
+    assert steps.index(prepare) < steps.index(native)
+    assert not Path(scratch).exists()
+    result = subprocess.run(  # noqa: S603 — checked-in mkdir step over a test-owned directory
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", prepare["run"]],
+        env={**os.environ, "AVA_PG_THROWAWAY_BASE": scratch},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert Path(scratch).is_dir()
+    diagnostic = next(step for step in steps if step.get("id") == "pg-scratch-capacity")
+    assert "failure()" in diagnostic["if"]
+    assert 'df -h "$AVA_PG_THROWAWAY_BASE"' in diagnostic["run"]
+    assert 'df -i "$AVA_PG_THROWAWAY_BASE"' in diagnostic["run"]
+
+
 @pytest.mark.parametrize("job", ["backend-shard", "backend", "test-selection-shadow-report", "e2e"])
 def test_fanout_and_summaries_respect_workflow_cancellation(job: str) -> None:
     condition = _JOBS[job]["if"]
