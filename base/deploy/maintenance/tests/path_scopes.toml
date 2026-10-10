@@ -3,3 +3,7 @@
 "tests.path_scoped.services_tests" = [
     "test_maintenance_failures.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_hold_driver.py",
+    "test_maintenance_failures.py"
+]

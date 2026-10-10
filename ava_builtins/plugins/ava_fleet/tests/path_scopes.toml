@@ -7,3 +7,20 @@
 "tests.path_scoped.ava_tests" = [
     "test_lazy_plugin_import.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "ava_fleet_plugin/test_dismissing_response_notice_refreshes_inspector_snapshot.py",
+    "task_registry/test_create_unique_title_no_conflict.py",
+    "task_registry/test_creation_receipt_identity.py",
+    "task_registry/test_creation_receipts.py",
+    "task_registry/test_notification_fences.py",
+    "task_registry/test_notification_recovery.py",
+    "task_registry/test_update_non_owner_notifies_owner.py",
+    "task_registry/test_update_receipt_identity.py",
+    "task_registry/test_update_receipts.py",
+    "test_ava_fleet_plugin.py",
+    "test_fleet_audit.py",
+    "test_lazy_plugin_import.py",
+    "test_task_maintenance_daemon_part2.py",
+    "test_task_registry.py",
+    "test_validation_ava_fleet.py"
+]

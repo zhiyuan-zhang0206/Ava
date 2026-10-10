@@ -17,3 +17,29 @@
 "tests.fixtures.log_capture" = [
     "test_plugin_scaffold.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "bootstrap/test_boot_retry.py",
+    "bootstrap/test_checkout_guard.py",
+    "bootstrap/test_dotenv_boot_launcher_context_cli.py",
+    "bootstrap/test_init.py",
+    "bootstrap/test_redis_binary_selection.py",
+    "bootstrap/test_start_identity.py",
+    "extensions/test_memory_cmd.py",
+    "extensions/test_mirror_profile.py",
+    "extensions/test_presets_cmd.py",
+    "extensions/test_settings_failure.py",
+    "extensions/test_skill_install.py",
+    "test_cli_groups.py",
+    "test_cluster_health_parser.py",
+    "test_lite_verbs.py",
+    "test_logs_rotate.py",
+    "test_main_dispatch.py",
+    "test_main_log_init.py",
+    "test_main_telemetry_exit.py",
+    "test_plugin_scaffold.py",
+    "test_pty_commands.py",
+    "test_schedules_parser.py",
+    "test_start_gate.py",
+    "test_stop_parser.py",
+    "test_unit_capability_cli.py"
+]

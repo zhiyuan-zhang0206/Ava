@@ -24,3 +24,6 @@
     "test_model_interrupt_owner.py",
     "test_node_log.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "."
+]

@@ -3,3 +3,6 @@
 "tests.path_scoped.services_tests" = [
     "test_permissions_helper.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_helper_retirement.py"
+]

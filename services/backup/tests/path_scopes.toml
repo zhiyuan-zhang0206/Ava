@@ -3,3 +3,8 @@
 "tests.path_scoped.services_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "backup/test_run_with_progress_without_a_sink_defers.py",
+    "test_backup.py",
+    "test_backup_part2.py"
+]

@@ -1,6 +1,6 @@
 """Autouse guards: keep every test hermetic and off the host.
 
-Each fixture here is autouse and either forbids a real host effect (native helper
+The autouse fixtures either forbid a real host effect (native helper
 converge, os.exec*, the bootstrap fetch, service readiness / health-port probes,
 the schedule manager's session backend, the label LLM) or restores process-global
 state a test may have leaked (metering wraps, OTLP export, the stdlib logging
@@ -62,8 +62,14 @@ def _telemetry_event_store_off() -> None:
     event_store.set_enabled(enabled=False)
 
 
+@pytest.fixture
+def sdk_metering() -> Iterator[None]:
+    """An unrelated test has no SDK recorder ledger; consumers override this locally."""
+    yield
+
+
 @pytest.fixture(autouse=True)
-def _restore_metering() -> Iterator[None]:
+def _restore_metering(sdk_metering: None) -> None:
     """Per-test isolation for the process-global `ava` singleton's metering state:
     whatever a test wrapped, the next test sees the bare callables again.
 
@@ -85,16 +91,11 @@ def _restore_metering() -> Iterator[None]:
     Restores from the installation that holds the recorder ledger; a test that
     installs the recorders directly restores its own (``install()`` returns the
     ledger). Free for the tests that never metered: with nothing installed there is
-    no ledger and nothing runs; the import runs only once `ava` is loaded (a rename
-    fails loudly).
+    no ledger and nothing runs. Consumer-local `sdk_metering` carries the SDK
+    dependency and teardown; the global default never imports the SDK.
     """
-    yield
-    if "ava" in sys.modules:
-        from ava.sdk_surface import install, metering
-
-        current = install.installed()
-        if current is not None and current.metered:
-            metering.uninstall(current.metered)
+    # The ordinary yield-fixture dependency owns the recorder teardown.
+    # Its consumer-local override reads the real installation ledger.
 
 
 @pytest.fixture(autouse=True)

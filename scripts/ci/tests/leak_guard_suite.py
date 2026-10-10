@@ -96,10 +96,12 @@ from collections.abc import Iterator
 import pytest
 
 import leakdemo.identity  # the stand-in slot must be loaded before the first test, whatever file runs
-from tests.fixtures import identity_restore, leak_guard
+from tests.fixtures import leak_guard
 
-# Exercise the real restore fixture against the suite's explicit context slot.
-identity_restore.ava = leakdemo.identity
+# Exercise the real global guard through the same explicit fixture seam as SDK consumers.
+@pytest.fixture
+def sdk_identity():
+    return leakdemo.identity
 
 
 class _Boom(list):

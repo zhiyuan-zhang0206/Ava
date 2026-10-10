@@ -3,3 +3,7 @@
 "tests.path_scoped.services_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_alert_reconciler.py",
+    "test_registry_gauge.py"
+]

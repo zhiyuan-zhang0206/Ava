@@ -10,3 +10,12 @@
     "test_requests.py",
     "test_revision_recovery.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_daemon.py",
+    "test_manager.py",
+    "test_manager_pty.py",
+    "test_manager_state.py",
+    "test_requests.py",
+    "test_revision_recovery.py",
+    "test_runner_composition.py"
+]

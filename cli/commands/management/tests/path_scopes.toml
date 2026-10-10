@@ -3,3 +3,6 @@
 "tests.path_scoped.cli_tests" = [
     "test_config_cmd.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_schedules_verify_foreign_checkout.py"
+]

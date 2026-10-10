@@ -3,3 +3,7 @@
 "tests.path_scoped.agent_tests" = [
     "test_resources.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_resource_admission.py",
+    "test_resources.py"
+]

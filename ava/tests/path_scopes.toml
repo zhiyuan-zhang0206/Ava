@@ -26,3 +26,6 @@
     "test_core.py",
     "test_security.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "."
+]
