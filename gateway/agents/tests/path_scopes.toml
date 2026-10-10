@@ -11,3 +11,10 @@
 ]
 "tests.fixtures.unit.homes" = ["."]
 "tests.fixtures.unit.identity" = ["."]
+"tests.fixtures.unit.config_authority" = [
+    "test_agent_launch_visibility.py",
+    "test_completion_digest_not_in_gateway.py",
+    "test_inbound_provenance.py",
+    "test_resurrect_forward.py",
+    "test_spawn_forward.py",
+]

@@ -27,7 +27,8 @@ Order is load-bearing:
    alphabetically, and `_clean_state` (in `provisioning`) sorts ahead of the
    `_guard_*` fixtures. The hooks in `provisioning` also stay registered
    before `collection_guard` and the stall probe, as they were.
-5. The opt-in fixture modules and the two hook-only plugins follow.
+5. The remaining hook plugins and pytester subprocess harness follow.
+   Opt-in unit, model, serving, logging and retry fixtures bind beside consumers.
 """
 
 pytest_plugins = [
@@ -39,10 +40,6 @@ pytest_plugins = [
     "tests.fixtures.provisioning",
     "tests.fixtures.guards",
     "cli.commands.tests.health_port_guard",
-    "base.deploy.lifecycle.tests.serving_root",
-    "tests.fixtures.log_capture",
-    "tests.fixtures.retry_waits",
-    "tests.fixtures.model_catalog",
     # Directory-level fixtures that follow their tests (`PATH_SCOPES`), not a conftest.
     "tests.fixtures.path_scopes",
     # Stall forensics (task #3513: the asyncio probe under `-o faulthandler_timeout=N`)
