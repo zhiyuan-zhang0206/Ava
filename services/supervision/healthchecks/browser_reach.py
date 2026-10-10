@@ -1,6 +1,6 @@
 """Browser network canary and host contrast, scheduled by root diagnostics.
 
-The canary opens one temporary target and closes it in finally. It never stops,
+The canary opens one temporary hidden target and closes it in finally. It never stops,
 restarts, or repairs the shared browser. Root diagnostics observes
 the configured endpoints without native listener inspection.
 """
@@ -56,7 +56,7 @@ async def _cdp_call(
 
 
 async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
-    """The browser-path canary: throwaway background target, one fetch, closed."""
+    """The browser-path canary: hidden target in the shared context, one fetch, closed."""
     deadline = time.monotonic() + timeout_s
 
     def left() -> float:
@@ -76,7 +76,7 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
             browser_ws,
             ids,
             "Target.createTarget",
-            {"url": "about:blank", "background": True},
+            {"url": "about:blank", "background": True, "hidden": True},
             left(),
         )
         target_id = created.get("targetId")
@@ -114,7 +114,7 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
                 await _cdp_call(browser_ws, ids, "Target.closeTarget", {"targetId": target_id}, 2.0)
             except (websockets.WebSocketException, OSError, RuntimeError, ValueError):
                 logger.opt(exception=True).warning(
-                    "[browser-reach] could not close the canary tab {}; it stays open in Chrome",
+                    "[browser-reach] could not explicitly close the hidden canary target {}",
                     target_id,
                 )
 

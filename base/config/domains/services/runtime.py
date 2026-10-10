@@ -58,7 +58,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     browser_reach_probe_interval_s: int = Field(
         default=300,
         alias="AVA_BROWSER_REACH_PROBE_INTERVAL_S",
-        description="Throttle for the browser-reach canary (seconds): the canary opens and closes one background about:blank target in the shared headed browser, so probing every watchdog round would churn the user's tab strip. 300s keeps that negligible while bounding a sticky hang to threshold*interval (~15 min). 0 disables the throttle.",
+        description="Interval for the browser-reach canary (seconds): each sample fetches the gateway health URL from a temporary hidden about:blank target in the shared browser context. 300s limits routine probe traffic; root diagnostics enforces a minimum interval of 60s.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",
