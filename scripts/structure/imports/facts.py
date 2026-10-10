@@ -8,11 +8,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
 
 from scripts.structure import placement_evidence
 
-from . import ModuleLookup, bindings, dependency_evidence, executed, normalize
+from . import bindings, dependency_evidence, executed, mock_targets, normalize
+from .mock_targets import Lookup as Lookup
 
 
 class FactKind(StrEnum):
@@ -45,10 +45,6 @@ class Unknown:
 class Evidence:
     records: tuple[Fact, ...]
     unknown: tuple[Unknown, ...]
-
-
-class Lookup(ModuleLookup, Protocol):
-    repo_root: Path
 
 
 _DYNAMIC_CALLS = frozenset(
@@ -202,9 +198,10 @@ class _Collector(ast.NodeVisitor):
         )
         values = self.scope.strings(target) if target is not None else None
         if values is None:
-            value = self.scope.value(target) if target is not None else None
-            if origin != "unittest.mock.patch" and isinstance(
-                value, ast.Dict | ast.List | ast.Tuple | ast.Set
+            if (
+                target is not None
+                and origin != "unittest.mock.patch"
+                and mock_targets.is_object(target, self.scope, self.index)
             ):
                 return  # An actual object target does not invoke patch's string importer.
             self.gap(node, f"{origin} target is not bounded literal text")

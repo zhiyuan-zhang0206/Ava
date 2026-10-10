@@ -120,6 +120,11 @@ paths anchored by `Path(__file__)` inside the checkout. Lexical bindings
 prevent an unrelated parameter or comprehension target from shadowing another
 scope's import or path. Patch target facts retain their callee, so ownership may
 prune patch-only subjects while runtime impact keeps the import dependency.
+`patch.dict` and `patch.multiple` object forms do not invoke the string importer.
+The collector proves standard-library mappings and explicit module imports through
+lexical bindings; a `from` submodule target also requires a namespace or inert
+package door. Imported symbols that could be strings, rebound attributes and opaque
+targets retain diagnostics. Existing static imports of object targets remain edges.
 It does not execute Python, infer arbitrary builders or prove runtime branch
 coverage. Resource facts describe possible referenced paths; directory facts
 give a conservative subtree, not proof that every child was read. Known paths
