@@ -260,8 +260,8 @@ export function nearestUnit(data: RunTimelineResponse, ms: number): Selection | 
   return best === null ? null : { kind: "unit", i0: best.i0, i1: best.i1, unitKind: best.kind };
 }
 
-/** Two arrows of one kind between the same rows merge when both ends are closer than this on screen. */
-export const MERGE_PX = 14;
+/** The most arrows the panel shows at once; the merge distance adapts to the viewport to stay within it. */
+export const MAX_ARROWS = 30;
 
 /** What clustering needs of an arrow on screen: its identity, which arrows it may merge with, and where its ends are. */
 export interface Arrow {
@@ -287,33 +287,49 @@ export interface Cluster {
 /** The bucket of a link: kind and the two rows with their agents. */
 export const bucketOf = (l: ResolvedLink): string => `${l.link.kind}|${l.from.row}:${l.from.agent}|${l.to.row}:${l.to.agent}`;
 
-/**
- * Merges arrows that lie close together on screen: within a bucket, arrows sorted by their start join
- * the first open group whose first member is within `px` at both ends, else open a group of their own.
- * Linear in the arrows after the sort (a group is open only while a later start can still be within
- * `px` of its first), so a thousand arrows cost no more than the sort. Pure and recomputed on every
- * viewport change: zooming in splits groups because the distances grow.
- */
-export function clusterArrows(arrows: readonly Arrow[], px: number = MERGE_PX): Cluster[] {
+/** Arrows grouped by bucket and sorted by their start, ready to be merged at any distance. */
+export type PreparedArrows = readonly { bucket: string; list: readonly Arrow[] }[];
+
+export function prepareArrows(arrows: readonly Arrow[]): PreparedArrows {
   const buckets = new Map<string, Arrow[]>();
   for (const a of arrows) {
     const list = buckets.get(a.bucket);
     if (list === undefined) buckets.set(a.bucket, [a]);
     else list.push(a);
   }
-  const out: Cluster[] = [];
-  for (const [bucket, list] of buckets) {
-    list.sort((p, q) => p.x0 - q.x0);
-    let open: { first: Arrow; members: Arrow[] }[] = [];
-    const close = (group: { members: Arrow[] }) => {
+  return [...buckets].map(([bucket, list]) => ({ bucket, list: list.sort((p, q) => p.x0 - q.x0) }));
+}
+
+interface Open {
+  first: Arrow;
+  members: Arrow[];
+}
+
+/**
+ * Merges the prepared arrows at distance `px`: within a bucket, in order of start, an arrow joins the
+ * first open group whose first member is within `px` at both ends, else opens a group of its own (a
+ * group is open only while a later start can still be within `px` of its first). With `emit` the
+ * clusters are built; without it only their number is returned (what the search for `px` needs).
+ */
+function mergeAt(prepared: PreparedArrows, px: number, emit: ((c: Cluster) => void) | null): number {
+  let count = 0;
+  for (const { bucket, list } of prepared) {
+    const close = (group: Open) => {
+      count += 1;
+      if (emit === null) return;
       const n = group.members.length;
-      const x0 = group.members.reduce((sum, m) => sum + m.x0, 0) / n;
-      const x1 = group.members.reduce((sum, m) => sum + m.x1, 0) / n;
       const keys = group.members.map((m) => m.key);
-      out.push({ key: n === 1 ? keys[0] : `group:${keys[0]}:${n}`, bucket, members: keys, x0, x1 });
+      emit({
+        key: n === 1 ? keys[0] : `group:${keys[0]}:${n}`,
+        bucket,
+        members: keys,
+        x0: group.members.reduce((sum, m) => sum + m.x0, 0) / n,
+        x1: group.members.reduce((sum, m) => sum + m.x1, 0) / n,
+      });
     };
+    let open: Open[] = [];
     for (const a of list) {
-      const stillOpen: typeof open = [];
+      const stillOpen: Open[] = [];
       let joined = false;
       for (const group of open) {
         if (a.x0 - group.first.x0 >= px) {
@@ -331,5 +347,48 @@ export function clusterArrows(arrows: readonly Arrow[], px: number = MERGE_PX): 
     }
     open.forEach(close);
   }
+  return count;
+}
+
+/** The merge result at a fixed distance. */
+export function clusterArrows(arrows: readonly Arrow[], px: number): Cluster[] {
+  const out: Cluster[] = [];
+  mergeAt(prepareArrows(arrows), px, (c) => out.push(c));
   return out;
+}
+
+const SEARCH_PRECISION_PX = 0.5;
+
+/** What `clusterToMax` found: the clusters, the distance that gave them, and whether the limit could be kept. */
+export interface Clustered {
+  clusters: Cluster[];
+  px: number;
+  /** False when even merging everything the buckets allow leaves more than `max` arrows (arrows of different kinds or rows are never merged). */
+  withinMax: boolean;
+}
+
+/**
+ * The fewest merges that keep at most `max` arrows on screen: a binary search on the merge distance
+ * for the smallest one whose result has at most `max` clusters. Merging is only by bucket, so if the
+ * buckets alone outnumber `max` the result is the full merge and `withinMax` is false. The arrows are
+ * sorted once; each step of the search only counts.
+ */
+export function clusterToMax(arrows: readonly Arrow[], max: number, widest: number): Clustered {
+  const prepared = prepareArrows(arrows);
+  const out: Cluster[] = [];
+  const done = (px: number, withinMax: boolean): Clustered => {
+    out.length = 0;
+    mergeAt(prepared, px, (c) => out.push(c));
+    return { clusters: [...out], px, withinMax };
+  };
+  if (mergeAt(prepared, 0, null) <= max) return done(0, true);
+  if (mergeAt(prepared, widest, null) > max) return done(widest, false);
+  let lo = 0;
+  let hi = widest;
+  while (hi - lo > SEARCH_PRECISION_PX) {
+    const mid = (lo + hi) / 2;
+    if (mergeAt(prepared, mid, null) <= max) hi = mid;
+    else lo = mid;
+  }
+  return done(hi, true);
 }

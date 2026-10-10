@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 
-import { bucketOf, clusterArrows, curveOf, curvePoint, endTangent, hitLink, LINK_COLORS, type Arrow, type Curve, type ResolvedLink } from "../model/timeline-links";
+import { bucketOf, clusterToMax, curveOf, curvePoint, endTangent, hitLink, LINK_COLORS, type Arrow, type Cluster, type Curve, type ResolvedLink } from "../model/timeline-links";
 import type { AxisMap, Viewport } from "../model/timeline-model";
 
 const ROW_TESTID = { units: "run-timeline-row-units", user: "run-timeline-row-user", other: "run-timeline-row-other" } as const;
@@ -40,12 +40,19 @@ export interface LinkHitResult {
 }
 
 const BADGE_FONT_PX = 9;
-const WIDTH_BASE = 1.25;
-const WIDTH_STEP = 0.2;
-const WIDTH_MAX = 3.25;
+// One width for every arrow, merged or not; a hovered or selected one is a little thicker.
+const WIDTH_PX = 1.25;
 
-/** A line a little thicker for each link it stands for, up to a bound. */
-export const widthFor = (count: number) => Math.min(WIDTH_BASE + (count - 1) * WIDTH_STEP, WIDTH_MAX);
+/** A cheap fingerprint of where the arrows are: equal when nothing moved, so the merge need not be searched again. */
+function arrowsSignature(arrows: readonly Arrow[], max: number): string {
+  let h0 = 0;
+  let h1 = 0;
+  for (const a of arrows) {
+    h0 = (h0 * 31 + Math.round(a.x0 * 10) + a.key.length) % 1_000_000_007;
+    h1 = (h1 * 37 + Math.round(a.x1 * 10) + a.bucket.length) % 1_000_000_007;
+  }
+  return `${max}|${arrows.length}|${h0}|${h1}`;
+}
 
 export function LinksCanvas({
   links,
@@ -53,6 +60,7 @@ export function LinksCanvas({
   hoverKeys,
   axis,
   view,
+  maxArrows,
   hitRef,
 }: {
   /** The arrows to draw (the kinds that are switched on). */
@@ -62,9 +70,12 @@ export function LinksCanvas({
   hoverKeys: ReadonlySet<string>;
   axis: AxisMap;
   view: Viewport;
+  /** The most arrows shown at once: close ones merge, as far as the viewport needs, to stay within it. */
+  maxArrows: number;
   hitRef: RefObject<LinkHit>;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const cache = useRef<{ signature: string; clusters: Cluster[] } | null>(null);
   useEffect(() => {
     const el = canvas.current;
     const ctx = el?.getContext("2d") ?? null;
@@ -100,8 +111,15 @@ export function LinksCanvas({
         ys.set(l.key, [a.y, b.y]);
         byKey.set(l.key, l);
       }
-      // Arrows close together on screen are drawn as one with a count; zooming in pulls them apart.
-      const clusters = clusterArrows(arrows);
+      // Arrows close together on screen are drawn as one with a count, merged only as far as it takes to
+      // stay within the limit; zooming in leaves fewer to merge, so they fall apart.
+      // The search runs again only when the arrows moved (a zoom, a pan, a resize); hovering and
+      // selecting repaint over the same result.
+      const signature = arrowsSignature(arrows, maxArrows);
+      if (cache.current?.signature !== signature) {
+        cache.current = { signature, clusters: clusterToMax(arrows, maxArrows, rect.width * 2).clusters };
+      }
+      const clusters = cache.current.clusters;
       const curves: Curve[] = [];
       const sizes = new Map<string, number>();
       const kinds = new Map<string, ResolvedLink["link"]["kind"]>();
@@ -131,7 +149,7 @@ export function LinksCanvas({
         ctx.globalAlpha = lit > 0 ? 1 : selectedKeys.size > 0 ? 0.25 : 0.55;
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
-        ctx.lineWidth = lit === 2 ? widthFor(count) + 1.25 : lit === 1 ? widthFor(count) + 0.75 : widthFor(count);
+        ctx.lineWidth = lit === 2 ? WIDTH_PX + 1.25 : lit === 1 ? WIDTH_PX + 0.75 : WIDTH_PX;
         ctx.beginPath();
         ctx.moveTo(c.x0, c.y0);
         ctx.bezierCurveTo(c.c1x, c.c1y, c.c2x, c.c2y, c.x1, c.y1);

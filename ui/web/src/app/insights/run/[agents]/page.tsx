@@ -11,7 +11,7 @@ import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { LinkDetail } from "@/components/run-timeline/run-timeline-link-detail";
 import { LinkGroupDetail } from "@/components/run-timeline/run-timeline-link-group-detail";
-import { LINK_KINDS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
+import { LINK_KINDS, MAX_ARROWS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
 import { RunTimelineRows, type AgentEntry } from "@/components/run-timeline/run-timeline-rows";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import { PageHeader } from "@/components/shell/page-header";
@@ -71,6 +71,8 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const [viewport, setViewport] = useState<Viewport | null>(null);
   // The selected arrow between agents (a selected arrow and a selected block exclude each other) and the kinds drawn.
   // The selected links: one for an arrow of one link, several for a merged arrow.
+  // TEMPORARY (screenshots to choose the limit): ?maxArrows=N overrides it.
+  const maxArrows = Number(new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("maxArrows")) || MAX_ARROWS;
   const [linkKeys, setLinkKeys] = useState<readonly string[]>([]);
   const setLinkKey = (key: string | null) => setLinkKeys(key === null ? [] : [key]);
   const [linkKinds, setLinkKinds] = useState<ReadonlySet<LinkKind>>(() => new Set(LINK_KINDS));
@@ -282,6 +284,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
               })
             }
             linkKeys={linkKeys}
+            maxArrows={maxArrows}
             onSelectLinks={(keys) => {
               setSelection(null);
               setLinkKeys(keys);

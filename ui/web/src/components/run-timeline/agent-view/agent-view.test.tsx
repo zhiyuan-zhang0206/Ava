@@ -24,7 +24,7 @@ vi.mock("@/lib/transport/api", () => ({
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
 import { drawn, drawnLinks, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas";
-import { curveOf, curvePoint } from "../model/timeline-links";
+import { curveOf, curvePoint, MAX_ARROWS } from "../model/timeline-links";
 import { viewportOf } from "../model/timeline-model";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
@@ -492,51 +492,66 @@ describe("arrows between agents", () => {
     expect(screen.getByTestId<HTMLInputElement>("agent-view-interactions-user").checked).toBe(false);
   });
 
-  it("draws close arrows of one kind between the same rows as one with a count, hovers and selects it as a group, and pulls it apart on a click", async () => {
+  it("draws every arrow while they fit the limit, with no count badge", async () => {
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
+    getRunTimelineLinks.mockResolvedValue({ links: [link({ ts: at(40) }), link({ ts: at(40.5) }), link({ ts: at(41) }), link({ kind: "spawn", ts: at(40.2) })] });
+    render("7,8");
+    await screen.findByTestId("agent-view-other");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 3"));
+    await paintFrame();
+    expect(strokes()).toHaveLength(4);
+    expect(drawnLinks().filter((d) => d.op === "text")).toHaveLength(0);
+  });
+
+  it("merges close arrows, as little as keeps the panel within the limit, with a count on each merged one; groups hover, select and pull apart on a click", async () => {
+    getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
+    // 40 messages from 7 to 8, 3 seconds apart, and one spawn between the same agents: over the limit of 30.
     getRunTimelineLinks.mockResolvedValue({
       links: [
-        link({ ts: at(40) }),
-        link({ ts: at(40.5) }),
-        link({ ts: at(41) }),
-        // Far from the three in time, a different kind, and a different pair of rows: each stays alone.
-        link({ ts: at(100) }),
-        link({ kind: "spawn", ts: at(40.2) }),
-        link({ ts: at(40.2), sender: 8, receiver: 7 }),
+        ...Array.from({ length: 40 }, (_, i) => link({ ts: at(40 + i / 20) })),
+        link({ kind: "spawn", ts: at(41) }),
       ],
     });
     render("7,8");
     await screen.findByTestId("agent-view-other");
-    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 5"));
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 40"));
     await paintFrame();
-    // Six links, three of them one arrow: four arrows, and a badge with the count on the merged one only.
-    expect(strokes()).toHaveLength(4);
-    const badges = drawnLinks().filter((d) => d.op === "text");
-    expect(badges.map((d) => d.text)).toEqual(["3"]);
-    // The legend still counts the links, not the arrows.
+    // No more than the limit are drawn; the spawn is never merged into the messages.
+    expect(strokes().length).toBeLessThanOrEqual(MAX_ARROWS);
+    expect(strokes().some((d) => d.color === GREEN)).toBe(true);
+    const badges = drawnLinks().filter((d) => d.op === "text").map((d) => Number(d.text));
+    expect(badges.length).toBeGreaterThan(0);
+    // The badges and the arrows without one add up to the 40 messages.
+    const single = strokes().filter((d) => d.color === BLUE).length - badges.length;
+    expect(badges.reduce((a, b) => a + b, 0) + single).toBe(40);
+    // The legend counts the links, not the arrows.
     expect(screen.getByTestId("run-timeline-link-legend-spawn").textContent).toBe("Spawn 1");
-    // The merged arrow is thicker than a single one, up to a bound.
-    const widths = strokes().map((d) => d.lineWidth).sort((a, b) => a - b);
-    expect(widths[0]).toBeLessThan(widths[widths.length - 1]);
-    expect(widths[widths.length - 1]).toBeLessThanOrEqual(3.25);
+    // Every arrow has the same width.
+    expect(new Set(strokes().map((d) => d.lineWidth)).size).toBe(1);
 
-    const x = (1000 * 40.5) / 120;
-    const merged = curvePoint(curveOf(`group:send_message-${at(40)}-7-8-0:3`, x, mid(7, "run-timeline-row-units"), x, mid(8, "run-timeline-row-units")), 0.5);
+    // Hover, then select, a merged arrow. A stroke records only its ends, so the point on the curve is
+    // found by trying keys, whose hash picks the bend (a per-link factor).
     const chart = screen.getByTestId("run-timeline-chart");
-    fireEvent.pointerMove(chart, { clientX: merged.x, clientY: merged.y });
-    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("Message · #7 → #8 · 3 merged");
-
-    fireEvent.click(chart, { clientX: merged.x, clientY: merged.y });
+    const group = strokes().find((d) => d.color === BLUE);
+    if (group === undefined) throw new Error("no message arrow drawn");
+    let point: { clientX: number; clientY: number } | null = null;
+    for (const key of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]) {
+      const p = curvePoint(curveOf(key, group.x, group.y, group.x + group.w, group.y + group.h), 0.5);
+      fireEvent.pointerMove(chart, { clientX: p.x, clientY: p.y });
+      if (screen.getByTestId("run-timeline-readout").textContent.includes("merged")) {
+        point = { clientX: p.x, clientY: p.y };
+        break;
+      }
+    }
+    expect(point).not.toBeNull();
+    expect(screen.getByTestId("run-timeline-readout").textContent).toMatch(/Message · #7 → #8 · \d+ merged · /);
+    fireEvent.click(chart, point as { clientX: number; clientY: number });
     const detail = await screen.findByTestId("run-timeline-link-group-detail");
-    expect(detail.textContent).toContain("3 × Message");
     const items = within(detail).getAllByTestId("run-timeline-link-group-item");
-    expect(items).toHaveLength(3);
+    expect(items.length).toBeGreaterThan(1);
     const before = screen.getByTestId("run-timeline-window").textContent;
-    fireEvent.click(items[2]);
-    // One link selected, the view zoomed to it, and the arrows apart: no badge is left.
+    fireEvent.click(items[0]);
     await screen.findByTestId("run-timeline-link-detail");
     expect(screen.getByTestId("run-timeline-window").textContent).not.toBe(before);
-    await paintFrame();
-    expect(drawnLinks().filter((d) => d.op === "text")).toHaveLength(0);
   });
 });
