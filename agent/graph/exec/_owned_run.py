@@ -8,7 +8,6 @@ import asyncio
 import hashlib
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -44,6 +43,7 @@ from base.native_process.exec_kill_notice import read_notice
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import exec_run_dir
 
+from ._output_pipe import ExecOutputPipe
 from ._result import _ExecCrashed, _ExecResult
 from ._stream import ExecOutputChunkPublisher, StreamingTextIO
 from .protocol import ResultPayload, write_request
@@ -167,7 +167,7 @@ class _OwnedRun:
         self.stream = StreamingTextIO(max_chars=accumulation_max_chars)
         self.proc: subprocess.Popen[bytes] | None = None
         self.ready: OwnerReady | None = None
-        self.reader: threading.Thread | None = None
+        self.reader: ExecOutputPipe | None = None
         self.cancelled = False
         self.settled = False
         self.attached = False
@@ -204,8 +204,8 @@ class _OwnedRun:
         )
         if receipt.reason != "host_eof":
             raise ResourceEvidenceError("unpermitted owner closed for an unexpected reason")
-        await asyncio.to_thread(reader.join, max(0, self.bound - time.monotonic()))
-        if reader.is_alive():
+        await reader.finish(max(0, self.bound - time.monotonic()))
+        if not reader.closed:
             raise ResourceEvidenceError("unpermitted owner output remains unresolved")
 
     async def settle_attached_owner(self) -> OwnerClosed:
@@ -222,8 +222,8 @@ class _OwnedRun:
             ready.allocation,
             self.context_path.with_suffix(".closed"),
         )
-        await asyncio.to_thread(reader.join, max(0, self.bound - time.monotonic()))
-        if reader.is_alive():
+        await reader.finish(max(0, self.bound - time.monotonic()))
+        if not reader.closed:
             raise ResourceEvidenceError("owner output reader remains unresolved")
         await asyncio.to_thread(_complete, self.db, self.context, ready.allocation)
         if self.scope is not None:
@@ -296,6 +296,8 @@ class _OwnedRun:
 
     async def tick(self) -> None:
         """One poll beat: forward cancel, enforce the original bound, stream output."""
+        if self.reader is not None:
+            self.reader.pump()
         if self.cancel_event.is_set() and not self.cancelled:
             self.cancelled = True
             self._send("cancel")
@@ -315,7 +317,7 @@ class _OwnedRun:
         reader = self.reader
         if self.ready is None or proc.returncode != 0 or reader is None:
             if reader is not None:
-                await asyncio.to_thread(reader.join, max(0, self.bound - time.monotonic()))
+                await reader.finish(max(0, self.bound - time.monotonic()))
             raise ResourceEvidenceError("owner exited without a successful exact close receipt")
         receipt = await asyncio.shield(self.attached_completion())
         self.settled = True
@@ -450,8 +452,6 @@ async def run_owned(
     birth_config: dict[str, object] | None,
 ) -> tuple[_ExecResult, ResultPayload | None]:
     """Run one managed exec; this function alone spawns the owner's reader thread and tasks."""
-    from ._subprocess import _drain_output
-
     owned = _OwnedRun(
         db,
         target,
@@ -476,10 +476,8 @@ async def run_owned(
     owned.attached_completion = attached_completion
     try:
         proc, launcher = owned.launch(config_overlay, birth_config)
-        owned.reader = threading.Thread(
-            target=_drain_output, args=(proc, owned.stream), daemon=True
-        )
-        owned.reader.start()
+        owned.reader = ExecOutputPipe(proc, owned.stream)
+        owned.reader.watch()
         while proc.poll() is None:
             if owned.ready_pending():
                 ready = owned.read_ready(launcher)

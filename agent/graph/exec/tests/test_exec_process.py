@@ -18,6 +18,7 @@ import psutil
 import pytest
 
 from agent.graph.exec import _process, _subprocess
+from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._process import (
     _READER_JOIN_TIMEOUT_S,
     DomainCloseOwner,
@@ -134,8 +135,7 @@ async def test_grace_expiry_waits_on_popen_once(monkeypatch: pytest.MonkeyPatch)
 
 
 async def test_reader_join_uses_its_own_bound() -> None:
-    """A descendant holding stdout open must not strand an executor worker in
-    an unbounded ``reader.join`` after the asyncio timeout has fired."""
+    """The reap barrier gives the output tail its own finite EOF budget."""
 
     class _ExitedProc:
         pid = 54321
@@ -147,11 +147,10 @@ async def test_reader_join_uses_its_own_bound() -> None:
         def __init__(self) -> None:
             self.timeouts: list[float | None] = []
 
-        def join(self, timeout: float | None = None) -> None:
+        async def finish(self, timeout: float) -> None:
             self.timeouts.append(timeout)
 
-        def is_alive(self) -> bool:
-            return False
+        closed = True
 
     reader = _Reader()
     proc = _ExitedProc()
@@ -190,11 +189,10 @@ async def test_reader_join_fails_loud_when_pipe_never_reaches_eof() -> None:
     cleanup failure rather than a silently completed barrier."""
 
     class _Reader:
-        def join(self, _timeout: float | None = None) -> None:
+        async def finish(self, _timeout: float) -> None:
             return
 
-        def is_alive(self) -> bool:
-            return True
+        closed = False
 
     reap_task = asyncio.create_task(asyncio.sleep(0, result=0))
 
@@ -226,12 +224,11 @@ async def test_cleanup_failure_retains_leader_and_still_joins_reader() -> None:
             raise OSError("close failed")
 
     class _Reader:
-        def join(self, timeout: float | None = None) -> None:
+        async def finish(self, timeout: float) -> None:
             assert timeout == _READER_JOIN_TIMEOUT_S
             events.append("reader")
 
-        def is_alive(self) -> bool:
-            return True
+        closed = False
 
     root_exit_task = asyncio.create_task(asyncio.sleep(0))
     domain_close = DomainCloseOwner(_Domain(), root_exit_task)  # type: ignore[arg-type]
@@ -424,8 +421,7 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
     root_exit_task = start_root_exit_observer(proc)
     domain_close = DomainCloseOwner(domain, root_exit_task)
     reap_task = start_reap(proc, domain_close)
-    reader = threading.Thread(target=proc.stdout.read, daemon=True)
-    reader.start()
+    reader = ExecOutputPipe(proc, StreamingTextIO(max_chars=1_000_000))
     reader_join_task = start_reader_join(reap_task, reader, proc.pid)
     try:
         deadline = time.monotonic() + 5.0

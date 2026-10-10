@@ -102,7 +102,7 @@ context for compaction and to END for idle or lifecycle control. Routing uses
 - `agent/graph/llm/node.py` streams model inference with retry and cancellation.
 - `agent/graph/exec/node.py` runs `execute_code` in a disposable subprocess with an
   owned POSIX process group or Windows Job Object. Cleanup reaps its child and
-  joins the output reader; this isolation is independent of host scheduling.
+  drains its invocation-owned output pipe to EOF under a finite tail budget.
 - Persistent shell sessions are held by the machine's `pty-sessions` service and
   survive normal agent restart and cluster pause. `ava stop` and `ava restart`
   close them.

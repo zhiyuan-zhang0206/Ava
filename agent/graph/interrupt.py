@@ -91,20 +91,34 @@ async def interruptible_model[T](
     to settle before returning to claim; the host's external stop boundary
     owns escalation if a provider refuses to unwind.
     """
-    task = asyncio.create_task(operation)
-    interrupted = asyncio.create_task(event.wait())
-    try:
-        done, _ = await asyncio.wait({task, interrupted}, return_when=asyncio.FIRST_COMPLETED)
-        if interrupted in done:
+
+    async def observed_operation() -> tuple[T] | BaseException:
+        # The bounded owner inspects the original error after both tasks settle.
+        # Letting TaskGroup raise it would cancel its sibling and wrap its identity.
+        try:
+            return (await operation,)
+        except BaseException as error:
+            return error
+
+    async with asyncio.TaskGroup() as tasks:
+        task = tasks.create_task(observed_operation())
+        interrupted = tasks.create_task(event.wait())
+        try:
+            done, _ = await asyncio.wait({task, interrupted}, return_when=asyncio.FIRST_COMPLETED)
+            cancelled = interrupted in done
+        finally:
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-            raise ModelInterruptedError
-        return task.result()
-    finally:
-        task.cancel()
-        interrupted.cancel()
-        await asyncio.gather(task, interrupted, return_exceptions=True)
+            interrupted.cancel()
+    outcome = task.result()
+    if isinstance(outcome, BaseException) and (
+        not cancelled or not isinstance(outcome, asyncio.CancelledError)
+    ):
+        raise outcome
+    if cancelled:
+        raise ModelInterruptedError
+    if isinstance(outcome, BaseException):
+        raise outcome
+    return outcome[0]
 
 
 async def _watch_for_interrupt(

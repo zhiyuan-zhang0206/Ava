@@ -8,9 +8,9 @@ root reap and output EOF. Independent persistent sessions are outside this domai
 import argparse
 import hashlib
 import os
+import select
 import subprocess
 import sys
-import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,25 +70,73 @@ class ControlPipe:
         return line + separator
 
 
-def _relay(root: subprocess.Popen[bytes], failures: list[BaseException]) -> None:
-    if root.stdout is None:
-        failures.append(RuntimeError("owner root has no output pipe"))
-        return
-    destination = sys.stdout.buffer
-    writable = True
-    try:
-        while chunk := root.stdout.read(8192):
-            if writable:
+class OutputRelay:
+    """Bounded nonblocking relay pumped by the owner's control/deadline loop.
+
+    Backpressure pauses reading rather than allocating an unbounded buffer. A
+    dead host disables forwarding, while the root pipe continues to be drained.
+    """
+
+    def __init__(self, root: subprocess.Popen[bytes]) -> None:
+        if root.stdout is None:
+            raise RuntimeError("owner root has no output pipe")
+        self.source = root.stdout
+        self.destination = sys.stdout.fileno()
+        self.pending = b""
+        self.writable = True
+        self.eof = False
+        os.set_blocking(self.source.fileno(), False)
+        os.set_blocking(self.destination, False)
+
+    def pump(self) -> None:
+        for _ in range(4):
+            if self.pending and self.writable:
                 try:
-                    destination.write(chunk)
-                    destination.flush()
+                    sent = os.write(self.destination, self.pending)
+                except BlockingIOError:
+                    return
                 except (BrokenPipeError, OSError):
-                    # Host death must not leave the root's output pipe undrained.
-                    writable = False
-    except BaseException as exc:
-        failures.append(exc)
-    finally:
-        root.stdout.close()
+                    self.writable = False
+                else:
+                    self.pending = self.pending[sent:]
+                    if self.pending:
+                        return
+            if not self.writable:
+                self.pending = b""
+            if self.eof:
+                return
+            try:
+                chunk = os.read(self.source.fileno(), 65536)
+            except BlockingIOError:
+                return
+            if not chunk:
+                self.eof = True
+                self.source.close()
+                return
+            if self.writable:
+                self.pending = chunk
+
+    def wait(self, control: int, timeout: float) -> None:
+        source = [control]
+        if not self.eof and not self.pending:
+            source.append(self.source.fileno())
+        destination = [self.destination] if self.pending and self.writable else []
+        select.select(source, destination, [], timeout)
+
+    def finish(self, deadline: float) -> None:
+        while not self.eof or self.pending:
+            self.pump()
+            if self.eof and not self.pending:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("exec owner output barrier is unresolved")
+            source = [] if self.eof or self.pending else [self.source]
+            destination = [self.destination] if self.pending else []
+            select.select(source, destination, [], min(0.05, remaining))
+
+    def close(self) -> None:
+        self.source.close()
 
 
 _Reason = Literal["completed", "host_eof", "cancel", "timeout"]
@@ -117,16 +165,18 @@ def _control_loop(
     control: ControlPipe,
     allocation: ExecAllocation,
     deadline: float,
+    relay: OutputRelay,
 ) -> _Reason:
     """Relay the one permit and watch for cancel / host EOF / deadline until the root ends."""
     permitted = False
     # Keep the root unreaped to pin its process group.
     while not _ended(root_identity):
+        relay.pump()
         if time.monotonic() >= deadline:
             return "timeout"
         raw = control.read()
         if raw is None:
-            time.sleep(min(0.05, max(0.001, deadline - time.monotonic())))
+            relay.wait(control.descriptor, min(0.05, max(0.001, deadline - time.monotonic())))
             continue
         if not raw:
             return "host_eof"
@@ -193,12 +243,12 @@ def run(context_path: Path) -> None:
         close_fds=True,
         bufsize=0,
     )
-    reader_failures: list[BaseException] = []
-    reader = threading.Thread(target=_relay, args=(root, reader_failures), daemon=True)
+    relay: OutputRelay | None = None
     attached = False
     close_attempted = False
     try:
         attached = True
+        relay = OutputRelay(root)
         root_identity = psutil.Process(root.pid)
         owner_identity = psutil.Process()
         allocation = allocation.model_copy(
@@ -207,15 +257,12 @@ def run(context_path: Path) -> None:
                 "root_process": ResourceProcess.capture(root_identity),
             }
         )
-        reader.start()
         publish_owner_message(context_path.with_suffix(".ready"), OwnerReady(allocation=allocation))
-        reason = _control_loop(root, root_identity, control, allocation, deadline)
+        reason = _control_loop(root, root_identity, control, allocation, deadline, relay)
         close_attempted = True
         domain.close_confirmed(close_deadline)
         code = root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
-        reader.join(timeout=max(0, close_deadline - time.monotonic()))
-        if reader.is_alive() or reader_failures:
-            raise RuntimeError("exec owner output barrier is unresolved")  # noqa: TRY301 -- do not publish on cleanup uncertainty.
+        relay.finish(close_deadline)
         publish_owner_message(
             context_path.with_suffix(".closed"),
             OwnerClosed(
@@ -236,6 +283,8 @@ def run(context_path: Path) -> None:
         )
         raise
     finally:
+        if relay is not None:
+            relay.close()
         # Never turn failed cleanup into a terminal receipt.
         if not attached:
             root.kill()
