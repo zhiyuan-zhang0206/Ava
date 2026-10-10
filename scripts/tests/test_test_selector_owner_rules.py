@@ -59,6 +59,12 @@ def _repo(tmp_path: Path) -> Path:
         "base/empty/tests/helper.py": "",
         "ops/worker.py": "",
         "scripts/tests/test_bulk.py": "def test_bulk(): pass\n",
+        # Tests that read a hidden tool directory by path, in the three quoting styles.
+        "scripts/tests/test_reads_github.py": 'WORKFLOW = ".github/workflows/ci.yml"\n',
+        "scripts/tests/test_reads_trunk.py": "ROOT = '.trunk'\n",
+        "scripts/tests/test_reads_agents.py": 'SKILLS = root / ".agents" / "skills"\n',
+        # A module named base.agents is not the .agents directory.
+        "scripts/tests/test_imports_agents_module.py": "from base.agents import runner\n",
         "ui/web/src/App.tsx": "",
         "ui/web/src/bridge.py": "",
         ".github/workflows/ci.yml": "",
@@ -77,6 +83,10 @@ def _repo(tmp_path: Path) -> Path:
         f"{_LINT}::test_scan": 1.0,
         "base/lm/tests/test_lm.py::test_lm": 5.0,
         "scripts/tests/test_bulk.py::test_bulk": 60.0,
+        "scripts/tests/test_reads_github.py::test_x": 1.0,
+        "scripts/tests/test_reads_trunk.py::test_x": 1.0,
+        "scripts/tests/test_reads_agents.py::test_x": 1.0,
+        "scripts/tests/test_imports_agents_module.py::test_x": 1.0,
     }
     _write(tmp_path, ".test_durations", json.dumps(timings))
     return tmp_path
@@ -200,8 +210,6 @@ def test_a_frontend_file_adds_no_backend_test(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        ".github/workflows/ci.yml",
-        ".agents/skills/demo/SKILL.md",
         ".pre-commit-config.yaml",
         ".test_durations",
         ".test_durations.source.json",
@@ -217,6 +225,50 @@ def test_repository_level_inputs_run_only_the_tree_scan_tests(tmp_path: Path, pa
     result = _select(_repo(tmp_path), path)
 
     assert (result.decision, result.tests) == ("SELECTED", (_LINT,))
+
+
+@pytest.mark.parametrize(
+    ("path", "reader"),
+    [
+        (".github/workflows/ci.yml", "scripts/tests/test_reads_github.py"),
+        (".trunk/trunk.yaml", "scripts/tests/test_reads_trunk.py"),
+        (".agents/skills/demo/SKILL.md", "scripts/tests/test_reads_agents.py"),
+    ],
+)
+def test_a_hidden_tool_directory_also_runs_the_tests_that_name_it(
+    tmp_path: Path, path: str, reader: str
+) -> None:
+    """Tests read these directories by path, so no import links them; the readers
+    are found by scanning test sources for the directory as a string literal."""
+    repo_root = _repo(tmp_path)
+    _write(repo_root, ".trunk/trunk.yaml")
+
+    result = _select(repo_root, path)
+
+    assert (result.decision, result.tests) == ("SELECTED", (reader, _LINT))
+
+
+def test_a_module_named_base_agents_does_not_reference_the_agents_directory(
+    tmp_path: Path,
+) -> None:
+    result = _select(_repo(tmp_path), ".agents/skills/demo/SKILL.md")
+
+    assert "scripts/tests/test_imports_agents_module.py" not in result.tests
+
+
+def test_the_real_repository_readers_of_hidden_directories_are_selected() -> None:
+    expectations = {
+        ".github/workflows/ci.yml": (
+            "tests/scripts/test_ci_test_selection.py",
+            "tests/ci/test_workflow_paths.py",
+        ),
+        ".trunk/trunk.yaml": ("tests/scripts/test_audit_branch_protection_contract.py",),
+        ".agents/skills/inspect-a-trace/SKILL.md": ("tests/skills/test_inspect_a_trace_fetch.py",),
+    }
+    for changed, readers in expectations.items():
+        result = _select(_REPO_ROOT, changed)
+        assert result.decision == "SELECTED", (changed, result.reason)
+        assert set(readers) <= set(result.tests), changed
 
 
 def test_an_unowned_path_is_the_full_suite_safety_net(tmp_path: Path) -> None:
