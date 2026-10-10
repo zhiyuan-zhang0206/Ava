@@ -338,8 +338,9 @@ class ClockListener:
         assert status["status"] == "active"
         elapse(self._db_conn, lease, window + 1)
 
-    async def close(self) -> None:
+    async def stop(self) -> tuple[str, ...]:
         self.closed = True
+        return ()
 
 
 def assert_pushes_follow_snapshotted_budget(

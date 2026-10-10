@@ -23,6 +23,7 @@ from uuid import UUID
 
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.log import logger
 
 
 def relay_token_from_env() -> str:
@@ -189,7 +190,14 @@ async def _wait_inbox(
                 return messages
             await listener.wait_one(min(remaining, 30.0))
     finally:
-        await listener.close()
+        primary = sys.exception()
+        try:
+            await listener.stop()
+        except Exception as cleanup_error:
+            if primary is None:
+                raise
+            primary.add_note(f"Redis listener stop also failed: {cleanup_error!r}")
+            logger.opt(exception=True).warning("Redis listener stop failed during inbox failure")
 
 
 def _run_local(args: argparse.Namespace) -> int:
