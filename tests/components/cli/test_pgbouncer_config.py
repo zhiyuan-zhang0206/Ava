@@ -9,8 +9,14 @@ transaction pooling in front of Postgres) lives in test_pgbouncer_wire.py.
 from __future__ import annotations
 
 import inspect
-import re
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, call
 
+import pytest
+
+from base.db import Database, DbConfig
+from base.db.code_version_gate import ProcessDbGate
 from cli.commands.data_plane import pgbouncer
 
 
@@ -125,42 +131,109 @@ def test_migrations_apply_uses_direct_unbounded_connection() -> None:
     assert "local_owner_authority()" in src
 
 
-def test_backup_defaults_to_a_direct_dump_source() -> None:
-    """pg_dump needs a real Postgres session (consistent snapshot); it never dials
-    the one URL as-is (AVA_DB_URL carries the pooler port when pooling is on). A
-    remote plane dumps through its provider's direct URL; a local plane through
-    the owner authority over the postmaster's own socket (proved on a born home
-    in tests/components/lifecycle/db_authority/test_backup_owner.py)."""
+@pytest.mark.parametrize("remote", [False, True])
+def test_backup_defaults_to_a_direct_dump_source(
+    monkeypatch: pytest.MonkeyPatch, remote: bool
+) -> None:
+    """The explicit plane reader selects either provider or local owner authority."""
     from services.backup import dump as backup
 
-    assert "dump_source(db)" in inspect.getsource(backup._run_backup)
-    src = inspect.getsource(backup.dump_source)
-    assert "db.direct_url()" in src
-    assert "local_owner_authority()" in src
-    assert ".pooled_db_url" not in src
+    database = MagicMock(spec=Database)
+    database.direct_url.return_value = "postgresql://provider:5432/ava"
+    authority = MagicMock()
+    authority.verified_conninfo.return_value = "host=/owner/socket dbname=ava"
+    local_owner = MagicMock(return_value=authority)
+    monkeypatch.setattr(backup, "local_owner_authority", local_owner)
+    reader = MagicMock(return_value=remote)
+
+    result = backup.dump_source(database, is_remote_reader=reader)
+
+    reader.assert_called_once_with()
+    if remote:
+        assert result == "postgresql://provider:5432/ava"
+        database.direct_url.assert_called_once_with()
+        local_owner.assert_not_called()
+    else:
+        assert result == "host=/owner/socket dbname=ava"
+        local_owner.assert_called_once_with()
+        authority.verified_conninfo.assert_called_once_with()
+        database.direct_url.assert_not_called()
 
 
-def test_base_db_connect_and_pool_dial_one_url_with_direct_escape() -> None:
-    """base.db.connect/pool dial AVA_DB_URL (the one access URL) by default and
-    expose direct=True (the admin plane derives the direct URL from the registry
-    record); every connection disables server-side prepared statements
-    (transaction-pooling safe). connect() also exposes unbounded=True — the
-    migration applier's no-statement-ceiling escape — and pooled dials deliver
-    the ceiling as an explicit SET (the pooler drops the `options` parameter)."""
+@pytest.mark.parametrize("direct", [False, True])
+def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
+    monkeypatch: pytest.MonkeyPatch, direct: bool
+) -> None:
+    """Dial the access URL or its recorded direct port with pooling-safe policy."""
+    import base.cluster
     import base.db
+    from base.db import connections
 
-    for fn in (base.db.connect, base.db.pool):
-        assert "direct" in inspect.signature(fn).parameters
-        src = inspect.getsource(fn)
-        assert "cfg.db_url if not direct else direct_db_url(cfg)" in src
-        assert "prepare_threshold" in src
-    assert "unbounded" in inspect.signature(base.db.connect).parameters
-    # Pooled dials restore the baseline session (RESET ALL + statement ceiling)
-    # — pgbouncer never resets backend session state between clients, so a
-    # borrowed backend may carry another client's session GUCs (2026-09-02 P0).
-    assert "_restore_pooled_session" in inspect.getsource(base.db.connect)
-    pool_src = inspect.getsource(base.db.pool)
-    assert "configure=_restore_pooled_session" in pool_src
-    # The check hook spans a formatted multi-line conditional; assert the wiring
-    # shape rather than a contiguous literal.
-    assert re.search(r"check=\s*\(\s*_restore_pooled_session\s*if not direct", pool_src)
+    config = DbConfig(
+        db_url="postgresql://user:password@127.0.0.1:6433/ava",
+        db_sslmode="disable",
+        db_pool_min_size=1,
+        db_pool_max_size=2,
+        pgbouncer_enabled=True,
+    )
+
+    def record(_home: Path | None) -> SimpleNamespace:
+        return SimpleNamespace(ports={"pgbouncer": 6433, "postgres": 5433})
+
+    monkeypatch.setattr(base.cluster, "get_record", record)
+    gate = MagicMock(spec=ProcessDbGate)
+    gate.application_name.return_value = "pgbouncer-contract-test"
+    gate.min_read_due.return_value = False
+    conn = MagicMock()
+    dial = MagicMock(return_value=conn)
+    make_pool = MagicMock()
+    monkeypatch.setattr(connections.psycopg, "connect", dial)
+    monkeypatch.setattr(connections, "ConnectionPool", make_pool)
+    expected_url = config.db_url.replace(":6433/", ":5433/") if direct else config.db_url
+
+    assert base.db.connect(config=config, gate=gate, direct=direct) is conn
+    assert dial.call_args.args == (expected_url,)
+    assert dial.call_args.kwargs["prepare_threshold"] is None
+    if direct:
+        conn.execute.assert_not_called()
+    else:
+        _assert_session_reset(conn)
+
+    base.db.pool(config=config, gate=gate, direct=direct)
+    assert make_pool.call_args.args == (expected_url,)
+    _assert_pool_hooks(make_pool, conn, direct=direct)
+
+    if direct:
+        dial.reset_mock()
+        base.db.connect(config=config, gate=gate, direct=True, unbounded=True)
+        assert dial.call_args.args == (expected_url,)
+        assert "options" not in dial.call_args.kwargs
+        assert dial.call_args.kwargs["prepare_threshold"] is None
+
+
+def _assert_pool_hooks(make_pool: MagicMock, conn: MagicMock, *, direct: bool) -> None:
+    """Pooled configure/check share the restore contract; direct owners bypass it."""
+    policy = make_pool.call_args.kwargs
+    assert policy["kwargs"]["prepare_threshold"] is None
+    if direct:
+        assert policy["configure"] is None
+        assert policy["check"] is None
+    else:
+        assert policy["configure"] is policy["check"]
+        for hook in (policy["configure"], policy["check"]):
+            conn.reset_mock()
+            hook(conn)
+            _assert_session_reset(conn)
+
+
+def _assert_session_reset(conn: MagicMock) -> None:
+    """A dial and both pool hooks scrub and reapply the statement ceiling."""
+    assert conn.execute.call_args_list == [
+        call("RESET ALL"),
+        call(
+            "SELECT set_config('statement_timeout', '60000', false), "
+            "set_config('application_name', %s, false)",
+            ("pgbouncer-contract-test",),
+        ),
+    ]
+    conn.commit.assert_called_once_with()

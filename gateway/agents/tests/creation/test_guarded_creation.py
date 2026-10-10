@@ -10,6 +10,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from base.config import settings
+from gateway import app as gateway_app
 from gateway.agents import router as agent_router
 from gateway.agents.creation import scoped_creation_key
 from gateway.app import app
@@ -17,6 +18,7 @@ from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.extensions.test_mcp_endpoint import _tool_call, _tool_result
 from ops.agents.creation_identity import creation_request_hash
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
+from tests.fixtures.configuration import snapshot_process_config
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 PATH = "/api/keyed/v1/agents"
@@ -29,6 +31,8 @@ def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterat
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+    # Every lifespan captures the values this test configured before that start.
+    monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)
 
     async def accept(db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)

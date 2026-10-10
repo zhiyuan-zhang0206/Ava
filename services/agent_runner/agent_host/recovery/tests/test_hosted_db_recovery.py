@@ -42,6 +42,7 @@ from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
 @pytest.fixture(autouse=True)
@@ -99,6 +100,18 @@ async def _graph(
     return graph, saver
 
 
+async def _probe_control_connection(
+    control: AsyncConnectionPool, failures: list[PoolTimeout]
+) -> None:
+    """Retain the actual exhausted-pool error while preserving its original propagation."""
+    try:
+        async with control.connection(timeout=0.03) as conn:
+            await conn.execute("SELECT 1")
+    except PoolTimeout as error:
+        failures.append(error)
+        raise
+
+
 async def test_original_host_task_resumes_autonomous_work_without_pending_inbound(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -120,10 +133,14 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
     monkeypatch.setattr(db_recovery, "_refresh_owner", observe)
     # Exhaust a real PostgreSQL pool: both the interrupted graph and recovery
     # get real PoolTimeout until the held connection is returned.
-    async with AsyncConnectionPool[psycopg.AsyncConnection](
-        settings.data_plane.db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
-    ) as control:
+    async with (
+        AsyncConnectionPool[psycopg.AsyncConnection](
+            settings.data_plane.db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
+        ) as control,
+        hosted_scope(expected_error=PoolTimeout) as resources,
+    ):
         invocations: list[int] = []
+        failures: list[PoolTimeout] = []
         work_entered, exhaust_control = asyncio.Event(), asyncio.Event()
 
         async def work(_state: states.AgentState) -> dict[str, Any]:
@@ -131,9 +148,12 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
             if len(invocations) == 1:
                 work_entered.set()
                 await exhaust_control.wait()
-            async with control.connection(timeout=0.03) as conn:
-                await conn.execute("SELECT 1")
-            return {"halted": True, "turn_idle": True, "messages": [AIMessage(content="Resumed")]}
+            await _probe_control_connection(control, failures)
+            return {
+                "halted": True,
+                "turn_idle": True,
+                "messages": [AIMessage(content="Resumed")],
+            }
 
         graph, saver = await _graph(aops_pool, agent, work)
         host = AgentHost(
@@ -158,7 +178,7 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
                         clock_factory=configured_policy().clock_factory,
                     ),
                     original_incarnation=incarnation,
-                    hosted_resources=None,
+                    hosted_resources=resources,
                     native_work=None,
                 ),
             )
@@ -188,6 +208,8 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
                 raise
         assert not (await asyncio.wait_for(original, 5)).exited
         assert len(invocations) == 2
+        (failure,) = failures
+        assert resources.require_service().failures == [(resources, failure)]
         cold = await saver.aget({"configurable": {"thread_id": str(agent)}})
         assert cold is not None
         assert cold["channel_values"]["halted"] is True

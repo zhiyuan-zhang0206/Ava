@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -14,6 +15,7 @@ import pytest
 import base.config as facade
 from base.config import ConfigBoot, ConfigBuildWaitTimeoutError, _full, _lite
 from base.host.env.dotenv_boot import EnvBootResult
+from base.host.proc import run_bounded
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +45,60 @@ def test_constructor_and_skip_boot_do_not_deliver_environment(
     owner.boot()
     assert not owner.boot_state()["prepared"]
     assert not owner.is_full()
+
+
+def test_read_only_owners_keep_delivered_values_through_parallel_eager_builds() -> None:
+    script = """
+import os
+from concurrent.futures import ThreadPoolExecutor
+from base.config import ConfigBoot
+
+before = dict(os.environ)
+owners = [ConfigBoot(), ConfigBoot()]
+for owner in owners:
+    owner.read_process_environment()
+with ThreadPoolExecutor(max_workers=2) as pool:
+    models = list(pool.map(lambda owner: owner.ensure_eager(), owners))
+assert dict(os.environ) == before, sorted(key for key in set(before) | set(os.environ) if before.get(key) != os.environ.get(key))
+assert all(model.lm.llm_model == "delivered-model" for model in models)
+assert all(model.general.timezone == "Asia/Tokyo" for model in models)
+assert all(not model.general.message_timestamps for model in models)
+assert all(owner.field_explicitly_set("timezone") for owner in owners)
+assert all(model.lm.gemini_api_key.get_secret_value() == "delivered-provider-key" for model in models)
+complete = owners[0].complete_read_model()
+assert complete.lm.llm_model == "delivered-model"
+assert dict(os.environ) == before
+"""
+    result = run_bounded(
+        [sys.executable, "-c", script],
+        env={
+            **os.environ,
+            "AVA_CONFIG_FETCH": "skip",
+            "AVA_MODEL": "delivered-model",
+            "AVA_TIMEZONE": "Asia/Tokyo",
+            "AVA_MESSAGE_TIMESTAMPS": "false",
+            "GEMINI_API_KEY": "delivered-provider-key",
+        },
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_process_entry_still_delivers_its_home_environment(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "AVA_MACHINE_SERVE_GATEWAY=true\n"
+        "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/entry\n"
+        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "AVA_MODEL=entry-model\nAVA_TIMEZONE=Asia/Tokyo\n",
+        encoding="utf-8",
+    )
+    owner = ConfigBoot()
+    owner.prepare()
+    assert os.environ["AVA_MODEL"] == "entry-model"
+    assert os.environ["TZ"] == "Asia/Tokyo"
+    assert owner.view.lm.llm_model == "entry-model"
 
 
 def test_two_real_models_keep_stable_views_overlays_and_live_readers(
@@ -252,3 +308,30 @@ def test_skip_agent_profile_selects_deferred_authority_for_other_domains(
     assert authority.service_field_value("provider_guard_balance_enabled") == value
     assert builds == 1
     assert not owner.is_full()
+
+
+def test_gateway_excludes_walg_while_cli_owner_supplies_its_configured_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from services.backup.walg.config import configured_path
+
+    monkeypatch.delenv("AVA_PROCESS_PROFILE", raising=False)
+    cli = ConfigBoot()
+    path = tmp_path / "walg.json"
+    cli.set_field("walg_config_file", path)
+
+    def path_reader() -> Path | None:
+        return cli.view.walg.walg_config_file
+
+    assert cli.view.has_domain("walg")
+    assert configured_path(path_reader=path_reader) == path
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "gateway")
+    gateway = ConfigBoot()
+    assert not gateway.view.has_domain("walg")
+    with pytest.raises(AttributeError, match="profile"):
+        _ = gateway.view.walg
+    gateway.ensure_eager()
+    assert not gateway.view.has_domain("walg")
+    with pytest.raises(AttributeError, match="profile"):
+        _ = gateway.view.walg
+    assert configured_path(path_reader=path_reader) == path

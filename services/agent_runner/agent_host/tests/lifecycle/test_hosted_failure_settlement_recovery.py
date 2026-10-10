@@ -20,7 +20,7 @@ from agent import db as agent_db
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.graph.llm_errors import FatalProviderError
-from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
+from agent.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.tests.claim.test_inbound_ownership import _admit, _agent
@@ -34,8 +34,10 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
 async def _prepare_graph(
@@ -129,71 +131,107 @@ async def test_abort_survives_database_loss_before_halted_state_write(
     database: Database,
     model_catalog: ModelCatalog,
 ) -> None:
-    ancestor, agent, owner = await _admitted_descendant(db_conn, aops_pool)
-    model_calls: list[str] = []
-    summary = AsyncMock(side_effect=RuntimeError("summary unavailable"))
-    monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
-
-    async def model(state: states.AgentState) -> Command[Any]:
-        assert not state.halted
-        model_calls.append("called")
-        if failure == "provider" and len(model_calls) == 1:
-            raise FatalProviderError("invalid credentials", error_class="permanent", status=401)
-        return Command(update={"halted": True}, goto="claim")
-
-    graph, saver, config, history = await _prepare_graph(aops_pool, agent, model)
-    if failure == "compaction":
-        db_conn.execute(
-            "INSERT INTO inbound_messages(agent_id,content,kind,source) "
-            "VALUES(%s,'','compact_request','user')",
-            (agent,),
+    async with hosted_scope(
+        expected_error=CompactionFailedError if failure == "compaction" else FatalProviderError
+    ) as resources:
+        ancestor, agent, owner = await _admitted_descendant(db_conn, aops_pool)
+        model_calls: list[str] = []
+        summary = AsyncMock(side_effect=RuntimeError("summary unavailable"))
+        provider_failure = FatalProviderError(
+            "invalid credentials", error_class="permanent", status=401
         )
-        db_conn.commit()
-    outages = await _inject_database_outages_into_state_writes(monkeypatch, graph)
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=saver,
-        graph=graph,
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(),
-        catalog=model_catalog,
-    )
-    publisher = MagicMock()
-    ctx = AvaContext(
-        ops_pool=aops_pool,
-        event_publisher=publisher,
-        llm=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
-        bus=EventBus.from_settings(),
-        catalog=model_catalog,
-        clock_factory=configured_policy().clock_factory,
-    )
-    assert not (
-        await host._invoke_until_done(
-            agent, replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None)
+        monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
+
+        async def model(state: states.AgentState) -> Command[Any]:
+            assert not state.halted
+            model_calls.append("called")
+            if failure == "provider" and len(model_calls) == 1:
+                raise provider_failure
+            return Command(update={"halted": True}, goto="claim")
+
+        graph, saver, config, history = await _prepare_graph(aops_pool, agent, model)
+        if failure == "compaction":
+            db_conn.execute(
+                "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+                "VALUES(%s,'','compact_request','user')",
+                (agent,),
+            )
+            db_conn.commit()
+        outages = await _inject_database_outages_into_state_writes(monkeypatch, graph)
+        host = AgentHost(
+            policy=configured_policy(),
+            pool=aops_pool,
+            checkpointer=saver,
+            graph=graph,
+            bus=EventBus.from_settings(),
+            db=Database.from_settings(),
+            catalog=model_catalog,
         )
-    ).exited
-    assert outages.count == 2 and len(model_calls) == (0 if failure == "compaction" else 1)
-    errors = _published_errors(publisher)
-    values = await _cold_channel_values(aops_pool, config)
-    assert values["halted"] is True and values["messages"] == history
+        publisher = MagicMock()
+        ctx = AvaContext(
+            ops_pool=aops_pool,
+            event_publisher=publisher,
+            llm=MagicMock(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
+            catalog=model_catalog,
+            clock_factory=configured_policy().clock_factory,
+        )
+        assert not (
+            await host._invoke_until_done(
+                agent,
+                replace(
+                    ctx, original_incarnation=owner, hosted_resources=resources, native_work=None
+                ),
+            )
+        ).exited
+        assert outages.count == 2 and len(model_calls) == (0 if failure == "compaction" else 1)
+        errors = _published_errors(publisher)
+        values = await _cold_channel_values(aops_pool, config)
+        assert values["halted"] is True and values["messages"] == history
+        _assert_persisted_failure(
+            db_conn,
+            agent,
+            failure,
+            resources,
+            summary=summary,
+            values=values,
+            provider_failure=provider_failure,
+        )
+        _assert_ancestor_report(
+            db_conn,
+            ancestor=ancestor,
+            agent=agent,
+            expected=0 if failure == "compaction" else 1,
+        )
+        assert len(errors) == 1 and errors[0]["agent_id"] == agent
+
+
+def _assert_persisted_failure(
+    db_conn: psycopg.Connection,
+    agent: int,
+    failure: str,
+    resources: HostedTurnResources,
+    *,
+    summary: AsyncMock,
+    values: Any,
+    provider_failure: FatalProviderError,
+) -> None:
+    """The durable abort retains the original graph failure and its compaction cause."""
     if failure == "compaction":
         assert summary.await_count == COMPACT_MAX_ATTEMPTS
+        (receipt,) = resources.require_service().failures
+        assert receipt[0] is resources
+        assert isinstance(receipt[1], CompactionFailedError)
+        assert receipt[1].__cause__ is summary.side_effect
         assert db_conn.execute(
             "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='compact_request'",
             (agent,),
         ).fetchone() == ("done",)
     else:
         assert values["circuit"].open and values["circuit"].reason == "auth"
-    _assert_ancestor_report(
-        db_conn,
-        ancestor=ancestor,
-        agent=agent,
-        expected=0 if failure == "compaction" else 1,
-    )
-    assert len(errors) == 1 and errors[0]["agent_id"] == agent
+        assert resources.require_service().failures == [(resources, provider_failure)]
 
 
 @pytest.mark.parametrize("interrupted_at", ["circuit_read", "ancestor_report"])

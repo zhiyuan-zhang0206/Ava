@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -69,6 +69,32 @@ class EnvBootResult:
     """
 
     db_authority_refusal: str | None = None
+
+
+def read_database_delivery(environment: Mapping[str, str]) -> EnvBootResult:
+    """Read existing login admission without consuming or delivering credentials.
+
+    A controller can read startup configuration without repeating dotenv boot.
+    A credential-free endpoint on an authority-managed home still must refuse
+    before its first dial, even when that controller has no startup owner to borrow.
+    """
+    root = environment.get("AVA_HOME")
+    home = Path(root).expanduser() if root else Path.home() / ".ava"
+    if not home.is_absolute():
+        raise ValueError(f"AVA_HOME must be an absolute path, got {root!r}")
+    authority = home / "db-authority"
+    if not ((authority / "ledger.json").exists() or (authority / "unit.json").exists()):
+        return EnvBootResult()
+    raw = environment.get("AVA_DB_URL")
+    try:
+        password = urlsplit(raw or "").password
+    except ValueError:
+        return EnvBootResult()  # Domain validation reports the malformed URL.
+    if password:
+        return EnvBootResult()
+    return EnvBootResult(
+        db_authority_refusal="no database login was delivered by this process's startup entry"
+    )
 
 
 def resolve_ava_home() -> Path:

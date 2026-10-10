@@ -36,7 +36,12 @@ from base.host.env.config_lite_table import (
     REQUIRED_FIELDS,
 )
 from base.host.env.config_registry import DOMAIN_ATTRS
-from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL, EnvBootResult, load_ava_env
+from base.host.env.dotenv_boot import (
+    PLACEHOLDER_DB_URL,
+    EnvBootResult,
+    load_ava_env,
+    read_database_delivery,
+)
 
 # `AVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
 BOOT_MODE_ENV = "AVA_CONFIG_BOOT"
@@ -351,6 +356,7 @@ class ConfigBoot:
     __slots__ = (
         "_lock",
         "env_boot",
+        "environment",
         "mode",
         "pending",
         "prepared",
@@ -367,6 +373,7 @@ class ConfigBoot:
         self._lock = RLock()
         self.view = _SettingsView(self)
         self.env_boot: EnvBootResult | None = None
+        self.environment: dict[str, str] | None = None
         self.mode = _LITE
         self.reason: str | None = None
         self.upgrades = 0
@@ -388,8 +395,43 @@ class ConfigBoot:
         name = self.get_field("timezone") if self.field_explicitly_set("timezone") else None
         _apply_timezone_name(name)
 
+    def read_process_environment(self) -> None:
+        """Capture an existing startup delivery without delivering it again.
+
+        Attachments own reads, overlays and connections, while process entry
+        boot owns dotenv authority, bootstrap/provider delivery and process TZ.
+        Both lite reads and later eager construction use this owner's values.
+        """
+        with self._lock:
+            if self.prepared:
+                raise RuntimeError("configuration owner was already prepared")
+            environment = dict(os.environ)
+            profile = environment.get(AVA_PROCESS_PROFILE_ENV)
+            if profile is not None and profile not in PROCESS_PROFILES:
+                raise profile_unknown_error(profile)
+            for _name, row in LITE_FIELDS.items():
+                raw = environment.get(row[1])
+                if raw is not None:
+                    _parse(_name, row[1], row[2], row[5], raw)
+            self.environment = environment
+            self.profile = cast(ProcessProfile, profile)
+            self.env_boot = read_database_delivery(environment)
+            self.prepared = True
+
+    def complete_read_model(self) -> Any:
+        """Build the SDK's complete read surface from this same delivery."""
+        from base.config._full import Settings, build
+
+        if self.environment is None:
+            return Settings(profile=None)
+        return build(
+            env_boot=cast(EnvBootResult, self.env_boot), environment=self.environment
+        ).settings
+
     def refresh_data_plane_settings(self) -> None:
         """Refresh only this owner's data-plane slice at the existing call point."""
+        if self.environment is not None:
+            raise RuntimeError("a read-only configuration owner cannot redeliver the data plane")
         from base.config._full import refresh_data_plane_settings
 
         self.upgrade("refresh_data_plane_settings()")
@@ -401,7 +443,7 @@ class ConfigBoot:
         if name in self.pending:
             return self.pending[name]
         _domain, alias, kind, default_kind, literal, check = LITE_FIELDS[name]
-        raw = os.environ.get(alias)
+        raw = (os.environ if self.environment is None else self.environment).get(alias)
         if raw is not None:
             return _parse(name, alias, kind, check, raw)
         return _default_value(self, name, default_kind, literal)
@@ -416,7 +458,8 @@ class ConfigBoot:
         self.prepare()
         if self.mode == _FULL:
             return name in getattr(self._current_settings(), FIELD_DOMAINS[name]).model_fields_set
-        return name in self.pending or os.environ.get(FIELD_ALIASES[name]) is not None
+        environment = os.environ if self.environment is None else self.environment
+        return name in self.pending or environment.get(FIELD_ALIASES[name]) is not None
 
     def _check_domain_allowed(self, domain: str) -> None:
         """The lite half of the profile fail-fast (the eager half lives in
@@ -540,7 +583,13 @@ class ConfigBoot:
                 env_boot = self.env_boot
                 if env_boot is None:
                     raise RuntimeError("config boot did not produce an environment delivery result")
-                bundle = build(env_boot=env_boot)
+                bundle = (
+                    build(env_boot=env_boot)
+                    if self.environment is None
+                    else build(
+                        env_boot=env_boot, environment=self.environment, profile=self.profile
+                    )
+                )
                 self._install(bundle, reason)
                 for name, value in tuple(self.pending.items()):
                     setattr(getattr(self.settings, FIELD_DOMAINS[name]), name, value)

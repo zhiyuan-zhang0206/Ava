@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Self, cast
 from unittest.mock import patch
@@ -17,6 +19,7 @@ from base.agents.impersonation import manifest
 from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
 from base.config import ConfigBoot
 from base.db import Database, code_version_gate, connections
+from base.host.proc import run_bounded
 from tests.factories.external_attachment import attached_runtime as attached_runtime
 
 
@@ -165,6 +168,79 @@ def test_attachment_borrows_existing_database_factory_without_closing_prior_clie
     assert ava.context is prior
     assert prior.sql._get() is original_connection
     assert not original_connection.closed
+
+
+def test_read_only_attachment_refuses_an_undelivered_login_before_dial(tmp_path: Path) -> None:
+    authority = tmp_path / "db-authority"
+    authority.mkdir()
+    (authority / "ledger.json").write_text("{}", encoding="utf-8")
+    script = """
+import os
+from unittest.mock import patch
+from ava import external
+from base.db import NoDatabaseAuthorityError
+
+before = dict(os.environ)
+with patch("psycopg.connect", side_effect=AssertionError("native dial must not run")):
+    try:
+        external.attach("lease")
+    except NoDatabaseAuthorityError as error:
+        assert "startup entry" in str(error)
+    else:
+        raise AssertionError("undelivered login must be refused")
+assert dict(os.environ) == before
+"""
+    environment = {key: value for key, value in os.environ.items() if key != "AVA_AGENT_ID"}
+    result = run_bounded(
+        [sys.executable, "-c", script],
+        env={
+            **environment,
+            "AVA_HOME": str(tmp_path),
+            "AVA_CONFIG_FETCH": "skip",
+            "AVA_DB_URL": "postgresql://127.0.0.1:1/undelivered",
+        },
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("contended", [False, True], ids=["sequential", "contended"])
+def test_independent_attachment_does_not_redeliver_environment(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    contended: bool,
+) -> None:
+    (tmp_path / ".env").write_text(
+        "AVA_MACHINE_SERVE_GATEWAY=true\nAVA_TIMEZONE=Asia/Tokyo\n"
+        "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/other-home\n"
+        "AVA_REDIS_URL=redis://127.0.0.1:1/1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    before = dict(os.environ)
+    delivered = ConfigBoot()
+    delivered.read_process_environment()
+    prior = ava.unbind_context()
+    try:
+        with external.attach("lease"):
+            assert dict(os.environ) == before
+            assert ava.context.require_clock().timezone == delivered.view.general.timezone
+            if contended:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(external.attach, "lease")
+                    with pytest.raises(RuntimeError, match="already has an external attachment"):
+                        future.result(timeout=5)
+            assert dict(os.environ) == before
+        if not contended:
+            with external.attach("lease"):
+                assert dict(os.environ) == before
+        assert dict(os.environ) == before
+    finally:
+        if prior is not None:
+            ava.bind_context(prior)
 
 
 @pytest.mark.parametrize("failure_at", ["lease", "plugins", "snapshot"])

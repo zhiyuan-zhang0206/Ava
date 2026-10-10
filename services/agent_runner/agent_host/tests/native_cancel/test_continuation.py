@@ -24,13 +24,13 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_owner
 from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.invocation import native_work as work_owner
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
 @dataclass
@@ -100,98 +100,99 @@ async def test_original_invocation_settles_once_after_database_fault(
     database: Database,
     model_catalog: ModelCatalog,
 ) -> None:
-    pool: ConnectionPool
-    incarnation, initial = await managed_work(db_conn, aops_pool)
-    agent = initial.agent_id
-    first = _insert(db_conn, agent)
-    entered, release = asyncio.Event(), asyncio.Event()
+    async with hosted_scope() as resources:
+        pool: ConnectionPool
+        incarnation, initial = await managed_work(db_conn, aops_pool)
+        agent = initial.agent_id
+        first = _insert(db_conn, agent)
+        entered, release = asyncio.Event(), asyncio.Event()
 
-    async def model(state: BaseAgentState) -> Command[Any]:
-        assert not state.halted
-        entered.set()
-        await release.wait()
-        return Command(update={"halted": True}, goto="claim")
+        async def model(state: BaseAgentState) -> Command[Any]:
+            assert not state.halted
+            entered.set()
+            await release.wait()
+            return Command(update={"halted": True}, goto="claim")
 
-    saver = AsyncPostgresSaver(aops_pool)
-    await saver.setup()
-    wrap_saver_writes_with_nstep_interval(saver, 100)
-    wrap_saver_reads_with_delta_reconstruction(saver)
-    builder: Any = StateGraph(AgentState, context_schema=AvaContext)
-    builder.add_node("claim", claim_node, destinations=("before_llm", "claim", "__end__"))
-    builder.add_node("before_llm", model, destinations=("claim",))
-    builder.add_edge(START, "claim")
-    graph = builder.compile(checkpointer=saver)
-    host = host_owner.AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=saver,
-        graph=graph,
-        machine="claim-test",
-        bus=EventBus.from_settings(),
-        db=database,
-        catalog=model_catalog,
-    )
-    ctx = AvaContext(
-        ops_pool=aops_pool,
-        event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=database,
-        bus=EventBus.from_settings(),
-        catalog=model_catalog,
-        clock_factory=configured_policy().clock_factory,
-    )
-    faults = _install_faults(monkeypatch, agent, site)
-    running = asyncio.create_task(
-        host._invoke_until_done(
-            agent,
-            replace(ctx, original_incarnation=incarnation, hosted_resources=HostedTurnResources()),
+        saver = AsyncPostgresSaver(aops_pool)
+        await saver.setup()
+        wrap_saver_writes_with_nstep_interval(saver, 100)
+        wrap_saver_reads_with_delta_reconstruction(saver)
+        builder: Any = StateGraph(AgentState, context_schema=AvaContext)
+        builder.add_node("claim", claim_node, destinations=("before_llm", "claim", "__end__"))
+        builder.add_node("before_llm", model, destinations=("claim",))
+        builder.add_edge(START, "claim")
+        graph = builder.compile(checkpointer=saver)
+        host = host_owner.AgentHost(
+            policy=configured_policy(),
+            pool=aops_pool,
+            checkpointer=saver,
+            graph=graph,
+            machine="claim-test",
+            bus=EventBus.from_settings(),
+            db=database,
+            catalog=model_catalog,
         )
-    )
-    try:
-        await asyncio.wait_for(entered.wait(), 10)
-        with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-            target = await asyncio.to_thread(observe_native_work, pool, agent)
-            assert target is not None and target.work_id != initial.work_id
-            accepted = await asyncio.to_thread(
-                accept_native_cancel, pool, "original-work", agent, target
+        ctx = AvaContext(
+            ops_pool=aops_pool,
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            db=database,
+            bus=EventBus.from_settings(),
+            catalog=model_catalog,
+            clock_factory=configured_policy().clock_factory,
+        )
+        faults = _install_faults(monkeypatch, agent, site)
+        running = asyncio.create_task(
+            host._invoke_until_done(
+                agent,
+                replace(ctx, original_incarnation=incarnation, hosted_resources=resources),
             )
-            repeated = await asyncio.to_thread(
-                accept_native_cancel, pool, "original-work", agent, target
-            )
-            assert repeated == accepted
-        queued = _insert(db_conn, agent)
-        release.set()
-        outcome = await asyncio.wait_for(running, 15)
-    finally:
-        release.set()
-        if not running.done():
-            running.cancel()
-        await asyncio.gather(running, return_exceptions=True)
-    await close_hosted_turn(
-        aops_pool,
-        aops_pool,
-        ctx.require_db(),
-        ctx.require_bus(),
-        saver,
-        incarnation,
-        outcome,
-        resources=None,
-        wake_enabled=configured_policy().recovery_wake_enabled,
-        prompt_reap_enabled=configured_policy().recrash_reap_enabled,
-        reconcile_inputs=configured_policy().reconcile_inputs,
-    )
-    assert faults.injected
-    assert faults.invocations == 1
-    assert not outcome.crashed and not outcome.native_held
-    assert db_conn.execute(
-        "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
-    ).fetchone() == ("applied",)
-    assert db_conn.execute(
-        "SELECT native_work_id FROM agents_meta WHERE id=%s", (agent,)
-    ).fetchone() == (target.work_id,)
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE id=%s", (queued,)
-    ).fetchone() == ("pending",)
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE id=%s", (first,)
-    ).fetchone() == ("done",)
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 10)
+            with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
+                target = await asyncio.to_thread(observe_native_work, pool, agent)
+                assert target is not None and target.work_id != initial.work_id
+                accepted = await asyncio.to_thread(
+                    accept_native_cancel, pool, "original-work", agent, target
+                )
+                repeated = await asyncio.to_thread(
+                    accept_native_cancel, pool, "original-work", agent, target
+                )
+                assert repeated == accepted
+            queued = _insert(db_conn, agent)
+            release.set()
+            outcome = await asyncio.wait_for(running, 15)
+        finally:
+            release.set()
+            if not running.done():
+                running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+        await close_hosted_turn(
+            aops_pool,
+            aops_pool,
+            ctx.require_db(),
+            ctx.require_bus(),
+            saver,
+            incarnation,
+            outcome,
+            resources=None,
+            wake_enabled=configured_policy().recovery_wake_enabled,
+            prompt_reap_enabled=configured_policy().recrash_reap_enabled,
+            reconcile_inputs=configured_policy().reconcile_inputs,
+        )
+        assert faults.injected
+        assert faults.invocations == 1
+        assert not outcome.crashed and not outcome.native_held
+        assert db_conn.execute(
+            "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
+        ).fetchone() == ("applied",)
+        assert db_conn.execute(
+            "SELECT native_work_id FROM agents_meta WHERE id=%s", (agent,)
+        ).fetchone() == (target.work_id,)
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (queued,)
+        ).fetchone() == ("pending",)
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (first,)
+        ).fetchone() == ("done",)

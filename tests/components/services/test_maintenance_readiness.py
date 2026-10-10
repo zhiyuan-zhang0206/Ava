@@ -1,5 +1,6 @@
 """A stopped generation can prove readiness without reopening native work."""
 
+import importlib
 import os
 from functools import partial
 from pathlib import Path
@@ -27,6 +28,13 @@ from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
+from tests.fixtures.configuration import snapshot_process_config
+
+
+@pytest.fixture(autouse=True)
+def gateway_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    gateway_app = importlib.import_module("gateway.app")
+    monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)
 
 
 @pytest.fixture

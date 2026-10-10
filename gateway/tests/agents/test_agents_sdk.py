@@ -1,20 +1,12 @@
-"""`ava.agents.spawn` / `.send_message` SDK entry point tests.
-
-Low-level lifecycle (spawn_agent / resurrect_agent / respawn_agent) covered by
-`ops/agents/tests/test_agents_internals.py`; here only test SDK wrapper:
-  - Automatically set spawner=f"agent:{ava.self.AGENT_ID}" into new agent
-  - Call underlying gateway HTTP routes (via in-process TestClient going through real endpoint
-    + real DB, exercising full link wire protocol)
-  - resurrect automatically passes resurrected_by=f"agent:{ava.self.AGENT_ID}", underlying INSERT
-    lifecycle 'resurrect' inbound + optional chat prompt same transaction
-  - send_message posts inbound with source=f'agent:{ava.self.AGENT_ID}'
-
-`gateway._agent_launch._launch_agent_process` monkeypatch (not actually start a process); SDK's
-httpx client redirected to in-process FastAPI app via autouse fixture.
+"""SDK spawn, resurrect and send_message use real in-process gateway routes and SQL.
+Spawner/source/resurrected_by retain the agent identity; resurrection's lifecycle
+inbound and optional prompt share its transaction. Native launch is mocked, while
+low-level lifecycle contracts live in ops/agents/tests/test_agents_internals.py.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -33,6 +25,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.plugin_providers import build_model_catalog
+from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -59,6 +52,7 @@ def _sdk_via_inprocess_gateway(
     database: Database,
     event_bus: EventBus,
     model_installation: Installation,
+    config_authority: ConfigAuthority,
 ):
     """SDK ↔ Gateway path in-process test apparatus:
     1. monkeypatch session noop — spawn / resurrect / respawn don't really start child python
@@ -66,7 +60,12 @@ def _sdk_via_inprocess_gateway(
        httpx client — SDK calls go through ASGI directly into gateway endpoint, real DB real logic,
        not bound to TCP port
     """
-    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+    monkeypatch.setattr(
+        ava,
+        "__plugin_installation__",
+        replace(model_installation, authority=config_authority),
+        raising=False,
+    )
     from base.cluster import machines as _machines
     from base.cluster.machine import machine_name
     from gateway.agents import forward as _agents_forward_router
@@ -143,6 +142,9 @@ def _sdk_via_inprocess_gateway(
 
     monkeypatch.setattr(_settings.data_plane, "cluster_secret", "sdk-test-secret")
     monkeypatch.setattr(_settings.gateway, "auth_middleware_enabled", True)
+    from gateway import app as gateway_app
+
+    monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)
     with (
         TestClient(
             app,

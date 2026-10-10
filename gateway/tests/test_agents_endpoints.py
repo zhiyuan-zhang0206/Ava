@@ -10,6 +10,7 @@ Real database rows and gateway/home-runner operation dispatch; no host task is s
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, cast
 
@@ -613,8 +614,18 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
         dim = 8
         fingerprint = "fake:provider:dim=8"
 
-        def __init__(self, *, catalog: ModelCatalog) -> None:
+        def __init__(
+            self,
+            name: str,
+            *,
+            catalog: ModelCatalog,
+            timeout_reader: Callable[[], float],
+            api_key_reader: Callable[[], str | None],
+        ) -> None:
+            assert name
             self.catalog = catalog
+            self.timeout_reader = timeout_reader
+            self.api_key_reader = api_key_reader
 
         @staticmethod
         async def embed_query_async(_query: str) -> list[float]:

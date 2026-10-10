@@ -167,7 +167,7 @@ class Attachment:
     ) -> None:
         config = None if bound is not None else ConfigBoot()
         if config is not None:
-            config.boot()
+            config.read_process_environment()
         self._clock_factory = (
             bound.require_clock
             if bound is not None

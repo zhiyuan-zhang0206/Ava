@@ -437,7 +437,7 @@ def _run_code(code: str, payload: Any) -> None:
         ava.bind_context(execution_context)
 
 
-def _finalize_telemetry() -> None:
+def _finalize_telemetry(*, clients: Any = None) -> None:
     """Attempt finite ordinary delivery in life, then flush the available OTLP tail.
 
     A completed barrier observes writer processing, not durable capture. An
@@ -452,8 +452,9 @@ def _finalize_telemetry() -> None:
     from base import telemetry
 
     context = getattr(ava, "context", None)
-    if context is not None:
-        owned_result = context.clients.sync_events()
+    owned = clients if clients is not None else (None if context is None else context.clients)
+    if owned is not None:
+        owned_result = owned.sync_events()
         if owned_result.status is telemetry.DrainStatus.UNFINISHED:
             logger.warning(
                 "exec child: owned telemetry delivery is unfinished; "
@@ -471,14 +472,14 @@ def _finalize_telemetry() -> None:
         telemetry_otlp.finalize()
 
 
-def _deliver_envelope_telemetry() -> None:
+def _deliver_envelope_telemetry(*, clients: Any = None) -> None:
     """Best-effort last-mile delivery for the crash-envelope writers (task #4312).
 
     Never raises and never rewrites the envelope: the crash must stay the
     reported failure. Ordinary observation delivery can remain unfinished.
     """
     try:
-        _finalize_telemetry()
+        _finalize_telemetry(clients=clients)
     except BaseException:
         logger.opt(exception=True).warning(
             "exec child: telemetry delivery after a crash envelope failed; "
@@ -511,14 +512,14 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
             _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
-def _bind_identity(request: RequestPayload, *, config: Any) -> None:
+def _bind_identity(request: RequestPayload, *, clients: Any) -> None:
     """Bind this child's `AvaContext` and the incarnation from its validated request."""
     import ava
-    from ava.sdk_surface import process_context
+    from base.agents.context import AvaContext
 
     ava.bind_context(
-        process_context.context_from_description(
-            request.context, original_incarnation=request.incarnation, config=config
+        AvaContext.from_description(
+            request.context, original_incarnation=request.incarnation, clients=clients
         )
     )
     # No eager OTLP warmup: the backend comes up lazily on the first export
@@ -526,7 +527,9 @@ def _bind_identity(request: RequestPayload, *, config: Any) -> None:
     # child never imports the OTel SDK at all (task #3816 M3).
 
 
-def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
+def _run(
+    request_path: str, result_path: str, boot_started_at: float, *, config: Any, clients: Any
+) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
     child = _import_runtime(boot_started_at)
@@ -534,16 +537,21 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
 
     _line_buffered_output()
     _install_signal_handlers()
+    from base.cluster.machine import validate_machine_name
+
+    raw_agent_id = os.environ.get("AVA_AGENT_ID")
+    _init_logger(
+        None if raw_agent_id is None else int(raw_agent_id),
+        producer=clients.event_pipeline,
+        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+    )
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
 
     birth, overlay = _pop_overlay_env()
     from base.clock import Clock, clock_config_from_boot
-    from base.config import ConfigBoot
 
-    config = ConfigBoot()
-    config.boot()
-    _bind_identity(request, config=config)
+    _bind_identity(request, clients=clients)
 
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config))
@@ -555,7 +563,6 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
         birth, overlay, scope="framework", set_framework_field=config.set_field
     )
     import ava
-    from base.cluster.machine import validate_machine_name
 
     _init_logger(
         request.agent_id,
@@ -647,19 +654,30 @@ def main() -> None:
             "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)
+    clients: Any = None
     try:
-        _run(request_path, result_path, boot_started_at)
+        _line_buffered_output()
+        _install_signal_handlers()
+        from ava.sdk_surface.process_context import process_clients
+        from base.config import ConfigBoot
+
+        config = ConfigBoot()
+        config.boot()
+        clients = process_clients(config=config)
+        _run(request_path, result_path, boot_started_at, config=config, clients=clients)
     except BaseException as exc:
         _write_crashed_result(result_path, exc)
         # The crash envelope's record needs the same last-mile delivery (task
         # #4312).
-        _deliver_envelope_telemetry()
+        _deliver_envelope_telemetry(clients=clients)
     finally:
         # The connections this child opened (SQL, Redis, gateway, MCP) end with it.
         sdk = sys.modules.get("ava")
         context = None if sdk is None else sdk.unbind_context()
-        if context is not None:
+        if context is not None and context.clients is not clients:
             context.clients.close()
+        if clients is not None:
+            clients.close()
 
 
 def _write_crashed_result(

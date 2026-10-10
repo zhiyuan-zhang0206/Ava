@@ -9,8 +9,10 @@ in `base/config/__init__.py` holds one instance of each.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Self
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import EnvSettingsSource
 
 from base.host.env.dotenv_boot import resolve_ava_home
 
@@ -33,3 +35,27 @@ class EnvSettings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    @classmethod
+    def from_environment(cls, values: dict[str, str]) -> Self:
+        """Validate supplied delivery values without rereading process environment.
+
+        Keep the existing env decoding (including complex fields) and validators.
+        The source instance belongs only to this construction; no process source
+        or model class is modified.
+        """
+        model: Any = cls
+
+        class DeliveredSettings(model):
+            @classmethod
+            def settings_customise_sources(
+                cls, settings_cls: type[BaseSettings], **_sources: Any
+            ) -> tuple[EnvSettingsSource]:
+                source = EnvSettingsSource(settings_cls)
+                source.env_vars = {
+                    key if source.case_sensitive else key.lower(): value
+                    for key, value in values.items()
+                }
+                return (source,)
+
+        return DeliveredSettings()
