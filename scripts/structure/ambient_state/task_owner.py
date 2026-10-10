@@ -400,7 +400,7 @@ def _request_stop(
     """A real owner-created signal is set and read by its registered worker."""
     signals = _signal_fields(methods, module)
     requested = _requested_signals(helpers, signals)
-    workers = _registered_workers(methods, registry)
+    workers = _registered_workers(methods, registry, module)
     native = _native_stop(helpers, methods, workers, module)
     return native or any(
         _awaits_signal(methods[name], requested, module) for name in workers if name in methods
@@ -444,23 +444,29 @@ def _requested_signals(helpers: list[Function], signals: set[str]) -> set[str]:
     }
 
 
-def _registered_workers(methods: dict[str, Function], registry: str) -> set[str]:
+def _registered_workers(methods: dict[str, Function], registry: str, module: Module) -> set[str]:
     workers: set[str] = set()
     for method in methods.values():
         for body in _statements(method):
             for statement, following in pairwise(body):
                 pair = _spawn_assignment(statement)
                 if pair is not None:
-                    name = _registered_worker(pair, following, methods, registry)
+                    name = _registered_worker(pair, following, methods, registry, module)
                     if name is not None:
                         workers.add(name)
     return workers
 
 
 def _registered_worker(
-    pair: tuple[str, ast.Call], following: ast.stmt, methods: dict[str, Function], registry: str
+    pair: tuple[str, ast.Call],
+    following: ast.stmt,
+    methods: dict[str, Function],
+    registry: str,
+    module: Module,
 ) -> str | None:
     task, call = pair
+    if module.full_name(call.func) not in {"asyncio.create_task", "asyncio.ensure_future"}:
+        return None
     registration = _registration(following, task, methods)
     if registration is None or registration[0] != registry or not call.args:
         return None

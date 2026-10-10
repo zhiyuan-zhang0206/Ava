@@ -489,3 +489,29 @@ def test_native_stop_cannot_use_fake_lost_or_unjoined_handles(
     tmp_path: Path, before: str, after: str
 ) -> None:
     assert _sites(NATIVE_SOURCE.replace(before, after), tmp_path)
+
+
+@pytest.mark.parametrize("source", [REQUEST_SOURCE, NATIVE_SOURCE])
+def test_decorative_factory_cannot_lend_its_worker_stop_edge(tmp_path: Path, source: str) -> None:
+    source = source.replace("asyncio.create_task(self._work(work))", "asyncio.create_task(work())")
+    source += """
+    def decorate(self, work):
+        task = pretend_factory(self._work(work))
+        self._register(task)
+"""
+    assert _sites(source, tmp_path)
+
+
+@pytest.mark.parametrize("source", [REQUEST_SOURCE, NATIVE_SOURCE])
+def test_request_native_owner_names_and_module_aliases_are_semantically_irrelevant(
+    tmp_path: Path, source: str
+) -> None:
+    source = source.replace("import asyncio", "import asyncio as scheduling").replace(
+        "asyncio.", "scheduling."
+    )
+    source = source.replace("import subprocess", "import subprocess as native").replace(
+        "subprocess.", "native."
+    )
+    for old, new in (("Service", "Lifecycle"), ("_stop", "signal"), ("_request", "request_close")):
+        source = source.replace(old, new)
+    assert _sites(source, tmp_path) == {}
