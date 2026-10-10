@@ -165,6 +165,12 @@ in `scripts/structure/ambient_state/allowlist.py` — write-only facades, framew
 no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts
 are not.
 
+Thread and Task evidence share executable method syntax through the actual
+`ambient_state/owner_method.py` definition owner. It supplies direct instance
+fields, visible assignments/calls and join timeout syntax, excluding nested
+uninvoked definitions and constant-dead branches. Each proof owner retains its
+lifecycle decisions; dynamic timeout syntax does not prove a finite runtime bound.
+
 Task ownership detection recognizes necessary same-instance wiring, with no file
 list, fixed owner names or marker. Each explicit spawn assigns its actual Task and
 immediately calls a synchronous registration method, before any suspension. That

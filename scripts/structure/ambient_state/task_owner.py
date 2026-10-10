@@ -12,15 +12,15 @@ from collections.abc import Iterator
 from itertools import pairwise
 
 from scripts.structure.ambient_state.module import Module, dotted
-from scripts.structure.ambient_state.task_owner_span import inline_registration, map_span
-from scripts.structure.ambient_state.thread_owner import (
+from scripts.structure.ambient_state.owner_method import (
     Function,
-    _assignments,
-    _bounded_join,
-    _calls,
-    _field,
-    nodes,
+    assignment_pairs,
+    call_nodes,
+    executable_nodes,
+    instance_field,
+    join_has_timeout,
 )
+from scripts.structure.ambient_state.task_owner_span import inline_registration, map_span
 
 
 def _statements(root: ast.AST) -> Iterator[list[ast.stmt]]:
@@ -38,7 +38,7 @@ def _statements(root: ast.AST) -> Iterator[list[ast.stmt]]:
 
 
 def _name(node: ast.AST) -> str | None:
-    return node.id if isinstance(node, ast.Name) else _field(node)
+    return node.id if isinstance(node, ast.Name) else instance_field(node)
 
 
 def _early_exit(method: Function) -> bool:
@@ -46,7 +46,7 @@ def _early_exit(method: Function) -> bool:
 
 
 def _one_helper(method: Function, methods: dict[str, Function]) -> list[Function]:
-    names = {_field(call.func) for call in _calls(method)}
+    names = {instance_field(call.func) for call in call_nodes(method)}
     # Properties referenced as results are an actual edge too.
     properties = {
         name
@@ -54,8 +54,8 @@ def _one_helper(method: Function, methods: dict[str, Function]) -> list[Function
         if any(dotted(d) == "property" for d in helper.decorator_list)
     }
     names.update(
-        _field(node)
-        for node in nodes(method)
+        instance_field(node)
+        for node in executable_nodes(method)
         if isinstance(node, ast.Attribute) and node.attr in properties
     )
     return [
@@ -74,12 +74,12 @@ def _init_fields(methods: dict[str, Function], module: Module) -> set[str]:
     init = methods.get("__init__")
     if init is None:
         return set()
-    assignments = list(_assignments(init))
-    fields = [_field(target) for target, _ in assignments]
+    assignments = list(assignment_pairs(init))
+    fields = [instance_field(target) for target, _ in assignments]
     return {
         field
         for target, value in assignments
-        if (field := _field(target)) is not None
+        if (field := instance_field(target)) is not None
         and fields.count(field) == 1
         and (
             isinstance(value, ast.Dict | ast.Set)
@@ -92,17 +92,17 @@ def _replaced(
     field: str, methods: dict[str, Function], allowed: tuple[Function, str] | None = None
 ) -> bool:
     return any(
-        _field(target) == field
+        instance_field(target) == field
         and not (allowed and method is allowed[0] and _name(value) == allowed[1])
         for method in methods.values()
         if method.name != "__init__"
-        for target, value in _assignments(method)
+        for target, value in assignment_pairs(method)
     ) or any(
         isinstance(call.func, ast.Attribute)
-        and _field(call.func.value) == field
+        and instance_field(call.func.value) == field
         and call.func.attr == "clear"
         for method in methods.values()
-        for call in _calls(method)
+        for call in call_nodes(method)
     )
 
 
@@ -112,7 +112,7 @@ def _registration(
     if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
         return None
     invocation = statement.value
-    helper_name = _field(invocation.func)
+    helper_name = instance_field(invocation.func)
     helper = methods.get(helper_name.removeprefix("self.")) if helper_name else None
     if not isinstance(helper, ast.FunctionDef):
         return None
@@ -120,7 +120,7 @@ def _registration(
         isinstance(
             node, ast.Await | ast.Yield | ast.YieldFrom | ast.Return | ast.Delete | ast.Raise
         )
-        for node in nodes(helper)
+        for node in executable_nodes(helper)
     ):
         return None
     params = helper.args.posonlyargs + helper.args.args
@@ -144,26 +144,26 @@ def _registration(
 def _drops_registration(helper: Function, registries: set[str]) -> bool:
     return any(
         isinstance(call.func, ast.Attribute)
-        and _field(call.func.value) in registries
+        and instance_field(call.func.value) in registries
         and call.func.attr in {"pop", "popitem", "remove", "discard"}
-        for call in _calls(helper)
+        for call in call_nodes(helper)
     )
 
 
 def _registered_in(helper: Function, bound: str) -> set[str]:
     registries = {
         field
-        for target, _ in _assignments(helper)
+        for target, _ in assignment_pairs(helper)
         if isinstance(target, ast.Subscript)
         and _name(target.slice) == bound
-        and (field := _field(target.value)) is not None
+        and (field := instance_field(target.value)) is not None
     }
     registries.update(
         field
-        for call in _calls(helper)
+        for call in call_nodes(helper)
         if isinstance(call.func, ast.Attribute)
         and call.func.attr == "add"
-        and (field := _field(call.func.value)) is not None
+        and (field := instance_field(call.func.value)) is not None
         and len(call.args) == 1
         and _name(call.args[0]) == bound
     )
@@ -173,12 +173,12 @@ def _registered_in(helper: Function, bound: str) -> set[str]:
 def _callbacks(helper: Function, bound: str) -> list[str]:
     return [
         callback
-        for call in _calls(helper)
+        for call in call_nodes(helper)
         if isinstance(call.func, ast.Attribute)
         and _name(call.func.value) == bound
         and call.func.attr == "add_done_callback"
         and len(call.args) == 1
-        and (callback := _field(call.args[0])) is not None
+        and (callback := instance_field(call.args[0])) is not None
     ]
 
 
@@ -187,10 +187,10 @@ def _reads_error(callback: Function) -> str | None:
     if len(params) != 2 or _early_exit(callback):
         return None
     task = params[1].arg
-    cancelled = any(dotted(call.func) == f"{task}.cancelled" for call in _calls(callback))
+    cancelled = any(dotted(call.func) == f"{task}.cancelled" for call in call_nodes(callback))
     if _rebound(callback, task) or not cancelled:
         return None
-    for target, value in _assignments(callback):
+    for target, value in assignment_pairs(callback):
         if not isinstance(target, ast.Name) or not isinstance(value, ast.Call):
             continue
         if (
@@ -204,7 +204,8 @@ def _reads_error(callback: Function) -> str | None:
 
 def _rebound(method: Function, name: str, original: ast.expr | None = None) -> bool:
     return any(
-        _name(target) == name and value is not original for target, value in _assignments(method)
+        _name(target) == name and value is not original
+        for target, value in assignment_pairs(method)
     )
 
 
@@ -212,8 +213,8 @@ def _error_paths(
     callback: Function, error: str, methods: dict[str, Function]
 ) -> Iterator[tuple[Function, str]]:
     yield callback, error
-    for call in _calls(callback):
-        name = _field(call.func)
+    for call in call_nodes(callback):
+        name = instance_field(call.func)
         helper = methods.get(name.removeprefix("self.")) if name else None
         if not isinstance(helper, ast.FunctionDef):
             continue
@@ -227,12 +228,12 @@ def _receipt(method: Function, error: str, module: Module) -> str | None:
     if _early_exit(method):
         return None
     stored = _stored_errors(method, error)
-    for call in _calls(method):
-        if isinstance(call.func, ast.Attribute) and _field(call.func.value) in stored:
+    for call in call_nodes(method):
+        if isinstance(call.func, ast.Attribute) and instance_field(call.func.value) in stored:
             continue
         if module.full_name(call.func) in {"str", "repr", "type", "isinstance", "bool"}:
             continue
-        if any(_name(node) == error for node in nodes(call)):
+        if any(_name(node) == error for node in executable_nodes(call)):
             return next(iter(stored)) if len(stored) == 1 else None
     return None
 
@@ -240,15 +241,15 @@ def _receipt(method: Function, error: str, module: Module) -> str | None:
 def _stored_errors(method: Function, error: str) -> set[str]:
     stored = {
         field
-        for target, value in _assignments(method)
-        if _name(value) == error and (field := _field(target)) is not None
+        for target, value in assignment_pairs(method)
+        if _name(value) == error and (field := instance_field(target)) is not None
     }
     stored.update(
         field
-        for call in _calls(method)
+        for call in call_nodes(method)
         if isinstance(call.func, ast.Attribute)
         and call.func.attr == "append"
-        and (field := _field(call.func.value)) is not None
+        and (field := instance_field(call.func.value)) is not None
         and len(call.args) == 1
         and _name(call.args[0]) == error
     )
@@ -259,14 +260,16 @@ def _real_receipt(
     receipt: str, method: Function, error: str, methods: dict[str, Function], module: Module
 ) -> bool:
     if any(
-        _field(target) == receipt and _name(value) == error
-        for target, value in _assignments(method)
+        instance_field(target) == receipt and _name(value) == error
+        for target, value in assignment_pairs(method)
     ):
         return True
     init = methods.get("__init__")
     if init is None:
         return False
-    values = [value for target, value in _assignments(init) if _field(target) == receipt]
+    values = [
+        value for target, value in assignment_pairs(init) if instance_field(target) == receipt
+    ]
     if len(values) != 1:
         return False
     value = values[0]
@@ -281,14 +284,14 @@ def _raises(method: Function, receipt: str) -> bool:
         isinstance(node, ast.Raise)
         and node.exc is not None
         and (_receipt_value(node.exc, receipt) or _name(node.exc) in aliases)
-        for node in nodes(method)
+        for node in executable_nodes(method)
     )
 
 
 def _receipt_value(value: ast.AST, receipt: str) -> bool:
-    return _field(value) == receipt or (
+    return instance_field(value) == receipt or (
         isinstance(value, ast.Subscript)
-        and _field(value.value) == receipt
+        and instance_field(value.value) == receipt
         and isinstance(value.slice, ast.Constant)
         and value.slice.value == 0
     )
@@ -296,7 +299,7 @@ def _receipt_value(value: ast.AST, receipt: str) -> bool:
 
 def _receipt_aliases(method: Function, receipt: str) -> set[str]:
     aliases: set[str] = set()
-    for target, value in _assignments(method):
+    for target, value in assignment_pairs(method):
         original = _receipt_value(value, receipt)
         if original and isinstance(target, ast.Name) and not _rebound(method, target.id, value):
             aliases.add(target.id)
@@ -314,17 +317,17 @@ def _receipt_aliases(method: Function, receipt: str) -> set[str]:
 def _registry_tasks(method: Function, registry: str) -> set[str]:
     return {
         node.target.id
-        for node in nodes(method)
+        for node in executable_nodes(method)
         if isinstance(node, ast.For | ast.comprehension)
         and isinstance(node.target, ast.Name)
-        and _field(node.iter) == registry
+        and instance_field(node.iter) == registry
     }
 
 
 def _pending_names(method: Function, registry: str, module: Module) -> set[str]:
     return {
         target.id
-        for target, value in _assignments(method)
+        for target, value in assignment_pairs(method)
         if isinstance(target, ast.Name)
         and _registry_snapshot(value, registry, module)
         and not _rebound(method, target.id, value)
@@ -333,9 +336,9 @@ def _pending_names(method: Function, registry: str, module: Module) -> set[str]:
 
 def _registry_snapshot(value: ast.expr, registry: str, module: Module) -> bool:
     if isinstance(value, ast.Call) and module.full_name(value.func) == "set":
-        return len(value.args) == 1 and _field(value.args[0]) == registry
+        return len(value.args) == 1 and instance_field(value.args[0]) == registry
     return isinstance(value, ast.SetComp) and any(
-        _field(gen.iter) == registry and _name(gen.target) == _name(value.elt)
+        instance_field(gen.iter) == registry and _name(gen.target) == _name(value.elt)
         for gen in value.generators
     )
 
@@ -344,18 +347,18 @@ def _waited(method: Function, registry: str, module: Module) -> bool:
     if _early_exit(method):
         return False
     pending = _pending_names(method, registry, module)
-    for node in nodes(method):
+    for node in executable_nodes(method):
         if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
             continue
         call = node.value
         if module.full_name(call.func) != "asyncio.wait" or not call.args:
             continue
         same = (
-            _field(call.args[0]) == registry
+            instance_field(call.args[0]) == registry
             or _name(call.args[0]) in pending
             or _registry_snapshot(call.args[0], registry, module)
         )
-        if same and any(kw.arg == "timeout" for kw in call.keywords) and _bounded_join(call):
+        if same and any(kw.arg == "timeout" for kw in call.keywords) and join_has_timeout(call):
             return True
     return False
 
@@ -364,8 +367,10 @@ def _unfinished(method: Function, registry: str) -> bool:
     return any(
         isinstance(node, ast.Return)
         and node.value is not None
-        and any(_live_identities(part, registry) for part in [node.value, *nodes(node.value)])
-        for node in nodes(method)
+        and any(
+            _live_identities(part, registry) for part in [node.value, *executable_nodes(node.value)]
+        )
+        for node in executable_nodes(method)
     )
 
 
@@ -377,7 +382,7 @@ def _live_identities(node: ast.AST, registry: str) -> bool:
         return False
     gen = node.generators[0]
     task = _name(gen.target)
-    if task is None or _field(gen.iter) != registry:
+    if task is None or instance_field(gen.iter) != registry:
         return False
     identified = _name(node.elt) == task or (
         isinstance(node.elt, ast.Call) and dotted(node.elt.func) == f"{task}.get_name"
@@ -414,8 +419,8 @@ def _signal_fields(methods: dict[str, Function], module: Module) -> set[str]:
         return set()
     return {
         field
-        for target, value in _assignments(init)
-        if (field := _field(target)) is not None
+        for target, value in assignment_pairs(init)
+        if (field := instance_field(target)) is not None
         and _owner_signal(value, module)
         and not _replaced(field, methods)
     }
@@ -438,10 +443,10 @@ def _requested_signals(helpers: list[Function], signals: set[str]) -> set[str]:
     return {
         field
         for helper in helpers
-        for call in _calls(helper)
+        for call in call_nodes(helper)
         if isinstance(call.func, ast.Attribute)
         and call.func.attr in {"set", "set_result"}
-        and (field := _field(call.func.value)) in signals
+        and (field := instance_field(call.func.value)) in signals
     }
 
 
@@ -472,7 +477,7 @@ def _registered_worker(
     if registration is None or registration[0] != registry or not call.args:
         return None
     work = call.args[0]
-    if isinstance(work, ast.Call) and (name := _field(work.func)) is not None:
+    if isinstance(work, ast.Call) and (name := instance_field(work.func)) is not None:
         return name.removeprefix("self.")
     return None
 
@@ -480,7 +485,7 @@ def _registered_worker(
 def _awaits_signal(worker: Function, requested: set[str], module: Module) -> bool:
     return any(
         field in requested
-        for node in nodes(worker)
+        for node in executable_nodes(worker)
         if isinstance(node, ast.Await)
         for field in _waited_signals(node.value, module)
     )
@@ -506,8 +511,8 @@ def _retained_processes(methods: dict[str, Function], module: Module) -> set[str
     invalid: set[str] = set()
     for method in methods.values():
         sources = _popen_sources(method, module)
-        for target, value in _assignments(method):
-            field = _field(target)
+        for target, value in assignment_pairs(method):
+            field = instance_field(target)
             if field is None:
                 continue
             if _name(value) in sources:
@@ -524,7 +529,7 @@ def _retained_processes(methods: dict[str, Function], module: Module) -> set[str
 def _popen_sources(method: Function, module: Module) -> set[str]:
     return {
         target.id
-        for target, value in _assignments(method)
+        for target, value in assignment_pairs(method)
         if isinstance(target, ast.Name)
         and isinstance(value, ast.Call)
         and module.full_name(value.func) == "subprocess.Popen"
@@ -535,15 +540,15 @@ def _popen_sources(method: Function, module: Module) -> set[str]:
 def _process_aliases(method: Function) -> dict[str, str]:
     aliases = {
         target.id: field
-        for target, value in _assignments(method)
+        for target, value in assignment_pairs(method)
         if isinstance(target, ast.Name)
-        and (field := _field(value)) is not None
+        and (field := instance_field(value)) is not None
         and not _rebound(method, target.id, value)
     }
-    for target, value in _assignments(method):
+    for target, value in assignment_pairs(method):
         if isinstance(target, ast.Tuple) and isinstance(value, ast.Tuple):
             for part, raw in zip(target.elts, value.elts, strict=False):
-                field = _field(raw)
+                field = instance_field(raw)
                 if (
                     isinstance(part, ast.Name)
                     and field is not None
@@ -554,14 +559,14 @@ def _process_aliases(method: Function) -> dict[str, str]:
 
 
 def _process_receiver(node: ast.expr, aliases: dict[str, str]) -> str | None:
-    return aliases.get(node.id) if isinstance(node, ast.Name) else _field(node)
+    return aliases.get(node.id) if isinstance(node, ast.Name) else instance_field(node)
 
 
 def _closed_processes(helpers: list[Function], native: set[str]) -> set[str]:
     closed: set[str] = set()
     for helper in helpers:
         aliases = _process_aliases(helper)
-        for call in _calls(helper):
+        for call in call_nodes(helper):
             field = _closed_pipe(call, aliases)
             if field in native:
                 closed.add(field)
@@ -581,7 +586,7 @@ def _awaits_process(worker: Function, closed: set[str], module: Module) -> bool:
     aliases = _process_aliases(worker)
     return any(
         _waited_process(node.value, aliases, module) in closed
-        for node in nodes(worker)
+        for node in executable_nodes(worker)
         if isinstance(node, ast.Await) and isinstance(node.value, ast.Call)
     )
 
@@ -593,7 +598,7 @@ def _waited_process(call: ast.Call, aliases: dict[str, str], module: Module) -> 
     if not isinstance(wait, ast.Attribute) or wait.attr != "wait":
         return None
     bounded = ast.Call(func=wait, args=[call.args[1]], keywords=[])
-    return _process_receiver(wait.value, aliases) if _bounded_join(bounded) else None
+    return _process_receiver(wait.value, aliases) if join_has_timeout(bounded) else None
 
 
 def _waited_signals(value: ast.expr, module: Module) -> set[str]:
@@ -602,11 +607,15 @@ def _waited_signals(value: ast.expr, module: Module) -> set[str]:
     if (
         isinstance(value.func, ast.Attribute)
         and value.func.attr == "wait"
-        and (field := _field(value.func.value)) is not None
+        and (field := instance_field(value.func.value)) is not None
     ):
         return {field}
     if module.full_name(value.func) == "asyncio.wait" and value.args:
-        return {field for node in nodes(value.args[0]) if (field := _field(node)) is not None}
+        return {
+            field
+            for node in executable_nodes(value.args[0])
+            if (field := instance_field(node)) is not None
+        }
     return set()
 
 
@@ -630,7 +639,7 @@ def _teardown(methods: dict[str, Function], registry: str, receipt: str, module:
             and call.func.attr == "cancel"
             and _name(call.func.value) in _registry_tasks(helper, registry)
             for helper in helpers
-            for call in _calls(helper)
+            for call in call_nodes(helper)
         )
         raised = any(_raises(helper, receipt) for helper in helpers)
         unfinished = any(_unfinished(helper, registry) for helper in helpers)
