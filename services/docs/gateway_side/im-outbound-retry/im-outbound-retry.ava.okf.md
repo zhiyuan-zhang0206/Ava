@@ -94,28 +94,27 @@ Normal notices share [this Outbox](notice-poll.ava.okf.md).
 
 ## Dispatch, uncertainty and retention
 
-One send runs per daemon. A transaction-pooling-compatible
-`pg_try_advisory_xact_lock` gates each account/recipient stream on connection A.
-**This transaction intentionally spans the network send.** Connection B uses
-short transactions to recover abandoned `sending` rows to `uncertain`, commit a
-new attempt token with `queued -> sending` **before** calling the provider, and
-commit `sent`, `uncertain` or `failed` using the original token/status CAS.
-No cursor or intent row lock spans the network. Worker enablement requires pool
-`max_size >= 2` (the existing default); two leases/backends are needed during a
-send. Try-lock avoids daemons waiting on each other's live claims. There is no
-TTL claim stealing or session-level advisory lock.
+One send runs per daemon. A short row-lock transaction changes one `queued`
+intent to `sending`, storing its attempt token and `send_result_unconfirmed`
+before provider access. No database lease spans the external call; a pool with
+one connection suffices. A short transaction records the outcome with the
+original attempt/status CAS.
 
-Cancellation drains an already-started external call (including SDK thread
-work) and short commit before releasing its gate. A hard process death releases
-the gate and leaves a durable `sending` attempt. Losing the gate/backend or an
-acknowledgement cannot prove no delivery: abandoned attempts become uncertain
-and are **never automatically resent**. A successful prefix followed by any
-ambiguous failure is uncertain. Only adapter `SendNotStartedError` proof of no
-whole-send effect permits `failed`; this slice still does not retry that item.
-A stale completion cannot overwrite a recovered outcome. Reasons/logs use
-fixed classifications, never HTTP exception text containing credentials.
+Only queued intents are eligible. Restart cannot prove an old sender stopped:
+unresolved sending stays unchanged, and its original attempt may still finish.
+Sending and uncertain rows are never automatically resent and do not block later
+queued messages. There is no cross-process chat gate, lease or TTL stealing.
+Different daemons may overlap distinct intents, reorder messages or interleave
+chunks; one daemon remains sequential.
 
-Uncertain records are retained while later recipient messages may proceed.
+Cancellation collects already-started external work (including SDK threads) or
+commits. A crash after claim can lose a message even before provider access;
+acknowledgement loss leaves it unconfirmed. Ambiguous transport failure after a
+successful prefix is uncertain. Only `SendNotStartedError` proof of no whole-send
+effect permits failed, without retry. Unknown errors record uncertain then reach
+the service owner unchanged; if recording fails, sending stays unconfirmed and
+both errors survive. Reasons/logs never contain raw HTTP exception credentials.
+
 All intent identities and replay receipts are retained without automatic expiry
 in this slice. `sent` means the adapter completed its whole accepted manifest;
 this is not an exactly-once provider guarantee. A multi-chunk uncertain attempt
