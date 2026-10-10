@@ -674,13 +674,25 @@ def build_system_prompt(
     """
     from base.config import settings
 
-    from ._base_prompt import _BASE_SYSTEM_PROMPT, _CODE_ACTION_PREAMBLE, _get_ava_overview
+    from ._base_prompt import (
+        _BASE_SYSTEM_PROMPT,
+        _CODE_ACTION_PREAMBLE,
+        _SEQUENTIAL_TOOL_CALLS_NOTE,
+        _get_ava_overview,
+    )
 
+    sequential = (
+        _SEQUENTIAL_TOOL_CALLS_NOTE if slices.prompt.prompt_sequential_tool_calls_enabled else ""
+    )
     if settings.agent.prompt_sdk_overview_enabled:
-        parts = [_BASE_SYSTEM_PROMPT.format(_AVA_OVERVIEW=_get_ava_overview())]
+        parts = [
+            _BASE_SYSTEM_PROMPT.format(
+                _SEQUENTIAL_TOOL_CALLS=sequential, _AVA_OVERVIEW=_get_ava_overview()
+            )
+        ]
     else:
         # Bare identity — no SDK overview, just the preamble
-        parts = [_CODE_ACTION_PREAMBLE]
+        parts = [_CODE_ACTION_PREAMBLE.format(_SEQUENTIAL_TOOL_CALLS=sequential)]
 
     def workspace_section(agent: AgentSlices) -> str:
         return _workspace_section(agent, agent_id=agent_id)

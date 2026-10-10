@@ -61,9 +61,14 @@ Capabilities rather than standing as its own section.
 
 - **Core base prompt** — `agent/graph/prompt/_base_prompt.py:_BASE_SYSTEM_PROMPT`: the
   code-as-action contract (`execute_code`, speak via text content, empty
-  tool-call = idle, several calls run sequentially and an error does not stop
-  later ones) plus the `help(ava)` SDK overview. Its `_CODE_ACTION_PREAMBLE`
-  is also the bare identity when the SDK overview is disabled.
+  tool-call = idle) plus the `help(ava)` SDK overview. Its `_CODE_ACTION_PREAMBLE`
+  is also the bare identity when the SDK overview is disabled. The preamble's
+  `_SEQUENTIAL_TOOL_CALLS_NOTE` (several calls in one response run sequentially
+  and an error does not stop later ones) is **off by default** via
+  `settings.agent.prompt_sequential_tool_calls_enabled` (env
+  `AVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS`, per-agent overlay): production
+  histories from 2026-09-28 to 2026-10-10 showed no cross-call dependency failures
+  for `deepseek-flash`, and other models are enabled per agent while they are evaluated.
 - **Core expanded SDK reference** — `agent/graph/prompt/system_prompt.py:_sdk_expand_section`,
   rendering `effective_sdk_expand()`: plugin registrations
   (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. ava_code's `cwd`) first, then
