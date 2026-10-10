@@ -73,7 +73,7 @@ export function LinkRowGroup({
               tabIndex={-1}
               data-testid="run-timeline-link-tick"
               aria-pressed={selected}
-              aria-label={t("linkAria", { kind: labels[l.link.kind], from: endLabel(l.link.sender), to: endLabel(l.link.receiver) })}
+              aria-label={t("linkAria", { kind: labels[l.kind], from: endLabel(l.link.sender), to: endLabel(l.link.receiver) })}
               onPointerEnter={() => onHover(l.key)}
               onPointerLeave={() => onHover(null)}
               onClick={(event) => {
@@ -81,7 +81,7 @@ export function LinkRowGroup({
                 onSelect(l.key);
               }}
               className={cn("absolute top-1 h-3 w-1.5 -translate-x-1/2 rounded-sm", selected && "ring-2 ring-foreground")}
-              style={{ left: `${box.left}%`, background: LINK_COLORS[l.link.kind] }}
+              style={{ left: `${box.left}%`, background: LINK_COLORS[l.kind] }}
             />
           );
         })}

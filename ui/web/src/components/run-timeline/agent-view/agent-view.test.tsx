@@ -24,7 +24,7 @@ vi.mock("@/lib/transport/api", () => ({
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
 import { drawn, drawnLinks, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas";
-import { curveOf, curvePoint } from "../model/timeline-links";
+import { curveOf, curvePoint, MAX_ARROWS } from "../model/timeline-links";
 import { viewportOf } from "../model/timeline-model";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
@@ -449,7 +449,8 @@ describe("arrows between agents", () => {
     expect(getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 11 });
     expect(screen.queryByTestId("run-timeline-link-add-agent")).toBeNull();
     // The legend counts them with the rest: two chat messages and one notice (the terminate is its own kind).
-    expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 2");
+    expect(screen.getByTestId("run-timeline-link-legend-user_message").textContent).toBe("User message 2");
+    expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 0");
     expect(screen.getByTestId("run-timeline-link-legend-notice").textContent).toBe("Notice 1");
   });
 
@@ -490,5 +491,133 @@ describe("arrows between agents", () => {
     fireEvent.click(screen.getByTestId("agent-view-user-close"));
     expect(screen.queryByTestId("agent-view-user")).toBeNull();
     expect(screen.getByTestId<HTMLInputElement>("agent-view-interactions-user").checked).toBe(false);
+  });
+
+  it("draws every arrow while they fit the limit, with no count badge", async () => {
+    getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
+    getRunTimelineLinks.mockResolvedValue({ links: [link({ ts: at(40) }), link({ ts: at(40.5) }), link({ ts: at(41) }), link({ kind: "spawn", ts: at(40.2) })] });
+    render("7,8");
+    await screen.findByTestId("agent-view-other");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 3"));
+    await paintFrame();
+    expect(strokes()).toHaveLength(4);
+    expect(drawnLinks().filter((d) => d.op === "text")).toHaveLength(0);
+  });
+
+  it("merges close arrows, as little as keeps the panel within the limit, with a count on each merged one; groups hover, select and pull apart on a click", async () => {
+    getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
+    // 40 messages from 7 to 8, 3 seconds apart, and one spawn between the same agents: over the limit of 30.
+    getRunTimelineLinks.mockResolvedValue({
+      links: [
+        ...Array.from({ length: 40 }, (_, i) => link({ ts: at(40 + i / 20) })),
+        link({ kind: "spawn", ts: at(41) }),
+      ],
+    });
+    render("7,8");
+    await screen.findByTestId("agent-view-other");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 40"));
+    await paintFrame();
+    // No more than the limit are drawn; the spawn is never merged into the messages.
+    expect(strokes().length).toBeLessThanOrEqual(MAX_ARROWS);
+    expect(strokes().some((d) => d.color === GREEN)).toBe(true);
+    const badges = drawnLinks().filter((d) => d.op === "text").map((d) => Number(d.text));
+    expect(badges.length).toBeGreaterThan(0);
+    // The badges and the arrows without one add up to the 40 messages.
+    const single = strokes().filter((d) => d.color === BLUE).length - badges.length;
+    expect(badges.reduce((a, b) => a + b, 0) + single).toBe(40);
+    // The legend counts the links, not the arrows.
+    expect(screen.getByTestId("run-timeline-link-legend-spawn").textContent).toBe("Spawn 1");
+    // Every arrow has the same width.
+    expect(new Set(strokes().map((d) => d.lineWidth)).size).toBe(1);
+
+    // Hover, then select, a merged arrow. A stroke records only its ends, so the point on the curve is
+    // found by trying keys, whose hash picks the bend (a per-link factor).
+    const chart = screen.getByTestId("run-timeline-chart");
+    const group = strokes().find((d) => d.color === BLUE);
+    if (group === undefined) throw new Error("no message arrow drawn");
+    let point: { clientX: number; clientY: number } | null = null;
+    for (const key of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]) {
+      const p = curvePoint(curveOf(key, group.x, group.y, group.x + group.w, group.y + group.h), 0.5);
+      fireEvent.pointerMove(chart, { clientX: p.x, clientY: p.y });
+      if (screen.getByTestId("run-timeline-readout").textContent.includes("merged")) {
+        point = { clientX: p.x, clientY: p.y };
+        break;
+      }
+    }
+    expect(point).not.toBeNull();
+    expect(screen.getByTestId("run-timeline-readout").textContent).toMatch(/Message · #7 → #8 · \d+ merged · /);
+    fireEvent.click(chart, point as { clientX: number; clientY: number });
+    const detail = await screen.findByTestId("run-timeline-link-group-detail");
+    const items = within(detail).getAllByTestId("run-timeline-link-group-item");
+    expect(items.length).toBeGreaterThan(1);
+    const before = screen.getByTestId("run-timeline-window").textContent;
+    fireEvent.click(items[0]);
+    await screen.findByTestId("run-timeline-link-detail");
+    expect(screen.getByTestId("run-timeline-window").textContent).not.toBe(before);
+  });
+
+  it("draws the user's messages in their own color and legend entry, with a switch of their own, never merged with the messages between agents", async () => {
+    getRunTimeline.mockImplementation((agent) =>
+      Promise.resolve(
+        agent === 7
+          ? { ...BY_AGENT[7], units: [...BY_AGENT[7].units, { ...unit(5, 2, 3, "l"), kind: "inbound", source: "user", inbound_id: 75 }] }
+          : (BY_AGENT[agent] ?? response(agent, [10, 20], false)),
+      ),
+    );
+    getRunTimelineLinks.mockResolvedValue({ links: [link({ ts: at(40) })] });
+    render("7,8");
+    await screen.findByTestId("agent-view-user");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-user_message").textContent).toBe("User message 1"));
+    expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 1");
+    await paintFrame();
+    const brown = "#92400e";
+    expect(strokes().map((d) => d.color).sort()).toEqual([BLUE, brown].sort());
+    fireEvent.click(screen.getByTestId("run-timeline-link-legend-user_message"));
+    await paintFrame();
+    expect(strokes().map((d) => d.color)).toEqual([BLUE]);
+  });
+
+  it("limits the arrows shown to 20 by default, and to any valid number typed; an invalid one changes nothing and says why", async () => {
+    getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
+    getRunTimelineLinks.mockResolvedValue({ links: Array.from({ length: 120 }, (_, i) => link({ ts: at(20 + i * 0.7) })) });
+    render("7,8");
+    await screen.findByTestId("agent-view-user");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 120"));
+    const input = screen.getByTestId<HTMLInputElement>("agent-view-max-arrows");
+    expect(input.value).toBe("20");
+    expect(screen.queryByTestId("agent-view-max-arrows-error")).toBeNull();
+    await paintFrame();
+    expect(strokes().length).toBeLessThanOrEqual(20);
+    const base = strokes().length;
+    const type = (text: string) => fireEvent.change(input, { target: { value: text } });
+
+    type("7");
+    await paintFrame();
+    expect(strokes().length).toBeLessThanOrEqual(7);
+    const seven = strokes().length;
+    type("45");
+    await paintFrame();
+    expect(strokes().length).toBeGreaterThan(base);
+    expect(strokes().length).toBeLessThanOrEqual(45);
+    const valid = strokes().length;
+    expect(input.getAttribute("aria-invalid")).toBe("false");
+
+    // Anything else keeps the last valid limit in force, marks the field and says what is accepted.
+    for (const bad of ["", "0", "-3", "2.5", "abc", "1e2", "+5", "501", "20 arrows"]) {
+      type(bad);
+      await paintFrame();
+      expect(strokes().length, `"${bad}"`).toBe(valid);
+      expect(input.getAttribute("aria-invalid"), `"${bad}"`).toBe("true");
+      expect(screen.getByTestId("agent-view-max-arrows-error").textContent).toContain("1 to 500");
+    }
+    // The boundaries are valid, and a valid number clears the complaint.
+    type("1");
+    await paintFrame();
+    expect(strokes().length).toBeLessThanOrEqual(1);
+    expect(screen.queryByTestId("agent-view-max-arrows-error")).toBeNull();
+    type("500");
+    await paintFrame();
+    expect(screen.queryByTestId("agent-view-max-arrows-error")).toBeNull();
+    expect(strokes().length).toBeGreaterThan(seven);
   });
 });

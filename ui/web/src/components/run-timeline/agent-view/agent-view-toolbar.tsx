@@ -11,6 +11,7 @@ import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 import type { UnitHeights } from "../canvas/run-timeline-paint";
+import { MAX_ARROWS_CAP, parseArrowLimit } from "../model/timeline-links";
 
 const HEIGHT_OPTIONS: readonly UnitHeights[] = ["equal", "tokens"];
 const FIELD = "rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground";
@@ -29,6 +30,8 @@ export function AgentViewToolbar({
   onShowUser,
   showOther,
   onShowOther,
+  maxArrows,
+  onMaxArrows,
 }: {
   agentIds: readonly number[];
   onAdd: (agent: number) => void;
@@ -47,9 +50,14 @@ export function AgentViewToolbar({
   onShowUser: (on: boolean) => void;
   showOther: boolean;
   onShowOther: (on: boolean) => void;
+  /** The most arrows shown at once: the last valid number typed. */
+  maxArrows: number;
+  onMaxArrows: (max: number) => void;
 }) {
   const t = useTranslations("runTimeline");
   const [draft, setDraft] = useState("");
+  const [limitDraft, setLimitDraft] = useState(String(maxArrows));
+  const limitInvalid = parseArrowLimit(limitDraft.trim()) === null;
   const parsed = Number(draft);
   const valid = draft.trim() !== "" && Number.isInteger(parsed) && parsed >= 0 && !agentIds.includes(parsed);
   const heightLabel: Record<UnitHeights, string> = { equal: t("heightEqual"), tokens: t("heightTokens") };
@@ -145,6 +153,30 @@ export function AgentViewToolbar({
           data-testid="agent-view-interactions-other"
         />
         {t("otherInteractionsLabel")}
+      </label>
+      <label className="grid gap-1 text-xs text-muted-foreground" title={t("maxArrowsTitle")}>
+        {t("maxArrowsLabel")}
+        <input
+          type="text"
+          inputMode="numeric"
+          value={limitDraft}
+          aria-invalid={limitInvalid}
+          aria-describedby={limitInvalid ? "agent-view-max-arrows-error" : undefined}
+          onChange={(event) => {
+            const text = event.target.value.trim();
+            setLimitDraft(event.target.value);
+            // Only a valid number takes effect; an invalid one leaves the last valid limit in force.
+            const parsed = parseArrowLimit(text);
+            if (parsed !== null) onMaxArrows(parsed);
+          }}
+          data-testid="agent-view-max-arrows"
+          className={cn(FIELD, "w-20", limitInvalid && "border-destructive text-destructive")}
+        />
+        {limitInvalid ? (
+          <span id="agent-view-max-arrows-error" role="alert" className="text-destructive" data-testid="agent-view-max-arrows-error">
+            {t("maxArrowsInvalid", { max: MAX_ARROWS_CAP })}
+          </span>
+        ) : null}
       </label>
     </div>
   );
