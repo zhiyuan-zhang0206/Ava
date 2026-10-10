@@ -59,9 +59,7 @@ root, preventing needless filename policy from returning.
 `--suggest PATH ...` explains the same strict subject proof. A single-component
 root test names its actual subject directory and must move into that directory's
 `tests/`; incomplete input names the exact unresolved site instead of guessing
-an owner. After moving, preserve autouse isolation in `path_scopes.toml` and
-verify the actual resolved fixture definitions and teardown. Validating existing
-path declarations does not prove that a removed old binding followed a move.
+an owner. After moving, preserve autouse isolation in `path_scopes.toml`.
 
 The commit hook checks changed root tests. A change under `scripts/structure/`
 widens to all tracked root tests; pre-push and CI check the same full set.
