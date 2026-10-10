@@ -203,7 +203,7 @@ def test_restart_requires_visible_stop_admission_fence(tmp_path: pathlib.Path) -
         "        if self._stop_requested.is_set():\n            raise RuntimeError('closed')\n"
         + spawn,
     )
-    assert _sites(guarded, tmp_path) == {}
+    assert _sites(guarded, tmp_path)
     namespace: dict[str, object] = {}
     exec(compile(guarded, "restart-example.py", "exec"), namespace)
     service_class = cast(Factory, namespace["Service"])
@@ -213,7 +213,8 @@ def test_restart_requires_visible_stop_admission_fence(tmp_path: pathlib.Path) -
 
     service = service_class(work, lambda error: pytest.fail(str(error)))
     assert service.stop()
-    # Exercise the same guarded source that the AST accepted.
+    # A stop-only fence refuses restart after stop, but cannot fence a second
+    # start while the first is live. This source is intentionally rejected.
     start = service.start
     with pytest.raises(RuntimeError, match="closed"):
         start()
@@ -228,3 +229,92 @@ def test_alias_imports_and_delegated_worker_body_are_visible(tmp_path: pathlib.P
     )
     source += "\n    def _body(self):\n        self._work(self._stop_requested)\n"
     assert _sites(source, tmp_path) == {}
+
+
+@pytest.mark.parametrize(
+    "tail",
+    ["raise RuntimeError('cleanup bug')", "self._error = None", "self._work(self._stop_requested)"],
+)
+def test_unprotected_finally_work_or_receipt_overwrite_is_rejected(
+    tmp_path: pathlib.Path, tail: str
+) -> None:
+    source = SOURCE.replace("            self._finished.set()", "            " + tail)
+    assert _sites(source, tmp_path)
+
+
+def test_unprotected_else_work_is_rejected(tmp_path: pathlib.Path) -> None:
+    source = SOURCE.replace(
+        "        finally:",
+        "        else:\n            self._work(self._stop_requested)\n        finally:",
+    )
+    assert _sites(source, tmp_path)
+
+
+def test_two_constructors_cannot_own_the_same_handle(tmp_path: pathlib.Path) -> None:
+    spawn = "        self._thread = threading.Thread(target=self._run, daemon=True)"
+    source = SOURCE.replace(spawn, spawn + "\n" + spawn)
+    findings = _sites(source, tmp_path)
+    assert len(findings["base/service.py::thread:Service.__init__"]) == 2
+
+
+def test_finally_can_erase_an_actual_failure_so_its_source_is_rejected(
+    tmp_path: pathlib.Path,
+) -> None:
+    source = SOURCE.replace(
+        "            self._finished.set()",
+        "            self._error = None\n            self._finished.set()",
+    )
+    assert _sites(source, tmp_path)
+    namespace: dict[str, object] = {}
+    exec(compile(source, "lost-error.py", "exec"), namespace)
+    service_class = cast(Factory, namespace["Service"])
+    failure = RuntimeError("original worker bug")
+    reported: list[BaseException] = []
+
+    def fail(stop: threading.Event) -> None:
+        raise failure
+
+    service = service_class(fail, reported.append)
+    assert service.stop()
+    assert reported == [failure]
+    # The original error was observed, then erased instead of propagated.
+    assert not service._thread.is_alive()
+
+
+def test_stop_only_fence_can_overwrite_a_live_thread_and_is_rejected(
+    tmp_path: pathlib.Path,
+) -> None:
+    spawn = "        self._thread = threading.Thread(target=self._run, daemon=True)\n        self._thread.start()"
+    source = SOURCE.replace(spawn, "        self.start()")
+    source += (
+        "\n    def start(self):\n        if self._stop_requested.is_set():\n            raise RuntimeError('closed')\n"
+        + spawn
+        + "\n"
+    )
+    assert _sites(source, tmp_path)
+    namespace: dict[str, object] = {}
+    exec(compile(source, "overwritten-live-handle.py", "exec"), namespace)
+    service_class = cast(Factory, namespace["Service"])
+    admitted = [threading.Event(), threading.Event()]
+    entries: list[threading.Thread] = []
+    lock = threading.Lock()
+
+    def work(stop: threading.Event) -> None:
+        with lock:
+            index = len(entries)
+            entries.append(threading.current_thread())
+            admitted[index].set()
+        stop.wait(2)
+
+    service = service_class(work, lambda error: pytest.fail(str(error)))
+    original = service._thread
+    try:
+        assert admitted[0].wait(1)
+        service.start()
+        assert admitted[1].wait(1)
+        assert service._thread is not original
+        assert original.is_alive()
+    finally:
+        assert service.stop()
+        original.join(timeout=1)
+        assert not original.is_alive()

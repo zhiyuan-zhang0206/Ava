@@ -167,7 +167,9 @@ def _error_receipt(handler: ast.ExceptHandler, module: Module) -> str | None:
     return receipt
 
 
-def _target_receipt(target: Function, module: Module) -> tuple[str, ast.Try] | None:
+def _target_receipt(
+    target: Function, module: Module, events: set[str]
+) -> tuple[str, ast.Try] | None:
     body = target.body
     if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
         body = body[1:]
@@ -176,6 +178,8 @@ def _target_receipt(target: Function, module: Module) -> tuple[str, ast.Try] | N
     if len(body) != 1 or not isinstance(body[0], ast.Try):
         return None
     attempt = body[0]
+    if attempt.orelse or not _completion_only(attempt.finalbody, events):
+        return None
     if len(attempt.handlers) != 1:
         return None
     if any(isinstance(node, ast.Return) for handler in attempt.handlers for node in nodes(handler)):
@@ -209,19 +213,16 @@ def _event_fields(methods: dict[str, Function], module: Module) -> set[str]:
     }
 
 
-def _admission(method: Function, call: ast.Call, signals: set[str]) -> bool:
-    if method.name == "__init__":
-        return True
-    return any(
-        isinstance(node, ast.If)
-        and node.lineno < call.lineno
-        and any(
-            receiver in signals and name == "is_set"
-            for receiver, name, _ in _method_calls(node.test)
-        )
-        and any(isinstance(exit_node, ast.Return | ast.Raise) for exit_node in nodes(node))
-        for node in nodes(method)
-    )
+def _completion_only(body: list[ast.stmt], events: set[str]) -> bool:
+    for statement in body:
+        if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+            return False
+        call = statement.value
+        if not isinstance(call.func, ast.Attribute) or call.func.attr != "set":
+            return False
+        if _field(call.func.value) not in events or call.args or call.keywords:
+            return False
+    return True
 
 
 def _join_and_observe(calls: list[tuple[str, str, ast.Call]], handle: str) -> bool:
@@ -255,11 +256,15 @@ def owned_calls(module: Module) -> set[int]:
     for cls in (node for node in ast.walk(module.tree) if isinstance(node, ast.ClassDef)):
         methods = {node.name: node for node in cls.body if isinstance(node, Function)}
         events = _event_fields(methods, module)
+        handles = _constructor_handles(methods, module)
         for method in methods.values():
+            if method.name != "__init__":
+                continue
             for call in _calls(method):
                 if module.full_name(call.func) != "threading.Thread":
                     continue
-                if _owned(call, method, methods, events, module):
+                handle = _handle(call, method)
+                if handles.count(handle) == 1 and _owned(call, method, methods, events, module):
                     accepted.add(id(call))
     return accepted
 
@@ -277,7 +282,7 @@ def _owned(
     worker = methods.get(target_name.removeprefix("self.")) if target_name else None
     if not handle or worker is None:
         return False
-    outcome = _target_receipt(worker, module)
+    outcome = _target_receipt(worker, module, events)
     if outcome is None:
         return False
     receipt, _ = outcome
@@ -285,11 +290,7 @@ def _owned(
     started = any(
         receiver == handle and name == "start" for receiver, name, _ in _method_calls(method)
     )
-    return (
-        started
-        and _admission(method, call, signals)
-        and _teardown(methods, handle, receipt, signals)
-    )
+    return started and _teardown(methods, handle, receipt, signals)
 
 
 def _signals_passed(helper: Function, events: set[str]) -> set[str]:
@@ -313,3 +314,12 @@ def _worker_signals(closure: list[Function], events: set[str]) -> set[str]:
         )
         signals.update(_signals_passed(helper, events))
     return signals
+
+
+def _constructor_handles(methods: dict[str, Function], module: Module) -> list[str | None]:
+    return [
+        _handle(call, method)
+        for method in methods.values()
+        for call in _calls(method)
+        if module.full_name(call.func) == "threading.Thread"
+    ]
