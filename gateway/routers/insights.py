@@ -8,8 +8,8 @@ admitted the caller, like every `/api` route); it applies the one policy that re
 caller's identity (`deny_isolated_result_read`) and forwards the request over the
 service's Unix socket (`base.paths.insights_socket`).
 
-The URL is the public one, unchanged: `/api/agents/{id}/run-timeline[/messages|/context]`
-and everything under `/api/insights/`. The typed routes declare the service's query
+The URL is the public one, unchanged: `/api/agents/{id}/run-timeline[/messages|/context]`,
+`/api/insights/run-timeline/links` and everything under `/api/insights/`. The typed routes declare the service's query
 parameters and response model so the gateway's OpenAPI (and the generated frontend types)
 describe them; the service owns validation, and a request the gateway's declaration
 rejects never reaches it. A route added to the service is proxied by declaring it here
@@ -33,6 +33,8 @@ from base.paths import insights_socket
 from gateway.agents.eval_guard import deny_isolated_result_read
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineContext,
+    RunTimelineLinkContent,
+    RunTimelineLinks,
     RunTimelineMessages,
     RunTimelineResponse,
 )
@@ -131,6 +133,35 @@ async def get_run_timeline(
 ) -> Response:
     """The understanding tree and the message units in a window; no window means the agent's whole lifetime."""
     return await _forward(request, f"/api/agents/{agent_id}/run-timeline")
+
+
+@router.get(
+    "/api/insights/run-timeline/links",
+    response_model=RunTimelineLinks,
+    dependencies=[Depends(deny_isolated_result_read)],
+)
+async def get_run_timeline_links(
+    request: Request,
+    agents: Annotated[str, Query()],  # noqa: ARG001
+    from_: Annotated[datetime, Query(alias="from")],  # noqa: ARG001
+    to: Annotated[datetime, Query()],  # noqa: ARG001
+) -> Response:
+    """The agent-to-agent events in a window with an end among the comma-separated `agents`."""
+    return await _forward(request, "/api/insights/run-timeline/links")
+
+
+@router.get(
+    "/api/insights/run-timeline/link-content",
+    response_model=RunTimelineLinkContent,
+    dependencies=[Depends(deny_isolated_result_read)],
+)
+async def get_run_timeline_link_content(
+    request: Request,
+    inbound_id: Annotated[int | None, Query(ge=1)] = None,  # noqa: ARG001
+    notice_id: Annotated[int | None, Query(ge=1)] = None,  # noqa: ARG001
+) -> Response:
+    """The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`)."""
+    return await _forward(request, "/api/insights/run-timeline/link-content")
 
 
 @router.get(

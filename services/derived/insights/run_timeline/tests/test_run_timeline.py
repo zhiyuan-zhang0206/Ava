@@ -22,7 +22,6 @@ from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
 from services.derived.insights.run_timeline import router
 from services.derived.insights.run_timeline.history import HistoryView
-from services.derived.insights.run_timeline.schemas import RunTimelineEvent
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -99,11 +98,9 @@ class World:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.view = view()
         self.nodes: list[StoredNode] = []
-        self.events: list[RunTimelineEvent] = []
         self.fresh_reads = 0
         monkeypatch.setattr(router, "load_nodes", self._nodes)
         monkeypatch.setattr(router, "load_generation_costs", self._costs)
-        monkeypatch.setattr(router._lifecycle, "read", self._lifecycle)
 
     def get(self, _db: object, _agent: int, *, needs: int = 0) -> HistoryView:
         """The `HistoryViewCache.get` the app state serves."""
@@ -115,11 +112,6 @@ class World:
 
     def _costs(self, _db: object, _agent: int) -> tuple[dict[int, object], dict[str, object]]:
         return {}, {}
-
-    def _lifecycle(
-        self, _db: object, _agent: int, _start: datetime, _end: datetime
-    ) -> list[RunTimelineEvent]:
-        return self.events
 
 
 def read(
@@ -140,14 +132,6 @@ def test_default_window_is_the_lifetime_of_the_messages_read_times(
     result = read(world)
     assert (result.window.from_, result.window.to) == (T0, T0 + timedelta(minutes=10))
     assert result.lifetime == result.window
-
-
-def test_lifecycle_events_never_move_the_default_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
-    world.events = [RunTimelineEvent(ts=T0 + timedelta(days=1), kind="spawn", label=None)]
-    result = read(world)
-    assert (result.window.from_, result.window.to) == (T0, T0 + timedelta(minutes=10))
-    assert [e.kind for e in result.events] == ["spawn"]
 
 
 def test_all_levels_and_every_unit_are_served_in_the_lifetime_window(
@@ -188,6 +172,23 @@ def test_a_unit_names_the_leaf_covering_its_first_message(monkeypatch: pytest.Mo
         ("output", 2, "1"),
         ("text", 4, "2"),
     ]
+
+
+def test_an_inbound_block_names_the_inbound_row_the_checkpoint_stamped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = World(monkeypatch)
+    messages = history_messages()
+    messages[1].additional_kwargs["ava_inbound_id"] = 77
+    world.view = view(messages)
+    result = read(world)
+    assert {u.kind: u.inbound_id for u in result.units} == {
+        "inbound": 77,
+        "thinking": None,
+        "call": None,
+        "output": None,
+        "text": None,
+    }
 
 
 def test_a_unit_no_leaf_covers_has_no_parent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -251,16 +252,6 @@ def test_an_orphan_node_is_left_out_and_the_page_still_answers(
     result = read(world)
     assert [n.id for n in result.nodes] == ["1"]
     assert [u.kind for u in result.units] != []
-
-
-def test_a_failed_lifecycle_read_leaves_the_markers_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
-
-    def boom(*_args: object) -> list[RunTimelineEvent]:
-        raise RuntimeError("audit table unreadable")
-
-    monkeypatch.setattr(router._lifecycle, "read", boom)
-    assert read(world).events == []
 
 
 @pytest.mark.parametrize(
