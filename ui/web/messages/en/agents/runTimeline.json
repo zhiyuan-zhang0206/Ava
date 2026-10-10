@@ -114,5 +114,6 @@
   "linkGroupHeading": "Merged arrows (select one to zoom to it)",
   "linkUserMessage": "User message",
   "maxArrowsLabel": "Max arrows",
-  "maxArrowsTitle": "Arrows beyond this many are merged by closeness"
+  "maxArrowsTitle": "The most arrows shown at once; more are merged by closeness",
+  "maxArrowsInvalid": "Enter a whole number from 1 to {max}; the last valid limit stays in force"
 }

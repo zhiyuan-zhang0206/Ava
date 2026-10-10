@@ -267,8 +267,16 @@ export function nearestUnit(data: RunTimelineResponse, ms: number): Selection | 
 }
 
 /** The most arrows the panel shows at once; the merge distance adapts to the viewport to stay within it. */
-export const ARROW_LIMITS = [20, 50] as const;
-export const MAX_ARROWS: number = ARROW_LIMITS[0];
+export const MAX_ARROWS = 20;
+/** The largest limit that can be asked for: beyond it the arrows are no longer readable anyway. */
+export const MAX_ARROWS_CAP = 500;
+
+/** The limit a typed text names: a whole number from 1 to `MAX_ARROWS_CAP`; null for anything else (empty, zero, negative, a fraction, a sign, letters, too large). */
+export function parseArrowLimit(text: string): number | null {
+  if (!/^[1-9][0-9]*$/.test(text)) return null;
+  const n = Number(text);
+  return n <= MAX_ARROWS_CAP ? n : null;
+}
 
 /** What clustering needs of an arrow on screen: its identity, which arrows it may merge with, and where its ends are. */
 export interface Arrow {
