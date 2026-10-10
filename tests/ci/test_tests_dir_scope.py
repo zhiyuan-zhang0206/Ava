@@ -66,7 +66,7 @@ def test_async_lint_exempts_a_package_tests_directory(
     lint = importlib.import_module("scripts.lint.async_no_sync_blocking")
     monkeypatch.setattr(lint, "_ROOT", tmp_path)
     monkeypatch.setattr(lint, "_DEFINITION_DIRS", ("base",))
-    monkeypatch.setattr(lint, "_REPO_BLOCKING_HELPERS", set())
+    monkeypatch.setattr(lint, "_REPO_BLOCKING_HELPERS", set[str]())
     monkeypatch.setattr(lint, "_BLOCKING_NAMES", lint._LIBRARY_BLOCKING_NAMES)
     body = "import time\n\nasync def handler() -> None:\n    time.sleep(1)\n"
     _write(tmp_path, "gateway/agents/tests/test_handler.py", body)

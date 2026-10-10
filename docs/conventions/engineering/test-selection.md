@@ -20,8 +20,8 @@ recognized repository-rooted resource paths use that same evidence owner and mod
 subject policies do not prune this runtime impact graph. The selector never imports
 application code or executes test code.
 
-Global fixture dependencies can therefore reach most tests. This is real runtime
-coupling: the duration guard reports `subset-too-close` and keeps FULL rather than
+Global fixture dependencies can therefore reach most tests. This is conservative
+runtime coupling: the duration guard reports `subset-too-close` and keeps FULL rather than
 removing those edges to produce a smaller subset. An opaque dynamic input on a test's
 reachable dependency graph produces `incomplete-impact`, with source locations and
 reasons in the JSON `diagnostics` field and stderr. Explicit edges do not certify that
