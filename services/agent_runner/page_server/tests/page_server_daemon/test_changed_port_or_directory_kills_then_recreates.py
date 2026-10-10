@@ -16,6 +16,8 @@ from psycopg_pool import ConnectionPool
 
 import services.agent_runner.page_server.daemon as psd
 import services.agent_runner.page_server.degradation as page_degradation
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
     _HOST,
     _FakeShellBackend,
@@ -39,8 +41,11 @@ def test_changed_port_or_directory_kills_then_recreates_the_page_session(
     db_conn: psycopg.Connection,
     backend: _FakeShellBackend,
     tmp_path: Path,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     old_dir = tmp_path / "old"
     old_dir.mkdir()
     new_dir = tmp_path / "new"
@@ -70,8 +75,11 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
     backend: _FakeShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     page_session = f"ava-agent-{agent_id}-shell-5-page-adopted"
     backend.sessions.add(page_session)
     _insert_page_row(
@@ -100,8 +108,11 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
     backend: _FakeShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     key = (agent_id, "kept")
     page_session = f"ava-agent-{agent_id}-shell-6-page-kept"
     backend.sessions.add(page_session)
@@ -137,8 +148,11 @@ def test_failed_session_creation_uses_spawn_backoff(
     db_conn: psycopg.Connection,
     backend: _FakeShellBackend,
     tmp_path: Path,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_page_row(db_conn, agent_id, "backoff", 12012, tmp_path)
     backend.new_result = False
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
@@ -157,8 +171,11 @@ def test_missing_serve_dir_uses_the_existing_degradation_ladder(
     db_conn: psycopg.Connection,
     backend: _FakeShellBackend,
     tmp_path: Path,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     missing = tmp_path / "gone"
     _insert_page_row(db_conn, agent_id, "missing", 12013, missing)
     degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}

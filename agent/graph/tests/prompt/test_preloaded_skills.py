@@ -25,6 +25,7 @@ from base.agents.context import AvaContext
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from base.paths import skills_dir
 
 
@@ -170,7 +171,12 @@ def test_note_none_when_config_empty(
 ) -> None:
     _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
     _expand(monkeypatch, [])
-    assert preloaded_skills_note(AvaContext(agent=AgentSlices.resolve())) is None
+    assert (
+        preloaded_skills_note(
+            AvaContext(agent=AgentSlices.resolve(), catalog=build_model_catalog())
+        )
+        is None
+    )
 
 
 def test_note_none_when_nothing_resolves(
@@ -178,7 +184,12 @@ def test_note_none_when_nothing_resolves(
 ) -> None:
     _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
     _expand(monkeypatch, ["ghost"])
-    assert preloaded_skills_note(AvaContext(agent=AgentSlices.resolve())) is None
+    assert (
+        preloaded_skills_note(
+            AvaContext(agent=AgentSlices.resolve(), catalog=build_model_catalog())
+        )
+        is None
+    )
 
 
 def test_note_carries_full_body_and_tag(
@@ -190,7 +201,9 @@ def test_note_carries_full_body_and_tag(
     )
     _expand(monkeypatch, ["ultra_speed"])
 
-    note = preloaded_skills_note(AvaContext(agent=AgentSlices.resolve()))
+    note = preloaded_skills_note(
+        AvaContext(agent=AgentSlices.resolve(), catalog=build_model_catalog())
+    )
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = note.content
@@ -211,7 +224,9 @@ def test_note_merges_multiple_skills_in_order(
     _write_skill(fake_skills_dir, "second", "name: second\ndescription: 2", body="BBB body")
     _expand(monkeypatch, ["second", "first"])  # explicit order preserved
 
-    note = preloaded_skills_note(AvaContext(agent=AgentSlices.resolve()))
+    note = preloaded_skills_note(
+        AvaContext(agent=AgentSlices.resolve(), catalog=build_model_catalog())
+    )
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = note.content
@@ -235,7 +250,9 @@ def test_note_heading_uses_dotted_access_path(
     )
     _expand(monkeypatch, ["ava_memory.consolidation"])
 
-    note = preloaded_skills_note(AvaContext(agent=AgentSlices.resolve()))
+    note = preloaded_skills_note(
+        AvaContext(agent=AgentSlices.resolve(), catalog=build_model_catalog())
+    )
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert "## ava.skills.ava-memory:consolidation" in note.content

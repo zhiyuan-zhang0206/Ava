@@ -50,6 +50,7 @@ from base.clock import Clock
 from base.config import settings
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 # A safety bound on the climb; a tree this tall is far past what history produces.
@@ -69,15 +70,19 @@ async def run_blocking[**P, T](
 
 
 class _Models(Protocol):
+    catalog: ModelCatalog
+
     def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> Any: ...
 
 
-def _group_model(db: Database, agent_id: int) -> tuple[str, ModelOverrides]:
+def _group_model(
+    db: Database, agent_id: int, *, catalog: ModelCatalog
+) -> tuple[str, ModelOverrides]:
     """The configured grouping model, else the agent's own with its overrides."""
     configured = settings.agent.understanding_group_model
     if configured:
         return configured, ModelOverrides.from_pins(None)
-    return agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model)
+    return agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model, catalog=catalog)
 
 
 MIN_CHECK_OPEN = 6
@@ -109,6 +114,7 @@ def _generate(
         models.get(model, overrides, settings.agent.understanding_group_reasoning),
         nodes,
         model=model,
+        catalog=models.catalog,
         agent_id=agent_id,
         corrections=settings.agent.understanding_group_corrections,
         clock=Clock.from_settings(),
@@ -144,7 +150,9 @@ async def _check_level(
             await load_last_checked(pool, agent_id, level), len(nodes)
         ) + check_threshold(level):
             return False
-        model, overrides = await asyncio.to_thread(_group_model, db, agent_id)
+        model, overrides = await asyncio.to_thread(
+            _group_model, db, agent_id, catalog=models.catalog
+        )
         try:
             groups = await run_blocking(
                 executor, _generate, models, model, overrides, level, nodes, calls, agent_id

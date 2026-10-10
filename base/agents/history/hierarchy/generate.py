@@ -17,6 +17,7 @@ from typing import Any
 
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.call import extract_text, invoke_response
+from base.lm.catalog import ModelCatalog
 
 
 class GenerateError(Exception):
@@ -55,9 +56,11 @@ _TOOL_REFUSAL = (
 def build_generation_llm(
     model: str,
     params: GenParams | None = None,
-    overrides: ModelOverrides | None = None,
     *,
+    overrides: ModelOverrides,
     thinking_off: bool = False,
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> Any:
     """Build the generation chat model the way the agent builds its own.
 
@@ -72,6 +75,8 @@ def build_generation_llm(
     p = params or GenParams()
     return build_chat_model(
         model,
+        catalog=catalog,
+        llm_override=llm_override,
         reasoning_effort=p.reasoning_effort,
         overrides=overrides,
         thinking={"type": "disabled"} if thinking_off else None,
@@ -99,6 +104,7 @@ def _invoke_agent_shaped(
     messages: list[Any],
     *,
     tools: Sequence[Any],
+    catalog: ModelCatalog,
     desc: str,
     model: str,
     retry_attempts: int,
@@ -130,6 +136,7 @@ def _invoke_agent_shaped(
             response = invoke_response(
                 bound,
                 messages,
+                catalog=catalog,
                 desc=desc,
                 error_type=GenerateError,
                 retry_attempts=retry_attempts,

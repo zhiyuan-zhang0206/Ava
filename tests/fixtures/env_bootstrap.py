@@ -485,20 +485,6 @@ assert settings.data_plane.events_channel == _TEST_EVENTS_CHANNEL
 # back — local must match CI, whose fresh .env has no such value (60s).
 settings.sandbox.exec_timeout_seconds = 60.0
 os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
-# Pre-warm the D5 full-instance cache while os.environ still carries the pinned
-# test values. A later test may legitimately simulate the gateway profile
-# (AVA_PROCESS_PROFILE=gateway + _enforce_cluster_env_authority), which POPS
-# the agent-runner cluster aliases (AVA_EXEC_TIMEOUT_SECONDS among them) from
-# os.environ for the rest of this worker. If the cache were first populated
-# after that pop, the config-service read paths would serve the field default
-# (exec_timeout_seconds=300) instead of the pinned 60 for the whole session
-# (2026-08-06 CI: test_config 300-vs-60 flake). Warming it here pins the
-# complete-instance snapshot at the pristine env.
-from base.config.service_read import _all_domains_settings as _prewarm_full_settings
-
-_prewarm_full_settings()
-
-
 # Session default for the SDK's own agent id. `ava.self.*` / `ava.agents.*` read
 # it to address `/api/agents/<AGENT_ID>/...`; leaving it None would 404 or crash
 # earlier. It is only a placeholder for tests that never create an agent: serial

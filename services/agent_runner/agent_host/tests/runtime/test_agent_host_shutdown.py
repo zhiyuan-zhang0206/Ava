@@ -26,6 +26,7 @@ import pytest
 
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from tests.components.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
@@ -113,9 +114,9 @@ def _exercise_shutdown(failure: str) -> None:
 
     original_loops = daemon._background_loops
 
-    def loops(*args: Any) -> dict[str, Any]:
+    def loops(*args: Any, catalog: ModelCatalog) -> dict[str, Any]:
         if failure == "plugin":
-            return original_loops(*args)
+            return original_loops(*args, catalog=catalog)
         failing = {} if failure in {"dispatcher_returns", "heartbeat"} else {"failed": fail()}
         return {**failing, "sibling": background()}
 
@@ -271,6 +272,7 @@ class _UnreachablePool:
 
 async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachable(
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
     out the control pool's 30 s acquire timeout, so ava-root's 10 s TERM window
@@ -283,6 +285,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),
         machine="this-box",
+        catalog=model_catalog,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
     )

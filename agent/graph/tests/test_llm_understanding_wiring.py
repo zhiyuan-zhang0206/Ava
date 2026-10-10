@@ -24,7 +24,9 @@ from base.agents.context.identity import AgentIdentity
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 
 
 async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
@@ -45,6 +47,7 @@ def _runtime(chunks: list[AIMessageChunk]) -> Runtime[AvaContext]:
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
+            catalog=build_model_catalog(),
         )
     )
 
@@ -84,7 +87,13 @@ def _turn(input_tokens: int, *, tool: bool) -> list[AIMessageChunk]:
 @pytest.fixture
 def enqueued(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(uc, "chunk_threshold", lambda *_a: 1000)
+
+    def threshold(
+        _model: str, _overrides: ModelOverrides, _ratio: float, *, catalog: ModelCatalog
+    ) -> int:
+        return 1000
+
+    monkeypatch.setattr(uc, "chunk_threshold", threshold)
     calls: list[dict] = []
 
     async def fake(pool: object, agent_id: int, **kwargs: object) -> bool:

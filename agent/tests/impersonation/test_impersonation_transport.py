@@ -15,6 +15,7 @@ import pytest
 
 from agent import impersonation
 from base.agents.observation.relay_supervision import relay_exited
+from base.config.service_read import ConfigAuthority
 from base.native_process.ownership import OwnedProcess
 
 
@@ -141,7 +142,12 @@ def test_new_claim_without_birth_is_safe_but_legacy_unknown_is_not() -> None:
 
 @pytest.fixture
 def recovery_lease(
-    db_conn: Any, database: Any, event_bus: Any, monkeypatch: pytest.MonkeyPatch
+    db_conn: Any,
+    database: Any,
+    event_bus: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    config_authority: ConfigAuthority,
 ) -> Any:
     import tempfile
     from uuid import uuid4
@@ -151,9 +157,20 @@ def recovery_lease(
     from base.agents.messages.caller_identity import CallerIdentity
     from base.cluster.machine import machine_name
     from base.db import create_agent
+    from base.db.test_db_guard import assert_test_db_url
     from base.native_process.runtime_incarnation import RuntimeIncarnation
     from base.sessions import env_forwarding
     from tests.impersonation_support import recorded_tree
+
+    # The real relay boots this test-owned unit instead of inheriting cluster secrets.
+    url = config_authority.runtime.data_plane.db_url
+    assert_test_db_url(url, context="real impersonation relay fixture")
+    config_authority.env_path.write_text(
+        f"AVA_DB_URL={url}\n"
+        f"AVA_REDIS_URL={config_authority.runtime.data_plane.redis_url}\n"
+        f"AVA_MACHINE_NAME={machine_name()}\n",
+        encoding="utf-8",
+    )
 
     # Test-only gateway isolation is the same skip posture as env_bootstrap;
     # production still re-sources its admitted unit configuration normally.
@@ -187,6 +204,7 @@ def recovery_lease(
                 relay_thread_id=str(uuid4()),
                 relay_codex_remote=f"unix://{socket}",
                 process_metadata=recorded_tree(),
+                authority=config_authority,
             )
             leases.accept(database, event_bus, session["id"], aid, owner, "Continue pending work")
             leases.activate(database, event_bus, session["id"], owner)

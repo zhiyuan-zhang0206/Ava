@@ -34,7 +34,9 @@ from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 
@@ -50,6 +52,7 @@ def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=build_model_catalog(),
         )
     )
 
@@ -215,14 +218,14 @@ def _pin_compact_ceiling(monkeypatch: pytest.MonkeyPatch, *, hard_tokens: int) -
     absolute threshold `auto_compact_will_fire` compares against."""
     from base.lm.context_budget import ContextBudget
 
-    monkeypatch.setattr(
-        "agent.hooks.compact.resolve_context_budget",
-        lambda *_: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
+    def budget(_model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog) -> ContextBudget:
+        return ContextBudget(
             max_context_tokens=1_000_000,
             soft_compact_tokens=hard_tokens,
             hard_compact_tokens=hard_tokens,
-        ),
-    )
+        )
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", budget)
 
 
 async def test_hook_defers_when_a_compaction_will_replace_the_window(

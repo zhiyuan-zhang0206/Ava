@@ -7,9 +7,14 @@ import psycopg
 import pytest
 
 import ava.skills as skills_mod
+from ava.sdk_surface.install import Installation
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import _write_skill
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
+from base import telemetry
+from base.config.service_read import ConfigAuthority
+from base.db import Database
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
@@ -42,13 +47,18 @@ def test_all_for_ava_is_the_live_top_level_index(fake_skills_dir: Path) -> None:
 
 
 def test_help_on_skills_module_is_index_only(
-    fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
+    fake_skills_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+    model_installation: Installation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`ava.help(ava.skills)` renders an INDEX: per entry its `ava.skills.<path>`
     heading plus its one-line description — never a SKILL.md body. The body is
     one `ava.help(ava.skills.<name>)` away; rendering it here would put the whole
     catalog into the prompt."""
     import ava
+
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     _write_skill(
         fake_skills_dir,
@@ -63,7 +73,9 @@ def test_help_on_skills_module_is_index_only(
 
 
 def test_resolution_is_not_consumption(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    fake_skills_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model_installation: Installation,
 ) -> None:
     """Mere access to a skill must not emit `skill_invoked`: `ava.skills.<name>`
     resolution, description reads, dir() and printing a proxy all record
@@ -73,6 +85,8 @@ def test_resolution_is_not_consumption(
     in the transcript). The signal fires on first SKILL.md body consumption —
     help() or a direct `__doc__` read."""
     import ava
+
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
@@ -86,11 +100,12 @@ def test_resolution_is_not_consumption(
     _write_skill(root, "sub", "name: sub\ndescription: s", body="# Sub\n")
 
     recorded: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        skills_mod,
-        "_record_skill_invoked",
-        lambda skill: recorded.append((skill["name"], "loaded")),  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def capture(_db: Database, event: telemetry.Event) -> None:
+        recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
+
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
 
     # Resolution and metadata reads — no body enters the conversation.
     leaf = ava.skills.alpha
@@ -116,7 +131,9 @@ def test_resolution_is_not_consumption(
 
 
 def test_index_render_records_no_loaded_attribution(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    fake_skills_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model_installation: Installation,
 ) -> None:
     """Listing the catalog is not using a skill. `ava.help(ava.skills)` resolves
     every node but opens no body, so it must emit no `skill_invoked` row —
@@ -134,6 +151,8 @@ def test_index_render_records_no_loaded_attribution(
     `ava.help(ava.skills.guide)` consumes the body and MUST attribute."""
     import ava
 
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
     d.mkdir()
@@ -147,11 +166,12 @@ def test_index_render_records_no_loaded_attribution(
     _write_skill(root, "sub", "name: sub\ndescription: s", body="# Sub\n")
 
     recorded: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        skills_mod,
-        "_record_skill_invoked",
-        lambda skill: recorded.append((skill["name"], "loaded")),  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def capture(_db: Database, event: telemetry.Event) -> None:
+        recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
+
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
 
     ava.help(ava.skills)  # walks the leaf, the plain namespace AND the root skill
     assert recorded == []
@@ -183,11 +203,12 @@ def test_files_read_skill_md_records_consumption(
     (skill_dir / "notes.md").write_text("# notes\n", encoding="utf-8")
 
     recorded: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        skills_mod,
-        "_record_skill_invoked",
-        lambda skill: recorded.append((skill["name"], "loaded")),  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def capture(_db: Database, event: telemetry.Event) -> None:
+        recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
+
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
 
     # The exact agent pattern: proxy.path + read of SKILL.md.
     out = ava.files.read(ava.skills.alpha.path + "/SKILL.md")
@@ -201,23 +222,28 @@ def test_files_read_skill_md_records_consumption(
 
 
 def test_files_read_other_files_do_not_record(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    fake_skills_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model_installation: Installation,
 ) -> None:
     """Only a loaded skill's own SKILL.md attributes: sibling files in the
     skill directory, a SKILL.md outside the mounted tree, and index renders
     must stay silent (a random SKILL.md is not a skill the agent loaded)."""
     import ava
 
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     skill_dir = fake_skills_dir / "alpha"
     (skill_dir / "notes.md").write_text("# notes\n", encoding="utf-8")
 
     recorded: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        skills_mod,
-        "_record_skill_invoked",
-        lambda skill: recorded.append((skill["name"], "loaded")),  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def capture(_db: Database, event: telemetry.Event) -> None:
+        recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
+
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
 
     # Sibling file inside the skill dir — skill art, not the body.
     ava.files.read(str(skill_dir / "notes.md"))
@@ -237,7 +263,9 @@ def test_files_read_other_files_do_not_record(
 
 
 def test_every_consumption_records_one_event_and_nothing_is_remembered(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    fake_skills_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model_installation: Installation,
 ) -> None:
     """Attribution is an event written at the moment of consumption, not a
     per-run dedup: the SDK keeps no record of what it already wrote, so each
@@ -245,6 +273,8 @@ def test_every_consumption_records_one_event_and_nothing_is_remembered(
     second read — emits its own `skill_invoked` event. The consumer reads the
     set of skills, so repeats are harmless; remembering them was the buffer."""
     import ava
+
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
@@ -290,11 +320,12 @@ def test_skills_read_consumes_and_records(
     _write_skill(d, "beta", "name: beta\ndescription: b", body="# B\n")
 
     recorded: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        skills_mod,
-        "_record_skill_invoked",
-        lambda skill: recorded.append((skill["name"], "loaded")),  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def capture(_db: Database, event: telemetry.Event) -> None:
+        recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
+
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
 
     out = skills_mod.read("alpha")
     assert out.endswith("# A\n")
@@ -316,10 +347,11 @@ def test_skills_read_returns_same_shape_as_proxy_doc(
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
 
-    def _noop(_skill: object) -> None:
+    def _noop(_db: Database, _event: telemetry.Event) -> None:
         return None
 
-    monkeypatch.setattr(skills_mod, "_record_skill_invoked", _noop)
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", _noop)
     assert skills_mod.read("alpha") == ava.skills.alpha.__doc__
 
 
@@ -343,12 +375,17 @@ def test_skills_read_rejects_non_string_name(fake_skills_dir: Path) -> None:
 
 
 def test_help_skills_index_lists_read(
-    fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
+    fake_skills_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+    model_installation: Installation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The explicit API is discoverable: `ava.help(ava.skills)` renders `read`
     as a function entry (the surface list carries it), and `dir()` includes it
     — while index renders still record no attribution."""
     import ava
+
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
     ava.help(ava.skills)
@@ -361,7 +398,12 @@ def test_help_skills_index_lists_read(
 
 
 def test_consuming_a_skill_lands_a_skill_invoked_row(
-    fake_skills_dir: Path, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    fake_skills_dir: Path,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """End to end with a real database: consuming a skill body leaves a
     `skill_invoked` row in `audit_events` for the consuming agent, carrying the
@@ -370,7 +412,7 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
     from tests.fixtures.units import spawn_agent
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: agent_id)
 
     skills_mod.read("alpha")

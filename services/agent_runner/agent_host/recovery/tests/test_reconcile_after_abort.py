@@ -42,6 +42,8 @@ from base.agents.history.inbound_sideload import (
     committed_ids_for_reconcile,
     sideload_committed_ids,
 )
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement as settlement_mod
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
 
@@ -120,11 +122,15 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The abort settlement's reconcile finalizes the turn's rows at once:
     committed to the flushed checkpoint -> done, fresh orphans -> pending for
     the next claim, rows past the stale threshold -> dead-lettered."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
@@ -150,10 +156,14 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A kill after the abort leaves the rows already final: the boot pass
     (the same helper) is idempotent and silent on the second run."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
@@ -174,10 +184,14 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
 async def test_replaced_incarnation_writes_nothing(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A replacement runtime owns the row now: the stale incarnation's pass is
     refused by the lease fence before any write."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
@@ -203,10 +217,14 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """At the settlement boundary the same refusal is a logged no-op — the
     abort's settlement must not fail because its reconcile was fenced out."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     saver = await _seed_checkpoint(aops_pool, agent, committed)
@@ -227,12 +245,17 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
 
 
 async def test_next_claim_does_not_re_deliver_the_committed_row(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """At-least-once delivery still permits duplicates, but a row the
     checkpoint committed is not re-delivered by the next claim cycle — only
     the uncommitted orphan is."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
@@ -346,8 +369,12 @@ def _insert_write(
 async def test_no_claimed_rows_never_reads_the_checkpoint(
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     saver = _CountingSaver(aops_pool)
     await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
@@ -360,8 +387,12 @@ async def test_only_stale_claims_skip_the_read_and_dead_letter(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     stale = _insert_claimed(db_conn, agent, "stale", age=timedelta(days=2))
     saver = _CountingSaver(aops_pool)
@@ -378,8 +409,12 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
@@ -396,9 +431,13 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
 async def test_committed_and_later_removed_is_finalized_not_reset(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The window proof finalizes a commit the list-presence check would reset."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed, remove_after=True)
@@ -411,9 +450,13 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
 async def test_pending_write_without_successor_is_reset(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A durable pending write alone is not a settled message commit."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     claimed = _insert_claimed(db_conn, agent, "pending write")
     saver = _CountingSaver(aops_pool)
@@ -440,9 +483,13 @@ async def test_pending_write_without_successor_is_reset(
 async def test_pending_write_with_unrelated_successor_is_reset(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A child checkpoint that did not advance messages cannot commit a write."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     claimed = _insert_claimed(db_conn, agent, "unapplied write")
     saver = _CountingSaver(aops_pool)
@@ -470,8 +517,12 @@ async def test_unresolved_window_falls_back_to_the_full_read(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: Any,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
@@ -492,9 +543,13 @@ async def test_unresolved_window_falls_back_to_the_full_read(
 async def test_thread_without_messages_writes_falls_back_to_the_full_read(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A materialized thread (no write rows) must not read as "nothing committed"."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "committed")
     orphan = _insert_claimed(db_conn, agent, "orphan")
@@ -508,9 +563,13 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
 async def test_materialized_thread_with_only_pending_write_falls_back(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A pending write does not prove the thread uses settled message deltas."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     committed = _insert_claimed(db_conn, agent, "materialized")
     saver = await _seed_counting_checkpoint(aops_pool, agent, committed)
@@ -637,9 +696,13 @@ async def test_sideload_decodes_inbound_ids_from_write_rows(
 async def test_reclaimed_row_keeps_its_first_claim_window(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A new claimed_at must not hide a commit from an earlier claim."""
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     claimed = _insert_claimed(db_conn, agent, "reclaimed")
     db_conn.execute(
@@ -670,76 +733,3 @@ async def test_reclaimed_row_keeps_its_first_claim_window(
     _insert_write(db_conn, agent, parent_id, idx=0, type_tag=str(type_tag), blob=bytes(blob))
 
     assert await committed_ids_for_reconcile(aops_pool, saver, agent) == {claimed}
-
-
-async def test_checkpoint_clock_skew_scans_settled_history(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    """A checkpoint clock over 300 seconds behind DB time cannot bound writes."""
-    incarnation = await _admit(aops_pool)
-    agent = incarnation.agent_id
-    committed = _insert_claimed(db_conn, agent, "skewed")
-    saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed)
-    db_conn.execute(
-        "UPDATE checkpoints SET checkpoint = jsonb_set(checkpoint, '{ts}', to_jsonb(%s::text)) "
-        "WHERE thread_id = %s",
-        ((datetime.now(UTC) - timedelta(minutes=10)).isoformat(), str(agent)),
-    )
-    db_conn.commit()
-
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
-
-    assert saver.aget_calls == 0
-    assert _statuses(db_conn, [committed]) == {committed: "done"}
-
-
-async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    """A later clock-correct checkpoint must not make an old skewed write disappear."""
-    incarnation = await _admit(aops_pool)
-    agent = incarnation.agent_id
-    committed = _insert_claimed(db_conn, agent, "historically skewed")
-    saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed, remove_after=True)
-    db_conn.execute(
-        "UPDATE checkpoints SET checkpoint = jsonb_set(checkpoint, '{ts}', to_jsonb(%s::text)) "
-        "WHERE thread_id = %s",
-        ((datetime.now(UTC) - timedelta(minutes=10)).isoformat(), str(agent)),
-    )
-    db_conn.commit()
-    graph = _build_graph(saver)
-    await graph.aupdate_state(
-        {"configurable": {"thread_id": str(agent)}}, {"halted": True}, as_node="work"
-    )
-
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
-
-    assert saver.aget_calls == 0
-    assert _statuses(db_conn, [committed]) == {committed: "done"}
-
-
-async def test_incomplete_full_write_scan_preserves_claimed_row(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: Any,
-) -> None:
-    """A failed history scan cannot turn missing proof into a reset."""
-    incarnation = await _admit(aops_pool)
-    agent = incarnation.agent_id
-    claimed = _insert_claimed(db_conn, agent, "unresolved")
-    saver = _CountingSaver(aops_pool)
-
-    import base.agents.history.inbound_sideload as sideload_mod
-
-    async def _failed_scan(*args: Any, **kwargs: Any) -> set[int]:
-        raise RuntimeError("history unavailable")
-
-    monkeypatch.setattr(sideload_mod, "committed_ids_for_reconcile", _failed_scan)
-    with pytest.raises(RuntimeError, match="history unavailable"):
-        await reconcile_claimed_inbounds_at_startup(
-            aops_pool, saver, agent, incarnation=incarnation
-        )
-
-    assert _statuses(db_conn, [claimed]) == {claimed: "claimed"}

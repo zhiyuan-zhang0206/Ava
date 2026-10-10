@@ -43,6 +43,6 @@ rows that duplicate Settings aliases are rejected.
 
 ## Related owners
 
-- [[base/docs/configuration.ava.okf.md]] — Settings composition and configuration fields.
+- [[base/docs/configuration/configuration.ava.okf.md]] — Settings composition and configuration fields.
 - [[base/host/env/docs/audit.ava.okf.md]] — environment file writes and audit integrity.
 - [[base/host/docs/host.ava.okf.md]] — host primitives.

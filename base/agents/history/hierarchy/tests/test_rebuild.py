@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
@@ -34,7 +35,8 @@ from base.agents.history.hierarchy.rebuild import (
     run_rebuild,
 )
 from base.config import settings
-from base.host.env.agent_slices import ModelOverrides
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 
 AGENT = 7
 
@@ -75,30 +77,32 @@ async def _enqueue_rebuild(pool: AsyncConnectionPool, agent: int = AGENT) -> int
 
 
 @pytest.fixture
-def _groups(monkeypatch: pytest.MonkeyPatch) -> list[list[int]]:
+def _groups(monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog) -> list[list[int]]:
     """Grouping checks of five open nodes (no decay), closing the first three; each ask is recorded."""
     monkeypatch.setattr(settings.agent, "understanding_group_check_open", 5)
     monkeypatch.setattr(settings.agent, "understanding_group_check_decay", 1)
+    monkeypatch.setattr(settings.agent, "understanding_group_model", "deepseek-flash")
     monkeypatch.setattr(gc, "MIN_CHECK_OPEN", 1)
-    monkeypatch.setattr(
-        gc, "_group_model", lambda *_a: ("deepseek-flash", ModelOverrides.from_pins(None))
-    )
     asked: list[list[int]] = []
 
     def generate(
-        _models: object,
-        model: str,
-        _o: object,
-        _level: int,
+        _llm: object,
         nodes: list[OpenNode],
-        calls: list,
-        _agent_id: int,
+        *,
+        model: str,
+        catalog: ModelCatalog,
+        agent_id: int,
+        on_call: Callable[[GroupCall], None] | None = None,
+        **_kw: object,
     ) -> list[Group]:
+        assert catalog is model_catalog
+        assert agent_id == AGENT
+        assert on_call is not None
         asked.append([n.id for n in nodes])
-        calls.append(GroupCall(0, model, "prompt", AIMessage(content="r"), 5.0, None, None))
+        on_call(GroupCall(0, model, "prompt", AIMessage(content="r"), 5.0, None, None))
         return [Group(nodes[0].id, nodes[2].id, f"group of {nodes[0].id}")]
 
-    monkeypatch.setattr(gc, "_generate", generate)
+    monkeypatch.setattr(gc, "generate_groups", generate)
     return asked
 
 
@@ -112,7 +116,7 @@ async def _tree(pool: AsyncConnectionPool) -> list[tuple[Any, ...]]:
 
 
 async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_levels(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]]
+    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
 ) -> None:
     leaves = [await _leaf(aops_pool, i) for i in range(12)]
     stale = await _leaf(aops_pool, 50, depth=2)
@@ -125,7 +129,7 @@ async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_le
         aops_pool, "UPDATE understanding_nodes SET parent_id = %s WHERE id = %s", stale, leaves[0]
     )
 
-    assert await run_rebuild(aops_pool, MagicMock(), MagicMock(), AGENT) == 12
+    assert await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT) == 12
 
     # Each check saw only the leaves that had "landed" by then (the replay horizon), though all
     # twelve exist: the first five; then, with two left open and five more arrived, seven.
@@ -147,18 +151,18 @@ async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_le
 
 
 async def test_rebuilding_twice_gives_the_same_tree(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]]
+    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
 ) -> None:
     for i in range(12):
         await _leaf(aops_pool, i)
-    await run_rebuild(aops_pool, MagicMock(), MagicMock(), AGENT)
+    await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
     once = await _tree(aops_pool)
-    await run_rebuild(aops_pool, MagicMock(), MagicMock(), AGENT)
+    await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
     assert await _tree(aops_pool) == once and len(once) == 2
 
 
 async def test_a_rebuild_touches_only_its_own_agent(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]]
+    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
 ) -> None:
     for i in range(6):
         await _leaf(aops_pool, i)
@@ -169,7 +173,7 @@ async def test_a_rebuild_touches_only_its_own_agent(
         " prompt_version, schema_version) VALUES (8, 2, 0, 5, now(), now(), 'k', 't', 'h', 'i', 0,"
         " 'm', 'group-0.1', 'p', 1) RETURNING id",
     )
-    await run_rebuild(aops_pool, MagicMock(), MagicMock(), AGENT)
+    await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_nodes WHERE id = %s", other[0][0])
 
 
@@ -226,7 +230,11 @@ async def test_a_rebuild_handed_back_waits_out_the_spacing_and_one_rebuild_runs_
 
 
 async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     ran: list[int] = []
 
@@ -238,7 +246,13 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
 
     monkeypatch.setattr(loop, "run_rebuild", fake_rebuild)
     rebuild_id = await _enqueue_rebuild(aops_pool)
-    await loop._Consumer(aops_pool, MagicMock(), []).run_until_idle()
+    await loop._Consumer(
+        aops_pool,
+        MagicMock(),
+        [],
+        catalog=model_catalog,
+        llm_override=config_authority.runtime.lm.llm_override,
+    ).run_until_idle()
     assert ran == [AGENT]
     assert await _rows(
         aops_pool, "SELECT status, leaves FROM understanding_rebuilds WHERE id = %s", rebuild_id
@@ -246,7 +260,11 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
 
 
 async def test_a_failing_rebuild_is_retried_then_failed(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     async def broken(*_a: object, **_kw: object) -> int:
         raise RuntimeError("provider down")
@@ -254,7 +272,13 @@ async def test_a_failing_rebuild_is_retried_then_failed(
     monkeypatch.setattr(loop, "run_rebuild", broken)
     monkeypatch.setattr(loop.telemetry, "emit", lambda *_a, **_kw: None)
     rebuild_id = await _enqueue_rebuild(aops_pool)
-    consumer = loop._Consumer(aops_pool, MagicMock(), [])
+    consumer = loop._Consumer(
+        aops_pool,
+        MagicMock(),
+        [],
+        catalog=model_catalog,
+        llm_override=config_authority.runtime.lm.llm_override,
+    )
     for attempt in (1, 2, 3):
         await _rows(
             aops_pool,
@@ -293,12 +317,12 @@ async def _open_before_parented(pool: AsyncConnectionPool) -> list[tuple[Any, ..
 
 
 async def test_a_leaf_landing_before_a_grouped_one_queues_one_rebuild_that_closes_the_gap(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]]
+    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
 ) -> None:
     """The later segment lands first and is grouped; the earlier one arrives afterwards."""
     for i in range(5, 10):
         await _land(aops_pool, i)
-    await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), AGENT)
+    await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
     assert not await rebuild_pending(aops_pool, AGENT)  # in order so far: nothing queued
 
     for i in range(5):
@@ -307,16 +331,16 @@ async def test_a_leaf_landing_before_a_grouped_one_queues_one_rebuild_that_close
     assert len(await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds")) == 1
     assert await _open_before_parented(aops_pool)  # the gap exists until the rebuild runs
 
-    await run_rebuild(aops_pool, MagicMock(), MagicMock(), AGENT)
+    await run_rebuild(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
     assert await _open_before_parented(aops_pool) == []
 
 
 async def test_leaves_landing_in_order_queue_no_rebuild(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]]
+    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
 ) -> None:
     for i in range(10):
         await _land(aops_pool, i)
-        await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), AGENT)
+        await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT)
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
     await _land(aops_pool, 9)  # a rewrite of an existing, grouped span is not out of order
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []

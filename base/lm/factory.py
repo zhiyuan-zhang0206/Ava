@@ -81,9 +81,9 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import provider_api
+from base.lm.catalog import ModelCatalog
 
 # Reasoning-effort dispatch lives in the companion module base/lm/effort.py
 # (split for the file-size ceiling); per-model facts and the media-capability
@@ -92,7 +92,6 @@ from base.lm import provider_api
 from base.lm.effort import (
     validate_effort as validate_effort,
 )  # re-exported (tests import it via factory)
-from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import ThinkingConfig
 from base.lm.registry import (
     attach_modalities_for_model as attach_modalities_for_model,  # re-exported resolution
@@ -119,35 +118,39 @@ class _LLMFactory(Protocol):
     def __call__(self, model: str, *, agent_id: int | None) -> BaseChatModel: ...
 
 
-def model_supports_vision(model: str) -> bool:
+def model_supports_vision(model: str, *, catalog: ModelCatalog) -> bool:
     """Whether `model` accepts images via registry media types, plugin vision, or fallback.
 
     Answers from the model's **raw registry entry**: a withdrawn id keeps its
     declared facts here, so callers judging an agent's effective model must
     resolve the withdrawal fallback first (`resolve_available_model`)."""
-    return "image" in media_types_for_model(model)
+    return "image" in media_types_for_model(
+        model,
+        models=catalog.models,
+        vision_prefixes={prefix: binding.vision for prefix, binding in catalog.bindings.items()},
+    )
 
 
-def vision_capable_provider_names() -> list[str]:
+def vision_capable_provider_names(*, catalog: ModelCatalog) -> list[str]:
     """Display names of every vision-capable binding.
 
     Feeds the message endpoint's 422 error text (gateway/agents/
     state.py), so the "switch to a vision-capable model" hint stops
     being a hardcoded list that a new provider must remember to edit.
     """
-    return [binding.display_name for binding in model_catalog().bindings.values() if binding.vision]
+    return [binding.display_name for binding in catalog.bindings.values() if binding.vision]
 
 
-def provider_key_of_model(model: str) -> str | None:
+def provider_key_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
     """Provider key for a model name, or None for an unregistered prefix.
 
     Each registered plugin's explicit provider key or stripped dispatch
     prefix. None means the model id matches no registered plugin.
     """
-    return model_catalog().provider_key_of(model)
+    return catalog.provider_key_of(model)
 
 
-def provider_key_map() -> dict[str, tuple[str, str]]:
+def provider_key_map(*, catalog: ModelCatalog) -> dict[str, tuple[str, str]]:
     """Provider dispatch prefix/key → (display name, key env var).
 
     The single source for `_ensure_provider_key`. The key lives in the process environment only (bootstrap
@@ -156,7 +159,7 @@ def provider_key_map() -> dict[str, tuple[str, str]]:
     """
     return {
         binding.provider_key or prefix: (binding.display_name, binding.key_env)
-        for prefix, binding in model_catalog().bindings.items()
+        for prefix, binding in catalog.bindings.items()
     }
 
 
@@ -165,6 +168,8 @@ def validate_model_config(
     model: str | None = None,
     config: dict[str, object] | None = None,
     check_provider_key: bool = True,
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> str:
     """Validate the selected model, its explicit effort and launch credentials.
 
@@ -205,30 +210,30 @@ def validate_model_config(
             "config.llm_model in the spawn request"
         )
 
-    effective_model = resolve_available_model(effective_model)
+    effective_model = resolve_available_model(effective_model, models=catalog.models)
 
     # 1. Model must be registered.
-    all_models: list[str] = [
-        m for models in model_catalog().supported_models.values() for m in models
-    ]
+    all_models: list[str] = [m for models in catalog.supported_models.values() for m in models]
     if effective_model not in all_models:
         raise ValueError(
             f"unknown model {effective_model!r}. Available models: " + ", ".join(sorted(all_models))
         )
 
-    _validate_model_effort(effective_model, config)
+    _validate_model_effort(effective_model, config, catalog=catalog)
 
     # 2. API key must be configured — unless an LLM override is active
     # (e2e tests inject fake chat models via AVA_LLM_OVERRIDE and don't need
     # real keys; the override path in build_chat_model skips the real LLM).
-    if not check_provider_key or settings.lm.llm_override:
+    if not check_provider_key or llm_override:
         return effective_model
 
-    _ensure_provider_key(effective_model)
+    _ensure_provider_key(effective_model, catalog=catalog)
     return effective_model
 
 
-def _validate_model_effort(model: str, config: dict[str, object] | None) -> None:
+def _validate_model_effort(
+    model: str, config: dict[str, object] | None, *, catalog: ModelCatalog
+) -> None:
     """Reject unsupported explicit effort before spawn or override dispatch."""
     effort = config.get("reasoning_effort") if config is not None else None
     if effort is None or effort == "":
@@ -236,18 +241,18 @@ def _validate_model_effort(model: str, config: dict[str, object] | None) -> None
     if not isinstance(effort, str):
         # Spawn handlers translate ValueError into an HTTP 400 response.
         raise ValueError("reasoning_effort must be a string")  # noqa: TRY004
-    spec = model_catalog().models[model]
+    spec = catalog.models[model]
     validate_effort(effort, spec.effort_levels or (), target=model)
 
 
-def _ensure_provider_key(effective_model: str) -> None:
+def _ensure_provider_key(effective_model: str, *, catalog: ModelCatalog) -> None:
     """Fail fast when the effective model's provider API key is not configured.
 
     Drives the lookup from `provider_key_map()`. The key has no Settings field, so it
     is read from the process env and the `.env` file directly. An unregistered model
     that slipped past the spawnable-model check raises.
     """
-    for prefix, (_display, env_var) in provider_key_map().items():
+    for prefix, (_display, env_var) in provider_key_map(catalog=catalog).items():
         if not effective_model.startswith(prefix):
             continue
         # The key arrives on this unit's effective channel: a pure agent-runner
@@ -315,8 +320,10 @@ def build_chat_model(
     media_resolution: str | None = None,
     media_thinking_level: str | None = None,
     base_url: str | None = None,
-    overrides: ModelOverrides | None = None,
+    overrides: ModelOverrides,
     single_attempt: bool = False,
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> BaseChatModel:
     """Pick the provider by model name prefix and return the corresponding ChatModel.
 
@@ -400,7 +407,14 @@ def build_chat_model(
         base_url=base_url,
         overrides=overrides,
         single_attempt=single_attempt,
+        catalog=catalog,
+        llm_override=llm_override,
     )[0]
+
+
+def _provider_model_ids(catalog: ModelCatalog, prefix: str) -> tuple[str, ...]:
+    """The binding's registered IDs, retained in explicit validation diagnostics."""
+    return tuple(sorted(name for name in catalog.models if name.startswith(prefix)))
 
 
 def build_chat_model_bound(
@@ -414,8 +428,10 @@ def build_chat_model_bound(
     media_resolution: str | None = None,
     media_thinking_level: str | None = None,
     base_url: str | None = None,
-    overrides: ModelOverrides | None = None,
+    overrides: ModelOverrides,
     single_attempt: bool = False,
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> tuple[BaseChatModel, provider_api.ProviderBinding | None]:
     """Internal companion: return the client and binding selected by this build."""
     # e2e tests inject fake chat model via AVA_LLM_OVERRIDE (tests/e2e/README.md);
@@ -423,7 +439,7 @@ def build_chat_model_bound(
     # all agents through a fake LLM, and production observability must be fail-loud.
     if type(single_attempt) is not bool:
         raise ValueError("single_attempt must be a boolean")
-    override = settings.lm.llm_override
+    override = llm_override
     if override:
         if single_attempt:
             raise ValueError("LLM overrides do not declare single-attempt construction")
@@ -432,13 +448,11 @@ def build_chat_model_bound(
         )
         return _resolve_override(override, model, agent_id=agent_id), None
 
-    # Every process that builds a model loads the provider plugins (once per
-    # process) through the catalog, including the labeler daemon and the eval
-    # harness that never load plugin.py.
-    catalog = model_catalog()
+    # The composition root supplies a complete catalog, including for services
+    # that never load agent-side plugin.py.
 
     requested_model = model
-    model = resolve_available_model(model)
+    model = resolve_available_model(model, models=catalog.models)
     if model != requested_model:
         if single_attempt:
             raise ValueError("single-attempt generation cannot change its frozen model")
@@ -456,7 +470,9 @@ def build_chat_model_bound(
 
     # The cross-provider reasoning-effort knob, resolved per model: explicit
     # env/.env/overlay value wins, else the model's registry default, else "".
-    resolved_effort: str = resolve_setting("reasoning_effort", model=model, overrides=overrides)
+    resolved_effort: str = resolve_setting(
+        "reasoning_effort", model=model, models=catalog.models, explicit=overrides.reasoning_effort
+    )
 
     # The prefix map is flat (no nesting, collisions rejected at registration),
     # so at most one binding matches. Every builder receives the shared
@@ -470,6 +486,7 @@ def build_chat_model_bound(
                 provider_api.BuildContext(
                     model=model,
                     spec=spec,
+                    provider_model_ids=_provider_model_ids(catalog, prefix),
                     thinking=thinking,
                     resolved_effort=reasoning_effort or resolved_effort,
                     disable_streaming=disable_streaming,
@@ -479,6 +496,12 @@ def build_chat_model_bound(
                     media_thinking_level=media_thinking_level,
                     base_url=base_url,
                     overrides=overrides,
+                    thinking_budget_tokens=resolve_setting(
+                        "claude_thinking_budget_tokens",
+                        model=model,
+                        models=catalog.models,
+                        explicit=overrides.claude_thinking_budget_tokens,
+                    ),
                 )
             )
 

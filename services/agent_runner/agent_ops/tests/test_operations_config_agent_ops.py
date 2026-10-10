@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 
 
@@ -15,6 +17,8 @@ from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 async def test_dispatch_config_read_calls_config_read_op(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """config_read kind -> ops.config_read_op, returns completed with its result."""
     from services.agent_runner.agent_ops import daemon
@@ -22,13 +26,20 @@ async def test_dispatch_config_read_calls_config_read_op(
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     captured: list[bool] = []
 
-    def _fake_config_read() -> ConfigReadResult:
+    def _fake_config_read(*, authority: ConfigAuthority) -> ConfigReadResult:
         captured.append(True)
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
 
     monkeypatch.setattr(daemon.host_config, "config_read_op", _fake_config_read)
     status, result = await daemon._dispatch(
-        "config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
+        "config_read",
+        {},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     # _dispatch serializes the result model to a JSON dict for the wire.
@@ -40,6 +51,8 @@ async def test_dispatch_config_read_calls_config_read_op(
 async def test_dispatch_config_write_passes_overrides(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """config_write kind -> ops.config_write_op(payload['overrides'] + local/actor/trace_id),
     fail-fast on missing key."""
@@ -54,6 +67,7 @@ async def test_dispatch_config_write_passes_overrides(
         local: bool = False,
         actor: str | None = None,
         trace_id: str | None = None,
+        authority: ConfigAuthority,
     ) -> ConfigWriteOpResult:
         captured["overrides"] = overrides
         captured["local"] = local
@@ -69,6 +83,8 @@ async def test_dispatch_config_write_passes_overrides(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
@@ -80,6 +96,8 @@ async def test_dispatch_config_write_passes_overrides(
 async def test_dispatch_config_write_missing_overrides_key_fails(
     op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """payload missing 'overrides' key -> failed result (ConfigWritePayload
     validation rejects it, fail-fast, no silent fallback)."""
@@ -90,7 +108,14 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
     # `overrides` is required; a missing key is a caught ValidationError surfaced
     # as a 'failed' op result (the /ops route returns HTTP 200 + status=failed).
     status, result = await daemon._dispatch(
-        "config_write", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
+        "config_write",
+        {},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )  # no 'overrides' key
     assert status == "failed"
     assert "overrides" in str(result["error"])

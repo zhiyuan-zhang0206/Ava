@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage
 
 from agent.graph.recall._memory_filter import Candidate, filter_candidates
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 def _candidates(*paths: str) -> list[Candidate]:
@@ -59,7 +60,13 @@ async def test_retries_when_reply_unparseable_then_succeeds(
     monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _model_name, **_kw: m)  # pyright: ignore[reportUnknownArgumentType]
 
     picked = await filter_candidates(
-        "q", _candidates("a.md", "b.md", "c.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md", "c.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     )
 
     assert picked == ["b.md"]
@@ -78,7 +85,13 @@ async def test_warns_only_when_all_retries_fail(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _model_name, **_kw: m)  # pyright: ignore[reportUnknownArgumentType]
 
     picked = await filter_candidates(
-        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     )
 
     assert picked == []
@@ -90,7 +103,13 @@ async def test_keeps_only_what_the_model_picked(monkeypatch: pytest.MonkeyPatch)
     _patch_model(monkeypatch, '["b.md"]')
 
     picked = await filter_candidates(
-        "q", _candidates("a.md", "b.md", "c.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md", "c.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     )
 
     assert picked == ["b.md"]
@@ -106,7 +125,13 @@ async def test_records_hmac_query_and_basename_path_sample(
     _patch_model(monkeypatch, f'["{full_path}"]')
 
     assert await filter_candidates(
-        query, _candidates("a.md", full_path), AgentSlices.resolve().memory, log_key=hmac_key
+        query,
+        _candidates("a.md", full_path),
+        AgentSlices.resolve().memory,
+        log_key=hmac_key,
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     ) == [full_path]
 
     verdict = next(
@@ -143,7 +168,13 @@ async def test_does_not_log_an_unrecognised_model_path(
 
     assert (
         await filter_candidates(
-            query, _candidates("a.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+            query,
+            _candidates("a.md"),
+            AgentSlices.resolve().memory,
+            log_key=b"test-key",
+            catalog=build_model_catalog(),
+            llm_override="",
+            overrides=AgentSlices.resolve().overrides,
         )
         == []
     )
@@ -171,7 +202,13 @@ async def test_does_not_log_an_unparseable_model_echo(
 
     assert (
         await filter_candidates(
-            query, _candidates("a.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+            query,
+            _candidates("a.md"),
+            AgentSlices.resolve().memory,
+            log_key=b"test-key",
+            catalog=build_model_catalog(),
+            llm_override="",
+            overrides=AgentSlices.resolve().overrides,
         )
         == []
     )
@@ -199,7 +236,13 @@ async def test_does_not_log_a_filter_exception_echo(
 
     assert (
         await filter_candidates(
-            query, _candidates("a.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+            query,
+            _candidates("a.md"),
+            AgentSlices.resolve().memory,
+            log_key=b"test-key",
+            catalog=build_model_catalog(),
+            llm_override="",
+            overrides=AgentSlices.resolve().overrides,
         )
         == []
     )
@@ -227,7 +270,13 @@ async def test_successful_filter_call_emits_chat_billing(
     monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _name, **_kw: model)  # pyright: ignore[reportUnknownArgumentType]
 
     assert await filter_candidates(
-        "q", _candidates("a.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     ) == ["a.md"]
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
     assert record["extra"]["model"] == settings.agent.memory_recall_filter_model
@@ -256,7 +305,13 @@ async def test_filter_model_is_built_with_reasoning_pinned_off(
 
     assert (
         await filter_candidates(
-            "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+            "q",
+            _candidates("a.md", "b.md"),
+            AgentSlices.resolve().memory,
+            log_key=b"test-key",
+            catalog=build_model_catalog(),
+            llm_override="",
+            overrides=AgentSlices.resolve().overrides,
         )
         == []
     )
@@ -272,7 +327,13 @@ async def test_injects_nothing_when_the_model_rejects_everything(
 
     assert (
         await filter_candidates(
-            "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+            "q",
+            _candidates("a.md", "b.md"),
+            AgentSlices.resolve().memory,
+            log_key=b"test-key",
+            catalog=build_model_catalog(),
+            llm_override="",
+            overrides=AgentSlices.resolve().overrides,
         )
         == []
     )
@@ -287,7 +348,13 @@ async def test_model_order_is_kept_and_capped_at_inject_k(
     _patch_model(monkeypatch, '["c.md", "a.md", "b.md"]')
 
     assert await filter_candidates(
-        "q", _candidates("a.md", "b.md", "c.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md", "c.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     ) == ["c.md", "a.md"]
 
 
@@ -308,7 +375,13 @@ async def test_the_wrappers_small_models_add_are_seen_through(
     _patch_model(monkeypatch, reply)
 
     assert await filter_candidates(
-        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     ) == ["a.md"]
 
 
@@ -319,7 +392,13 @@ async def test_invented_path_is_dropped_not_injected(monkeypatch: pytest.MonkeyP
     _patch_model(monkeypatch, '["a.md", "hallucinated.md"]')
 
     assert await filter_candidates(
-        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     ) == ["a.md"]
 
 
@@ -327,7 +406,13 @@ async def test_duplicate_picks_collapse(monkeypatch: pytest.MonkeyPatch) -> None
     _patch_model(monkeypatch, '["a.md", "a.md"]')
 
     assert await filter_candidates(
-        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     ) == ["a.md"]
 
 
@@ -346,7 +431,13 @@ async def test_unreadable_reply_injects_nothing(
 
     assert (
         await filter_candidates(
-            "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+            "q",
+            _candidates("a.md", "b.md"),
+            AgentSlices.resolve().memory,
+            log_key=b"test-key",
+            catalog=build_model_catalog(),
+            llm_override="",
+            overrides=AgentSlices.resolve().overrides,
         )
         == []
     )
@@ -374,7 +465,13 @@ async def test_timeout_bound_comes_from_settings(
     _patch_model(monkeypatch, '["a.md"]')
 
     picked = await filter_candidates(
-        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     )
 
     assert picked == ["a.md"]
@@ -393,7 +490,13 @@ async def test_model_failure_injects_nothing(
 
     assert (
         await filter_candidates(
-            "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+            "q",
+            _candidates("a.md", "b.md"),
+            AgentSlices.resolve().memory,
+            log_key=b"test-key",
+            catalog=build_model_catalog(),
+            llm_override="",
+            overrides=AgentSlices.resolve().overrides,
         )
         == []
     )
@@ -412,7 +515,13 @@ async def test_disabled_filter_passes_the_top_through_untouched(
     monkeypatch.setattr("base.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
     assert await filter_candidates(
-        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     ) == ["a.md", "b.md"]
     assert not [
         record for record in loguru_records if record["extra"].get("event") == "recall_filter"
@@ -425,7 +534,18 @@ async def test_no_candidates_needs_no_model(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr("base.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert await filter_candidates("q", [], AgentSlices.resolve().memory, log_key=b"test-key") == []
+    assert (
+        await filter_candidates(
+            "q",
+            [],
+            AgentSlices.resolve().memory,
+            log_key=b"test-key",
+            catalog=build_model_catalog(),
+            llm_override="",
+            overrides=AgentSlices.resolve().overrides,
+        )
+        == []
+    )
 
 
 async def test_prompt_lists_when_unsure_instead_of_staying_strict(
@@ -451,7 +571,13 @@ async def test_prompt_lists_when_unsure_instead_of_staying_strict(
     monkeypatch.setattr("base.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
     await filter_candidates(
-        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory, log_key=b"test-key"
+        "q",
+        _candidates("a.md", "b.md"),
+        AgentSlices.resolve().memory,
+        log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     )
 
     assert "err on the side of including" in seen["prompt"]
@@ -484,6 +610,9 @@ async def test_prompt_shows_the_type_tag(monkeypatch: pytest.MonkeyPatch) -> Non
         [Candidate(path="p.md", description="a profile", tags=["type/user", "tech-ops"])],
         AgentSlices.resolve().memory,
         log_key=b"test-key",
+        catalog=build_model_catalog(),
+        llm_override="",
+        overrides=AgentSlices.resolve().overrides,
     )
 
     assert "type/user" in seen["prompt"]

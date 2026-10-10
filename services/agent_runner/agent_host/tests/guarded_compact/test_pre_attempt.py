@@ -9,7 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import _insert
 from base.config import settings
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 from tests.fixtures.model_catalog import AddBindings
@@ -23,13 +23,17 @@ async def test_pre_attempt_construction_rejected_without_provider_or_starvation(
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     unsupported: str,
+    model_catalog: ModelCatalog,
 ) -> None:
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     if unsupported == "binding":
-        binding = model_catalog().bindings["gpt-"]
-        add_bindings({"gpt-": replace(binding, build_single_attempt=None)})
+        binding = model_catalog.bindings["gpt-"]
+        model_catalog = add_bindings(
+            model_catalog, {"gpt-": replace(binding, build_single_attempt=None)}
+        )
     else:
         monkeypatch.setattr(settings.lm, "llm_override", "gpt-6.1-sol")
+    accepted.host._catalog = model_catalog
     await accepted.host.run_turn(accepted.agent)
     status = accepted.status(client)
     assert status["outcome"] == "rejected" and status["reason"] == "single_attempt_unavailable"

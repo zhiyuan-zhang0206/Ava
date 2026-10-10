@@ -10,8 +10,10 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 from ops.agents.spawn import create_agent_row
 
@@ -38,10 +40,17 @@ def _park(
     *,
     status: str,
     pid: int | None = None,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> int:
     """Seed admission input or a terminated hosted incarnation without launching."""
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner="user",
+        machine=machine_name(),
+        authority=config_authority,
+        catalog=model_catalog,
     )
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status=%s, pid=%s WHERE id=%s", (status, pid, aid))
@@ -84,10 +93,15 @@ def test_resurrect_agent_hosted_flips_and_wakes(
     wakes: list[tuple[int, str]],
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """terminated -> idling + resurrect inbound + one wake; no launch, no
     pid-confirm polling."""
-    aid = _park(db_conn, status="terminated")
+    aid = _park(
+        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+    )
     out = wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     assert out == aid
     assert _row(db_conn, aid) == ("idling", None)
@@ -100,11 +114,16 @@ def test_resurrect_agent_hosted_clears_the_corpse_marker(
     wakes: list[tuple[int, str]],
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A reaper-terminated corpse keeps `last_turn_fatal_at` stamped; the
     resurrect transition must clear it or the reaper's next beat would
     re-terminate the freshly revived row (the marker is already past grace)."""
-    aid = _park(db_conn, status="terminated")
+    aid = _park(
+        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+    )
     db_conn.execute(
         "UPDATE agents_meta SET termination_source='reaper', "
         "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
@@ -122,10 +141,15 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
     wakes: list[tuple[int, str]],
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The auto-resurrect trigger CAS semantics are mode-independent: a stale
     trigger still refuses the transition."""
-    aid = _park(db_conn, status="terminated")
+    aid = _park(
+        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+    )
     with pytest.raises(wake.ResurrectTriggerStaleError):
         wake.resurrect_agent(
             database,
@@ -148,6 +172,9 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     managed: bool,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """An observed termination never revalidates its original runtime token."""
     from uuid import uuid4
@@ -160,7 +187,9 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     from base.agents.incarnation.resources import ResourceBirth
     from base.db import insert_inbound_message
 
-    aid = _park(db_conn, status="idling")
+    aid = _park(
+        db_conn, status="idling", config_authority=config_authority, model_catalog=model_catalog
+    )
     if managed:
         db_conn.execute(
             "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
@@ -231,12 +260,16 @@ def _backdate_before_status(db: psycopg.Connection, aid: int, iid: int) -> None:
     db.commit()
 
 
-def _reaped_crash_park(db: psycopg.Connection) -> tuple[int, int]:
+def _reaped_crash_park(
+    db: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
+) -> tuple[int, int]:
     """terminated + reaper source + retained crash marker + a leftover chat
     that predates the termination (the relaxed-trigger shape)."""
     from base.db import insert_inbound_message
 
-    aid = _park(db, status="terminated")
+    aid = _park(
+        db, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+    )
     trigger = insert_inbound_message(
         db,
         aid,
@@ -272,10 +305,15 @@ def test_reaped_crash_row_resumes_leftover_work(
     wakes: list[tuple[int, str]],
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A reaper death is not an operator decision, so a chat that predates it
     still qualifies as the pending-work trigger (task #3617, design section 6)."""
-    aid, trigger = _reaped_crash_park(db_conn)
+    aid, trigger = _reaped_crash_park(
+        db_conn, config_authority=config_authority, model_catalog=model_catalog
+    )
 
     assert (
         wake.resurrect_agent(
@@ -293,13 +331,20 @@ def test_reaped_crash_row_resumes_leftover_work(
 
 
 def test_operator_death_still_refuses_leftover_work(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The crash marker alone never relaxes the fence: a user kill keeps its
     contract — the leftover chat cannot undo it."""
     from base.db import insert_inbound_message
 
-    aid = _park(db_conn, status="terminated")
+    aid = _park(
+        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+    )
     trigger = insert_inbound_message(
         db_conn, aid, "leftover work", "user", bus=event_bus, database=database
     )
@@ -316,9 +361,13 @@ def test_operator_death_still_refuses_leftover_work(
     assert _row(db_conn, aid)[0] == "terminated"
 
 
-def test_suppressed_wakes_refuse_the_reaped_crash_trigger(db_conn: psycopg.Connection) -> None:
+def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
+    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
+) -> None:
     """The relaxed fence does not bypass an active automatic-wake suppression."""
-    aid, trigger = _reaped_crash_park(db_conn)
+    aid, trigger = _reaped_crash_park(
+        db_conn, config_authority=config_authority, model_catalog=model_catalog
+    )
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
         "wake_suppress_reason = 'resurrect_failed' WHERE id = %s",
@@ -332,12 +381,14 @@ def test_suppressed_wakes_refuse_the_reaped_crash_trigger(db_conn: psycopg.Conne
 
 
 def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
 ) -> None:
     """After consecutive permanent provider rejections the automatic trigger is
     refused at the final CAS; the durable streak refuses even with no
     suppression window set (a claim clears the window by design)."""
-    aid, trigger = _reaped_crash_park(db_conn)
+    aid, trigger = _reaped_crash_park(
+        db_conn, config_authority=config_authority, model_catalog=model_catalog
+    )
     db_conn.execute("UPDATE agents_meta SET permanent_reject_streak = 2 WHERE id = %s", (aid,))
     db_conn.commit()
 
@@ -347,11 +398,13 @@ def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
 
 
 def test_reaped_crash_row_keeps_the_failed_restart_fence(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
 ) -> None:
     """A failed-restart target keeps its hard fence even for a reaped crash
     row: the relaunch observation must settle first."""
-    aid, trigger = _reaped_crash_park(db_conn)
+    aid, trigger = _reaped_crash_park(
+        db_conn, config_authority=config_authority, model_catalog=model_catalog
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET runtime_generation = gen_random_uuid(), "
@@ -379,13 +432,18 @@ def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The relaxed fence is not a budget bypass: an exhausted auto-resurrect
     budget refuses even a reaper-marked leftover."""
     from base.agents import ResurrectBudgetExhausted
     from base.db import insert_inbound_message
 
-    aid, trigger = _reaped_crash_park(db_conn)
+    aid, trigger = _reaped_crash_park(
+        db_conn, config_authority=config_authority, model_catalog=model_catalog
+    )
     for _ in range(wake._auto_resurrect_max_attempts()):
         insert_inbound_message(
             db_conn, aid, "", "system", kind="resurrect", bus=event_bus, database=database
@@ -401,11 +459,16 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
     wakes: list[tuple[int, str]],
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A manual resurrect passes no trigger: the explicit human override
     bypasses both suppression and the tripped breaker (the breaker record —
     streak and suppression reason — is retained, auditable)."""
-    aid = _park(db_conn, status="terminated")
+    aid = _park(
+        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+    )
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until = now() + interval '300 days', "
         "wake_suppress_reason = 'permanent_provider_reject', permanent_reject_streak = 2 "
@@ -435,12 +498,17 @@ def test_historical_runtime_cannot_be_resurrected(
     guarded: bool,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """An absent command pointer cannot adopt a historical or unknown runtime."""
     from base.agents import ResurrectRefused
     from base.db import insert_inbound_message
 
-    aid = _park(db_conn, status="terminated")
+    aid = _park(
+        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+    )
     db_conn.execute(
         "UPDATE agents_meta SET runtime_kind=%s, incarnation_resources=NULL, "
         "runtime_generation=CASE WHEN %s THEN runtime_generation ELSE NULL END, "
@@ -477,13 +545,18 @@ def test_incomplete_hosted_target_requires_cutover(
     missing: str,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
     """A hosted label alone cannot replace the retained incarnation authority."""
     from psycopg import sql
 
     from base.agents import ResurrectRefused
 
-    aid = _park(db_conn, status="terminated")
+    aid = _park(
+        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+    )
     db_conn.execute(
         sql.SQL("UPDATE agents_meta SET {}=%s WHERE id=%s").format(sql.Identifier(missing)),
         (424243 if missing == "pid" else None, aid),

@@ -7,22 +7,30 @@ Covers:
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from collections.abc import Iterator
+from dataclasses import replace
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import httpx
 import pytest
 
+import ava
+from ava.gateway_client.transport import use_client
+from ava.sdk_surface.install import Installation
 from base.agents import GatewayUnavailable
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
-def _client_mock() -> MagicMock:
-    """A gateway client double: the transport's `_http()` returns it, so `mock.post` etc. are what
-    the transport calls."""
+@pytest.fixture()
+def mock_client(
+    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
+) -> Iterator[MagicMock]:
+    """Bind the wire client through its public seam and supply its explicit SDK owner."""
+    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     client = MagicMock()
-    client.return_value = client
-    return client
+    with use_client(client):
+        yield client
 
 
 # --- raise_from_response ---
@@ -189,7 +197,6 @@ class TestRaiseFromResponse:
 
 
 class TestPostRetry:
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_first_attempt_succeeds(self, mock_client: MagicMock):
         from ava.gateway_client.transport import post
 
@@ -201,7 +208,6 @@ class TestPostRetry:
         assert result is mock_resp
         assert mock_client.post.call_count == 1
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_retries_on_transport_error(self, mock_client: MagicMock, retry_waits: list[float]):
         from ava.gateway_client.transport import post
 
@@ -221,7 +227,6 @@ class TestPostRetry:
         assert mock_client.post.call_count == 3
         assert len(retry_waits) == 2
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_all_retries_exhausted_raises_gateway_unavailable(self, mock_client: MagicMock):
         from ava.gateway_client.transport import post
@@ -232,7 +237,6 @@ class TestPostRetry:
             post("/api/agents")
         assert mock_client.post.call_count == 3
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_http_4xx_not_retried(self, mock_client: MagicMock):
         """HTTP 4xx is an application error, no retry."""
         from ava.gateway_client.transport import post
@@ -263,7 +267,6 @@ class TestPostTimeoutContract:
     SDK ran unbounded and `AVA_GATEWAY_HTTP_TIMEOUT_SECONDS` did nothing.
     """
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_default_defers_to_client_timeout(self, mock_client: MagicMock):
         """No per-call timeout → httpx gets the sentinel, never None."""
         from ava.gateway_client.transport import post
@@ -278,7 +281,6 @@ class TestPostTimeoutContract:
         assert passed is httpx.USE_CLIENT_DEFAULT
         assert passed is not None
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_explicit_timeout_is_forwarded(self, mock_client: MagicMock):
         """A per-call timeout still overrides the client default."""
         from ava.gateway_client.transport import post
@@ -297,7 +299,6 @@ class TestPostTimeoutContract:
 
 
 class TestGetRetry:
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_first_attempt_succeeds(self, mock_client: MagicMock):
         from ava.gateway_client.transport import get
 
@@ -309,7 +310,6 @@ class TestGetRetry:
         assert result is mock_resp
         assert mock_client.get.call_count == 1
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_all_retries_exhausted_raises_gateway_unavailable(self, mock_client: MagicMock):
         from ava.gateway_client.transport import get
@@ -325,7 +325,6 @@ class TestGetRetry:
 
 
 class TestSendMessage:
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_send_message_fire_and_forget(self, mock_client: MagicMock):
         """send_message is pure POST + return, does not read the status field."""
         from ava.gateway_client import send_message
@@ -344,7 +343,6 @@ class TestSendMessage:
 
 class TestLifecycle:
     @pytest.mark.parametrize("wire_status", ["enqueued", "already_terminated"])
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_terminate_returns_status(self, mock_client: MagicMock, wire_status: str):
         from ava.gateway_client import terminate
 
@@ -360,7 +358,6 @@ class TestLifecycle:
         assert result == {"status": wire_status, "open_tasks": None}
         assert mock_client.post.call_args.kwargs["json"]["force"] is True
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_terminate_passes_open_tasks_hint_through(self, mock_client: MagicMock):
         """A non-null hint rides the client verbatim; the SDK converts it."""
         from ava.gateway_client import terminate
@@ -386,7 +383,6 @@ class TestLifecycle:
         result = terminate(42)
         assert result == {"status": "enqueued", "open_tasks": hint}
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_restart_returns_status(self, mock_client: MagicMock):
         from ava.gateway_client import restart
 
@@ -421,28 +417,20 @@ def _transient_resp(status: int, body: dict | None = None) -> MagicMock:
 
 
 class TestTransientHttpRetry:
-    """Idempotent requests retry transient HTTP 429/5xx with bounded backoff.
+    """Idempotent requests retry known transient statuses with bounded backoff."""
 
-    Regression for task #960: the 2026-08-07 memory-search transient 500
-    crashed an agent's graph because the client had no HTTP-status retry and
-    the before_llm caller saw an uncaught HTTPStatusError.
-    """
-
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
-    def test_memory_search_transient_500_self_heals(self, mock_client: MagicMock):
-        """The incident scenario: a plain-text 500 (FastAPI default) followed
-        by success. The retry rides out the blip; the caller sees results."""
+    def test_memory_search_unknown_500_is_exposed_once(self, mock_client: MagicMock):
+        """An unhandled server failure must not be retried as backend congestion."""
         from ava.gateway_client import memory_search
 
         ok = _transient_resp(200, {"results": [{"path": "a.md", "description": "d", "tags": []}]})
         mock_client.post.side_effect = [_transient_resp(500), ok]
 
-        results = memory_search("query", 5)
-        assert [r.path for r in results] == ["a.md"]
-        assert mock_client.post.call_count == 2
+        with pytest.raises(httpx.HTTPStatusError):
+            memory_search("query", 5)
+        assert mock_client.post.call_count == 1
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_memory_search_dedicated_timeout_and_single_retry(self, mock_client: MagicMock):
         """Memory search carries its own budget (task #2003/A): the
@@ -474,7 +462,6 @@ class TestTransientHttpRetry:
             == settings.services.memory_search_deadline_seconds + gc._MEMORY_SEARCH_TIMEOUT_MARGIN_S
         )
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_memory_search_caller_timeout_overrides_default(self, mock_client: MagicMock):
         """An explicit `timeout` replaces the derived default for that one call."""
@@ -487,7 +474,6 @@ class TestTransientHttpRetry:
         passed = mock_client.post.call_args.kwargs["timeout"]
         assert passed.read == 9.0
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_transient_5xx_exhausted_surfaces_wire_error(self, mock_client: MagicMock):
         """After retries are exhausted the wire contract is preserved: a 503
@@ -504,7 +490,6 @@ class TestTransientHttpRetry:
         with pytest.raises(IndexerUnavailable, match="embed failed"):
             raise_from_response(resp)  # pyright: ignore[reportUnknownArgumentType]
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_transient_5xx_not_retried_for_non_idempotent(self, mock_client: MagicMock):
         """spawn is non-idempotent: an HTTP 5xx means the route may have
@@ -523,7 +508,6 @@ class TestTransientHttpRetry:
             )
         assert mock_client.post.call_count == 1
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_get_transient_5xx_retried(self, mock_client: MagicMock):
         from ava.gateway_client.transport import get
@@ -535,19 +519,17 @@ class TestTransientHttpRetry:
         assert resp is ok
         assert mock_client.get.call_count == 2
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_delete_transient_5xx_retried(self, mock_client: MagicMock):
         from ava.gateway_client.transport import _delete
 
         ok = _transient_resp(204)
-        mock_client.delete.side_effect = [_transient_resp(500), ok]
+        mock_client.delete.side_effect = [_transient_resp(503), ok]
 
         resp = _delete("/api/presets/1")
         assert resp is ok
         assert mock_client.delete.call_count == 2
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_429_retried(self, mock_client: MagicMock):
         from ava.gateway_client.transport import get
@@ -595,15 +577,14 @@ class TestRetryBackoffJitter:
         pin_no_identity()
         assert [gc._retry_delay_seconds(i) for i in range(6)] == [1.0, 2.0, 4.0, 8.0, 8.0, 8.0]
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_sleeps_follow_backoff_schedule(
-        self, mock_client: MagicMock, retry_waits: list[float], monkeypatch: MagicMock
+        self, mock_client: MagicMock, retry_waits: list[float], monkeypatch: pytest.MonkeyPatch
     ):
         """Retries sleep the bounded backoff schedule, not the old fixed 1s."""
         from ava.gateway_client.transport import post
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-        pin_no_identity()
+        ava.bind_context(replace(ava.context, identity=None))
         mock_client.post.side_effect = httpx.ConnectError("refused")
 
         with pytest.raises(GatewayUnavailable):
@@ -626,7 +607,6 @@ class TestSendMessageAtLeastOnceWithKey:
             httpx.ReadError("reply lost"),
         ],
     )
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_send_message_retries_transport_failure_with_one_key(
         self, mock_client: MagicMock, error: httpx.TransportError
@@ -645,9 +625,8 @@ class TestSendMessageAtLeastOnceWithKey:
         assert len(keys) == 1, "all retries of one message must share one key"
         assert next(iter(keys))
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
-    def test_send_message_retries_transient_5xx(self, mock_client: MagicMock):
+    def test_send_message_unknown_500_is_exposed_once(self, mock_client: MagicMock):
         from ava.gateway_client import send_message
 
         resp = _transient_resp(500)
@@ -657,9 +636,8 @@ class TestSendMessageAtLeastOnceWithKey:
 
         with pytest.raises(httpx.HTTPStatusError):
             send_message(42, content="hello", source="user")
-        assert mock_client.post.call_count == 3  # outcome unknown but deduped by key
+        assert mock_client.post.call_count == 1
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")
     def test_send_message_503_without_reason_surfaces_status_code(self, mock_client: MagicMock):
         """Regression for task #1205 (2026-08-12 cluster-update report): a
@@ -679,7 +657,6 @@ class TestSendMessageAtLeastOnceWithKey:
         assert mock_client.post.call_count == 3  # AtLeastOnceWithKey retries, deduped by key
         assert not isinstance(excinfo.value.__context__, KeyError)
 
-    @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     def test_send_message_sends_key_header(self, mock_client: MagicMock):
         from ava.gateway_client import send_message
 

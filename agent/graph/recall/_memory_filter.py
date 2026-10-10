@@ -40,7 +40,8 @@ from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
 
-from base.host.env.agent_slices import MemoryRecall
+from base.host.env.agent_slices import MemoryRecall, ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 _LABEL = "recall-filter"
@@ -164,7 +165,14 @@ def _log_filter_decision(
 
 
 async def filter_candidates(
-    query: str, candidates: list[Candidate], memory: MemoryRecall, log_key: bytes
+    query: str,
+    candidates: list[Candidate],
+    memory: MemoryRecall,
+    log_key: bytes,
+    *,
+    catalog: ModelCatalog,
+    overrides: ModelOverrides,
+    llm_override: str,
 ) -> list[str]:
     """The paths worth injecting, in the model's order, at most `inject_k`.
 
@@ -191,7 +199,11 @@ async def filter_candidates(
     # is worth a warning — a single flake is routine, three in a row is not
     # (user ruling 2026-08-05: retry x3, warn only when all attempts fail).
     model = build_chat_model(
-        memory.memory_recall_filter_model, reasoning_effort=ReasoningEffort.NONE
+        memory.memory_recall_filter_model,
+        reasoning_effort=ReasoningEffort.NONE,
+        catalog=catalog,
+        overrides=overrides,
+        llm_override=llm_override,
     )
     last_failure: str | None = None
     for _attempt in range(1, memory.memory_recall_filter_max_retries + 1):
@@ -213,6 +225,7 @@ async def filter_candidates(
                 reply,
                 model=memory.memory_recall_filter_model,
                 usage_kind="chat",
+                catalog=catalog,
             )
             # `.text` is a property on current langchain messages (a str
             # subclass); fall back to the raw content when it is absent.

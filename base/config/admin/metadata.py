@@ -17,9 +17,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
-from base.host.env.config_registry import Capability, field_editor_type
+from base.config.service_read import ConfigAuthority, domain_model_classes
+from base.host.env.config_registry import (
+    Capability,
+    field_alias,
+    field_editor_type,
+    fields,
+    schema_extra,
+)
 
 # Stand-in a sensitive field carries in `raw_overrides` instead of its cleartext
 # value: the panel/CLI round-trips it unchanged on a full-replace PUT, and the
@@ -72,14 +80,12 @@ class ConfigFieldMeta:
         self.choices = choices
 
 
-def get_config_metadata() -> list[ConfigFieldMeta]:
+def get_config_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:
     """Walk every sub-model's fields and extract the metadata the frontend needs."""
-    from base.config import _FIELDS, current_field_values, field_alias, schema_extra
-
-    values = current_field_values()
+    values = authority.current_field_values()
     result: list[ConfigFieldMeta] = []
-    for name, ref in _FIELDS.items():
-        field_info = ref.info
+    for name, ref in fields().items():
+        field_info: FieldInfo = domain_model_classes()[ref.domain].model_fields[name]
         extra = schema_extra(field_info)
         type_name, choices = field_editor_type(field_info.annotation)
 
@@ -125,7 +131,7 @@ def get_config_metadata() -> list[ConfigFieldMeta]:
     return result + plugin_metadata()
 
 
-def env_override_values(*, local: bool = False) -> dict[str, Any]:
+def env_override_values(*, authority: ConfigAuthority, local: bool = False) -> dict[str, Any]:
     """field name -> current value for every field explicitly set in this unit's
     `.env` that a PUT /api/config would accept.
 
@@ -137,15 +143,14 @@ def env_override_values(*, local: bool = False) -> dict[str, Any]:
     for a remote target, the connection / identity values the first `ava start` wrote — so
     the whole set round-trips back through a PUT without rejection.
     """
-    from base.config import current_field_values
     from base.config.admin.plugin_config import plugin_overrides
-    from base.host.env import runtime_config
 
     plugin_values = plugin_overrides()
-    set_fields = runtime_config.env_set_field_names() | plugin_values.keys()
-    values = {**current_field_values(), **plugin_values}
+    aliases = authority.read_env_aliases()
+    set_fields = {name for name in fields() if field_alias(name) in aliases} | plugin_values.keys()
+    values = {**authority.current_field_values(), **plugin_values}
     out: dict[str, Any] = {}
-    for meta in get_config_metadata():
+    for meta in get_config_metadata(authority=authority):
         if meta.name not in set_fields or not meta.writable:
             continue
         if meta.scope == "host" and not local and not meta.remote_writable:

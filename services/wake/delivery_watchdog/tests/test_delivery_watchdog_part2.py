@@ -12,8 +12,10 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog.daemon import (
     gc_alerted,
     persist_alerted,
@@ -38,24 +40,28 @@ def pool():
         p.close()
 
 
-def _make_idling_agent(db: psycopg.Connection) -> int:
+def _make_idling_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     """spawn_agent creates the agents_meta row (create_agent does not — that
     is the spawn path's job); the alert filter reads owner status, so tests
     spawn then park the agent 'idling' (same pattern as the heartbeat daemon
     tests)."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (aid,))
     db.commit()
     return aid
 
 
-def _make_running_agent(db: psycopg.Connection) -> int:
+def _make_running_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
     db.commit()
@@ -120,10 +126,12 @@ def _healthy_host_verdict(db_conn: psycopg.Connection) -> None:
 # ── Terminated-owner resurrect retry (Task #689 G4) ───────────────────────────
 
 
-def _make_terminated_agent(db: psycopg.Connection) -> int:
+def _make_terminated_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'exit' "
@@ -134,10 +142,12 @@ def _make_terminated_agent(db: psycopg.Connection) -> int:
     return aid
 
 
-def _make_reaped_crash_agent(db: psycopg.Connection) -> int:
+def _make_reaped_crash_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     """A `terminated` row the SYSTEM reaped after a crash: reaper source plus
     the retained crash marker (task #3617's relaxed-trigger population)."""
-    aid = _make_terminated_agent(db)
+    aid = _make_terminated_agent(db, model_catalog=model_catalog, config_authority=config_authority)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET termination_source = 'reaper', "
@@ -208,13 +218,15 @@ def _insert_pending_resurrect_row(
     return inbound_id
 
 
-def _make_crash_marked_agent(db: psycopg.Connection) -> int:
+def _make_crash_marked_agent(
+    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> int:
     """An idling row with the corpse marker set — the corpse reaper's own
     predicate (`last_turn_fatal_at IS NOT NULL` on an idling row).
     spawn_agent leaves the marker NULL, so the scenario stamps it."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user")
+    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'idling', last_turn_fatal_at = now() WHERE id = %s",
@@ -231,9 +243,16 @@ class TestAlertDedupPersistence:
     forgotten (so the pending -> claimed -> pending flip re-alerts)."""
 
     def test_persist_then_reload_seeds_alerted_set(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
 
         # First daemon life: alert once, persist the delta.
@@ -249,10 +268,17 @@ class TestAlertDedupPersistence:
         assert newly == 0
 
     def test_reload_roundtrip_persists_only_given_ids(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         # FK -> inbound_messages: only real inbound ids can be persisted.
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid_a = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         iid_b = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         persist_alerted(pool, {iid_a, iid_b})
@@ -262,9 +288,16 @@ class TestAlertDedupPersistence:
         assert select_alerted_ids(pool) == {iid_a, iid_b}
 
     def test_prune_forgets_rows_that_left_pending(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
-        aid = _make_idling_agent(db_conn)
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         _, alerted = scan_once(pool, _THRESHOLD_S, set())
         persist_alerted(pool, alerted)
@@ -288,8 +321,17 @@ class TestAlertDedupPersistence:
         assert newly == 1
         assert alerted3 == {iid}
 
-    def test_gc_removes_old_rows(self, db_conn: psycopg.Connection, pool: ConnectionPool) -> None:
-        aid = _make_idling_agent(db_conn)
+    def test_gc_removes_old_rows(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+    ) -> None:
+        aid = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
         persist_alerted(pool, {iid})
         # Backdate the row beyond the TTL (2h) — as if it were alerted long ago
@@ -321,37 +363,59 @@ class TestStalledCrashMarkedRecovery:
     `test_stall_recovery.py`."""
 
     def test_selector_matches_only_marked_idling_owners(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         from services.wake.delivery_watchdog import stall_recovery as sr
 
-        zombie = _make_crash_marked_agent(db_conn)
+        zombie = _make_crash_marked_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         zombie_inbound = _insert_old_inbound(db_conn, zombie, age_s=_THRESHOLD_S + 5)
-        healthy = _make_idling_agent(db_conn)
+        healthy = _make_idling_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, healthy, age_s=_THRESHOLD_S + 5)
-        running = _make_running_agent(db_conn)
+        running = _make_running_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET last_turn_fatal_at = now() WHERE id = %s", (running,)
             )
         db_conn.commit()
         _insert_old_inbound(db_conn, running, age_s=_THRESHOLD_S + 5)
-        fresh = _make_crash_marked_agent(db_conn)
+        fresh = _make_crash_marked_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, fresh, age_s=1.0)
 
         rows = sr.select_stalled_crash_marked(pool, _THRESHOLD_S)
         assert [(r[0], r[1]) for r in rows] == [(zombie_inbound, zombie)]
 
     def test_selector_excludes_halted_owners(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """A tripped recovery breaker (durable streak) or a live suppression
         window keeps the scan from starting a recovery — task #3617's halt."""
         from services.wake.delivery_watchdog import stall_recovery as sr
 
-        tripped = _make_crash_marked_agent(db_conn)
+        tripped = _make_crash_marked_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, tripped, age_s=_THRESHOLD_S + 5)
-        suppressed = _make_crash_marked_agent(db_conn)
+        suppressed = _make_crash_marked_agent(
+            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        )
         _insert_old_inbound(db_conn, suppressed, age_s=_THRESHOLD_S + 5)
         with db_conn.cursor() as cur:
             cur.execute(

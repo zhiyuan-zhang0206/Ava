@@ -25,6 +25,7 @@ from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, pool
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -37,7 +38,11 @@ from tests.impersonation_support import recorded_tree
 
 
 def test_reminder_commands_are_bare_ava(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The renewal reminder names no interpreter or home: a bare `ava` resolves
     through the executor's inherited AVA_HOME."""
@@ -60,6 +65,7 @@ def test_reminder_commands_are_bare_ava(
         process_metadata={**recorded_tree(), "invoked_python": "/preview source/.venv/bin/python"},
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
@@ -87,7 +93,12 @@ def test_reminder_commands_are_bare_ava(
 
 @pytest.mark.parametrize("bad", [7, "", "  ", ["python"]])
 def test_request_rejects_a_malformed_invoked_python(
-    db_conn: psycopg.Connection, bad: object, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    bad: object,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -108,6 +119,7 @@ def test_request_rejects_a_malformed_invoked_python(
             process_metadata={**recorded_tree(), "invoked_python": bad},
             relay_provider="codex",
             relay_thread_id=str(uuid4()),
+            authority=config_authority,
         )
 
 
@@ -117,6 +129,7 @@ async def _termination_session(
     *,
     status: str = "active",
     automatic: bool = False,
+    config_authority: ConfigAuthority,
 ) -> tuple[RuntimeIncarnation, dict[str, Any]]:
     agent_id = create_agent(conn)
     conn.execute(
@@ -145,6 +158,7 @@ async def _termination_session(
         process_metadata=recorded_tree(),
         relay_provider="claude",
         automatic=automatic,
+        authority=config_authority,
     )
     if status in ("accepted", "active"):
         leases.accept(
@@ -233,9 +247,14 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     mode: str,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     owner, session = await _termination_session(
-        db_conn, aops_pool, status="requested" if mode == "live" else "active"
+        db_conn,
+        aops_pool,
+        status="requested" if mode == "live" else "active",
+        config_authority=config_authority,
     )
     runtime = Runtime(
         context=AvaContext(
@@ -299,9 +318,15 @@ def _age_and_sweep_notices(conn: psycopg.Connection, agent_id: int) -> None:
 
 @pytest.mark.parametrize("status", ["requested", "accepted", "active"])
 async def test_termination_closes_automatic_preparation_and_dismisses_reminders(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, status: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    status: str,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
-    owner, session = await _termination_session(db_conn, aops_pool, status=status, automatic=True)
+    owner, session = await _termination_session(
+        db_conn, aops_pool, status=status, automatic=True, config_authority=config_authority
+    )
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
         "VALUES(%s,'renew','reminder','system',jsonb_build_object('lease_id',%s::text))",
@@ -322,9 +347,14 @@ async def test_termination_closes_automatic_preparation_and_dismisses_reminders(
 
 
 async def test_termination_notice_rollback_and_repeated_status_writes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
-    owner, session = await _termination_session(db_conn, aops_pool)
+    owner, session = await _termination_session(
+        db_conn, aops_pool, config_authority=config_authority
+    )
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
         assert len(_native_notices(db_conn, owner.agent_id)) == 2
@@ -339,9 +369,14 @@ async def test_termination_notice_rollback_and_repeated_status_writes(
 
 
 async def test_restart_and_termination_without_a_lease_add_no_notices(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
-    owner, session = await _termination_session(db_conn, aops_pool)
+    owner, session = await _termination_session(
+        db_conn, aops_pool, config_authority=config_authority
+    )
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     assert _native_notices(db_conn, owner.agent_id) == []
@@ -366,11 +401,15 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     transport_dead: bool,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from cli.commands.agents import impersonation as cli_impersonation
     from cli.parsers import build_parser
 
-    owner, session = await _termination_session(db_conn, aops_pool)
+    owner, session = await _termination_session(
+        db_conn, aops_pool, config_authority=config_authority
+    )
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     emitted: list[str] = []
@@ -424,8 +463,12 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
-    owner, session = await _termination_session(db_conn, aops_pool)
+    owner, session = await _termination_session(
+        db_conn, aops_pool, config_authority=config_authority
+    )
     reads = 0
     emitted: list[str] = []
 
@@ -484,9 +527,13 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
 
-    owner, _session = await _termination_session(db_conn, aops_pool)
+    owner, _session = await _termination_session(
+        db_conn, aops_pool, config_authority=config_authority
+    )
     started = db_conn.execute("SELECT transaction_timestamp()").fetchone()
     assert started is not None
     with pool(max_size=1) as other, other.connection() as conn:

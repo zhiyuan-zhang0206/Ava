@@ -7,14 +7,19 @@ import psycopg
 from base.agents import AgentNotFound, InvalidModelConfig
 from base.agents.birth_config import resolve_birth_config
 from base.config.agent_pins import resolve_agent_config_pins
-from base.host.env.agent_slices import agent_setting
+from base.config.service_read import ConfigAuthority
 from base.lm import factory
+from base.lm.catalog import ModelCatalog
 
 
 def validate_spawn_model_config(
     cur: psycopg.Cursor,
     config: dict[str, object] | None,
     fork_from: int | None = None,
+    *,
+    catalog: ModelCatalog,
+    llm_override: str,
+    authority: ConfigAuthority,
 ) -> str:
     """Check the model and effort a plain birth or inherited fork will run."""
     inherited = None
@@ -25,14 +30,26 @@ def validate_spawn_model_config(
             raise AgentNotFound(f"fork source agent {fork_from} does not exist")
         inherited = row[0]
     try:
-        birth = resolve_birth_config(cur, config, inherited=inherited)
-        return factory.validate_model_config(config=resolve_agent_config_pins(config, birth))
+        birth = resolve_birth_config(
+            cur, config, inherited=inherited, catalog=catalog, authority=authority
+        )
+        return factory.validate_model_config(
+            config=resolve_agent_config_pins(config, birth),
+            catalog=catalog,
+            llm_override=llm_override,
+        )
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc
 
 
 def validate_restart_model_config(
-    cur: psycopg.Cursor, agent_id: int, overlay: Mapping[str, object]
+    cur: psycopg.Cursor,
+    agent_id: int,
+    overlay: Mapping[str, object],
+    *,
+    catalog: ModelCatalog,
+    llm_override: str,
+    default_model: str,
 ) -> None:
     """Lock and check overlay > stored overlay > birth before changing either field.
 
@@ -54,7 +71,11 @@ def validate_restart_model_config(
     pins = resolve_agent_config_pins(merged, birth_config)
     try:
         factory.validate_model_config(
-            model=agent_setting("llm_model", pins), config=pins, check_provider_key=False
+            model=pins.get("llm_model", default_model),
+            config=pins,
+            check_provider_key=False,
+            catalog=catalog,
+            llm_override=llm_override,
         )
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc

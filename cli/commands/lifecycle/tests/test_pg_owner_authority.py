@@ -45,7 +45,7 @@ from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from services.derived.memory_indexer.backends.pgvector import prepare_table
-from services.derived.memory_indexer.embeddings.factory import get_provider
+from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
 _OWNER_PASSWORD = "owner-login-fixture"  # noqa: S105 — test fixture, not a real credential
 _GROUPS = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
@@ -280,7 +280,7 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     """Same catalog, same application privileges, only the dial changed."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
     legacy, current = "ava_lgcy", "ava_auth"
-    _provision_by_owner_login(owned_pg, legacy, get_provider().dim)
+    _provision_by_owner_login(owned_pg, legacy, get_descriptor().dim)
     _bind_cluster_url(monkeypatch, owned_pg, current)
 
     assert _provision_by_authority(owned_pg, current) is True

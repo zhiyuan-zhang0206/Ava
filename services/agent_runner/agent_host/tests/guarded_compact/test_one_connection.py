@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel
@@ -21,6 +21,7 @@ async def test_real_chain_pool_one_provider_can_borrow_only_connection(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
+    model_catalog: ModelCatalog,
 ) -> None:
     async with AsyncConnectionPool[psycopg.AsyncConnection](
         db_conn.info.dsn, min_size=1, max_size=1, open=False
@@ -36,9 +37,11 @@ async def test_real_chain_pool_one_provider_can_borrow_only_connection(
                 return await super().ainvoke(*args, **kwargs)
 
         model = BorrowingModel(responses=["Original source summary. " * 100])
-        binding = model_catalog().bindings["gpt-"]
-        add_bindings({"gpt-": replace(binding, build_single_attempt=lambda _: model)})
-        accepted = await admit(db_conn, pool, client, monkeypatch)
+        binding = model_catalog.bindings["gpt-"]
+        model_catalog = add_bindings(
+            model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+        )
+        accepted = await admit(db_conn, pool, client, monkeypatch, catalog=model_catalog)
         await asyncio.wait_for(accepted.host.run_turn(accepted.agent), 5)
         assert accepted.status(client)["outcome"] == "applied"
         assert queried == [1] and model.calls == 1

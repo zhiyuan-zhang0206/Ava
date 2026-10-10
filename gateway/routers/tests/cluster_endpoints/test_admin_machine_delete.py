@@ -7,9 +7,12 @@ from typing import cast
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg.rows import TupleRow
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from tests.components.gateway.test_cluster_endpoints import _pin_session_names as _pin_session_names
 from tests.components.gateway.test_cluster_endpoints import (
@@ -27,6 +30,12 @@ from tests.components.gateway.test_cluster_endpoints import (
 from tests.components.gateway.test_cluster_endpoints import (
     pause_backend as pause_backend,
 )
+
+
+def _existing_row(cur: psycopg.Cursor) -> TupleRow:
+    row = cur.fetchone()
+    assert row is not None
+    return row
 
 
 class TestAdminMachineDelete:
@@ -69,7 +78,7 @@ class TestAdminMachineDelete:
 class TestAgentMachineList:
     def test_get_cluster_machines_returns_name_description_live(
         self,
-        db_conn,
+        db_conn: psycopg.Connection,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
@@ -126,7 +135,7 @@ class TestAgentMachineList:
 
     def test_get_cluster_machines_reachable_unknown_is_not_live(
         self,
-        db_conn,
+        db_conn: psycopg.Connection,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
@@ -176,7 +185,7 @@ class TestAgentMachineList:
 
     def test_get_cluster_machines_excludes_gateway(
         self,
-        db_conn,
+        db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """The agent view (`/api/cluster/machines`) lists only machines that run
@@ -305,7 +314,12 @@ class TestAgentMachineList:
 
 class TestMachinePauseResume:
     def test_pause_drains_terminates_and_hides_from_roster(
-        self, db_conn, set_machine_identity
+        self,
+        db_conn: psycopg.Connection,
+        set_machine_identity,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:  # type: ignore[no-untyped-def]
         """The full pause contract: tasks of the machine's live agents are
         drained to #405 with a note, every agent is terminated (graceful via
@@ -316,8 +330,12 @@ class TestMachinePauseResume:
         set_machine_identity(role="agent-runner", name="test-host")
         _seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _seed_drain_owner(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        aid = _seed_agent_on_machine(db_conn, "away")  # pyright: ignore[reportUnknownArgumentType]
-        _seed_agent_on_machine(db_conn, "away")  # pyright: ignore[reportUnknownArgumentType]
+        aid = _seed_agent_on_machine(
+            db_conn, "away", config_authority=config_authority, model_catalog=model_catalog
+        )  # pyright: ignore[reportUnknownArgumentType]
+        _seed_agent_on_machine(
+            db_conn, "away", config_authority=config_authority, model_catalog=model_catalog
+        )  # pyright: ignore[reportUnknownArgumentType]
         _seed_in_progress_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
 
         with TestClient(app) as client:
@@ -337,15 +355,18 @@ class TestMachinePauseResume:
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "SELECT COUNT(*) FROM agents_meta WHERE machine = 'away' AND status != 'terminated'"
             )
-            (n_live,) = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
+            live_row = _existing_row(cur)
+            (n_live,) = live_row  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "SELECT owner, results FROM agent_tasks WHERE title = 'task-on-away'"
             )
-            owner, results = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
+            task_row = _existing_row(cur)
+            owner, results = task_row  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "SELECT gateway_url, role FROM machines WHERE name = 'away'"
             )
-            gateway_url, role = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
+            machine_row = _existing_row(cur)
+            gateway_url, role = machine_row  # pyright: ignore[reportUnknownMemberType]
         assert n_live == 0
         assert owner == 405
         assert "machine pause" in results or "paused" in results
@@ -379,6 +400,9 @@ class TestMachinePauseResume:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:  # type: ignore[no-untyped-def]
         """A machine whose ops server cannot take the graceful terminate (already
         unreachable) gets its agent rows force-marked terminated in the shared
@@ -387,7 +411,9 @@ class TestMachinePauseResume:
 
         set_machine_identity(role="agent-runner", name="test-host")
         _seed_away_machine(db_conn)
-        aid = _seed_agent_on_machine(db_conn, "away")
+        aid = _seed_agent_on_machine(
+            db_conn, "away", config_authority=config_authority, model_catalog=model_catalog
+        )
         from base.db import insert_inbound_message
 
         old_chat_id = insert_inbound_message(

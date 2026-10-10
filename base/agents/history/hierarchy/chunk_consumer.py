@@ -91,6 +91,7 @@ from base.config import settings
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.factory import provider_key_of_model
 from base.log import logger
 
@@ -141,7 +142,9 @@ class ModelCache:
     configurations, so the cache stays small.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, catalog: ModelCatalog, llm_override: str) -> None:
+        self.catalog = catalog
+        self.llm_override = llm_override
         self._models: dict[tuple[str, ModelOverrides, str], Any] = {}
         self._lock = threading.Lock()  # jobs build models from several worker threads
 
@@ -154,7 +157,9 @@ class ModelCache:
                 self._models[key] = build_generation_llm(
                     model,
                     GenParams(reasoning_effort=reasoning) if reasoning not in ("", "off") else None,
-                    overrides,
+                    overrides=overrides,
+                    catalog=self.catalog,
+                    llm_override=self.llm_override,
                     thinking_off=reasoning == "off",
                 )
             return self._models[key]
@@ -178,6 +183,7 @@ def _describe(
         located.prefix,
         located.start_offset,
         model=model,
+        catalog=models.catalog,
         agent_id=agent_id,
         tools=tools,
         corrections=settings.agent.understanding_group_corrections,
@@ -258,9 +264,13 @@ async def _run_job(
     if (gave_up := _gave_up(job)) is not None:
         return gave_up
     model, overrides = await asyncio.to_thread(
-        agent_model_target, db, job.agent_id, fallback=settings.lm.hierarchy_model
+        agent_model_target,
+        db,
+        job.agent_id,
+        fallback=settings.lm.hierarchy_model,
+        catalog=models.catalog,
     )
-    if provider_key_of_model(model) == _GEMINI:
+    if provider_key_of_model(model, catalog=models.catalog) == _GEMINI:
         return Outcome("skipped", f"model {model} uses the Gemini explicit-cache path")
     try:
         history, closing_segment = await asyncio.to_thread(
@@ -378,9 +388,12 @@ class _Consumer:
         db: Database,
         tools: Sequence[Any],
         replay: Replay | None = None,
+        *,
+        catalog: ModelCatalog,
+        llm_override: str,
     ) -> None:
         self.pool, self.db, self.tools, self.replay = pool, db, tools, replay
-        self.models = ModelCache()
+        self.models = ModelCache(catalog, llm_override)
         self.in_flight = 0
         self.finished = asyncio.Event()  # set whenever a job ends
 
@@ -594,14 +607,27 @@ class _Consumer:
 
 
 async def replay_jobs(
-    pool: AsyncConnectionPool, db: Database, tools: Sequence[Any], agent_id: int
+    pool: AsyncConnectionPool,
+    db: Database,
+    tools: Sequence[Any],
+    agent_id: int,
+    *,
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> None:
     """Describe every enqueued job of one agent, its segments in parallel (the replay tool)."""
-    await _Consumer(pool, db, tools, Replay(agent_id)).run_until_idle()
+    await _Consumer(
+        pool, db, tools, Replay(agent_id), catalog=catalog, llm_override=llm_override
+    ).run_until_idle()
 
 
 async def understanding_loop_forever(
-    pool: AsyncConnectionPool, db: Database, tools: Sequence[Any]
+    pool: AsyncConnectionPool,
+    db: Database,
+    tools: Sequence[Any],
+    *,
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> None:
     """Consume the chunk queue for the host's whole life; returns at once when the feature is off.
 
@@ -612,4 +638,4 @@ async def understanding_loop_forever(
     if not settings.agent.understanding_enabled:
         logger.info("[agent-host] understanding consumer idle — AVA_UNDERSTANDING_ENABLED is off")
         return
-    await _Consumer(pool, db, tools).run_forever()
+    await _Consumer(pool, db, tools, catalog=catalog, llm_override=llm_override).run_forever()

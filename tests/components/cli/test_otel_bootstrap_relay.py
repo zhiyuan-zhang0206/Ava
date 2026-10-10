@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from base import config
 from base.cluster.authority.api import telemetry_token
 from base.config.domains.observability.settings import ObservabilitySettings
+from base.config.service_read import ConfigAuthority
 from base.host.env import runtime_config
 from cli.commands.observability import otel_collector as collector
 from gateway.app import app
@@ -29,9 +30,8 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         "AVA_GATEWAY_OTLP_ENDPOINT=http://stale.invalid:1\n"
     )
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
-    monkeypatch.setattr(
-        "base.config.domains.storage.data_plane.self_machine_host", lambda: "10.0.0.10"
-    )
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.10")
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "relay-test-token")
     with TestClient(app) as client:
         assert client.get("/api/bootstrap").status_code == 401
@@ -113,8 +113,8 @@ def test_an_invalid_gateway_projection_names_its_problem() -> None:
     assert "non-loopback" in problem
 
 
-def test_local_otlp_config_stays_host_owned() -> None:
-    metadata = {row.name: row for row in config.get_config_metadata()}
+def test_local_otlp_config_stays_host_owned(config_authority: ConfigAuthority) -> None:
+    metadata = {row.name: row for row in config.get_config_metadata(authority=config_authority)}
     for field in ("telemetry_otlp_endpoint", "telemetry_otlp_port"):
         assert metadata[field].scope == "host"
         assert field not in config.BOOTSTRAP_FIELDS

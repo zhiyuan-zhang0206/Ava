@@ -1,98 +1,247 @@
-"""Profile-independent config read path (Task #856 D5) + startup utilities.
+"""Explicit owner of boot read models and fresh unit configuration reads.
 
-Under per-process profiles the `base.config` singleton only constructs its
-profile's sub-models; a domain outside the profile raises AttributeError on
-access (fail-fast). The config-SERVICE paths — bootstrap_config_values (the
-gateway serves every BOOTSTRAP_FIELDS to agent-runners), current_field_values
-(the 231-field config panel), flat_dump (the config-overlay snapshot) — must
-still read EVERY field, so they resolve a missing domain through a fresh full
-Settings instance. The .env FILE remains the primary source for the service
-paths (read fresh via runtime_config.read_env_aliases); the full instance only
-supplies the effective-value fallback for fields absent from the file, reading
-the current os.environ exactly as the pre-profile singleton did.
-
-Lives in its own module (not base/config/__init__.py) for the repo's
-line-budget discipline; it imports the config package lazily because
-`base.config` builds on top of this module's primitives — the same lazy
-pattern as `base/host/env/runtime_config.py`.
+Composition roots supply both the process-profile runtime and a complete
+read model. File reads use the owner's fixed path, so two roots do not share
+configuration or follow a later change to AVA_HOME. Runtime profile access
+remains restricted; only this service's complete read surface crosses domains.
+Invalid file values propagate their owning model's validation error. Repair
+commands use class metadata and candidate validation without constructing an
+authority or validating unrelated configuration.
 """
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import ValidationError
+from dotenv import dotenv_values
+
+from base.host.env.config_registry import DOMAIN_MODELS, field_alias, fields, schema_extra
 
 __all__ = [
-    "_all_domains_settings",
-    "_service_field_value",
+    "ConfigAuthority",
     "bootstrap_config_values",
     "current_field_values",
     "domain_model_classes",
+    "served_db_endpoint",
 ]
 
 
-@lru_cache(maxsize=1)
-def _all_domains_settings() -> Any:
-    """A profile-less full Settings instance for the config-service read paths.
+def _validate_complete_model(model: Any) -> None:
+    if model.profile is not None:
+        raise ValueError("ConfigAuthority requires a profile-independent read model")
 
-    Constructed once per process, lazily, from the current os.environ at first
-    use. Never consulted when the running process has no profile (the
-    singleton already constructs every domain), so profile-less processes —
-    tests, CLI maintenance verbs, bare checkouts — pay nothing.
+
+class _DeferredReadModel:
+    """Memoize a supplied complete model only after successful construction."""
+
+    profile = None
+
+    def __init__(self, build: Callable[[], Any]) -> None:
+        self._build: Callable[[], Any] | None = build
+        self._model: Any = None
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name: str) -> Any:
+        with self._lock:
+            if self._build is not None:
+                model = self._build()
+                _validate_complete_model(model)
+                self._model = model
+                self._build = None
+            return getattr(self._model, name)
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigAuthority:
+    """One root's explicit runtime, complete read model and unit config path.
+
+    ``all_domains`` must be built with ``profile=None`` by the composition
+    root. It may be the runtime itself when that runtime is already complete.
+    Missing file fields retain this owner's validated model values. Fresh reads
+    do not mutate either model and are never memoized.
     """
-    from base.config import Settings
 
-    # profile=None forces full construction even when the environment
-    # carries AVA_PROCESS_PROFILE (D5).
-    return Settings(profile=None)
+    runtime: Any
+    all_domains: Any
+    env_path: Path
+
+    def __post_init__(self) -> None:
+        _validate_complete_model(self.all_domains)
+        if not self.env_path.is_absolute():
+            raise ValueError("ConfigAuthority env_path must be absolute")
+
+    @classmethod
+    def deferred(
+        cls, *, runtime: Any, build_all_domains: Callable[[], Any], env_path: Path
+    ) -> ConfigAuthority:
+        """Retain a root's complete-model factory without forcing a lite process to upgrade.
+
+        The first read outside the supplied runtime constructs and validates the
+        complete model from the environment at that first use. Successful
+        construction is memoized; failures propagate without an internal retry.
+        Fresh file reads remain uncached and use this authority's fixed path.
+        """
+        return cls(runtime, _DeferredReadModel(build_all_domains), env_path)
+
+    def read_env_aliases(self) -> dict[str, str]:
+        """Read this authority's file once; preserve explicitly empty values."""
+        if not self.env_path.exists():
+            return {}
+        return {
+            name: value for name, value in dotenv_values(self.env_path).items() if value is not None
+        }
+
+    def service_field_value(self, name: str) -> Any:
+        """Read an owned model value without recovering arbitrary AttributeError failures."""
+        domain = fields()[name].domain
+        source = self.runtime if self.runtime.has_domain(domain) else self.all_domains
+        return getattr(getattr(source, domain), name)
+
+    def flat_dump(self, mode: str = "python") -> dict[str, Any]:
+        """The complete boot snapshot used when binding an agent overlay."""
+        out: dict[str, Any] = {}
+        for domain, *_rest in DOMAIN_MODELS:
+            source = self.runtime if self.runtime.has_domain(domain) else self.all_domains
+            out.update(getattr(source, domain).model_dump(mode=mode))
+        return out
+
+    def current_field_values(self) -> dict[str, Any]:
+        """Decode fresh file fields in complete domain batches, failing on invalid values.
+
+        Once the complete read model is constructed, providing every domain
+        field from the owned models prevents later ambient environment changes
+        from supplying or poisoning values.
+        Domain validation keeps field coercion and cross-field invariants.
+        """
+        aliases = self.read_env_aliases()
+        out: dict[str, Any] = {}
+        pending: dict[str, dict[str, str]] = {}
+        for name, ref in fields().items():
+            alias = field_alias(name)
+            if alias in aliases:
+                pending.setdefault(ref.domain, {})[name] = aliases[alias]
+            else:
+                out[name] = self.service_field_value(name)
+        for domain, file_values in pending.items():
+            model = domain_model_classes()[domain]
+            payload = {name: self.service_field_value(name) for name in model.model_fields}
+            payload.update(file_values)
+            if domain == "data_plane":
+                self._project_runner_db_url(payload)
+            decoded = model.model_validate(payload)
+            out.update({name: getattr(decoded, name) for name in file_values})
+        return out
+
+    def _project_runner_db_url(self, payload: dict[str, Any]) -> None:
+        """Choose the delivered runner login before validating the owner file.
+
+        A local owner URL at the default home is an endpoint for launchers,
+        not the agent's login. Only that existing guarded topology uses the
+        runtime projection. Malformed URLs continue into normal validation;
+        invalid fields never recover from a validation failure.
+        """
+        from base.config.domains.storage.data_plane import project_service_db_url
+
+        raw = payload["db_url"]
+        payload["db_url"] = project_service_db_url(
+            payload["db_url"],
+            self.runtime.data_plane.db_url,
+            profile=self.runtime.profile,
+            home=self.env_path.parent,
+            cluster_secret=payload["cluster_secret"],
+            machine_host=self.runtime.general.machine_host,
+        )
+        if payload["db_url"] != raw:
+            from base.log import logger
+
+            logger.debug("current_field_values: serving the delivered runner AVA_DB_URL")
+
+    def bootstrap_config_values(
+        self, *, provider_key_envs: Iterable[str], plugin_cluster_config: str
+    ) -> dict[str, str]:
+        """Fresh authenticated bootstrap packet, with no database credential.
+
+        Raw file values retain their env syntax for recipient-side validation.
+        Provider secrets arrive only through the catalog's declared key names;
+        plugin policy is supplied by the plugin authority's fresh packet.
+        """
+        from pydantic import SecretStr
+
+        from base.host.env import runtime_config
+        from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
+
+        aliases = self.read_env_aliases()
+        out: dict[str, str] = {}
+        for name, ref in fields().items():
+            extra = schema_extra(ref.info)
+            if extra.get("scope") not in ("cluster-pinned", "cluster-default"):
+                continue
+            if extra.get("bootstrap", True) is False:
+                continue
+            alias = field_alias(name)
+            if alias in aliases:
+                out[alias] = aliases[alias]
+                continue
+            value = self.service_field_value(name)
+            if value is None:
+                continue
+            if isinstance(value, SecretStr):
+                value = value.get_secret_value()
+            out[alias] = runtime_config.env_value_text(value)
+        _serve_reachable_data_plane_hosts(out, self._reachable_host())
+        out["AVA_DB_URL"] = self.served_db_endpoint(aliases)
+        out["AVA_GATEWAY_OTLP_ENDPOINT"] = self._gateway_otlp_projection(aliases)
+        for key_env in provider_key_envs:
+            if key_env in aliases and key_env not in out:
+                out[key_env] = aliases[key_env]
+        out[PLUGIN_CLUSTER_CONFIG_ENV] = plugin_cluster_config
+        return out
+
+    def served_db_endpoint(self, aliases: dict[str, str] | None = None) -> str:
+        """Read this gateway's required fresh endpoint and strip its password."""
+        from base.cluster.authority.unit import credential_free
+
+        if aliases is None:
+            aliases = self.read_env_aliases()
+        db_url = aliases.get("AVA_DB_URL")
+        if not db_url:
+            raise ValueError("AVA_DB_URL is missing from the gateway config snapshot")
+        served = {"AVA_DB_URL": credential_free(db_url)}
+        _serve_reachable_data_plane_hosts(served, self._reachable_host())
+        return served["AVA_DB_URL"]
+
+    def _reachable_host(self) -> str:
+        return self.service_field_value("machine_host").strip() or "localhost"
+
+    def _gateway_otlp_projection(self, aliases: dict[str, str]) -> str:
+        """Project gateway ingress without distributing local listener settings."""
+        from base.host.net.url_secret import url_with_host
+
+        port = int(
+            aliases.get(
+                "AVA_TELEMETRY_OTLP_PORT", str(self.service_field_value("telemetry_otlp_port"))
+            )
+        )
+        if not 1 <= port <= 65535:
+            raise ValueError("AVA_TELEMETRY_OTLP_PORT must be between 1 and 65535")
+        host = aliases.get("AVA_MACHINE_HOST") or self._reachable_host()
+        return url_with_host(f"http://localhost:{port}", host)
 
 
-def _service_field_value(name: str) -> Any:
-    """Effective value of leaf field `name` for the config-service read paths.
-
-    `get_field` (the module singleton) is the fast path; when the running
-    profile excludes the field's domain — the singleton raises AttributeError,
-    fail-fast — resolve through `_all_domains_settings()` so the bootstrap
-    payload / config panel stay complete (D5). Callers that must NOT silently
-    cross a profile boundary keep using `get_field` directly.
-    """
-    from base.config import _FIELDS, settings
-
-    ref = _FIELDS[name]
-    try:
-        return getattr(getattr(settings, ref.domain), name)
-    except AttributeError:
-        return getattr(getattr(_all_domains_settings(), ref.domain), name)
-
-
-_DATA_PLANE_URL_ALIASES = ("AVA_DB_URL", "AVA_REDIS_URL")
-
-
-def _serve_reachable_data_plane_hosts(out: dict[str, str]) -> None:
-    """Rewrite loopback hosts in served data-plane URLs to this gateway's
-    reachable address, in place.
-
-    The cluster's own `.env` (and therefore the verbatim bootstrap payload) uses
-    `127.0.0.1` in its db/redis URLs: the gateway dials itself over loopback and
-    the data plane binds loopback first (`_dial_self_host_via_loopback` /
-    `_bind_addrs`). A REMOTE agent-runner materializing that payload would dial
-    ITS OWN loopback and hit itself — a remote runner's join only works because
-    the reachable host (`AVA_MACHINE_HOST`) is
-    substituted here. A single box (reachable host = localhost) and an
-    already-reachable URL host pass through unchanged; only the host is swapped
-    — scheme / userinfo / port / database / query survive verbatim.
-    """
-    from base.config.domains.storage.data_plane import self_machine_host
+def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> None:
+    """Rewrite served loopback endpoints to the root's reachable address."""
     from base.host.net.predicates import is_loopback_host
     from base.host.net.url_secret import url_with_host
 
-    reachable = self_machine_host()
     if is_loopback_host(reachable):
         return
-    for alias in _DATA_PLANE_URL_ALIASES:
+    for alias in ("AVA_DB_URL", "AVA_REDIS_URL"):
         value = out.get(alias)
         if not value:
             continue
@@ -103,227 +252,36 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str]) -> None:
 
 @lru_cache(maxsize=1)
 def domain_model_classes() -> dict[str, type[Any]]:
-    """`{domain attr: sub-model class}` — the registry's deferred class imports,
-    resolved once per process without constructing any Settings. Public because
-    overlay validation (`base.packages.plugins.config_registration`) re-validates each
-    framework field against its owning sub-model class."""
+    """Resolve registry class metadata without constructing any Settings."""
     from importlib import import_module
 
-    from base.host.env.config_registry import DOMAIN_MODELS, MODEL_CLASSES
+    from base.host.env.config_registry import MODEL_CLASSES
 
-    out: dict[str, type[Any]] = {}
-    for attr, _label, model_name, _capability in DOMAIN_MODELS:
-        if isinstance(model_name, str):
-            out[attr] = getattr(import_module(MODEL_CLASSES[model_name]), model_name)
-        else:
-            out[attr] = model_name
-    return out
-
-
-def current_field_values() -> dict[str, Any]:
-    """Map every field name to its current value.
-
-    For a field whose alias is set in this unit's `.env` FILE, the fresh file
-    value is used — decoded through the field's OWN sub-model (one
-    `model_validate` per domain), so the model's field validators run exactly as
-    they do at Settings construction: a NoDecode comma-list ("weixin,feishu")
-    splits into the typed list instead of failing a bare
-    `TypeAdapter(list[str])`. For a field absent from the file, the boot-time
-    value is used (the effective env value, which already folds in os.environ +
-    the Field default).
-
-    The config panel and the bootstrap payload both read through this, so an edit
-    takes effect on the next consuming-process restart while `restart_required`
-    signals which process that is.
-    """
-
-    from base.config import _FIELDS, field_alias
-    from base.host.env import runtime_config
-
-    aliases = runtime_config.read_env_aliases()
-    out: dict[str, Any] = {}
-    # Group the file-present fields by owning domain: one model_validate per
-    # domain decodes them all through the sub-model's own validators.
-    pending: dict[str, list[tuple[str, str, str]]] = {}
-    for name, ref in _FIELDS.items():
-        alias = field_alias(name)
-        if alias not in aliases:
-            out[name] = _service_field_value(name)
-            continue
-        pending.setdefault(ref.domain, []).append((name, alias, aliases[alias]))
-    for domain, batch in pending.items():
-        _decode_env_file_values(domain, batch, out)
-    return out
+    return {
+        attr: getattr(import_module(MODEL_CLASSES[model]), model)
+        if isinstance(model, str)
+        else model
+        for attr, _label, model, _capability in DOMAIN_MODELS
+    }
 
 
-def _isolated_domain_payload(model: type[Any], file_overrides: dict[str, str]) -> dict[str, Any]:
-    """A full-field payload that makes ``model_validate`` env-independent.
-
-    Every field of the sub-model carries its boot-time value; the ``file_overrides``
-    fields then override with their raw `.env` strings. Because EVERY field is
-    provided (keyed by field name — EnvSettings has populate_by_name=True),
-    pydantic-settings has nothing left to read from os.environ: a bad env value
-    for a field absent from the file can no longer poison the decode of a good
-    file value (QA #1090 repro — the batch and the per-field retry used to read
-    env for non-file fields, and one bad env value made a good file value get
-    dropped).
-    """
-    payload = {name: _service_field_value(name) for name in model.model_fields}
-    payload.update(file_overrides)
-    return payload
+def current_field_values(authority: ConfigAuthority) -> dict[str, Any]:
+    """Read fresh values through the caller's explicit authority."""
+    return authority.current_field_values()
 
 
-def _decode_env_file_values(
-    domain: str, batch: list[tuple[str, str, str]], out: dict[str, Any]
-) -> None:
-    """Decode one domain's raw `.env` values through its owning sub-model.
-
-    The previous path validated the raw string against a bare
-    `TypeAdapter(annotation)` — which cannot see the model's field validators
-    (NoDecode metadata and the before-validators live on the class, not the
-    annotation) — so every NoDecode comma-list field warned "cannot be decoded"
-    on each panel read / agent spawn and fell back to a wrong-typed comma split
-    (a `list[float]` field came back `list[str]`). Validating through the model
-    reuses its validators and coercion, so comma lists and JSON arrays decode
-    silently and with the right types.
-
-    On a batch failure, each field is re-validated alone — with the OTHER file
-    fields reverted to their boot values so one bad line hides nothing else:
-    good values still land, the bad one warns and falls back to the boot-time
-    value.
-
-    One failure is not a bad value: an agent-profile process at the default
-    home decoding the owner `AVA_DB_URL` line hits the deliberate guard refusal
-    (`AgentProfileOwnerDbUrlRefusedError`, #4332). That topology is expected — the
-    boot-time value is the launcher-injected runner projection — so it is
-    served SILENTLY (debug-logged only): warning on every fresh read (every
-    panel read / agent send) would bury the genuine decode failures.
-    """
-    model = domain_model_classes()[domain]
-    file_values = {name: raw for name, _alias, raw in batch}
-    try:
-        decoded = model.model_validate(_isolated_domain_payload(model, file_values))
-    except ValidationError:
-        for name, alias, raw in batch:
-            try:
-                out[name] = getattr(
-                    model.model_validate(_isolated_domain_payload(model, {name: raw})),
-                    name,
-                )
-            except ValidationError as exc:
-                if _is_expected_owner_url_refusal(exc):
-                    from base.log import logger
-
-                    logger.debug(
-                        f"current_field_values: serving the boot-time {alias} "
-                        f"(expected agent-profile owner-URL refusal)"
-                    )
-                else:
-                    _warn_undecodable_field(name, alias, raw)
-                out[name] = _service_field_value(name)
-        return
-    for name, _alias, _raw in batch:
-        out[name] = getattr(decoded, name)
-
-
-def _is_expected_owner_url_refusal(exc: ValidationError) -> bool:
-    """Whether `exc` is only the agent-profile owner-URL guard refusing (#4332).
-
-    The guard raises `AgentProfileOwnerDbUrlRefusedError` and pydantic keeps the
-    original exception instance in `err["ctx"]["error"]`, so this is a type
-    test — never a message match. EVERY reported error must be the refusal:
-    anything else is a genuine decode failure and warns.
-    """
-    from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
-
-    errors = exc.errors()
-    return bool(errors) and all(
-        isinstance((item.get("ctx") or {}).get("error"), AgentProfileOwnerDbUrlRefusedError)
-        for item in errors
+def bootstrap_config_values(
+    authority: ConfigAuthority, *, provider_key_envs: Iterable[str], plugin_cluster_config: str
+) -> dict[str, str]:
+    """Build a packet using the caller's authority and declared provider keys."""
+    return authority.bootstrap_config_values(
+        provider_key_envs=provider_key_envs, plugin_cluster_config=plugin_cluster_config
     )
 
 
-def _warn_undecodable_field(name: str, alias: str, _raw: str) -> None:
-    """Warn about a `.env` value the owning model cannot decode — the next
-    process start's Settings construction will fail on it, so the operator must
-    hear about it at panel-read time rather than at the next boot (audit
-    round-2 config.md P2).
-
-    Only genuinely undecodable values reach this: the expected agent-profile
-    owner-URL refusal is classified out by `_is_expected_owner_url_refusal`.
-    """
-    from base.log import logger
-
-    logger.warning(
-        f"current_field_values: {alias} in .env cannot be decoded "
-        f"by the {name!r} config field; serving the boot-time value instead — "
-        f"fix the line before the next process start (Settings "
-        f"construction will fail on it)"
-    )
-
-
-def bootstrap_config_values() -> dict[str, str]:
-    """Return {ENV_ALIAS: value} for the BOOTSTRAP_FIELDS that are set.
-
-    Values are unmasked (the caller is an authenticated machine). A field set in
-    the gateway's `.env` is served as its raw `.env` text verbatim (already the
-    env-string form the recipient re-parses, including a comma-list), read fresh
-    — so a `.env` edit reaches a recipient on its next restart without the
-    gateway itself restarting. The data-plane URL aliases
-    (`AVA_DB_URL` / `AVA_REDIS_URL`) have their loopback host rewritten to this
-    gateway's reachable address (`_serve_reachable_data_plane_hosts`) — required
-    for a remote unit on another machine. AVA_GATEWAY_OTLP_ENDPOINT is derived from this
-    gateway's reachable host and OTLP port; local receiver settings are not
-    distributed. A field absent from `.env` is served as its stringified
-    boot-time value, except the required DB URL, which must come from this fresh
-    snapshot. Only None is skipped (env can't express "no value"), so the
-    recipient falls back to the field default. An empty string IS served: it is
-    the env form of an explicit set-to-empty (e.g.
-    AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT="" on a bench gateway), and dropping
-    it would silently revert the recipient to the field default — exactly the
-    distinction between "unset" and "set to empty".
-
-    `AVA_DB_URL` is served as the CREDENTIAL-FREE endpoint (`served_db_endpoint`):
-    bootstrap hands out configuration, never a database login. A remote
-    agent-runner receives its runner login only in the capability bundle the
-    gateway operator issues for that unit (`base.cluster.authority.unit`; the
-    login is the write generation's, shared by every runner unit), so a stale
-    runner holding the bearer cannot reacquire the current write generation
-    here.
-    """
-    from pydantic import SecretStr
-
-    from base.config import BOOTSTRAP_FIELDS, field_alias
-    from base.host.env import runtime_config
-
-    aliases = runtime_config.read_env_aliases()
-    out: dict[str, str] = {}
-    for name in BOOTSTRAP_FIELDS:
-        alias = field_alias(name)
-        if alias in aliases:
-            out[alias] = aliases[alias]
-            continue
-        value = _service_field_value(name)
-        if value is None:
-            continue
-        if isinstance(value, SecretStr):
-            value = value.get_secret_value()
-        out[alias] = runtime_config.env_value_text(value)
-    _serve_reachable_data_plane_hosts(out)
-    out["AVA_DB_URL"] = served_db_endpoint(aliases)
-    out["AVA_GATEWAY_OTLP_ENDPOINT"] = _gateway_otlp_projection(aliases)
-    # Provider keys are not Settings fields, so they cannot arrive through
-    # BOOTSTRAP_FIELDS. Read only declared keys from the raw gateway .env; this
-    # is the authenticated, fresh-file channel a split runner materializes.
-    from base.lm.plugin_providers import model_catalog
-
-    for binding in model_catalog().bindings.values():
-        if binding.key_env in aliases and binding.key_env not in out:
-            out[binding.key_env] = aliases[binding.key_env]
-    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
-
-    out[PLUGIN_CLUSTER_CONFIG_ENV] = plugin_bootstrap_config()
-    return out
+def served_db_endpoint(authority: ConfigAuthority, aliases: dict[str, str] | None = None) -> str:
+    """Read the caller's credential-free gateway endpoint."""
+    return authority.served_db_endpoint(aliases)
 
 
 def plugin_bootstrap_config() -> str:
@@ -356,37 +314,3 @@ def plugin_bootstrap_config() -> str:
             values = config.model_dump(mode="json")
             payload[plugin] = {name: values[name] for name in fields}
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
-
-
-def served_db_endpoint(aliases: dict[str, str] | None = None) -> str:
-    """The database endpoint this gateway serves to agent-runners: its `.env`
-    `AVA_DB_URL` without any password, loopback rewritten to the reachable host.
-
-    A local plane's `.env` already holds the credential-free endpoint; a
-    remote-managed plane's provider URL loses its password here. Raises when
-    the gateway's fresh config snapshot has no `AVA_DB_URL`."""
-    from base.cluster.authority.unit import credential_free
-    from base.host.env import runtime_config
-
-    if aliases is None:
-        aliases = runtime_config.read_env_aliases()
-    db_url = aliases.get("AVA_DB_URL")
-    if not db_url:
-        raise ValueError("AVA_DB_URL is missing from the gateway config snapshot")
-    served = {"AVA_DB_URL": credential_free(db_url)}
-    _serve_reachable_data_plane_hosts(served)
-    return served["AVA_DB_URL"]
-
-
-def _gateway_otlp_projection(aliases: dict[str, str]) -> str:
-    """Publish this gateway's ingress without distributing its local listener settings."""
-    from base.config.domains.storage.data_plane import self_machine_host
-    from base.host.net.url_secret import url_with_host
-
-    port = int(
-        aliases.get("AVA_TELEMETRY_OTLP_PORT", str(_service_field_value("telemetry_otlp_port")))
-    )
-    if not 1 <= port <= 65535:
-        raise ValueError("AVA_TELEMETRY_OTLP_PORT must be between 1 and 65535")
-    host = aliases.get("AVA_MACHINE_HOST") or self_machine_host()
-    return url_with_host(f"http://localhost:{port}", host)

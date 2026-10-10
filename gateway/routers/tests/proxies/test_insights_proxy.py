@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from gateway.agents import eval_guard
 from gateway.routers import insights as proxy
 from services.derived.insights.app import build_app
@@ -131,13 +132,16 @@ def test_an_unavailable_service_is_a_gateway_error_not_a_crash(
         assert down.get("/api/agents/7/run-timeline").status_code == status
 
 
-def test_the_gateway_declares_exactly_what_the_service_serves() -> None:
+def test_the_gateway_declares_exactly_what_the_service_serves(
+    *, model_catalog: ModelCatalog
+) -> None:
     """Same query parameters and response schema per proxied route, so the OpenAPI contract
     (and the frontend types generated from it) cannot drift from the service."""
     service = build_app(
         cast(Database, object()),
         cast(ConnectionPool[Any], object()),
         InsightsConfig(run_timeline_message_text_max=1),
+        catalog=model_catalog,
     ).openapi()
     gateway = _gateway(httpx.MockTransport(lambda _r: httpx.Response(200))).openapi()
 

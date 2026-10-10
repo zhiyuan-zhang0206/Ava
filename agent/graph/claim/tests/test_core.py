@@ -15,7 +15,10 @@ import psycopg
 import pytest
 
 import ava
+from ava.sdk_surface.install import Installation
 from base.config import set_field, settings
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.units import spawn_agent
@@ -74,12 +77,17 @@ class TestLifecycleExceptions:
 
 class TestTerminate:
     def test_terminate_inserts_terminate_inbound_to_self(
-        self, db_conn: psycopg.Connection, monkeypatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """terminate self-inserts a kind='terminate' source='self' into its own agent.
         source='self' lets the claim dispatch produce the "by yourself" marker (distinguishing from external
         user / agent:N triggered "by {source}", precisely expressing "suicide" semantics)."""
-        pin_agent(spawn_agent())  # self identity
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))  # self identity
         with pytest.raises(ava.self.AgentTermination):
             ava.self.terminate()
         assert _inbound_rows(db_conn, ava.self.AGENT_ID) == [("", "terminate", "self")]
@@ -87,24 +95,38 @@ class TestTerminate:
 
 class TestRestart:
     def test_restart_inserts_restart_inbound_to_self(
-        self, db_conn: psycopg.Connection, monkeypatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        model_installation: Installation,
     ) -> None:
         """restart self-inserts a kind='restart' source='self' into its own agent.
         The restarter daemon will handle the respawn (this test only verifies the SDK-side write is correct)."""
-        pin_agent(spawn_agent())  # self identity
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))  # self identity
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart()
         assert _inbound_rows(db_conn, ava.self.AGENT_ID) == [("", "restart", "self")]
 
     def test_restart_with_config_inserts_payload(
-        self, db_conn: psycopg.Connection, monkeypatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        model_installation: Installation,
     ) -> None:
         """`ava.self.restart(config_overlay={...})` (PR-E) — payload JSONB holds config_overlay.
 
         Validation + INSERT path exercised, validate_config_overlay passes then payload serialized
         into inbound_messages.payload.
         """
-        pin_agent(spawn_agent())
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart(config_overlay={"auto_compact_fraction": 0.7})
         with db_conn.cursor() as cur:
@@ -121,7 +143,13 @@ class TestRestart:
         assert payload == {"config_overlay": {"auto_compact_fraction": 0.7}}
 
     def test_restart_with_config_merges_into_overlay_column(
-        self, db_conn: psycopg.Connection, monkeypatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        model_installation: Installation,
     ) -> None:
         """restart(config_overlay=) merges into agents_meta.config_overlay rather than
         replacing it: pre-existing keys survive, new keys are added.
@@ -130,7 +158,8 @@ class TestRestart:
         diff (not the merged result) so the restart_completed marker shows the
         right diff text.
         """
-        pin_agent(spawn_agent())
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
         # Pre-seed an existing overlay key directly in the column.
         with db_conn.cursor() as cur:
             cur.execute(
@@ -164,10 +193,17 @@ class TestRestart:
         assert inbound_row[0] == {"config_overlay": {"llm_model": "gpt-5.6-sol"}}
 
     def test_restart_with_invalid_config_raises_and_no_inbound(
-        self, db_conn: psycopg.Connection, monkeypatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        model_installation: Installation,
     ) -> None:
         """Non-per_agent field → InvalidConfigOverlay; does **not** deliver inbound, process does not exit."""
-        pin_agent(spawn_agent())
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
         with pytest.raises(ava.self.InvalidConfigOverlay, match=r"typo|per_agent"):  # type: ignore[attr-defined]
             ava.self.restart(config_overlay={"definitely_not_a_field": 1})
         # No inbound delivered (process will not exit)
@@ -181,10 +217,17 @@ class TestRestart:
             assert count_row[0] == 0
 
     def test_restart_with_unknown_model_raises_without_persisting(
-        self, db_conn: psycopg.Connection, monkeypatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        model_installation: Installation,
     ) -> None:
         """A model typo is rejected before either persistent restart side effect."""
-        pin_agent(spawn_agent())
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
@@ -214,26 +257,34 @@ class TestRestart:
         assert after_row[0] == before_row[0]
 
     def test_restart_settles_withdrawn_model_to_registered_fallback(
-        self, db_conn: psycopg.Connection, add_models: AddModels
+        self,
+        db_conn: psycopg.Connection,
+        add_models: AddModels,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        model_installation: Installation,
     ) -> None:
         """A registered-but-withdrawn model passes the membership check but is
         settled to its registered fallback before persistence (task #4306): the
         overlay column and the restart payload both carry the fallback."""
         from dataclasses import replace
 
-        from base.lm.plugin_providers import model_catalog
-
         model = "deepseek-retired-fixture"
-        add_models(
+        model_catalog = add_models(
+            model_catalog,
             {
                 model: replace(
-                    model_catalog().models["deepseek-flash"],
+                    model_catalog.models["deepseek-flash"],
                     spawnable=False,
                     unavailable_fallback="deepseek-flash",
                 )
-            }
+            },
         )
-        pin_agent(spawn_agent())
+        model_installation = replace(model_installation, catalog=model_catalog)
+        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart(config_overlay={"llm_model": model})
         with db_conn.cursor() as cur:
@@ -257,11 +308,16 @@ class TestRestart:
 
 class TestPauseHeartbeat:
     def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
-        self, db_conn: psycopg.Connection, monkeypatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """pause_heartbeat updates the window, records the pause trail, and
         emits the heartbeat_paused event used by the inspector's Last Pause."""
-        pin_agent(spawn_agent())  # self identity
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))  # self identity
         ava.self.pause_heartbeat(1800)
         from base import telemetry
 
@@ -311,10 +367,16 @@ class TestPauseHeartbeat:
 
     @pytest.mark.parametrize("bad", [0, -1, settings.agent.heartbeat_pause_max_seconds + 1])
     def test_pause_heartbeat_rejects_out_of_range(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, bad: float
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        bad: float,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
     ) -> None:
         """Invalid duration must not write or emit a heartbeat pause event."""
-        pin_agent(spawn_agent())
+        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
         from base import telemetry
 
         def _unexpected_emit(_category: str, event_name: str, **_kwargs: object) -> None:
@@ -337,12 +399,18 @@ class TestPauseHeartbeat:
         assert row is not None
         assert row[0] is None
 
-    def test_pause_heartbeat_lower_cluster_default(self, db_conn: psycopg.Connection) -> None:
+    def test_pause_heartbeat_lower_cluster_default(
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+    ) -> None:
         """The configured cluster limit accepts its inclusive upper boundary."""
         original_limit = settings.agent.heartbeat_pause_max_seconds
         set_field("heartbeat_pause_max_seconds", 3600.0)
         try:
-            pin_agent(spawn_agent())
+            pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
             ava.self.pause_heartbeat(3600)
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -358,12 +426,14 @@ class TestPauseHeartbeat:
         finally:
             set_field("heartbeat_pause_max_seconds", original_limit)
 
-    def test_pause_heartbeat_per_agent_override_wins(self) -> None:
+    def test_pause_heartbeat_per_agent_override_wins(
+        self, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    ) -> None:
         """The effective per-agent overlay limit is read when the SDK is called."""
         original_limit = settings.agent.heartbeat_pause_max_seconds
         set_field("heartbeat_pause_max_seconds", 172800.0)
         try:
-            pin_agent(spawn_agent())
+            pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
             ava.self.pause_heartbeat(172800)
         finally:
             set_field("heartbeat_pause_max_seconds", original_limit)

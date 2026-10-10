@@ -12,7 +12,9 @@ from base.agents.compaction.commands import accept
 from base.agents.compaction.execution import claim_attempt, pending, require_receiver
 from base.agents.compaction.models import CompactHeldError
 from base.agents.compaction.tests.helpers import source
+from base.config.service_read import ConfigAuthority
 from base.db.transaction import async_write_transaction
+from base.lm.catalog import ModelCatalog
 
 
 @pytest.mark.parametrize("phase", ["source", "execution"])
@@ -22,8 +24,13 @@ async def test_stale_or_unclosed_receiver_cannot_claim_or_apply_original(
     aops_pool: AsyncConnectionPool,
     phase: str,
     change: str,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> None:
-    incarnation, target, *_ = await source(db_conn, aops_pool)
+    incarnation, target, *_ = await source(
+        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+    )
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accept(pool, str(target.observation_id), target.source.agent_id, target)
     command = await pending(aops_pool, target.source.agent_id)

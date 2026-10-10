@@ -74,6 +74,7 @@ from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
@@ -149,12 +150,14 @@ class AgentHost:
         machine: str | None = None,
         bus: EventBus,
         db: Database,
+        catalog: ModelCatalog,
         clients: ClientSet | None = None,
         extensions: ExtensionRegistry = EMPTY,
         plugin_configs: Mapping[str, BaseModel] | None = None,
     ) -> None:
         self._bus = bus
         self._db = db
+        self._catalog = catalog
         # Shared clients are passed through each turn's explicit `AvaContext`.
         self._clients = clients if clients is not None else ClientSet(database=lambda: db)
         self._extensions = extensions
@@ -249,6 +252,8 @@ class AgentHost:
                     self.database_waits,
                     self._peek_lock,
                     work=None,
+                    catalog=self._catalog,
+                    llm_override=settings.lm.llm_override,
                 )
             )
             cancelled = await wait_shielded_task(settlement) or cancelled
@@ -321,6 +326,8 @@ class AgentHost:
                 stats=self.stats,
                 rejected=self._rejected_configs,
                 normalized=self._normalized_configs,
+                catalog=self._catalog,
+                llm_override=settings.lm.llm_override,
             ):
                 return
             self.stats.turns_started += 1
@@ -510,6 +517,8 @@ class AgentHost:
             agent_id,
             fingerprint,
             slices,
+            catalog=self._catalog,
+            llm_override=settings.lm.llm_override,
         )
 
     def _evict(self) -> None:
@@ -552,6 +561,7 @@ class AgentHost:
             ops_pool=self._pool,
             llm=runtime.llm,
             llm_binding=runtime.binding,
+            catalog=self._catalog,
             event_publisher=event_publisher,
             db=self._db,
             bus=self._bus,
@@ -773,14 +783,7 @@ class AgentHost:
             ) from exc
 
     async def renew_ownership(self) -> None:
-        """Existing daemon health beat also proves idle runtime responsibility.
-
-        Renewal first, corpse reap second: a reap failure must not starve
-        healthy rows' leases (the next beat retries the reap). The reaped
-        corpses' recovery-wake attempts ride the same step — their wake rows
-        are already committed, so a dropped attempt is deferred, not lost
-        (task #4039).
-        """
+        """Renew healthy leases before reaping corpses and retrying committed wakes."""
         await renew_hosted_owner(self._control_pool, self._machine, self._owner)
         try:
             reaped = await reap_crash_corpses(

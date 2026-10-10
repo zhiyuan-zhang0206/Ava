@@ -10,17 +10,22 @@ endpoint smoke tests live in tests/components/gateway/test_cluster_endpoints.py.
 from __future__ import annotations
 
 import re
-from unittest.mock import AsyncMock
+from typing import cast
+from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from base.agents import ResurrectResult, TerminateResult
 from base.agents.messages.inbound import InboundKind
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from ops import lifecycle
 from ops.lifecycle import launch
 from ops.rpc_schemas import (
@@ -129,10 +134,9 @@ class TestRestartAgentRequestConfigOverlay:
 
 
 @pytest.fixture
-def stub_pool() -> object:
-    """Sentinel pool — every op call below mocks the gateway/agents helpers so
-    the pool is never touched, but the signature still requires an object."""
-    return object()
+def stub_pool() -> MagicMock:
+    """A pool test double: mocked operation helpers never access it."""
+    return MagicMock()
 
 
 class TestSpawnPrechecksBlocking:
@@ -146,7 +150,7 @@ class TestSpawnPrechecksBlocking:
         from base.lm import model_config
 
         monkeypatch.setattr(
-            model_config, "validate_spawn_model_config", lambda *_args: "deepseek-flash"
+            model_config, "validate_spawn_model_config", lambda *_args, **_kwargs: "deepseek-flash"
         )
 
     class _FakeCursor:
@@ -170,16 +174,22 @@ class TestSpawnPrechecksBlocking:
         def connection(self):
             return TestSpawnPrechecksBlocking._FakeConn()
 
-    def test_fork_resolves_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_fork_resolves_checkpoint(
+        self, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
+    ) -> None:
         """fork_from -> latest_checkpoint_id resolves to an explicit id, not 'latest'."""
         monkeypatch.setattr(launch, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")
         checkpoint = launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user", fork_from=3),
-            self._FakePool(),  # type: ignore[arg-type]
+            cast(ConnectionPool, self._FakePool()),
+            catalog=build_model_catalog(),  # type: ignore[arg-type]
+            authority=config_authority,
         )
         assert checkpoint == "ckpt:v1"
 
-    def test_fork_empty_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_fork_empty_raises(
+        self, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
+    ) -> None:
         """fork_from with no checkpoint raises ForkSourceEmpty (wire-mapped to 409)."""
         from base.agents import ForkSourceEmpty
 
@@ -187,10 +197,14 @@ class TestSpawnPrechecksBlocking:
         with pytest.raises(ForkSourceEmpty):
             launch.spawn_prechecks_blocking(
                 SpawnAgentRequest(spawner="user", fork_from=3),
-                self._FakePool(),  # type: ignore[arg-type]
+                cast(ConnectionPool, self._FakePool()),
+                catalog=build_model_catalog(),  # type: ignore[arg-type]
+                authority=config_authority,
             )
 
-    def test_plain_spawn_no_checkpoint_lookup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_plain_spawn_no_checkpoint_lookup(
+        self, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
+    ) -> None:
         """No fork_from -> no checkpoint lookup, returns None."""
         looked_up: list[object] = []
 
@@ -201,7 +215,9 @@ class TestSpawnPrechecksBlocking:
         monkeypatch.setattr(launch, "latest_checkpoint_id", _fake_lookup)
         checkpoint = launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user"),
-            self._FakePool(),  # type: ignore[arg-type]
+            cast(ConnectionPool, self._FakePool()),
+            catalog=build_model_catalog(),  # type: ignore[arg-type]
+            authority=config_authority,
         )
         assert checkpoint is None
         assert looked_up == []
@@ -212,18 +228,26 @@ async def test_restart_agent_op_terminated_short_circuits(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     from ops.tests.pool_support import make_test_pool
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
     db_conn.commit()
     wake = AsyncMock()
     monkeypatch.setattr(lifecycle, "publish_inbound_arrived", wake)
     with make_test_pool() as pool:
         resp = await lifecycle.restart_agent_op(
-            database, event_bus, agent_id, RestartAgentRequest(source="user"), pool
+            database,
+            event_bus,
+            agent_id,
+            RestartAgentRequest(source="user"),
+            pool,
+            catalog=build_model_catalog(),
         )
     assert resp.status == "already_terminated"
     wake.assert_not_awaited()
@@ -234,7 +258,7 @@ async def test_restart_agent_op_terminated_short_circuits(
 
 @pytest.mark.asyncio
 async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
-    stub_pool: object,
+    stub_pool: MagicMock,
     database: Database,
     event_bus: EventBus,
 ) -> None:
@@ -245,7 +269,8 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
             event_bus,
             "/api/agents/9/restart",
             {"config_overlay": {"definitely_not_a_config_field": "x"}},
-            stub_pool,  # type: ignore[arg-type]
+            stub_pool,
+            catalog=build_model_catalog(),  # type: ignore[arg-type]
         )
 
 
@@ -297,7 +322,7 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
 
 @pytest.mark.asyncio
 async def test_terminate_agent_op_terminated_short_circuits(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     from base.agents import AgentStatus
 
@@ -320,7 +345,7 @@ async def test_terminate_agent_op_terminated_short_circuits(
 
 @pytest.mark.asyncio
 async def test_lifecycle_op_parses_path_to_terminate(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
 
     captured: dict[str, object] = {}
@@ -338,7 +363,8 @@ async def test_lifecycle_op_parses_path_to_terminate(
         event_bus,
         "/api/agents/42/terminate",
         {"source": "user"},
-        stub_pool,  # type: ignore[arg-type]
+        stub_pool,
+        catalog=build_model_catalog(),  # type: ignore[arg-type]
     )
     # lifecycle_op now returns the per-action response model (not its dict form).
     assert result.status == "enqueued"
@@ -348,7 +374,7 @@ async def test_lifecycle_op_parses_path_to_terminate(
 
 @pytest.mark.asyncio
 async def test_lifecycle_op_unparseable_path_raises(
-    stub_pool: object, database: Database, event_bus: EventBus
+    stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     with pytest.raises(ValueError, match="lifecycle path not recognized"):
         await lifecycle.lifecycle_op(
@@ -356,13 +382,14 @@ async def test_lifecycle_op_unparseable_path_raises(
             event_bus,
             "/api/agents/bogus",
             {},
-            stub_pool,  # type: ignore[arg-type]
+            stub_pool,
+            catalog=build_model_catalog(),  # type: ignore[arg-type]
         )
 
 
 @pytest.mark.asyncio
 async def test_guarded_resurrect_path_requires_trigger(
-    stub_pool: object, database: Database, event_bus: EventBus
+    stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     """The new internal path fails closed when its CAS evidence is missing."""
     with pytest.raises(ValueError, match="requires trigger inbound"):
@@ -371,7 +398,8 @@ async def test_guarded_resurrect_path_requires_trigger(
             event_bus,
             "/api/agents/42/resurrect-if-pending-work-v2",
             {"resurrected_by": "system"},
-            stub_pool,  # type: ignore[arg-type]
+            stub_pool,
+            catalog=build_model_catalog(),  # type: ignore[arg-type]
         )
 
 
@@ -395,7 +423,7 @@ def test_versioned_resurrect_paths_are_unknown_to_legacy_runner(new_path: str) -
 
 @pytest.mark.asyncio
 async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
-    stub_pool: object, database: Database, event_bus: EventBus
+    stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     """A mismatched path/guard pair cannot silently fall back to an
     unconditional manual resurrect."""
@@ -408,12 +436,13 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
             stub_pool,  # type: ignore[arg-type]
             trigger_inbound_id=99,
             trigger_inbound_kind=InboundKind.CHAT,
+            catalog=build_model_catalog(),
         )
 
 
 @pytest.mark.asyncio
 async def test_legacy_resurrect_path_fails_closed_without_trigger(
-    stub_pool: object, database: Database, event_bus: EventBus
+    stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     """A new runner rejects an old gateway's ambiguous resurrection even when
     no new trigger field is present; mixed-version rollback cannot revive."""
@@ -423,13 +452,14 @@ async def test_legacy_resurrect_path_fails_closed_without_trigger(
             event_bus,
             "/api/agents/42/resurrect",
             {"resurrected_by": "user"},
-            stub_pool,  # type: ignore[arg-type]
+            stub_pool,
+            catalog=build_model_catalog(),  # type: ignore[arg-type]
         )
 
 
 @pytest.mark.asyncio
 async def test_explicit_v2_resurrect_dispatches_manual_op(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     """The versioned unguarded path is the only runner path used by a new
     gateway for a deliberate manual or system lifecycle resurrection."""
@@ -460,7 +490,8 @@ async def test_explicit_v2_resurrect_dispatches_manual_op(
         event_bus,
         "/api/agents/42/resurrect-explicit-v2",
         {"resurrected_by": "user"},
-        stub_pool,  # type: ignore[arg-type]
+        stub_pool,
+        catalog=build_model_catalog(),  # type: ignore[arg-type]
     )
 
     assert result.status == "spawned"

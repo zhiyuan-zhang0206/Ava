@@ -6,6 +6,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.tests.impersonation._impersonation_helpers import _active, _agent
@@ -16,12 +17,14 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
     owner = _agent(db_conn)
-    lease = _active(owner)
+    lease = _active(owner, authority=config_authority)
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
         "WHERE id=%s",
@@ -49,6 +52,8 @@ def test_reminder_ack_suppresses_further_reminders(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Issue #2054: an ACKed reminder still counts for the once-per-lease rule.
 
@@ -61,7 +66,7 @@ def test_reminder_ack_suppresses_further_reminders(
     from base.db import pool
 
     owner = _agent(db_conn)
-    lease = _active(owner)
+    lease = _active(owner, authority=config_authority)
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
         "WHERE id=%s",
@@ -93,13 +98,17 @@ def test_reminder_ack_suppresses_further_reminders(
 
 
 def test_reminder_skips_leases_outside_the_window(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
     owner = _agent(db_conn)
-    _active(owner)
+    _active(owner, authority=config_authority)
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '30 minutes' "
         "WHERE agent_id=%s",
@@ -115,13 +124,17 @@ def test_reminder_skips_leases_outside_the_window(
 
 
 def test_release_dismisses_its_pending_reminder(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
     owner = _agent(db_conn)
-    lease = _active(owner)
+    lease = _active(owner, authority=config_authority)
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '2 minutes' "
         "WHERE id=%s",
@@ -138,13 +151,17 @@ def test_release_dismisses_its_pending_reminder(
 
 
 def test_expiry_dismisses_its_pending_reminder(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.agents.impersonation import maintenance as maintenance
     from base.db import pool
 
     owner = _agent(db_conn)
-    lease = _active(owner)
+    lease = _active(owner, authority=config_authority)
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '1 minute' "
         "WHERE id=%s",
@@ -187,11 +204,13 @@ def test_reminder_window_tracks_current_ttl(
     ttl: int,
     remaining: int,
     expected: int,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    lease = _active(_agent(db_conn))
+    lease = _active(_agent(db_conn), authority=config_authority)
     db_conn.execute(
         "UPDATE agent_impersonations SET ttl_seconds=%s, "
         "expires_at=clock_timestamp()+make_interval(secs=>%s) WHERE id=%s",
@@ -206,11 +225,13 @@ def test_renewal_recomputes_window_and_allows_a_new_reminder(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    lease = _active(_agent(db_conn))
+    lease = _active(_agent(db_conn), authority=config_authority)
     caller = attested_caller(lease)
     with pool(max_size=2) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1

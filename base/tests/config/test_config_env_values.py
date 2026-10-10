@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 import base.log
 from base import config
+from base.config.service_read import ConfigAuthority
+
+
+@pytest.fixture
+def authority(tmp_path: Path) -> ConfigAuthority:
+    """The test owns the read model and the file it writes."""
+    return ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
 
 
 class _RecordingLogger:
@@ -34,7 +43,9 @@ def _patch_logger(monkeypatch: pytest.MonkeyPatch) -> _RecordingLogger:
     return rec
 
 
-def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_current_field_values_coerces_secretstr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+):
     """A SecretStr field read from .env must come back a SecretStr, not a bare str
     — `.get_secret_value()` consumers crash on a plain str."""
     from pydantic import SecretStr
@@ -44,23 +55,27 @@ def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"anthropic_api_key": "sk-ant-abc"}, set())
 
-    secret = config.current_field_values()["anthropic_api_key"]
+    secret = authority.current_field_values()["anthropic_api_key"]
     assert isinstance(secret, SecretStr)
     assert secret.get_secret_value() == "sk-ant-abc"
 
 
-def test_current_field_values_coerces_bool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_current_field_values_coerces_bool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+):
     """A bool field written to .env round-trips through the field type unchanged."""
     from base.host.env import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"trace_enabled": True}, set())
 
-    assert config.current_field_values()["trace_enabled"] is True
+    assert authority.current_field_values()["trace_enabled"] is True
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_bootstrap_serves_comma_list_not_repr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_bootstrap_serves_comma_list_not_repr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+):
     """A NoDecode comma-list field set in .env reaches an agent as the raw "a,b"
     env text, not a Python list repr (which the agent would split into garbage)."""
     from base.host.env import runtime_config as rt
@@ -70,12 +85,12 @@ def test_bootstrap_serves_comma_list_not_repr(monkeypatch: pytest.MonkeyPatch, t
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
     upsert_env(tmp_path / ".env", {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
 
-    vals = config.bootstrap_config_values()
+    vals = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
     assert vals["AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == "alpha,beta"
 
 
 def test_current_field_values_decodes_nodecode_comma_list(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """A NoDecode comma-list field reads back as a list (split like the model's
     _split_comma_list validator), not a silently mis-typed raw string."""
@@ -84,12 +99,12 @@ def test_current_field_values_decodes_nodecode_comma_list(
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
 
-    v = config.current_field_values()["skills_to_inject_into_system_prompt"]
+    v = authority.current_field_values()["skills_to_inject_into_system_prompt"]
     assert v == ["alpha", "beta"]
 
 
 def test_current_field_values_decodes_nodecode_comma_list_without_warning(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """P1 regression: a NoDecode comma-list value is a SUPPORTED .env spelling,
     not a decode failure. Decoding through the owning model must not emit the
@@ -108,7 +123,7 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
         set(),
     )
 
-    values = config.current_field_values()
+    values = authority.current_field_values()
 
     assert values["im_disabled_adapters"] == ["weixin", "feishu"]
     assert values["im_send_retry_delays"] == [0.5, 1.0]
@@ -117,7 +132,7 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
 
 
 def test_current_field_values_decodes_json_array_spelling(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """The JSON-array spelling the model validators also accept must decode
     through the panel path too — both spellings, not just the comma list."""
@@ -127,14 +142,14 @@ def test_current_field_values_decodes_json_array_spelling(
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"im_disabled_adapters": '["weixin", "feishu"]'}, set())
 
-    values = config.current_field_values()
+    values = authority.current_field_values()
 
     assert values["im_disabled_adapters"] == ["weixin", "feishu"]
     assert rec.warnings == []
 
 
 def test_current_field_values_decodes_empty_nodecode_list(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """An empty NoDecode list value decodes to [] (nothing disabled), matching
     Settings construction."""
@@ -144,14 +159,14 @@ def test_current_field_values_decodes_empty_nodecode_list(
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"im_disabled_adapters": []}, set())
 
-    values = config.current_field_values()
+    values = authority.current_field_values()
 
     assert values["im_disabled_adapters"] == []
     assert rec.warnings == []
 
 
 def test_auth_middleware_set_roundtrips_through_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """A `.env` write of auth_middleware_enabled (the e2e harness's knob; the
     config API refuses it) writes the key the model actually reads. The field's alias used to fall back to its upper-cased
@@ -166,7 +181,7 @@ def test_auth_middleware_set_roundtrips_through_env(
     text = (tmp_path / ".env").read_text()
     keys = {line.split("=", 1)[0] for line in text.splitlines() if "=" in line}
     assert keys == {"AVA_AUTH_MIDDLEWARE_ENABLED"}
-    assert config.current_field_values()["auth_middleware_enabled"] is False
+    assert authority.current_field_values()["auth_middleware_enabled"] is False
 
 
 def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -236,109 +251,85 @@ def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
 # ─── current_field_values warns on an undecodable .env value ───
 
 
-def test_current_field_values_warns_on_undecodable_env_value(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_current_field_values_rejects_undecodable_env_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
-    """A .env value the field annotation cannot decode falls back to the boot
-    value WITH a warning naming the key — never silently: the bad line stays in
-    the file and the next process start's Settings construction will fail on it,
-    so the operator must hear about it at panel-read time (audit round-2
-    config.md P2)."""
+    """Invalid file values fail at the explicit reader without serving boot defaults."""
     from base.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"trace_enabled": "banana"}, set())
 
-    val = config.current_field_values()["trace_enabled"]
-
-    assert val is True  # boot-time fallback (the field default)
-    assert len(rec.warnings) == 1
-    assert "AVA_TRACE_ENABLED" in rec.warnings[0]
-    assert "banana" not in rec.warnings[0]
+    with pytest.raises(ValidationError):
+        authority.current_field_values()
+    assert rec.warnings == []
 
 
-def test_current_field_values_warns_on_bad_nodecode_list_value(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_current_field_values_rejects_bad_nodecode_list_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
-    """A genuinely undecodable NoDecode list value (non-numeric delays) warns
-    and falls back to the boot-time value — never a wrong-typed string split
-    (the old fallback served ["banana", "apple"] for a list[float] field)."""
+    """Invalid file values fail at the explicit reader without serving boot defaults."""
     from base.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"im_send_retry_delays": "banana,apple"}, set())
 
-    values = config.current_field_values()
-
-    assert values["im_send_retry_delays"] == [2.0, 4.0, 8.0, 16.0, 32.0]
-    assert len(rec.warnings) == 1
-    assert "AVA_IM_SEND_RETRY_DELAYS" in rec.warnings[0]
-    assert "banana,apple" not in rec.warnings[0]
+    with pytest.raises(ValidationError):
+        authority.current_field_values()
+    assert rec.warnings == []
 
 
-def test_current_field_values_silently_serves_boot_db_url_for_agent_profile_refusal(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """#4332: an agent-profile process at the default home fresh-reading the
-    owner AVA_DB_URL line hits the deliberate guard refusal — an expected
-    topology, not a decode failure. It must serve the boot-time value (the
-    launcher-injected runner projection) with NO warning and only a debug
-    note; the old path warned on every panel read / agent send, while the
-    guard's fail-fast for a MISSING projection is unchanged."""
-    from base.config.domains.storage import data_plane
+def test_current_field_values_serves_the_explicit_runner_db_projection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+) -> None:
+    """The default-home agent owns a delivered runner login, not its file's owner URL."""
     from base.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
-    monkeypatch.setenv(config.AVA_PROCESS_PROFILE_ENV, "agent")
-    # The session singleton carries an empty cluster secret (single-box
-    # default); a real agent-profile process has one set — it is what turns
-    # the owner URL into the guard refusal.
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-cluster-secret")
-
-    boot = config.current_field_values()["db_url"]
+    monkeypatch.setenv("HOME", str(tmp_path))
+    home = tmp_path / ".ava"
+    home.mkdir()
+    runtime = config.settings.model_copy(deep=True, update={"profile": "agent"})
+    runtime.data_plane.cluster_secret = secrets.token_urlsafe(16)
+    runtime.data_plane.db_url = "postgresql://ava_g0_runner@127.0.0.1:5433/ava?hostaddr=127.0.0.1"
+    authority = ConfigAuthority(runtime, config.settings, home / ".env")
+    monkeypatch.setattr(rt, "_ava_home", lambda: home)
+    boot = authority.current_field_values()["db_url"]
     rt.write_fields({"db_url": "postgresql://ava_main:owner-pw@127.0.0.1:5433/ava"}, set())
 
-    values = config.current_field_values()
+    values = authority.current_field_values()
 
     assert values["db_url"] == boot
     assert rec.warnings == []
-    assert rec.debugs, "the expected refusal must stay visible in a debug log"
+    assert rec.debugs, "the expected projection must stay visible in a debug log"
 
 
-def test_current_field_values_warns_on_bad_db_url_under_agent_profile_conditions(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """#4332 precision: the refusal classification must not swallow genuine
-    decode failures — a malformed URL in the SAME agent-profile/default-home
-    context still warns and falls back to the boot-time value, and the
-    warning must not suggest removing the load-bearing .env line."""
-    from base.config.domains.storage import data_plane
+def test_current_field_values_rejects_bad_db_url_with_runner_projection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+) -> None:
+    """The runner projection never hides malformed file URLs."""
     from base.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
-    monkeypatch.setenv(config.AVA_PROCESS_PROFILE_ENV, "agent")
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-cluster-secret")
-
-    boot = config.current_field_values()["db_url"]
+    monkeypatch.setenv("HOME", str(tmp_path))
+    home = tmp_path / ".ava"
+    home.mkdir()
+    runtime = config.settings.model_copy(deep=True, update={"profile": "agent"})
+    runtime.data_plane.cluster_secret = secrets.token_urlsafe(16)
+    runtime.data_plane.db_url = "postgresql://ava_g0_runner@127.0.0.1:5433/ava?hostaddr=127.0.0.1"
+    authority = ConfigAuthority(runtime, config.settings, home / ".env")
+    monkeypatch.setattr(rt, "_ava_home", lambda: home)
     rt.write_fields({"db_url": "postgresql://[::1"}, set())
 
-    values = config.current_field_values()
-
-    assert values["db_url"] == boot
-    assert len(rec.warnings) == 1
-    assert "AVA_DB_URL" in rec.warnings[0]
-    assert "fix the line" in rec.warnings[0]
-    assert "remove" not in rec.warnings[0]
+    with pytest.raises(ValidationError):
+        authority.current_field_values()
+    assert rec.warnings == []
 
 
 def test_current_field_values_isolates_bad_env_from_good_file_value(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """QA #1090 repro: a good comma-list FILE value must decode even when
     ANOTHER field of the same domain carries a bad ENV value (absent from the
@@ -355,7 +346,7 @@ def test_current_field_values_isolates_bad_env_from_good_file_value(
     # path only.
     monkeypatch.setitem(os.environ, "AVA_IM_SEND_RETRY_DELAYS", "banana")
 
-    values = config.current_field_values()
+    values = authority.current_field_values()
 
     assert values["im_disabled_adapters"] == ["weixin", "feishu"]
     assert rec.warnings == []

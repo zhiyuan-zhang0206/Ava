@@ -12,7 +12,7 @@ tags:
 The base-layer domain map below complements the public
 [[entry-points.ava.okf.md|entry points]].
 
-- [[base/lm/docs/lm.ava.okf.md]] — LLM provider abstraction layer, used by agent/graph/llm/node.py via factory to build chat models
+- [[base/lm/docs/lm/lm.ava.okf.md]] — LLM provider abstraction layer, used by agent/graph/llm/node.py via factory to build chat models
 - [[agents-contract.ava.okf.md]] — agent ↔ gateway state/exception/wire protocol contract
 - [[base/agents/messages/docs/kwargs.ava.okf.md]] — typed `ava_*` metadata inside a message's `additional_kwargs`
 - [[base/agents/messages/docs/inbound-provenance.ava.okf.md]] — non-enforcing credential, transport, content-hash, and source-assertion facts on gateway inbounds

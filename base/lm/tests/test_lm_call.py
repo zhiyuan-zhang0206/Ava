@@ -16,7 +16,10 @@ import openai
 import pytest
 from langchain_core.messages import AIMessage
 
+from base.config import get_field, settings
+from base.host.env.agent_slices import ModelOverrides
 from base.lm.call import answer_text, extract_text, invoke_text
+from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
 
 
@@ -63,15 +66,17 @@ def test_extract_text_stringifies_other_shapes() -> None:
 # ─── invoke_text ──────────────────────────────────────────────────────────
 
 
-def test_invoke_text_returns_flattened_text() -> None:
+def test_invoke_text_returns_flattened_text(*, model_catalog: ModelCatalog) -> None:
     llm = _FakeLLM(_FakeResponse("answer"))
-    out = invoke_text(llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError)
+    out = invoke_text(
+        llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError, catalog=model_catalog
+    )
     assert out == "answer"
     assert llm.messages[0].content == [{"type": "text", "text": "q"}]
 
 
 def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """A successful shared text call records the priced provider usage it consumed.
 
@@ -119,7 +124,13 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
     )
 
     assert (
-        invoke_text(llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError)
+        invoke_text(
+            llm,
+            [{"type": "text", "text": "q"}],
+            desc="d",
+            error_type=ValueError,
+            catalog=model_catalog,
+        )
         == "answer"
     )
 
@@ -131,7 +142,7 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
 
 
 def test_invoke_text_logs_priced_chat_usage_with_source(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: list[dict[str, Any]], *, model_catalog: ModelCatalog
 ) -> None:
     """A successful auxiliary text call enters the durable usage ledger.
 
@@ -160,6 +171,7 @@ def test_invoke_text_logs_priced_chat_usage_with_source(
             desc="d",
             error_type=ValueError,
             usage_source="web.fetch",
+            catalog=model_catalog,
         )
         == "answer"
     )
@@ -179,28 +191,42 @@ def test_invoke_text_logs_priced_chat_usage_with_source(
 
 
 def test_invoke_text_skips_usage_log_without_usage_metadata(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: list[dict[str, Any]], *, model_catalog: ModelCatalog
 ) -> None:
     """A response without provider token counts must not masquerade as metered."""
     llm = _FakeLLM(_FakeResponse("answer"), model_name="deepseek-v4-pro")
 
     assert (
-        invoke_text(llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError)
+        invoke_text(
+            llm,
+            [{"type": "text", "text": "q"}],
+            desc="d",
+            error_type=ValueError,
+            catalog=model_catalog,
+        )
         == "answer"
     )
 
     assert not [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
 
 
-def test_invoke_text_empty_response_raises_error_type() -> None:
+def test_invoke_text_empty_response_raises_error_type(*, model_catalog: ModelCatalog) -> None:
     """An empty (safety-blocked) response raises the caller's error type, not
     a silent empty string."""
     llm = _FakeLLM(_FakeResponse(""))
     with pytest.raises(ValueError, match="empty response"):
-        invoke_text(llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError)
+        invoke_text(
+            llm,
+            [{"type": "text", "text": "q"}],
+            desc="d",
+            error_type=ValueError,
+            catalog=model_catalog,
+        )
 
 
-def test_invoke_text_upstream_error_wrapped_in_error_type(loguru_records) -> None:
+def test_invoke_text_upstream_error_wrapped_in_error_type(
+    loguru_records, *, model_catalog: ModelCatalog
+) -> None:
     class _Boom:
         def invoke(self, messages: list[Any]) -> Any:
             response = httpx2.Response(429, request=httpx2.Request("POST", "https://audit.invalid"))
@@ -213,6 +239,7 @@ def test_invoke_text_upstream_error_wrapped_in_error_type(loguru_records) -> Non
             desc="d",
             error_type=KeyError,
             model="deepseek-v4-pro",
+            catalog=model_catalog,
         )
     events = [
         record
@@ -226,13 +253,22 @@ def test_invoke_text_upstream_error_wrapped_in_error_type(loguru_records) -> Non
 # ─── answer_text ──────────────────────────────────────────────────────────
 
 
-def test_answer_text_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_answer_text_happy_path(
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+) -> None:
     """Builds the model at the given effort and answers prompt vs material."""
     captured: dict[str, Any] = {}
 
     def _fake_build(
-        model: str, *, reasoning_effort: Any = None, timeout: float | None = None
+        model: str,
+        *,
+        catalog: ModelCatalog,
+        llm_override: str,
+        overrides: ModelOverrides,
+        reasoning_effort: Any = None,
+        timeout: float | None = None,
     ) -> Any:
+        assert catalog is model_catalog
         captured["model"] = model
         captured["effort"] = reasoning_effort
         return _FakeLLM(_FakeResponse("answer"))
@@ -245,30 +281,65 @@ def test_answer_text_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
         effort=ReasoningEffort.HIGH,
         error_type=ValueError,
         desc="d",
+        catalog=model_catalog,
+        llm_override=settings.lm.llm_override,
+        overrides=ModelOverrides.from_pins(
+            {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+        ),
     )
     assert out == "answer"
     assert captured == {"model": "m1", "effort": ReasoningEffort.HIGH}
 
 
-def test_answer_text_build_failure_raises_error_type(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_answer_text_build_failure_raises_error_type(
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+) -> None:
     """A build failure (missing API key etc.) surfaces as the caller's error
     type with the reason — the fetch-path contract."""
 
-    def _fail(model: str, *, reasoning_effort: Any = None, timeout: float | None = None) -> Any:
+    def _fail(
+        model: str,
+        *,
+        catalog: ModelCatalog,
+        llm_override: str,
+        overrides: ModelOverrides,
+        reasoning_effort: Any = None,
+        timeout: float | None = None,
+    ) -> Any:
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
     monkeypatch.setattr("base.lm.factory.build_chat_model", _fail)
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        answer_text("p", "m", model="m1", effort="low", error_type=ValueError, desc="d")
+        answer_text(
+            "p",
+            "m",
+            model="m1",
+            effort="low",
+            error_type=ValueError,
+            desc="d",
+            catalog=model_catalog,
+            llm_override=settings.lm.llm_override,
+            overrides=ModelOverrides.from_pins(
+                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            ),
+        )
 
 
 def test_answer_text_build_failure_uses_build_error_when_given(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """The fetch path passes `build_error` to keep its "for <url>" wording."""
     seen: dict[str, Any] = {}
 
-    def _fail(model: str, *, reasoning_effort: Any = None, timeout: float | None = None) -> Any:
+    def _fail(
+        model: str,
+        *,
+        catalog: ModelCatalog,
+        llm_override: str,
+        overrides: ModelOverrides,
+        reasoning_effort: Any = None,
+        timeout: float | None = None,
+    ) -> Any:
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
     monkeypatch.setattr("base.lm.factory.build_chat_model", _fail)
@@ -286,6 +357,11 @@ def test_answer_text_build_failure_uses_build_error_when_given(
             error_type=ValueError,
             desc="d",
             build_error=_wrap,
+            catalog=model_catalog,
+            llm_override=settings.lm.llm_override,
+            overrides=ModelOverrides.from_pins(
+                {name: get_field(name) for name in ModelOverrides.__dataclass_fields__}
+            ),
         )
     assert seen["model"] == "m1"
 
@@ -299,7 +375,7 @@ def _no_jitter(delay: float) -> float:
 
 
 def test_invoke_text_retries_transient_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """A TRANSIENT provider failure (transport class) is retried when
     `retry_attempts` allows, and a later success returns normally."""
@@ -322,13 +398,14 @@ def test_invoke_text_retries_transient_then_succeeds(
         error_type=ValueError,
         retry_attempts=2,
         retry_delay_seconds=0.0,
+        catalog=model_catalog,
     )
     assert out == "answer"
     assert calls["n"] == 2
 
 
 def test_invoke_text_retry_exhausted_raises_error_type(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """A failure that persists past the retry budget raises the caller's
     error type with the attempt count in the message."""
@@ -348,11 +425,12 @@ def test_invoke_text_retry_exhausted_raises_error_type(
             error_type=ValueError,
             retry_attempts=1,
             retry_delay_seconds=0.0,
+            catalog=model_catalog,
         )
 
 
 def test_invoke_text_retry_uses_exponential_backoff(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """Retry waits double per attempt (base 2 → 4 → 8…) capped at
     retry_max_delay_seconds, plus jitter; the base itself is not re-added."""
@@ -374,11 +452,14 @@ def test_invoke_text_retry_uses_exponential_backoff(
             retry_attempts=3,
             retry_delay_seconds=2.0,
             retry_max_delay_seconds=30.0,
+            catalog=model_catalog,
         )
     assert sleeps == [2.0, 4.0, 8.0]
 
 
-def test_invoke_text_retry_backoff_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_invoke_text_retry_backoff_capped(
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+) -> None:
     """The exponential sequence stops growing at retry_max_delay_seconds."""
 
     sleeps: list[float] = []
@@ -398,6 +479,7 @@ def test_invoke_text_retry_backoff_capped(monkeypatch: pytest.MonkeyPatch) -> No
             retry_attempts=4,
             retry_delay_seconds=2.0,
             retry_max_delay_seconds=5.0,
+            catalog=model_catalog,
         )
     assert sleeps == [2.0, 4.0, 5.0, 5.0]
 
@@ -419,7 +501,7 @@ class _RetryAfterLLM:
 
 
 def test_invoke_text_retry_respects_retry_after(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """A provider Retry-After header longer than the backoff wins (capped at
     120s), plus jitter — mirroring the SDKs' own header reading at our layer."""
@@ -435,13 +517,14 @@ def test_invoke_text_retry_respects_retry_after(
             error_type=ValueError,
             retry_attempts=2,
             retry_delay_seconds=2.0,
+            catalog=model_catalog,
         )
     # attempt 1 backoff would be 2s, but Retry-After 45 wins; attempt 2 too.
     assert sleeps == [45.0, 45.0]
 
 
 def test_invoke_text_retry_after_capped_at_120(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """A Retry-After above 120s is ignored (treated as absent) — the backoff
     sequence applies instead."""
@@ -457,12 +540,13 @@ def test_invoke_text_retry_after_capped_at_120(
             error_type=ValueError,
             retry_attempts=2,
             retry_delay_seconds=2.0,
+            catalog=model_catalog,
         )
     assert sleeps == [2.0, 4.0]  # Retry-After 300 ignored
 
 
 def test_invoke_text_retry_after_ms_header(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """`retry-after-ms` (the SDKs' non-standard precision header) is honored."""
     sleeps: list[float] = []
@@ -477,11 +561,12 @@ def test_invoke_text_retry_after_ms_header(
             error_type=ValueError,
             retry_attempts=1,
             retry_delay_seconds=2.0,
+            catalog=model_catalog,
         )
     assert sleeps == [7.0]  # 7000ms → 7s, longer than the 2s backoff
 
 
-def test_invoke_text_does_not_retry_permanent() -> None:
+def test_invoke_text_does_not_retry_permanent(*, model_catalog: ModelCatalog) -> None:
     """A PERMANENT provider rejection (e.g. 401) is deterministic — never
     retried even with a retry budget."""
     calls = {"n": 0}
@@ -500,12 +585,13 @@ def test_invoke_text_does_not_retry_permanent() -> None:
             error_type=ValueError,
             retry_attempts=3,
             retry_delay_seconds=0.0,
+            catalog=model_catalog,
         )
     assert calls["n"] == 1  # no retry on PERMANENT
 
 
 def test_invoke_response_attributes_usage_to_the_given_agent(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: list[dict[str, Any]], *, model_catalog: ModelCatalog
 ) -> None:
     """A daemon call made for an agent passes its id; the usage row carries it."""
     from base.lm.call import invoke_response
@@ -520,6 +606,7 @@ def test_invoke_response_attributes_usage_to_the_given_agent(
         error_type=ValueError,
         usage_source="hierarchy.group",
         usage_agent_id=42,
+        catalog=model_catalog,
     )
 
     [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]

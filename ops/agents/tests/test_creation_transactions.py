@@ -10,7 +10,9 @@ from base.agents.birth_config import set_cluster_default_model
 from base.agents.tasks.creation import create_task_in_transaction
 from base.agents.tasks.model import Task
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.lm.plugin_providers import build_model_catalog
 from ops.agents.birth_transaction import insert_agent_birth
 from ops.agents.creation_identity import creation_request_hash
 
@@ -36,7 +38,7 @@ def _counts(conn: psycopg.Connection) -> tuple[int, ...]:
 
 
 def test_actual_birth_model_effort_failure_rolls_back_every_effect(
-    db_conn: psycopg.Connection, cluster_defaults_unset: None
+    db_conn: psycopg.Connection, cluster_defaults_unset: None, *, config_authority: ConfigAuthority
 ) -> None:
     before = _counts(db_conn)
     with (
@@ -51,22 +53,38 @@ def test_actual_birth_model_effort_failure_rolls_back_every_effect(
             config={"reasoning_effort": "max"},
             prompt="This birth must roll back",
             prompt_source="user",
+            catalog=build_model_catalog(),
+            authority=config_authority,
         )
     assert _counts(db_conn) == before
 
 
 @pytest.mark.parametrize("commit", [False, True])
 def test_caller_owns_birth_task_audit_and_inbound_commit(
-    db_conn: psycopg.Connection, database: Database, commit: bool
+    db_conn: psycopg.Connection,
+    database: Database,
+    commit: bool,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     parent = _seed_parent(db_conn)
     with database.connect(autocommit=True) as observer:
         before = _counts(observer)
         expected = nullcontext() if commit else pytest.raises(RuntimeError, match="caller refuses")
         with expected, db_conn.transaction(), db_conn.cursor() as cur:
-            actor = insert_agent_birth(cur, machine=machine_name())
+            actor = insert_agent_birth(
+                cur,
+                machine=machine_name(),
+                catalog=build_model_catalog(),
+                authority=config_authority,
+            )
             birth = insert_agent_birth(
-                cur, machine=machine_name(), prompt="First instruction", prompt_source="user"
+                cur,
+                machine=machine_name(),
+                prompt="First instruction",
+                prompt_source="user",
+                catalog=build_model_catalog(),
+                authority=config_authority,
             )
             task, event, notes = create_task_in_transaction(
                 cur,
@@ -90,7 +108,7 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
 
 
 def test_task_validation_failure_rolls_back_birth_and_prompt(
-    db_conn: psycopg.Connection, database: Database
+    db_conn: psycopg.Connection, database: Database, *, config_authority: ConfigAuthority
 ) -> None:
     _seed_parent(db_conn)
     row = db_conn.execute(
@@ -108,7 +126,12 @@ def test_task_validation_failure_rolls_back_birth_and_prompt(
             db_conn.cursor() as cur,
         ):
             birth = insert_agent_birth(
-                cur, machine=machine_name(), prompt="First instruction", prompt_source="user"
+                cur,
+                machine=machine_name(),
+                prompt="First instruction",
+                prompt_source="user",
+                catalog=build_model_catalog(),
+                authority=config_authority,
             )
             create_task_in_transaction(
                 cur,
@@ -130,7 +153,7 @@ def test_fleet_task_model_remains_the_shared_model() -> None:
 
 
 def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
 ) -> None:
     with db_conn.transaction(), db_conn.cursor() as cur:
         original = insert_agent_birth(
@@ -140,6 +163,8 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
             prompt_source="user",
             creation_key="transaction-birth",
             creation_request_hash=creation_request_hash({"prompt": "First instruction"}),
+            catalog=build_model_catalog(),
+            authority=config_authority,
         )
     before = _counts(db_conn)
     db_conn.commit()
@@ -151,6 +176,8 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
             prompt_source="user",
             creation_key="transaction-birth",
             creation_request_hash=creation_request_hash({"prompt": "First instruction"}),
+            catalog=build_model_catalog(),
+            authority=config_authority,
         )
         assert replay.agent_id == original.agent_id
         assert replay.launch_attempt_id == original.launch_attempt_id

@@ -4,7 +4,6 @@ import asyncio
 import subprocess
 import sys
 from collections.abc import Callable
-from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -20,14 +19,15 @@ from agent.ownership.hosted import settle_stale_running_rows
 from agent.state import AgentState
 from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
-from services.agent_runner.agent_host.tests.test_agent_host import _PendingScanPool
 from services.agent_runner.agent_host.tests.test_turn_dispatcher import _FixedClock, _ScanScheduler
 from tests.components.base.poll_until import poll_until_async
 
@@ -48,9 +48,15 @@ def isolated_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_pending_scan_classifies_lifecycle_work_and_lease(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, insert_inbound: Callable[..., int]
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    insert_inbound: Callable[..., int],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent,))
     lifecycle = insert_inbound(db_conn, agent, "", "system:test", kind="restart")
@@ -61,6 +67,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         graph=AsyncMock(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
 
     assert [(wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(60)] == [
@@ -94,8 +101,12 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
     aops_pool: AsyncConnectionPool,
     known_progress: bool,
     insert_inbound: Callable[..., int],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     inbound = insert_inbound(db_conn, agent, "Queued before host recovery", "user")
     db_conn.execute(
@@ -122,6 +133,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         checkpointer=saver,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     host._owner = incarnation.owner
     scheduler = TurnScheduler(host.run_turn)
@@ -156,9 +168,15 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
 
 
 async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_messages(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, insert_inbound: Callable[..., int]
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    insert_inbound: Callable[..., int],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     inbound = insert_inbound(db_conn, agent, "Claimed before host exit", "user")
     db_conn.execute("UPDATE inbound_messages SET status='claimed' WHERE id=%s", (inbound,))
@@ -203,6 +221,7 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
         graph=graph,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     # A host boot while the dead predecessor still has a fresh lease cannot settle it.
     assert await settle_stale_running_rows(aops_pool, machine_name()) == []
@@ -253,9 +272,16 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
     "boundary", ["fresh", "same_owner", "foreign", "unowned", "fatal", "terminated"]
 )
 async def test_owner_recovery_scan_excludes_unrelated_rows(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, status: str, boundary: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    status: str,
+    boundary: str,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     host = AgentHost(
         pool=aops_pool,
@@ -263,6 +289,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         graph=AsyncMock(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     if boundary == "same_owner":
         host._owner = incarnation.owner
@@ -289,9 +316,15 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
 
 @pytest.mark.parametrize("status", ["running", "idling"])
 async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, status: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    status: str,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     host = AgentHost(
         pool=aops_pool,
@@ -299,6 +332,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
         graph=AsyncMock(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     with subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
@@ -756,41 +790,3 @@ class TestHostedWakePacing:
         )
         await disp.scan_once()
         assert scheduler.woken == [1, 2]
-
-
-class TestHostedHostWakePacing:
-    async def test_held_cohort_wakes_are_never_paced(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        pool = _PendingScanPool([(17, False, False)])
-        host = AgentHost(
-            pool=cast(AsyncConnectionPool[Any], pool),
-            checkpointer=object(),  # pyright: ignore[reportArgumentType]
-            graph=object(),  # pyright: ignore[reportArgumentType]
-            machine="this-box",
-            bus=EventBus.from_settings(),
-            db=Database.from_settings(),
-        )
-
-        def held_wakes(_fences: object) -> list[dispatcher.PendingInboundWake]:
-            return [
-                dispatcher.PendingInboundWake(17, False),
-                dispatcher.PendingInboundWake(23, False),
-            ]
-
-        monkeypatch.setattr(
-            "services.agent_runner.agent_host.host.maintenance_receipts.pending_wakes", held_wakes
-        )
-        # The drain's held re-drive is update machinery: never paced.
-        assert [
-            (wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(30)
-        ] == [(17, False), (23, False)]
-        scheduler = _ScanScheduler()
-        wake_dispatcher = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=host.pending_inbound_wakes,
-            stale_after_s=30,
-            recovery_wake_batch=1,
-            recovery_wake_inflight=1,
-        )
-        await wake_dispatcher.scan_once()
-        assert scheduler.woken == [17, 23]

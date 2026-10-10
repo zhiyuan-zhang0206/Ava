@@ -32,9 +32,11 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from tests.impersonation_support import attested_caller, recorded_tree
@@ -58,6 +60,7 @@ async def _prepare_graph(
     monkeypatch: pytest.MonkeyPatch,
     *,
     automatic: bool = False,
+    config_authority: ConfigAuthority,
 ) -> tuple[
     Any,
     AsyncPostgresSaver,
@@ -92,6 +95,7 @@ async def _prepare_graph(
         executor_name="Codex: integration",
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     model_calls: list[Any] = []
 
@@ -155,6 +159,7 @@ async def _prepare_graph(
         clients=process_clients(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         original_incarnation=owner,
+        catalog=build_model_catalog(),
     )
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {
@@ -249,9 +254,13 @@ async def test_consent_exec_inbox_release_and_resume(
     finish: str,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
+    # The real exec child boots this installed unit, whose identity is file-owned.
+    config_authority.env_path.write_text(f"AVA_MACHINE_NAME={machine_name()}\n", encoding="utf-8")
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch
+        db_conn, aops_pool, monkeypatch, config_authority=config_authority
     )
     agent_id = owner.agent_id
 
@@ -388,14 +397,13 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn,
-        aops_pool,
-        monkeypatch,
-        automatic=True,
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -465,12 +473,11 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     graph, saver, ctx, config, _reset, owner, requested, calls = await _prepare_graph(
-        db_conn,
-        aops_pool,
-        monkeypatch,
-        automatic=True,
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     # Emulate a committed acceptance followed by a crash before claim's update.
@@ -507,15 +514,14 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     from agent.impersonation_handoff import deliver_handoff
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, calls = await _prepare_graph(
-        db_conn,
-        aops_pool,
-        monkeypatch,
-        automatic=True,
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -569,13 +575,15 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """With every source sealed at release, the event log is complete before delivery."""
     from agent.impersonation_handoff import deliver_handoff
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, _calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -628,6 +636,8 @@ async def test_end_note_resumes_an_empty_queue(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A release with nothing queued must still run the end note's first turn.
 
@@ -639,7 +649,7 @@ async def test_end_note_resumes_an_empty_queue(
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -705,13 +715,15 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Task #5010: an ACK acknowledges the message, not the work — input the executor
     received and never finished survives expiry into the record and the resume note."""
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, automatic=True
+        db_conn, aops_pool, monkeypatch, automatic=True, config_authority=config_authority
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(history, "workspace_dir", Mock(return_value=tmp_path))

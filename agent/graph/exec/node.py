@@ -520,7 +520,9 @@ async def _exec_single_call(
         # as the fallback for edge paths that skip this update (compact halt).
         merged_attach = merge_attachments(state.attach, envelope_attachments)
         update["attach"] = merged_attach
-        attach_msg = build_attach_message(merged_attach, _attach_model(ctx))
+        attach_msg = build_attach_message(
+            merged_attach, _attach_model(ctx), catalog=ctx.require_catalog()
+        )
         if attach_msg is not None:
             state_messages_update.append(attach_msg)
             update["attach"] = AttachState()

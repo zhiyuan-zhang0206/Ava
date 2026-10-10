@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.tests.claim.test_inbound_ownership import _insert
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -25,6 +25,7 @@ async def test_generation_unknown_or_short_never_repeats_and_next_chat_runs(
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     failure: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     calls: list[str] = []
 
@@ -39,11 +40,16 @@ async def test_generation_unknown_or_short_never_repeats_and_next_chat_runs(
                 raise RuntimeError("unknown provider response")
             return await super().ainvoke(*args, **kwargs)
 
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings(
-        {"gpt-": replace(binding, build_single_attempt=lambda _: FailingModel(responses=["short"]))}
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog,
+        {
+            "gpt-": replace(
+                binding, build_single_attempt=lambda _: FailingModel(responses=["short"])
+            )
+        },
     )
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     await accepted.host.run_turn(accepted.agent)
     status = accepted.status(client)
     assert status["outcome"] == ("rejected" if failure == "short" else "uncertain")

@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.process_boot import boot_agent_scope
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
 from base.lm.provider_api import ProviderBinding
 from base.lm.registry import resolve_available_model
@@ -120,6 +121,8 @@ def admit_stored_model(
     stats: HostStats,
     rejected: dict[int, str],
     normalized: dict[int, str],
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> bool:
     """Admit the stored model configuration a hosted wake is about to bind.
 
@@ -149,7 +152,7 @@ def admit_stored_model(
     """
     model = pins.get("llm_model") or settings.lm.llm_model
     try:
-        validate_model_config(model=model)
+        validate_model_config(model=model, catalog=catalog, llm_override=llm_override)
     except ValueError as exc:
         stats.config_rejected += 1
         if rejected.get(agent_id) != stored.fingerprint:
@@ -167,7 +170,7 @@ def admit_stored_model(
     rejected.pop(agent_id, None)
     if "llm_model" in pins:
         pinned_model = pins["llm_model"]
-        resolved_model = resolve_available_model(pinned_model)
+        resolved_model = resolve_available_model(pinned_model, models=catalog.models)
         if resolved_model != pinned_model:
             pins["llm_model"] = resolved_model
             stats.config_normalized += 1
@@ -309,12 +312,17 @@ async def build_runtime(
     agent_id: int,
     fingerprint: str,
     slices: AgentSlices,
+    *,
+    catalog: ModelCatalog,
+    llm_override: str,
 ) -> _AgentRuntime:
     """Build the retained model binding after the host repaired its original admission."""
     llm, binding = await boot_agent_scope(
         agent_id,
         slices.brain.llm_model,
         slices.overrides,
+        catalog=catalog,
+        llm_override=llm_override,
     )
     return _AgentRuntime(fingerprint=fingerprint, llm=llm, binding=binding)
 

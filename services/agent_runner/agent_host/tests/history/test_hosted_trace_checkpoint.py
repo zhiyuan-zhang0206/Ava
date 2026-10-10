@@ -24,6 +24,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
 
 
@@ -31,6 +32,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
     aops_pool: AsyncConnectionPool,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent_id = _agent(db_conn)
     incarnation = await _admit(
@@ -76,6 +78,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
             machine="test",
             bus=EventBus.from_settings(),
             db=Database.from_settings(),
+            catalog=model_catalog,
         )
         assert not (
             await host._invoke_until_done(
@@ -86,6 +89,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                         agent=AgentSlices.resolve(),
                         db=Database.from_settings(),
                         bus=EventBus.from_settings(),
+                        catalog=model_catalog,
                     ),
                     original_incarnation=incarnation,
                     hosted_resources=None,

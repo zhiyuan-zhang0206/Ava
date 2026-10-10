@@ -6,11 +6,6 @@ history and halts until new input. Consumed legacy requests are not replayed.
 Compaction is a core capability (Issue #1284) — this module is always active,
 not gated by plugins; its hook belongs to `framework_hooks()`.
 
-Exports:
-- `generate_summary`: compaction LLM operation over the whole conversation.
-- The compaction live-run events (`emit_compact_started` / `emit_compact_finished`)
-  live in `agent/hooks/compact_events.py`.
-
 Compaction replaces the whole history with `[system prompt, summary]` — the
 summary retains needed recency; no raw tail is carried into the replacement.
 
@@ -56,6 +51,7 @@ from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.call import ProviderCallBinding
+from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.lm.errors import is_retryable_provider_error
 from base.log import logger
@@ -201,6 +197,7 @@ async def generate_summary(
     llm: BaseChatModel,
     slices: AgentSlices,
     *,
+    catalog: ModelCatalog,
     single_attempt: bool = False,
     binding: ProviderCallBinding | None = None,
 ) -> SummaryText:
@@ -246,6 +243,7 @@ async def generate_summary(
             response,
             model=model,
             usage_kind="agent",
+            catalog=catalog,
             # Gemini + explicit cachedContent reports only the explicit block
             # in cache_read — label the event's provenance honestly.
             cache_mechanism=CACHE_MECHANISM_MIXED if used_explicit_cache else None,
@@ -318,6 +316,7 @@ async def emergency_compact_summary(
     llm: BaseChatModel,
     slices: AgentSlices,
     *,
+    catalog: ModelCatalog,
     binding: ProviderCallBinding | None = None,
 ) -> str:
     """The circuit-breaker compaction summary: a real compaction first, then the
@@ -341,7 +340,9 @@ async def emergency_compact_summary(
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm, slices, binding=binding)
+            summary = await generate_summary(
+                messages, llm, slices, binding=binding, catalog=catalog
+            )
         except Exception as e:
             last_error = e
             if _is_permanent_provider_failure(e):
@@ -400,17 +401,11 @@ def _estimate_tokens(messages: list[AnyMessage]) -> int:
 
 
 def _context_occupancy(messages: list[AnyMessage]) -> int:
-    """Context-window occupancy, in the same unit the frontend gauge shows: the
-    most recent LLM call's real ``input_tokens`` (provider truth). Falls back to
-    the chars/4 estimate only until the first call completes (a just-spawned
-    agent's first turn, or right after a compaction wiped the prior AIMessages),
-    when the context is trivially small anyway.
+    """The last provider input count, or a chars/4 estimate before the first call.
 
-    This is the "Option Y" approach: the compact trigger, the reported soft/hard
-    thresholds, and the gauge are all one unit. The trade-off is that occupancy
-    now reflects the *previous* call's measured size rather than a fresh estimate
-    of the context about to be sent — so compaction fires one turn later than the
-    old chars/4 gate, absorbed by the completion buffer the fractions leave."""
+    Matches the frontend gauge. It measures the previous model request, so the
+    completion buffer absorbs the one-turn delay before a compaction threshold.
+    """
     tokens = latest_input_tokens(messages)
     return tokens if tokens is not None else _estimate_tokens(messages)
 
@@ -432,21 +427,15 @@ def _summary_awaits_reply(messages: list[AnyMessage]) -> bool:
     return False
 
 
-def auto_compact_will_fire(state: AgentState, agent: AgentSlices) -> bool:
-    """Whether the force-compact path would replace ``state.messages`` this turn:
-    occupancy over the model's hard ceiling AND a non-empty conversation to
-    compress. The single gate — plugins that must defer a message write on a
-    turn compaction will claim (agent-reply / memory / silent-idle notes) call
-    this instead of replicating the estimate + threshold, so the prediction can
-    never drift from ``auto_compact_for_llm``.
+def auto_compact_will_fire(state: AgentState, agent: AgentSlices, *, catalog: ModelCatalog) -> bool:
+    """Apply the same agent-owned budget gate the automatic compact path uses.
 
-    Resolves the ceiling from the agent's own model and its own threshold overrides
-    (the brain and overrides slices, which the spawn overlay already applied);
-    ``UnknownModelWindowError`` surfaces rather than silently mis-gating an agent
-    whose window we do not know."""
+    Plugins use this to defer writes on a turn that compaction will claim.
+    A missing model window fails explicitly rather than silently mis-gating.
+    """
     if _summary_awaits_reply(state.messages):
         return False
-    budget = resolve_context_budget(agent.brain.llm_model, agent.overrides)
+    budget = resolve_context_budget(agent.brain.llm_model, agent.overrides, catalog=catalog)
     if _context_occupancy(state.messages) <= budget.hard_compact_tokens:
         return False
     return bool(conversation_messages(state.messages))
@@ -458,13 +447,17 @@ async def _auto_compact_summary(
     content_count: int,
     slices: AgentSlices,
     binding: ProviderCallBinding | None = None,
+    *,
+    catalog: ModelCatalog,
 ) -> str:
     """Generate and validate a summary without committing any context change."""
     summary: str = ""
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm, slices, binding=binding)
+            summary = await generate_summary(
+                messages, llm, slices, binding=binding, catalog=catalog
+            )
         except Exception as e:
             if not isinstance(e, EmptyCompactionSummaryError) and not is_retryable_provider_error(
                 e
@@ -530,7 +523,8 @@ async def auto_compact_for_llm(
         return None
     occupancy = _context_occupancy(state.messages)
     agent = runtime.context.require_agent()
-    budget = resolve_context_budget(agent.brain.llm_model, agent.overrides)
+    catalog = runtime.context.require_catalog()
+    budget = resolve_context_budget(agent.brain.llm_model, agent.overrides, catalog=catalog)
     if occupancy <= budget.hard_compact_tokens:
         return None
     content_msgs = conversation_messages(state.messages)
@@ -568,6 +562,7 @@ async def auto_compact_for_llm(
                     len(content_msgs),
                     runtime.context.require_agent(),
                     binding=runtime.context.llm_binding,
+                    catalog=catalog,
                 ),
                 interrupted,
             )
@@ -710,7 +705,9 @@ COMPACT_REMINDER_NOTE = (
 )
 
 
-def _compact_reminder_update(state: AgentState, agent: AgentSlices) -> dict | None:
+def _compact_reminder_update(
+    state: AgentState, agent: AgentSlices, *, catalog: ModelCatalog
+) -> dict | None:
     """The one-time wind-down reminder, injected when occupancy sits in the band
     below the forced ceiling (soft_compact_tokens < occupancy <=
     hard_compact_tokens). Returns the `messages` update + bookkeeping, or None.
@@ -729,7 +726,9 @@ def _compact_reminder_update(state: AgentState, agent: AgentSlices) -> dict | No
     occupancy = _context_occupancy(state.messages)
     if (
         occupancy
-        <= resolve_context_budget(agent.brain.llm_model, agent.overrides).soft_compact_tokens
+        <= resolve_context_budget(
+            agent.brain.llm_model, agent.overrides, catalog=catalog
+        ).soft_compact_tokens
     ):
         return None
     if not conversation_messages(state.messages):
@@ -784,9 +783,12 @@ class _CompactReminderHook(Hook):
         /,
     ) -> dict | None:
         agent = runtime.context.require_agent()
-        if _summary_awaits_reply(state.messages) or auto_compact_will_fire(state, agent):
+        catalog = runtime.context.require_catalog()
+        if _summary_awaits_reply(state.messages) or auto_compact_will_fire(
+            state, agent, catalog=catalog
+        ):
             return None
-        return _compact_reminder_update(state, agent)
+        return _compact_reminder_update(state, agent, catalog=catalog)
 
 
 _compact_reminder = _CompactReminderHook()

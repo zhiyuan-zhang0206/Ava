@@ -86,6 +86,10 @@ class _CaptureAdmission:
     gate: _CaptureGate
     released: bool = False
 
+    def capture_failed(self) -> None:
+        """Fail this call's original receipt before its admission can drain."""
+        _mark_participant_failed(self.gate.participant, gate=self.gate)
+
     def release(self) -> None:
         if self.released:
             return
@@ -179,12 +183,12 @@ def admit_local_sdk_call() -> _CaptureAdmission | None:
 
 
 @contextmanager
-def admitted_local_sdk_call() -> Generator[None, None, None]:
+def admitted_local_sdk_call() -> Generator[_CaptureAdmission | None, None, None]:
     """Carry one pre-close SDK admission through its eventual emit ``finally``."""
     admission = admit_local_sdk_call()
     token = _sdk_capture_admission.set(admission)
     try:
-        yield
+        yield admission
     finally:
         _sdk_capture_admission.reset(token)
         if admission is not None:
@@ -288,9 +292,11 @@ def _insert_local_item(participant: LocalParticipant, event: Event) -> None:
         append_source_event(conn, lease, event, source_key=participant.source_key)
 
 
-def _mark_participant_failed(participant: LocalParticipant) -> None:
+def _mark_participant_failed(
+    participant: LocalParticipant, *, gate: _CaptureGate | None = None
+) -> None:
     """Record a capture failure without allowing a transient writer loss to erase it."""
-    gate = _capture_gate(participant)
+    gate = _capture_gate(participant) if gate is None else gate
     if gate is not None:
         with gate.condition:
             gate.capture_failure_pending = True

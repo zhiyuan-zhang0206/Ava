@@ -28,6 +28,8 @@ from loguru import logger
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.config.domains.lm import LmSettings
+from base.config.profiles import PROCESS_PROFILES, profile_unknown_error
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -35,6 +37,9 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
 from services.derived.labeler.config import LabelerConfig
 from services.derived.labeler.labeler import generate_label_async
@@ -54,6 +59,25 @@ def labeler_config() -> LabelerConfig:
     return LabelerConfig(
         labeler_model=settings.lm.labeler_model,
         labeler_max_chars=settings.services.labeler_max_chars,
+    )
+
+
+def labeler_model_overrides(*, profile: str | None, lm: LmSettings) -> ModelOverrides:
+    """Freeze this caller's tuning at the composition boundary.
+
+    Gateway boot removes agent-only tuning aliases, so the old model factory
+    resolved this caller through model defaults. Do not read those stripped
+    fields. A full or agent-side boot retains its explicit tuning as before.
+    """
+    if profile is not None and profile not in PROCESS_PROFILES:
+        raise profile_unknown_error(profile)
+    if profile == "gateway":
+        return ModelOverrides.from_pins({})
+    return ModelOverrides.from_pins(
+        {
+            "reasoning_effort": lm.reasoning_effort,
+            "claude_thinking_budget_tokens": lm.claude_thinking_budget_tokens,
+        }
     )
 
 
@@ -230,7 +254,15 @@ def _is_running() -> bool:
 
 
 async def _dispatch_loop(
-    pool: ConnectionPool, db: Database, bus: EventBus, liveness: Liveness, config: LabelerConfig
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    liveness: Liveness,
+    config: LabelerConfig,
+    *,
+    catalog: ModelCatalog,
+    llm_override: str,
+    overrides: ModelOverrides,
 ) -> None:
     """Main loop: every second, poll the newest unlabeled agents
     (`_select_unlabeled`, minus those in failure-backoff) -> grab first prompt ->
@@ -258,7 +290,16 @@ async def _dispatch_loop(
                 if not prompt:
                     continue
                 try:
-                    result = await generate_label_async(tid, prompt, config, db, bus)
+                    result = await generate_label_async(
+                        tid,
+                        prompt,
+                        config,
+                        db,
+                        bus,
+                        catalog=catalog,
+                        llm_override=llm_override,
+                        overrides=overrides,
+                    )
                 except Exception as exc:
                     # Defensive: generate_label_async returns False on LLM
                     # failures instead of raising; an escaping exception is
@@ -314,7 +355,16 @@ async def run() -> None:
     db = Database.from_settings()
     pool = db.pool()
     try:
-        await _dispatch_loop(pool, db, EventBus.from_settings(), liveness, labeler_config())
+        await _dispatch_loop(
+            pool,
+            db,
+            EventBus.from_settings(),
+            liveness,
+            labeler_config(),
+            catalog=build_model_catalog(),
+            llm_override=settings.lm.llm_override,
+            overrides=labeler_model_overrides(profile=settings.profile, lm=settings.lm),
+        )
     finally:
         pool.close()
         await stop_health_server(health)

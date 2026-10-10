@@ -21,7 +21,7 @@ and `usage_kind` for every metered LLM path.
 - **Turn-by-turn reasoning decrease monitoring**: turn 1 has long reasoning, subsequent turns' reasoning is transparently echoed into input (cache hit), reasoning volume decreases monotonically
 
 ## Key Dependencies
-- [[base/lm/docs/lm.ava.okf.md]] — `base/lm/usage.py` owns LangChain `AIMessage.usage_metadata` extraction and billing
+- [[base/lm/docs/lm/lm.ava.okf.md]] — `base/lm/usage.py` owns LangChain `AIMessage.usage_metadata` extraction and billing
 - [[gateway-cli.ava.okf.md]] — gateway stats dashboard consumes model info in logs for cost accounting
 
 ## Entry Points

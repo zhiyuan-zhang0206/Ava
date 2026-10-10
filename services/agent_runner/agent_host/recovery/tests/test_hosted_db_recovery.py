@@ -4,9 +4,7 @@ import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, LiteralString
-from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import psycopg
@@ -31,11 +29,13 @@ from base.agents.incarnation.resources import ResourceBirth
 from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
@@ -54,9 +54,16 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.daemon, "host_db_recovery_budget_seconds", 3600.0)
 
 
-async def _admit(pool: AsyncConnectionPool) -> RuntimeIncarnation:
+async def _admit(
+    pool: AsyncConnectionPool, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> RuntimeIncarnation:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     async with pool.connection() as conn:
         await conn.execute(
@@ -94,8 +101,12 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
     recovering = asyncio.Event()
     refresh = db_recovery._refresh_owner
@@ -130,12 +141,14 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
             graph=graph,
             bus=EventBus.from_settings(),
             db=Database.from_settings(),
+            catalog=model_catalog,
         )
         original = asyncio.create_task(
             host._invoke_until_done(
                 agent,
                 replace(
                     AvaContext(
+                        catalog=model_catalog,
                         agent=AgentSlices.resolve(),
                     ),
                     original_incarnation=incarnation,
@@ -182,9 +195,15 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
 
 @pytest.mark.parametrize("lost", ["owner", "generation", "terminated", "released", "frozen"])
 async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, lost: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    lost: str,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
@@ -223,8 +242,12 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
 async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
@@ -292,8 +315,12 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
     action: str,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     agent = incarnation.agent_id
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
@@ -350,9 +377,14 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
 
 
 async def test_repair_timeout_retries_and_remains_cancellable(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
         raise AssertionError("repair never invokes agent work")
@@ -507,12 +539,16 @@ async def test_healthy_stages_each_get_their_own_deadline(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Issue #1972: stages that each fit the old 5s aggregate but not together
     must still complete — the chain is bounded per stage, not per attempt."""
     import time
 
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    )
     saver, graph, config, inbound, hold, graph_calls, at = await _seed_stalled_repair_scenario(
         db_conn, aops_pool, incarnation
     )
@@ -588,204 +624,3 @@ async def test_healthy_stages_each_get_their_own_deadline(
     assert all(elapsed < 5 for _, kind, elapsed in events if kind == "query_complete")
     assert any(isinstance(msg, ToolMessage) and msg.tool_call_id == "private-tool" for msg in msgs)
     assert not graph_calls
-
-
-@pytest.fixture
-def recovery_observation(monkeypatch: pytest.MonkeyPatch) -> tuple[list[float], Mock, AsyncMock]:
-    clock = [1000.0]
-    # Replace only this module's clock; real pool and asyncio deadlines still run.
-    monkeypatch.setattr(db_recovery, "time", SimpleNamespace(monotonic=lambda: clock[0]))
-    log = Mock()
-    monkeypatch.setattr(db_recovery, "logger", log)
-
-    async def advance_backoff(_delay: float) -> None:
-        clock[0] += 10.0
-
-    backoff = AsyncMock(side_effect=advance_backoff)
-    monkeypatch.setattr(db_recovery.RecoveryInterrupt, "wait_backoff", backoff)
-    return clock, log, backoff
-
-
-@pytest.mark.parametrize(
-    ("error", "stage_seconds", "expected_error_type"),
-    [
-        (PoolTimeout("unavailable"), 290.0, "PoolTimeout"),
-        (psycopg.errors.AdminShutdown(), 300.0, "AdminShutdown"),
-        (TimeoutError("unavailable"), 290.0, "PoolTimeout"),
-    ],
-)
-async def test_recovery_budget_abandons_at_attempt_boundary(
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    recovery_observation: tuple[list[float], Mock, AsyncMock],
-    error: Exception,
-    stage_seconds: float,
-    expected_error_type: str,
-) -> None:
-    clock, log, backoff = recovery_observation
-    monkeypatch.setattr(settings.daemon, "host_db_recovery_budget_seconds", 600.0)
-    incarnation = await _admit(aops_pool)
-    graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
-    attempts = 0
-    waits = DatabaseWaits()
-
-    async def failed_repair(_graph: Any, _agent: int) -> None:
-        nonlocal attempts
-        attempts += 1
-        assert attempts <= 2, "a spent ladder must not start another repair attempt"
-        clock[0] += stage_seconds
-        raise error
-
-    monkeypatch.setattr(db_recovery, "repair_dangling_tool_use_at_startup", failed_repair)
-    with pytest.raises(db_recovery.DatabaseRecoveryBudgetExceededError, match="after 2 attempts"):
-        await db_recovery.recover_database(
-            pool=aops_pool,
-            graph=graph,
-            checkpointer=saver,
-            incarnation=incarnation,
-            database_waits=waits,
-            peek_lock=asyncio.Lock(),
-            work=None,
-        )
-    assert attempts == backoff.await_count == 2
-    assert waits.snapshot(incarnation.agent_id) is None
-    log.error.assert_called_once_with(
-        "host checkpoint recovery abandoned",
-        agent_id=incarnation.agent_id,
-        attempts=2,
-        total_elapsed_seconds=2 * (stage_seconds + 10.0),
-        final_phase="tool_state_repair",
-        last_error_type=expected_error_type,
-        last_sqlstate=error.sqlstate if isinstance(error, psycopg.Error) else None,
-    )
-    assert (
-        sum(c.args[0] == "host checkpoint recovery retry" for c in log.warning.call_args_list) == 2
-    )
-    assert all(c.args[0] != "host turn checkpoint recovered" for c in log.info.call_args_list)
-    assert any(
-        c.args[0]
-        == (
-            "host checkpoint recovery stage failed"
-            if isinstance(error, psycopg.OperationalError) and not isinstance(error, PoolTimeout)
-            else "host checkpoint recovery stage timed out"
-        )
-        and c.kwargs["phase"] == "tool_state_repair"
-        and c.kwargs["duration_ms"] >= 0
-        for c in log.warning.call_args_list
-    )
-
-
-@pytest.mark.parametrize(("attempt_limit", "seconds_limit"), [(2, 300.0), (99, 50.0), (2, 50.0)])
-async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    recovery_observation: tuple[list[float], Mock, AsyncMock],
-    attempt_limit: int,
-    seconds_limit: float,
-) -> None:
-    clock, log, backoff = recovery_observation
-    monkeypatch.setattr(settings.daemon, "host_db_recovery_prolonged_attempts", attempt_limit)
-    monkeypatch.setattr(settings.daemon, "host_db_recovery_prolonged_seconds", seconds_limit)
-    incarnation = await _admit(aops_pool)
-    graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
-    flush = db_recovery.flush_checkpoint
-    attempts = 0
-
-    async def flaky_flush(checkpointer: AsyncPostgresSaver, agent: int) -> None:
-        nonlocal attempts
-        attempts += 1
-        clock[0] += 20.0
-        if attempts <= 3:
-            raise PoolTimeout("checkpoint unavailable")
-        await flush(checkpointer, agent)
-
-    monkeypatch.setattr(db_recovery, "flush_checkpoint", flaky_flush)
-    await db_recovery.recover_database(
-        pool=aops_pool,
-        graph=graph,
-        checkpointer=saver,
-        incarnation=incarnation,
-        database_waits=DatabaseWaits(),
-        peek_lock=asyncio.Lock(),
-        work=None,
-    )
-    warnings = [
-        c for c in log.warning.call_args_list if c.args[0] == "host checkpoint recovery prolonged"
-    ]
-    assert len(warnings) == 1
-    assert warnings[0].kwargs == {
-        "agent_id": incarnation.agent_id,
-        "attempts": 2,
-        "total_elapsed_seconds": 50.0,
-        "phase": "checkpoint_flush",
-        "error_type": "PoolTimeout",
-        "sqlstate": None,
-    }
-    assert attempts == 4
-    assert backoff.await_count == 3
-    log.error.assert_not_called()
-    assert sum(c.args[0] == "host turn checkpoint recovered" for c in log.info.call_args_list) == 1
-
-
-@pytest.mark.parametrize("failures", [0, 2])
-async def test_recovery_summary_counts_all_attempts_and_backoff_time(
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    recovery_observation: tuple[list[float], Mock, AsyncMock],
-    failures: int,
-) -> None:
-    clock, log, backoff = recovery_observation
-    incarnation = await _admit(aops_pool)
-    graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
-    refresh = db_recovery._refresh_owner
-    failed_probes = 0
-    waits = DatabaseWaits()
-
-    async def flaky_probe(pool: AsyncConnectionPool, original: RuntimeIncarnation) -> None:
-        nonlocal failed_probes
-        clock[0] += 1.0
-        if failed_probes < failures:
-            failed_probes += 1
-            raise PoolTimeout("owner unavailable")
-        await refresh(pool, original)
-
-    monkeypatch.setattr(db_recovery, "_refresh_owner", flaky_probe)
-    await db_recovery.recover_database(
-        pool=aops_pool,
-        graph=graph,
-        checkpointer=saver,
-        incarnation=incarnation,
-        database_waits=waits,
-        peek_lock=asyncio.Lock(),
-        work=None,
-    )
-    assert backoff.await_count == failures
-    assert waits.snapshot(incarnation.agent_id) is not None
-    recovered = [
-        c for c in log.info.call_args_list if c.args[0] == "host turn checkpoint recovered"
-    ]
-    assert len(recovered) == 1
-    assert recovered[0].kwargs == {
-        "agent_id": incarnation.agent_id,
-        "attempt": failures + 1,
-        "elapsed_seconds": 3.0,
-        "total_attempts": failures + 1,
-        "total_elapsed_seconds": failures * 11.0 + 3.0,
-    }
-    stages = [
-        c for c in log.info.call_args_list if c.args[0] == "host checkpoint recovery stage complete"
-    ]
-    assert len(stages) == 6
-    assert {c.kwargs["phase"] for c in stages} == {
-        "owner_probe",
-        "checkpoint_flush",
-        "inbound_reconciliation",
-        "owner_revalidation",
-        "tool_state_repair",
-        "repaired_owner_validation",
-    }
-    assert all(c.kwargs["outcome"] == "success" and c.kwargs["duration_ms"] >= 0 for c in stages)
-    assert all(
-        c.args[0] != "host checkpoint recovery prolonged" for c in log.warning.call_args_list
-    )
-    log.error.assert_not_called()

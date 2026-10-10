@@ -33,6 +33,7 @@ from ava_builtins.plugins.ava_fleet.tests.registry_support import (
 )
 from base.agents.observation.snapshot import select_one
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.pin_agent import pin_agent
 
@@ -97,13 +98,17 @@ def test_member_torn_down_on_uninstall(_load_activity_plugin: None):
 
 
 def test_plugin_registers_prompt_section(_load_activity_plugin: None):
-    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
+    prompt = build_system_prompt(
+        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+    )
     assert "ava.self.set_label" in prompt
 
 
 def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     """The rendered prompt carries the reporting contract with the plugin."""
-    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
+    prompt = build_system_prompt(
+        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+    )
 
     assert prompt.count("one reporter per milestone") == 1
     assert "directly to whoever must act" in prompt
@@ -114,7 +119,9 @@ def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
 
 def test_enabled_fleet_preserves_workflow_choice(_load_activity_plugin: None):
     """Installing Fleet exposes capabilities without imposing a work strategy."""
-    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
+    prompt = build_system_prompt(
+        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+    )
     assert "Workflow selection belongs to `ava-workflow`" in prompt
     assert (
         "enabling Fleet does not require delegation, a registry task, or a management tree"
@@ -137,8 +144,10 @@ def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
     """Fleet adds collaboration guidance without owning the core lifecycle."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section(_fleet_slices())
-    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
+    section = _fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+    )
     assert "# Efficient long-running operation" not in section
     assert prompt.count("# Efficient long-running operation") == 1
     assert "do not plan to terminate it yourself" not in section
@@ -152,7 +161,9 @@ def test_peer_communication_survives_human_guidance_toggle(
     """Turning off human interruption guidance must not remove peer discipline."""
 
     set_fleet_configuration(reduce_context_switch=False)
-    prompt = build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
+    prompt = build_system_prompt(
+        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+    )
     assert prompt.count("## Agent-to-agent communication") == 1
     assert "## Reduce context switch for the human" not in prompt
     assert "explicit reporting agreements still apply" in prompt
@@ -167,7 +178,7 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin:
     rule is phrased semantically (no dismiss_notice call name)."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section(_fleet_slices())
+    section = _fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
     assert "Dismiss a pending notice" in section
     assert "when the dialog resolves it" in section
     assert "dismiss_notice" not in section
@@ -177,7 +188,7 @@ def test_prompt_section_queue_delivery_mandate(_load_activity_plugin: None):
     """Keep asynchronous delivery and resolved-notice semantics resident."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section(_fleet_slices())
+    section = _fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
     assert "queue necessary decisions and results" in section
     assert "even while they are offline" in section
     assert "offline" in section
@@ -197,10 +208,12 @@ def test_prompt_section_reduce_context_switch_gating(
     )
 
     set_fleet_configuration(reduce_context_switch=True)
-    assert "Queue, never push" in _reduce_context_switch_section(_fleet_slices())
+    assert "Queue, never push" in _reduce_context_switch_section(
+        _fleet_slices(), catalog=build_model_catalog()
+    )
 
     set_fleet_configuration(reduce_context_switch=False)
-    assert _reduce_context_switch_section(_fleet_slices()) == ""
+    assert _reduce_context_switch_section(_fleet_slices(), catalog=build_model_catalog()) == ""
 
 
 def test_prompt_section_reduce_context_switch_content(
@@ -212,7 +225,7 @@ def test_prompt_section_reduce_context_switch_content(
     )
 
     set_fleet_configuration(reduce_context_switch=True)
-    section = _reduce_context_switch_section(_fleet_slices())
+    section = _reduce_context_switch_section(_fleet_slices(), catalog=build_model_catalog())
 
     assert "Queue, never push" in section
     assert "irreversible risk in motion" in section
@@ -233,17 +246,21 @@ def test_reduce_context_switch_reaches_the_prompt(
 
     section = "## Reduce context switch for the human"
     set_fleet_configuration(reduce_context_switch=True)
-    assert section in build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
+    assert section in build_system_prompt(
+        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+    )
 
     set_fleet_configuration(reduce_context_switch=False)
-    assert section not in build_system_prompt(fleet_registry(), _fleet_slices(), agent_id=1)
+    assert section not in build_system_prompt(
+        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+    )
 
 
 def test_fleet_operating_contract_is_loaded_on_demand(_load_activity_plugin: None):
     """The prompt routes chosen capabilities to complete, preserved procedures."""
     from ava_builtins.plugins.ava_fleet import agent_runtime
 
-    section = agent_runtime._fleet_self_section(_fleet_slices())
+    section = agent_runtime._fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
     skill_directory = Path(agent_runtime.__file__).parent / "skills" / "ava-fleet"
     skill = (skill_directory / "SKILL.md").read_text()
     contract = (skill_directory / "reference" / "operating-contract.md").read_text()
@@ -286,7 +303,9 @@ def test_fleet_contract_preserves_numeric_identifier_prefixes():
 def test_task_conversion_absent_when_plugin_disabled():
     """Prompt copy and the task SDK reference disappear together with the
     fleet plugin."""
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
+    prompt = build_system_prompt(
+        EMPTY, AgentSlices.resolve(), agent_id=1, catalog=build_model_catalog()
+    )
 
     assert "## Fleet task interaction" not in prompt
     assert "create directly with `ava.tasks.create`" not in prompt
@@ -398,7 +417,7 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
     assert rows[1][5] is None  # resolved_at (open)
 
     # the snapshot badge counts only the open FYI notice as unread.
-    snap = select_one(db_conn, agent_id)
+    snap = select_one(db_conn, agent_id, catalog=build_model_catalog())
     assert snap is not None
     assert snap.unread_notice_count == 1
     assert snap.notices_awaiting_response == []
@@ -423,7 +442,7 @@ def test_notify_require_response_rides_awaiting_worklist(
 
     db_conn.rollback()
     # Only the most recent require_response notice rides the snapshot worklist.
-    snap = select_one(db_conn, agent_id)
+    snap = select_one(db_conn, agent_id, catalog=build_model_catalog())
     assert snap is not None
     assert snap.unread_notice_count == 0
     awaiting = snap.notices_awaiting_response
@@ -469,7 +488,7 @@ def test_notify_records_task_id_and_rides_snapshot(
     )  # type: ignore[attr-defined]
     db_conn.rollback()  # notify committed via its own cursor; refresh our view
     assert _notice_task_id(db_conn, agent_id) == tid
-    snap = select_one(db_conn, agent_id)
+    snap = select_one(db_conn, agent_id, catalog=build_model_catalog())
     assert snap is not None
     assert [n.task_id for n in snap.notices_awaiting_response] == [tid]
 
@@ -578,7 +597,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     # inspector's cached snapshot authoritative through the whole chain.
     assert published_agent_ids == [agent_id] * 11
     db_conn.rollback()
-    snapshot = select_one(db_conn, agent_id)
+    snapshot = select_one(db_conn, agent_id, catalog=build_model_catalog())
     assert snapshot is not None
     awaiting = snapshot.notices_awaiting_response
     assert len(awaiting) == 1
@@ -628,7 +647,7 @@ def test_dismiss_notice_withdraws(_load_activity_plugin: None, db_conn: psycopg.
     assert row[1] == "withdrawn"
 
     # the dismissed notice drops off the unread badge.
-    snap = select_one(db_conn, agent_id)
+    snap = select_one(db_conn, agent_id, catalog=build_model_catalog())
     assert snap is not None
     assert snap.unread_notice_count == 0
 

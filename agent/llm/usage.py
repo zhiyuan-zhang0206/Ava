@@ -4,6 +4,7 @@ from datetime import datetime
 
 from langchain_core.messages import AIMessage
 
+from base.lm.catalog import ModelCatalog
 from base.lm.usage import log_usage_from_message
 
 
@@ -12,6 +13,7 @@ def log_llm_usage(
     model: str,
     *,
     agent_id: int | None,
+    catalog: ModelCatalog,
     latency_ms: float | None = None,
     decode_ms: float | None = None,
     priced_at: datetime | None = None,
@@ -32,6 +34,7 @@ def log_llm_usage(
     return log_usage_from_message(
         msg,
         model,
+        catalog=catalog,
         latency_ms=latency_ms,
         decode_ms=decode_ms,
         priced_at=priced_at,

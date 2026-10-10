@@ -1,8 +1,8 @@
 """Per-model facts and tunable defaults: `ModelSpec`, `ModelTuning` and their resolution.
 
 Every per-model fact and per-model tunable default lives in one ``ModelSpec`` per model id; the
-table of them is ``ModelCatalog.models`` (``base/lm/catalog.py``), built once per process by the
-provider loader (``base/lm/plugin_providers.py:model_catalog``). Core registers no provider or
+table of them is ``ModelCatalog.models`` (``base/lm/catalog/__init__.py``), built once per process by the
+provider loader (``base/lm/plugin_providers.py:build_model_catalog``). Core registers no provider or
 model rows: provider plugins are the sole source of chat ``ModelSpec`` entries, per-provider
 bindings, and complete runtime price lattices. ``pricing_catalog_archive.json`` is the reviewed
 reconciliation ledger and catalog-only source; selection lives in ``base.lm.pricing``.
@@ -45,7 +45,6 @@ from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any
 
-from base.host.env.agent_slices import ModelOverrides
 from base.lm.pricing import PriceBook
 
 # ---------------------------------------------------------------------------
@@ -235,26 +234,27 @@ class ModelSpec:
     tuning: ModelTuning = field(default_factory=ModelTuning)
 
 
-def media_types_for_model(model: str) -> frozenset[str]:
+def media_types_for_model(
+    model: str, *, models: Mapping[str, ModelSpec], vision_prefixes: Mapping[str, bool]
+) -> frozenset[str]:
     """Native media capability for `model` across the three provider tiers.
 
     Registered plugin models use their per-model ``ModelSpec.media_types``. An
     unregistered id under a plugin prefix gets the binding's v1 image-only
     ``vision`` capability. No match means text-only.
     """
-    from base.lm.plugin_providers import model_catalog  # the catalog module imports this one
-
-    catalog = model_catalog()
-    spec = catalog.models.get(model)
+    spec = models.get(model)
     if spec is not None:
         return spec.media_types
-    for prefix, binding in catalog.bindings.items():
+    for prefix, vision in vision_prefixes.items():
         if model.startswith(prefix):
-            return frozenset({"image"}) if binding.vision else frozenset()
+            return frozenset({"image"}) if vision else frozenset()
     return frozenset()
 
 
-def attach_modalities_for_model(model: str) -> frozenset[str]:
+def attach_modalities_for_model(
+    model: str, *, models: Mapping[str, ModelSpec], vision_prefixes: Mapping[str, bool]
+) -> frozenset[str]:
     """The media types `ava.self.attach` accepts for `model`.
 
     `ModelSpec.attach_modalities` when the entry declares an attach-specific
@@ -267,14 +267,12 @@ def attach_modalities_for_model(model: str) -> frozenset[str]:
 
     Raw-entry semantics: a withdrawn id answers with its declared set; the
     registration gates resolve the effective model first (task #3212)."""
-    from base.lm.plugin_providers import model_catalog  # the catalog module imports this one
-
-    spec = model_catalog().models.get(model)
+    spec = models.get(model)
     if spec is not None:
         if spec.attach_modalities is not None:
             return spec.attach_modalities
         return spec.media_types
-    return media_types_for_model(model)
+    return media_types_for_model(model, models=models, vision_prefixes=vision_prefixes)
 
 
 def validate_spec(
@@ -462,7 +460,7 @@ def _validate_unavailable_fallbacks(models: Mapping[str, ModelSpec]) -> None:
             )
 
 
-def resolve_available_model(model: str) -> str:
+def resolve_available_model(model: str, *, models: Mapping[str, ModelSpec]) -> str:
     """Resolve an explicitly withdrawn model id to its registered fallback.
 
     Unknown and currently available ids pass through. Registry validation keeps
@@ -471,13 +469,13 @@ def resolve_available_model(model: str) -> str:
     plugin-declared withdrawal resolves on the first call of a fresh process
     too (task #3212).
     """
-    from base.lm.plugin_providers import model_catalog  # the catalog module imports this one
-
-    spec = model_catalog().models.get(model)
+    spec = models.get(model)
     return spec.unavailable_fallback if spec and spec.unavailable_fallback else model
 
 
-def normalize_overlay_llm_model(config: dict[str, object]) -> tuple[str, str] | None:
+def normalize_overlay_llm_model(
+    config: dict[str, object], *, models: Mapping[str, ModelSpec]
+) -> tuple[str, str] | None:
     """Settle a withdrawn ``llm_model`` in a config overlay to its registered fallback.
 
     The write-side counterpart of `admit_stored_model`'s wake-time settlement:
@@ -497,7 +495,7 @@ def normalize_overlay_llm_model(config: dict[str, object]) -> tuple[str, str] | 
     requested = config.get("llm_model")
     if not isinstance(requested, str):
         return None
-    resolved = resolve_available_model(requested)
+    resolved = resolve_available_model(requested, models=models)
     if resolved == requested:
         return None
     config["llm_model"] = resolved
@@ -526,9 +524,6 @@ class ResolvedSetting:
     explicit_value: Any | None  # the user's pinned value (None = not pinned)
 
 
-_OVERRIDE_FIELDS = frozenset(f.name for f in dataclass_fields(ModelOverrides))
-
-
 def tuning_field_names() -> tuple[str, ...]:
     """Every per-model-defaultable settings field name, in ``ModelTuning`` order.
 
@@ -539,7 +534,9 @@ def tuning_field_names() -> tuple[str, ...]:
     return tuple(f.name for f in dataclass_fields(ModelTuning))
 
 
-def explain_setting(setting: str, *, model: str, explicit: Any) -> ResolvedSetting:
+def explain_setting(
+    setting: str, *, model: str, explicit: Any, models: Mapping[str, ModelSpec]
+) -> ResolvedSetting:
     """``resolve_setting``'s layering, with the winning layer named.
 
     The explicit value is an ARGUMENT rather than read here: the runtime passes
@@ -548,10 +545,8 @@ def explain_setting(setting: str, *, model: str, explicit: Any) -> ResolvedSetti
     implementation for both, so the displayed resolution cannot drift from the
     one the agent actually gets.
     """
-    from base.lm.plugin_providers import model_catalog  # the catalog module imports this one
-
     floor = getattr(DEFAULT_TUNING, setting)
-    spec = model_catalog().models.get(model)
+    spec = models.get(model)
     tuned = getattr(spec.tuning, setting) if spec is not None else None
     if explicit is not None:
         return ResolvedSetting(setting, explicit, "explicit", floor, tuned, explicit)
@@ -560,44 +555,12 @@ def explain_setting(setting: str, *, model: str, explicit: Any) -> ResolvedSetti
     return ResolvedSetting(setting, floor, "shared-default", floor, tuned, None)
 
 
-def resolve_setting(setting: str, *, model: str, overrides: ModelOverrides | None = None) -> Any:
-    """The effective value of a per-model-defaultable settings field for `model`.
+def resolve_setting(
+    setting: str, *, model: str, models: Mapping[str, ModelSpec], explicit: Any
+) -> Any:
+    """Resolve an explicitly supplied setting over the model and shared defaults.
 
-    Layering (weakest first): ``DEFAULT_TUNING`` shared default < the model's
-    ``tuning`` entry < an explicit settings value. The settings value is
-    explicit exactly when it is non-None — these fields are ``T | None = None``
-    and every real source (.env, exported env, bootstrap-forwarded env, the
-    per-agent config overlay) writes a non-None value.
-
-    Args:
-        setting: flat config field name; must be a ``ModelTuning`` field
-            (AttributeError otherwise — a typo fails fast).
-        model: the model id whose per-model default applies. An unregistered
-            model simply has no per-model layer.
-        overrides: the agent's explicit values (its slices' `overrides`). A
-            value the agent set is the explicit layer; an unset one is the
-            cluster default, as is every value when `overrides` is omitted, which
-            is right only for a reader that is not serving one agent (a daemon).
+    The caller supplies its profile or per-agent value. None means unset;
+    an unknown tuning field fails before any value can bypass validation.
     """
-    from base.config import get_field
-
-    # Membership check first: a non-tuning field must never resolve through this
-    # path, even when it happens to carry an explicit value. Doing it here (not
-    # only inside explain_setting) keeps the AttributeError ahead of the
-    # get_field lookup, which would KeyError on a name that is no config field.
-    getattr(DEFAULT_TUNING, setting)
-    if overrides is not None and setting in _OVERRIDE_FIELDS:
-        pinned = getattr(overrides, setting)
-        if pinned is not None:
-            return explain_setting(setting, model=model, explicit=pinned).value
-    try:
-        explicit = get_field(setting)
-    except AttributeError:
-        # The field's owning domain is not constructed in this process's
-        # profile (Task #944): the tuning fields live in the AGENT domain, and
-        # the gateway's token-usage / context-breakdown display endpoints call
-        # resolve_context_budget too. Fail-fast is right for a typo, but this
-        # is a legal cross-profile read — degrade to the registry floor and
-        # let the agent process itself keep reading the explicit value.
-        explicit = None
-    return explain_setting(setting, model=model, explicit=explicit).value
+    return explain_setting(setting, model=model, models=models, explicit=explicit).value

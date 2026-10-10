@@ -32,9 +32,12 @@ from agent.tests.test_compact import (
 )
 from agent.tests.test_compact import _ava_compact_loaded as _ava_compact_loaded
 from base.agents.context import AvaContext
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.units import spawn_agent
 
@@ -173,11 +176,18 @@ async def test_compact_contract_reaches_request_without_resident_self(
     for section in _COMPACT_SECTIONS:
         assert section in contract, f"section {section!r} missing from the compact contract"
 
-    system_prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
+    system_prompt = build_system_prompt(
+        EMPTY, AgentSlices.resolve(), agent_id=1, catalog=build_model_catalog()
+    )
     assert "## ava.self\n" not in system_prompt
     head = SystemMessage(content=system_prompt)
     llm = _fake_llm()
-    await generate_summary([head, HumanMessage(content="Keep my work")], llm, AgentSlices.resolve())
+    await generate_summary(
+        [head, HumanMessage(content="Keep my work")],
+        llm,
+        AgentSlices.resolve(),
+        catalog=build_model_catalog(),
+    )
     [call] = _compaction_ainvoke(llm).call_args_list
     [request] = call.args
     assert request[0] is head
@@ -192,13 +202,17 @@ async def test_compact_contract_reaches_request_without_resident_self(
 
 
 async def test_compact_summary_preserves_agent_continuity(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """After processing compact_summary the batch resumes at BEFORE_LLM (not END) —
     the agent continues its conversation rather than being terminated. The goto
     itself is the init_context detour that rebuilds the standing head; where the
     batch was actually headed rides in `context_reset.resume`."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_compact_summary(db_conn, tid, "summary after compact")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -217,12 +231,16 @@ async def test_compact_summary_preserves_agent_continuity(
 
 
 async def test_compact_summary_replaces_whole_history_no_tail(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """compact_summary → the whole history is cleared and the parked tail is the
     summary alone; not a single original message survives (the summary is the
     complete memory, no raw tail)."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     sys_msg = SystemMessage(content="<test sys prompt>")
     initial_msgs: list[AnyMessage] = [
         sys_msg,
@@ -242,11 +260,14 @@ async def test_compact_summary_emits_compact_done(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """When claim processes compact_summary (agent-written summary), emit CompactDone
     at the same place where history is replaced — so UI refreshes, aligning with auto path (agent/hooks/compact.py).
     User-triggered compact_request goes through the same compact_payload block, emit is path-agnostic."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_compact_summary(db_conn, tid, "summary after compact")
     state = AgentState(
         messages=[
@@ -264,6 +285,7 @@ async def test_compact_summary_emits_compact_done(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     runtime = Runtime(context=ctx)
 
@@ -291,11 +313,15 @@ async def test_compact_summary_emits_compact_done(
 
 
 async def test_consecutive_compacts_both_processed(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Two consecutive compact_summary → first replaces with [sys, summary1]; second on that
     state replaces again with [sys, summary2]."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     sys_msg = SystemMessage(content="<test sys prompt>")
 
     # ---- first compact ----
@@ -321,14 +347,18 @@ async def test_consecutive_compacts_both_processed(
 
 
 async def test_compact_with_empty_state_injects_system_message_and_summary(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """A compact_summary arriving on an empty window behaves like any other: the
     window is cleared and the summary parked, exactly as when there was history
     to clear. Claim used to lay down a cold-start head here and then pop it back
     off — the head is `init_context`'s now, so there is nothing to undo and the
     two cases stopped differing."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_compact_summary(db_conn, tid, "compact before any chat")
 
     state = AgentState()  # empty messages
@@ -341,11 +371,15 @@ async def test_compact_with_empty_state_injects_system_message_and_summary(
 
 
 async def test_compact_with_super_long_summary_in_claim(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """claim_node processes compact_summary with super-long summary (50K chars) —
     no truncation, no error thrown."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     long_summary = "LONG_" * 10_000  # 50K chars
 
     sys_msg = SystemMessage(content="<test sys prompt>")

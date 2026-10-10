@@ -11,7 +11,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg_pool import AsyncConnectionPool
 
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel
@@ -23,6 +23,7 @@ async def test_real_runner_login_closes_compact_without_admission_or_metadata_in
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
+    model_catalog: ModelCatalog,
 ) -> None:
     role = "compact_runner_" + uuid4().hex
     password = uuid4().hex
@@ -41,13 +42,15 @@ async def test_real_runner_login_closes_compact_without_admission_or_metadata_in
         admin.execute(sql.SQL("GRANT ava_runner TO {}").format(sql.Identifier(role)))
     dsn = make_conninfo(db_conn.info.dsn, user=role, password=password)
     model = SummaryModel(responses=["Original source summary. " * 100])
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings({"gpt-": replace(binding, build_single_attempt=lambda _: model)})
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+    )
     try:
         async with AsyncConnectionPool[psycopg.AsyncConnection](
             dsn, min_size=1, max_size=1, open=False
         ) as pool:
-            accepted = await admit(db_conn, pool, client, monkeypatch)
+            accepted = await admit(db_conn, pool, client, monkeypatch, catalog=model_catalog)
             await accepted.host.run_turn(accepted.agent)
             status = accepted.status(client)
             assert status["outcome"] == "applied" and status["continuation_released"]

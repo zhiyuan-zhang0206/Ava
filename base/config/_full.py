@@ -221,25 +221,9 @@ def _bootstrap_fields() -> tuple[str, ...]:
     )
 
 
-def flat_dump(mode: str = "python") -> dict[str, Any]:
-    """Flat `{field name: value}` dump across all sub-models — the shape the old
-    flat `settings.model_dump()` produced, used by the config-overlay snapshot.
-
-    Reads through the profile-independent path (`_all_domains_settings` for a
-    domain the running profile excludes), so an agent process — whose profile
-    excludes daemon/alerts/telegram/feishu — can still snapshot the full
-    overlay base at bind time."""
-    from base.config import settings
-    from base.config.service_read import _all_domains_settings
-
-    out: dict[str, Any] = {}
-    for attr, _label, _model, _cap in DOMAIN_MODELS:
-        try:
-            sub = getattr(settings, attr)
-        except AttributeError:
-            sub = getattr(_all_domains_settings(), attr)
-        out.update(sub.model_dump(mode=mode))
-    return out
+def flat_dump(authority: Any, mode: str = "python") -> dict[str, Any]:
+    """Flat boot values from an explicitly supplied configuration authority."""
+    return authority.flat_dump(mode=mode)
 
 
 def refresh_data_plane_settings() -> None:

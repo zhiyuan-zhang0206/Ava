@@ -31,6 +31,7 @@ from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.history.hierarchy.units import divide_units
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 
 
 def _history() -> FullHistory:
@@ -115,42 +116,45 @@ async def _nodes(pool: AsyncConnectionPool) -> list[tuple]:
 
 
 async def test_round_describes_a_due_chunk_and_stores_its_node(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     # Request list [head, m0, m1, m2]; chunk [1, 3) = m0, m1.
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert await _nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
     assert await _status(aops_pool) == [("done", 1, None)]
     assert [m.id for m in _seams["described"][0].messages] == ["m0", "m1"]
-    await _run_rounds(aops_pool, 1)  # queue drained: nothing more to claim
+    await _run_rounds(
+        aops_pool, 1, model_catalog=model_catalog
+    )  # queue drained: nothing more to claim
     assert await _status(aops_pool) == [("done", 1, None)]
 
 
 async def test_chunk_not_yet_checkpointed_goes_back_to_the_queue(
+    model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
 ) -> None:
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 9), end_msg_id="m8")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await _status(aops_pool)
     assert (status, attempts) == ("pending", 0) and "shorter" in error  # waiting spends no attempt
     assert await _nodes(aops_pool) == []
 
 
 async def test_drifted_indices_fail_the_job_with_an_event(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     emitted: list[str] = []
     monkeypatch.setattr(loop.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="not-m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await _status(aops_pool)
     assert status == "failed" and "not-m1" in error
     assert "understanding_chunk_failed" in emitted
 
 
 async def test_a_database_blink_puts_the_job_back_without_spending_an_attempt(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A restart of the database during a roll must not turn a paid-for job into a permanent
     failure: it goes back to the queue and the generation budget stays whole."""
@@ -160,7 +164,7 @@ async def test_a_database_blink_puts_the_job_back_without_spending_an_attempt(
 
     monkeypatch.setattr(loop, "_load_segments", blink)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await _status(aops_pool)
     assert (status, attempts) == ("pending", 0) and "closed the connection" in error
 
@@ -182,7 +186,7 @@ async def test_a_released_job_waits_its_spacing_from_the_release_not_from_the_cl
 
 
 async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     """A manual close and the producers' next size cut (or a replay after a restart) can cover
     the same stretch: the later job is shortened to the undescribed part, and skipped when
@@ -194,17 +198,20 @@ async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
             " schema_version) VALUES (5, 1, 0, 0, 'k', 'old', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
         )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert [m.id for m in _seams["described"][0].messages] == ["m1"]  # m0 was already covered
     assert await _nodes(aops_pool) == [(5, 1, 0, 0, "old"), (5, 1, 1, 1, "what happened")]
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 2), end_msg_id="m0")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     status = (await _status(aops_pool))[-1]
     assert status[0] == "skipped" and "already described" in status[2]
 
 
 async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dropped(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch, _seams: dict
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    _seams: dict,
 ) -> None:
     """A node covering the middle of a chunk splits it into two undescribed runs: the first is
     described, the other is named in an event (the old prefix-only trim lost it silently)."""
@@ -219,7 +226,7 @@ async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dro
             " schema_version) VALUES (5, 1, 1, 1, 'k', 'mid', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
         )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert [m.id for m in _seams["described"][0].messages] == ["m0"]
     assert {r[2:4] for r in await _nodes(aops_pool)} == {(0, 0), (1, 1)}
     [(name, attrs)] = events
@@ -228,7 +235,7 @@ async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dro
 
 
 async def test_an_old_workers_node_in_a_mixed_version_window_is_not_part_of_the_tree(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     """A node with a bare-number engine version (the retired worker's) neither covers a chunk nor
     shows up in the tree's reads."""
@@ -239,12 +246,12 @@ async def test_an_old_workers_node_in_a_mixed_version_window_is_not_part_of_the_
             " schema_version) VALUES (5, 1, 0, 3, 'k', 'old', 'h', 'i', 0, 'm', '0.3', '0.3', 1)"
         )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert [m.id for m in _seams["described"][0].messages] == ["m0", "m1", "m2", "m3"]
 
 
 async def test_a_cancelled_job_is_put_back_without_spending_an_attempt(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The host stops while a job runs (a rollout): the job goes back to the queue at once instead
     of making the next host wait out the 60-minute lease, and the give-up clock is untouched."""
@@ -257,7 +264,7 @@ async def test_a_cancelled_job_is_put_back_without_spending_an_attempt(
 
     monkeypatch.setattr(loop, "_run_job", hang)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    consumer = loop._Consumer(aops_pool, MagicMock(), [])
+    consumer = loop._Consumer(aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="")
     task = asyncio.create_task(consumer.run_until_idle())
     await asyncio.wait_for(started.wait(), 10)
     task.cancel()
@@ -297,7 +304,7 @@ async def test_the_give_up_clock_starts_at_the_first_wait_and_a_queued_job_has_n
 
 
 async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 9), end_msg_id="m8")
     async with aops_pool.connection() as conn:
@@ -305,13 +312,16 @@ async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
             "UPDATE understanding_chunk_jobs SET waiting_since = now() - interval '7 hours'"
         )
     monkeypatch.setattr(loop.telemetry, "emit", lambda *_a, **_k: None)
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await _status(aops_pool)
     assert status == "failed" and "gave up" in error
 
 
 async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_reports_the_rest(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch, _seams: dict
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    _seams: dict,
 ) -> None:
     """The boundary snapshot of segment 0 holds fewer messages than the closing chunk's end (the
     checkpoint of the segment's last super-step was still in flight at compaction). The part the
@@ -329,7 +339,7 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
         end_msg_id="m8",
         boundary_checkpoint_id="cp-1",
     )
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await _status(aops_pool)
     assert (status, error) == ("done", None)
     assert [m.id for m in _seams["described"][0].messages] == ["m0", "m1", "m2", "m3"]
@@ -340,7 +350,7 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
 
 
 async def test_generation_error_retries_then_fails_at_the_cap(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def boom(*_a: object, **_k: object) -> str:
         raise GenerateError("provider down")
@@ -349,7 +359,7 @@ async def test_generation_error_retries_then_fails_at_the_cap(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     status = ""
     for attempt in range(1, loop.GENERATION_MAX_ATTEMPTS + 1):
-        await _run_rounds(aops_pool, 1)
+        await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
         [(status, attempts, _)] = await _status(aops_pool)
         assert attempts == attempt
         if status == "pending":
@@ -364,45 +374,66 @@ async def test_generation_error_retries_then_fails_at_the_cap(
 
 
 async def test_gemini_model_is_skipped_with_an_event(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     emitted: list[str] = []
     monkeypatch.setattr(loop.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
-    monkeypatch.setattr(loop, "provider_key_of_model", lambda _model: "gemini")
+
+    def provider_key(_model: str, *, catalog: ModelCatalog) -> str:
+        assert catalog is model_catalog
+        return "gemini"
+
+    monkeypatch.setattr(loop, "provider_key_of_model", provider_key)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await _status(aops_pool)
     assert status == "skipped" and "Gemini" in error
     assert "understanding_chunk_skipped" in emitted and await _nodes(aops_pool) == []
 
 
 async def test_checkpoint_read_failure_is_retried(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fail(*_a: object) -> None:
         raise CheckpointReadError("db blip")
 
     monkeypatch.setattr(loop, "_load_segments", fail)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert (await _status(aops_pool))[0][0] == "pending"
 
 
-async def test_loop_is_idle_when_the_feature_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_loop_is_idle_when_the_feature_is_off(
+    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings.agent, "understanding_enabled", False)
-    await loop.understanding_loop_forever(MagicMock(), MagicMock(), [])  # returns at once
+    await loop.understanding_loop_forever(
+        MagicMock(), MagicMock(), [], catalog=model_catalog, llm_override=""
+    )  # returns at once
 
 
-def test_generation_models_are_reused_and_never_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_generation_models_are_reused_and_never_closed(
+    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
     built: list[MagicMock] = []
 
-    def build(model: str, params: object, overrides: object, *, thinking_off: bool) -> MagicMock:
+    def build(
+        model: str,
+        params: object,
+        overrides: object,
+        *,
+        catalog: ModelCatalog,
+        llm_override: str,
+        thinking_off: bool,
+    ) -> MagicMock:
+        assert catalog is model_catalog
+        assert llm_override == ""
         built.append(llm := MagicMock(name=model))
         llm.thinking_off, llm.params = thinking_off, params
         return llm
 
     monkeypatch.setattr(loop, "build_generation_llm", build)
-    models = loop.ModelCache()
+    models = loop.ModelCache(catalog=model_catalog, llm_override="")
     none = ModelOverrides.from_pins(None)
     first = models.get("m", none)
     assert models.get("m", none) is first
@@ -442,7 +473,10 @@ async def _calls(pool: AsyncConnectionPool) -> list[tuple]:
 
 
 async def test_raw_calls_are_persisted_for_a_done_job(
-    aops_pool: AsyncConnectionPool, _seams: dict, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    _seams: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reply = AIMessage(
         content=[{"type": "thinking", "thinking": "hm"}, {"type": "text", "text": "what"}],
@@ -456,7 +490,7 @@ async def test_raw_calls_are_persisted_for_a_done_job(
 
     monkeypatch.setattr(loop, "_describe", describe)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [row] = await _calls(aops_pool)
     async with aops_pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SELECT id FROM understanding_chunk_jobs")
@@ -468,7 +502,7 @@ async def test_raw_calls_are_persisted_for_a_done_job(
 
 
 async def test_a_failed_call_is_recorded_and_the_job_still_retries(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def boom(*args: object, **_k: object) -> str:
         args[5].append(_call(0, None, "provider down"))  # type: ignore[attr-defined]
@@ -476,14 +510,17 @@ async def test_a_failed_call_is_recorded_and_the_job_still_retries(
 
     monkeypatch.setattr(loop, "_describe", boom)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [row] = await _calls(aops_pool)
     assert row[8] is None and row[13] == "provider down"
     assert (await _status(aops_pool))[0][0] == "pending"
 
 
 async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
-    aops_pool: AsyncConnectionPool, _seams: dict, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    _seams: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     emitted: list[str] = []
     monkeypatch.setattr(loop.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
@@ -497,7 +534,7 @@ async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
 
     monkeypatch.setattr(loop, "_describe", describe)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert "understanding_call_record_failed" in emitted
     assert await _status(aops_pool) == [("done", 1, None)]
     assert await _nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
@@ -511,22 +548,26 @@ async def _jobs(pool: AsyncConnectionPool) -> list[tuple]:
         return await cur.fetchall()
 
 
-async def _run_rounds(pool: AsyncConnectionPool, count: int) -> None:
+async def _run_rounds(
+    pool: AsyncConnectionPool, count: int, *, model_catalog: ModelCatalog
+) -> None:
     """`count` times: claim at most one job and finish it (the loop's claim, one step at a time)."""
     for _ in range(count):
         async with asyncio.TaskGroup() as tg:
-            await loop._Consumer(pool, MagicMock(), []).claim(tg)
+            await loop._Consumer(
+                pool, MagicMock(), [], catalog=model_catalog, llm_override=""
+            ).claim(tg)
 
 
 async def test_each_group_is_a_node_covering_the_chunk_to_its_end(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     # Request [head, m0..m3]; chunk [1, 5): four units in three groups.
     _seams["answer"] = lambda located: _result(
         located, UnitGroup(0, 0, "first"), UnitGroup(1, 2, "second"), UnitGroup(3, 3, "third")
     )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert await _nodes(aops_pool) == [
         (5, 1, 0, 0, "first"),
         (5, 1, 1, 2, "second"),
@@ -537,11 +578,11 @@ async def test_each_group_is_a_node_covering_the_chunk_to_its_end(
 
 
 async def test_each_chunk_starts_at_its_own_start_whatever_the_previous_one_did(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(3, 5), end_msg_id="m3")
-    await _run_rounds(aops_pool, 2)
+    await _run_rounds(aops_pool, 2, model_catalog=model_catalog)
     assert [[m.id for m in loc.messages] for loc in _seams["described"]] == [
         ["m0", "m1"],
         ["m2", "m3"],
@@ -550,7 +591,7 @@ async def test_each_chunk_starts_at_its_own_start_whatever_the_previous_one_did(
 
 
 async def test_a_refused_grouping_retries_then_fails_the_job_without_nodes(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def refused(*_a: object, **_k: object) -> str:
         raise GenerateError("grouping reply refused after 2 correction(s): no <groups>")
@@ -558,7 +599,7 @@ async def test_a_refused_grouping_retries_then_fails_the_job_without_nodes(
     monkeypatch.setattr(loop, "_describe", refused)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     for _ in range(loop.GENERATION_MAX_ATTEMPTS):
-        await _run_rounds(aops_pool, 1)
+        await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
         async with aops_pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '1 hour'"
@@ -569,7 +610,7 @@ async def test_a_refused_grouping_retries_then_fails_the_job_without_nodes(
 
 
 async def test_a_done_job_is_followed_by_the_upper_level_checks(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     asked: list[int] = []
 
@@ -580,7 +621,7 @@ async def test_a_done_job_is_followed_by_the_upper_level_checks(
 
     monkeypatch.setattr(loop, "run_group_checks", standalone)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert asked == [5]
 
 
@@ -595,7 +636,7 @@ async def _enqueue_ends(pool: AsyncConnectionPool, agent: int, *ends: str) -> No
 
 
 async def test_different_agents_run_together_and_one_agents_jobs_in_order(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     log: list[tuple[str, str]] = []
     lock = threading.Lock()
@@ -617,14 +658,16 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
     _seams["answer"] = answer
     await _enqueue_ends(aops_pool, 1, "m1", "m3")  # agent 1: a1 then a2
     await _enqueue_ends(aops_pool, 2, "m2")  # agent 2: b
-    await loop._Consumer(aops_pool, MagicMock(), []).run_until_idle()
+    await loop._Consumer(
+        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override=""
+    ).run_until_idle()
     assert [s for s, *_ in await _status(aops_pool)] == ["done"] * 3
     assert log.index(("start", "b")) < log.index(("end", "a1"))  # overlapped
     assert log.index(("end", "a1")) < log.index(("start", "a2"))  # the same agent, in order
 
 
 async def test_every_due_job_runs_at_once_each_on_its_own_thread(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     barrier = threading.Barrier(5, timeout=10)
 
@@ -635,14 +678,14 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
     _seams["answer"] = answer
     for agent in range(1, 6):
         await _enqueue_ends(aops_pool, agent, "m1")
-    consumer = loop._Consumer(aops_pool, MagicMock(), [])
+    consumer = loop._Consumer(aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="")
     await consumer.run_until_idle()
     assert [s for s, *_ in await _status(aops_pool)] == ["done"] * 5
     assert consumer.in_flight == 0
 
 
 async def test_one_jobs_failure_touches_no_other_job(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     def answer(located: LocatedChunk) -> ChunkResult:
         if located.messages[-1].id == "m2":
@@ -652,14 +695,16 @@ async def test_one_jobs_failure_touches_no_other_job(
     _seams["answer"] = answer
     for agent, end in ((1, "m1"), (2, "m2"), (3, "m1")):
         await _enqueue_ends(aops_pool, agent, end)
-    await loop._Consumer(aops_pool, MagicMock(), []).run_until_idle()
+    await loop._Consumer(
+        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override=""
+    ).run_until_idle()
     status = [(s, e) for s, _, e in await _status(aops_pool)]
     assert [s for s, _ in status] == ["done", "failed", "done"]
     assert "bug in one job" in str(status[1][1])
 
 
 async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_finish(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     real = loop._settle
 
@@ -671,34 +716,38 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
     monkeypatch.setattr(loop, "_settle", settle)
     for agent in (1, 2):
         await _enqueue_ends(aops_pool, agent, "m1")
-    consumer = loop._Consumer(aops_pool, MagicMock(), [])
+    consumer = loop._Consumer(aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="")
     await consumer.run_until_idle()  # does not raise
     assert [s for s, *_ in await _status(aops_pool)] == ["running", "done"]
     assert consumer.in_flight == 0
 
 
 async def test_the_backlog_event_carries_in_flight(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: list[dict] = []
     monkeypatch.setattr(
         loop.telemetry, "emit", lambda _k, _name, attributes=None: seen.append(attributes or {})
     )
     await _enqueue_ends(aops_pool, 1, "m1")
-    consumer = loop._Consumer(aops_pool, MagicMock(), [])
+    consumer = loop._Consumer(aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="")
     consumer.in_flight = 1
     await consumer.emit_backlog()
     assert seen[-1]["pending"] == 1 and seen[-1]["in_flight"] == 1
 
 
 async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
     monkeypatch.setattr(loop, "POLL_SECONDS", 0.05)
     for agent in (1, 2, 3):
         await _enqueue_ends(aops_pool, agent, "m1")
-    task = asyncio.create_task(loop.understanding_loop_forever(aops_pool, MagicMock(), []))
+    task = asyncio.create_task(
+        loop.understanding_loop_forever(
+            aops_pool, MagicMock(), [], catalog=model_catalog, llm_override=""
+        )
+    )
     for _ in range(100):
         if [s for s, *_ in await _status(aops_pool)] == ["done"] * 3:
             break
@@ -710,7 +759,10 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
 
 
 async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upper_checks(
-    aops_pool: AsyncConnectionPool, _seams: dict, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    _seams: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     asked: list[int] = []
 
@@ -730,17 +782,17 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
             aops_pool, 1, compact_version=segment, chunk=Chunk(1, 3), end_msg_id="m1"
         )
     await enqueue_chunk(aops_pool, 2, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await loop.replay_jobs(aops_pool, MagicMock(), [], 1)
+    await loop.replay_jobs(aops_pool, MagicMock(), [], 1, catalog=model_catalog, llm_override="")
     assert [s for s, *_ in await _status(aops_pool)] == ["done", "done", "pending"]
     assert asked == []
 
 
 async def test_a_chunk_of_only_framework_notes_is_skipped_without_a_call(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
 ) -> None:
     _seams["history"] = _notes_history()
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1)
+    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await _status(aops_pool)
     assert status == "skipped" and "only framework notes" in error
     assert _seams["described"] == [] and await _nodes(aops_pool) == []

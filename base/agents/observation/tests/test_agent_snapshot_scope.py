@@ -18,6 +18,7 @@ from base.config import settings
 from base.db import Database
 from base.db.tests.fakes import fake_database
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 
 
 def seed(conn: psycopg.Connection, rows: list[tuple[int, str, str]]) -> None:
@@ -31,6 +32,7 @@ def seed(conn: psycopg.Connection, rows: list[tuple[int, str, str]]) -> None:
 
 
 def test_live_roster_preserves_ancestor_closure_without_history_growth(
+    model_catalog: ModelCatalog,
     db_conn: psycopg.Connection,
 ) -> None:
     seed(
@@ -42,13 +44,13 @@ def test_live_roster_preserves_ancestor_closure_without_history_growth(
             (4, "agent:2", "idling"),
         ],
     )
-    before = select_roster(db_conn)
+    before = select_roster(db_conn, catalog=model_catalog)
     assert [a.agent_id for a in before.agents] == [1, 3, 4]
     assert [a.model_dump() for a in before.ancestors] == [
         {"agent_id": 2, "spawner": "agent:1", "fork_source_agent_id": None}
     ]
     seed(db_conn, [(i, "user", "terminated") for i in range(100, 10_100)])
-    after = select_roster(db_conn)
+    after = select_roster(db_conn, catalog=model_catalog)
     before_payload = before.model_dump(mode="json")
     after_payload = after.model_dump(mode="json")
     # Roster content is stable even though each read has a new assessment time.
@@ -59,6 +61,7 @@ def test_live_roster_preserves_ancestor_closure_without_history_growth(
 
 
 def test_ancestor_closure_follows_fork_source_and_deduplicates_cycles(
+    model_catalog: ModelCatalog,
     db_conn: psycopg.Connection,
 ) -> None:
     seed(
@@ -74,40 +77,56 @@ def test_ancestor_closure_follows_fork_source_and_deduplicates_cycles(
         cur.execute(
             "UPDATE agents_meta SET fork_source_agent_id=1, fork_source_checkpoint_id='ckpt' WHERE id IN (3,4)"
         )
-    roster = select_roster(db_conn)
+    roster = select_roster(db_conn, catalog=model_catalog)
     assert [a.agent_id for a in roster.ancestors] == [1, 2]
     assert all(a.fork_source_agent_id == 1 for a in roster.agents)
 
 
-def test_directory_is_bounded_searchable_and_cursor_ordered(db_conn: psycopg.Connection) -> None:
+def test_directory_is_bounded_searchable_and_cursor_ordered(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection
+) -> None:
     seed(db_conn, [(i, "user", "terminated") for i in range(1, 8)])
-    first = list_directory(db_conn, scope="terminated", limit=3)
-    second = list_directory(db_conn, scope="terminated", before_id=first.next_cursor, limit=3)
-    third = list_directory(db_conn, scope="terminated", before_id=second.next_cursor, limit=3)
+    first = list_directory(db_conn, scope="terminated", limit=3, catalog=model_catalog)
+    second = list_directory(
+        db_conn, scope="terminated", before_id=first.next_cursor, limit=3, catalog=model_catalog
+    )
+    third = list_directory(
+        db_conn, scope="terminated", before_id=second.next_cursor, limit=3, catalog=model_catalog
+    )
     assert [a.agent_id for a in first.agents] == [7, 6, 5]
     assert [a.agent_id for a in second.agents] == [4, 3, 2]
     assert [a.agent_id for a in third.agents] == [1]
     assert third.next_cursor is None
-    assert [a.agent_id for a in list_directory(db_conn, scope="all", query="#3").agents] == [3]
-    assert [a.agent_id for a in list_directory(db_conn, scope="all", query="Agent 2").agents] == [2]
-    assert list_directory(db_conn).agents == []
+    assert [
+        a.agent_id
+        for a in list_directory(db_conn, scope="all", query="#3", catalog=model_catalog).agents
+    ] == [3]
+    assert [
+        a.agent_id
+        for a in list_directory(db_conn, scope="all", query="Agent 2", catalog=model_catalog).agents
+    ] == [2]
+    assert list_directory(db_conn, catalog=model_catalog).agents == []
 
 
-def test_notice_body_cannot_expand_roster_card(db_conn: psycopg.Connection) -> None:
+def test_notice_body_cannot_expand_roster_card(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection
+) -> None:
     seed(db_conn, [(1, "user", "idling")])
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_notices (agent_id,local_id,title,content,priority,blocking,require_response,expire_at) VALUES (1,1,'question',%s,'P0',true,true,now()+interval '1 day')",
             ("x" * 1_000_000,),
         )
-    card = select_roster(db_conn).agents[0]
+    card = select_roster(db_conn, catalog=model_catalog).agents[0]
     assert card.awaiting_response_count == 1
     assert card.highest_notice_priority == "P0"
     assert "notices_awaiting_response" not in AgentCard.model_fields
     assert len(card.model_dump_json()) < 1500
 
 
-def test_open_impersonation_status_reflects_lease_phase(db_conn: psycopg.Connection) -> None:
+def test_open_impersonation_status_reflects_lease_phase(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection
+) -> None:
     """Only an `active` lease means the agent is actually taken over — a
     `requested` lease still carries an open session number (so the UI can gate
     the force-expire action) but the native agent keeps running until
@@ -124,7 +143,7 @@ def test_open_impersonation_status_reflects_lease_phase(db_conn: psycopg.Connect
         )
     db_conn.commit()
 
-    requested_card = select_roster(db_conn).agents[0]
+    requested_card = select_roster(db_conn, catalog=model_catalog).agents[0]
     assert requested_card.open_impersonation_session_id is not None
     assert requested_card.open_impersonation_status == "requested"
 
@@ -136,41 +155,45 @@ def test_open_impersonation_status_reflects_lease_phase(db_conn: psycopg.Connect
         )
     db_conn.commit()
 
-    active_card = select_roster(db_conn).agents[0]
+    active_card = select_roster(db_conn, catalog=model_catalog).agents[0]
     assert active_card.open_impersonation_session_id == requested_card.open_impersonation_session_id
     assert active_card.open_impersonation_status == "active"
 
 
 @pytest.mark.parametrize("limit", [0, 201])
-def test_invalid_directory_limit_fails(db_conn: psycopg.Connection, limit: int) -> None:
+def test_invalid_directory_limit_fails(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection, limit: int
+) -> None:
     with pytest.raises(ValueError, match="limit"):
-        list_directory(db_conn, limit=limit)
+        list_directory(db_conn, limit=limit, catalog=model_catalog)
 
 
 @pytest.mark.parametrize("query", ["\u00b2", "\u0661", "9" * 100, "9223372036854775808"])
 def test_arbitrary_search_text_cannot_overflow_an_id(
-    db_conn: psycopg.Connection, query: str
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection, query: str
 ) -> None:
     seed(db_conn, [(1, "user", "idling")])
-    assert list_directory(db_conn, query=query).agents == []
+    assert list_directory(db_conn, query=query, catalog=model_catalog).agents == []
 
 
 @pytest.mark.parametrize(
     "spawner", ["agent:" + "9" * 100, "agent:9223372036854775808", "agent:18446744073709551615"]
 )
 def test_arbitrary_external_spawner_does_not_break_the_roster(
-    db_conn: psycopg.Connection, spawner: str
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection, spawner: str
 ) -> None:
     seed(db_conn, [(1, spawner, "idling")])
-    roster = select_roster(db_conn)
+    roster = select_roster(db_conn, catalog=model_catalog)
     assert roster.agents[0].spawner == spawner
     assert roster.ancestors == []
 
 
 @pytest.mark.parametrize("before_id", [0, -1, 9223372036854775808, 10**100])
-def test_directory_rejects_invalid_cursor(db_conn: psycopg.Connection, before_id: int) -> None:
+def test_directory_rejects_invalid_cursor(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection, before_id: int
+) -> None:
     with pytest.raises(ValueError, match="before_id"):
-        list_directory(db_conn, before_id=before_id)
+        list_directory(db_conn, before_id=before_id, catalog=model_catalog)
 
 
 def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.Connection) -> None:
@@ -245,50 +268,76 @@ def _install_conn(row: tuple[Any, ...] | None) -> tuple[Database, _FakeConn]:
     return fake_database(_connect), conn
 
 
-def test_effective_model_overlay_wins() -> None:
+def test_effective_model_overlay_wins(model_catalog: ModelCatalog) -> None:
     db, conn = _install_conn(({"llm_model": "deepseek-v4-pro"}, {"llm_model": "deepseek-v4-flash"}))
-    assert snapshot.agent_model_target(db, 42, fallback="fallback-x")[0] == "deepseek-v4-pro"
+    assert (
+        snapshot.agent_model_target(db, 42, fallback="fallback-x", catalog=model_catalog)[0]
+        == "deepseek-v4-pro"
+    )
     ((sql, params),) = conn.queries
     assert "agents_meta" in sql and params == (42,)
 
 
-def test_effective_model_is_the_birth_stamp_when_there_is_no_overlay() -> None:
+def test_effective_model_is_the_birth_stamp_when_there_is_no_overlay(
+    model_catalog: ModelCatalog,
+) -> None:
     """`llm_model` is birth-frozen: an agent born under an older default keeps it."""
     db, _ = _install_conn(({}, {"llm_model": "deepseek-v4-pro"}))
-    assert snapshot.agent_model_target(db, 42, fallback="fallback-x")[0] == "deepseek-v4-pro"
+    assert (
+        snapshot.agent_model_target(db, 42, fallback="fallback-x", catalog=model_catalog)[0]
+        == "deepseek-v4-pro"
+    )
 
 
-def test_effective_model_defaults_to_the_fleet_model_without_an_overlay() -> None:
+def test_effective_model_defaults_to_the_fleet_model_without_an_overlay(
+    model_catalog: ModelCatalog,
+) -> None:
     db, _ = _install_conn(({}, {}))
-    assert snapshot.agent_model_target(db, 42, fallback="fallback-x")[0] == settings.lm.llm_model
+    assert (
+        snapshot.agent_model_target(db, 42, fallback="fallback-x", catalog=model_catalog)[0]
+        == settings.lm.llm_model
+    )
 
 
-def test_effective_model_defaults_to_the_fleet_model_when_the_row_vanished() -> None:
+def test_effective_model_defaults_to_the_fleet_model_when_the_row_vanished(
+    model_catalog: ModelCatalog,
+) -> None:
     db, _ = _install_conn(None)
-    assert snapshot.agent_model_target(db, 42, fallback="fallback-x")[0] == settings.lm.llm_model
+    assert (
+        snapshot.agent_model_target(db, 42, fallback="fallback-x", catalog=model_catalog)[0]
+        == settings.lm.llm_model
+    )
 
 
-def test_effective_model_read_failure_returns_the_callers_fallback() -> None:
+def test_effective_model_read_failure_returns_the_callers_fallback(
+    model_catalog: ModelCatalog,
+) -> None:
     def boom(**_kw: object) -> None:
         raise RuntimeError("db down")
 
-    model, overrides = snapshot.agent_model_target(fake_database(boom), 42, fallback="fallback-x")
+    model, overrides = snapshot.agent_model_target(
+        fake_database(boom), 42, fallback="fallback-x", catalog=model_catalog
+    )
     assert model == "fallback-x"
     assert overrides == ModelOverrides.from_pins(None)
 
 
-def test_model_target_carries_the_agents_tuning_pins() -> None:
+def test_model_target_carries_the_agents_tuning_pins(model_catalog: ModelCatalog) -> None:
     """The overlay's pinned effort wins over the birth stamp's; unpinned fields stay unset."""
     db, _ = _install_conn(
         ({"reasoning_effort": "max"}, {"reasoning_effort": "low", "llm_model": "deepseek-v4-pro"})
     )
-    model, overrides = snapshot.agent_model_target(db, 42, fallback="fallback-x")
+    model, overrides = snapshot.agent_model_target(
+        db, 42, fallback="fallback-x", catalog=model_catalog
+    )
     assert model == "deepseek-v4-pro"
     assert overrides.reasoning_effort == "max"
     assert overrides.claude_thinking_budget_tokens is None
 
 
-def test_model_target_without_pins_leaves_every_tuning_field_to_the_cluster_default() -> None:
+def test_model_target_without_pins_leaves_every_tuning_field_to_the_cluster_default(
+    model_catalog: ModelCatalog,
+) -> None:
     db, _ = _install_conn(({}, {}))
-    _, overrides = snapshot.agent_model_target(db, 42, fallback="fallback-x")
+    _, overrides = snapshot.agent_model_target(db, 42, fallback="fallback-x", catalog=model_catalog)
     assert overrides == ModelOverrides.from_pins(None)

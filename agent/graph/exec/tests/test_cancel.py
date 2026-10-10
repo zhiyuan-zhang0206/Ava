@@ -49,6 +49,7 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 # Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.
@@ -82,6 +83,7 @@ def _make_runtime(*, llm=None, ops_pool=None, event_publisher=None) -> Runtime[A
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     return Runtime(context=ctx)
 

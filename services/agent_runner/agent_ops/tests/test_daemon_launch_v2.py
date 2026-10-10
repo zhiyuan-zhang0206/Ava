@@ -7,20 +7,30 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from services.agent_runner.agent_ops import daemon
 
 
 @pytest.mark.asyncio
 async def test_versioned_launch_dispatch(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+    op_executor: ThreadPoolExecutor,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_pool: ConnectionPool = pool
     seen: list[tuple[int, object]] = []
 
     async def _launch(
-        _db: object, _bus: object, body: LaunchAgentRequest, received_pool: object
+        _db: object,
+        _bus: object,
+        body: LaunchAgentRequest,
+        received_pool: object,
+        *,
+        catalog: ModelCatalog,
     ) -> SpawnedAgent:
         seen.append((body.agent_id, received_pool))
         return SpawnedAgent(id=body.agent_id)
@@ -33,6 +43,8 @@ async def test_versioned_launch_dispatch(
         workers=set(),
         pool=dispatch_pool,
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert (status, result) == ("completed", {"id": 777})
     assert seen == [(777, pool)]
@@ -40,16 +52,26 @@ async def test_versioned_launch_dispatch(
 
 @pytest.mark.asyncio
 async def test_retired_launch_is_refused_before_handler_or_dedupe(
-    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+    op_executor: ThreadPoolExecutor,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     pool: ConnectionPool = ConnectionPool(open=False)
 
-    async def forbidden(*_args: object) -> None:
+    async def forbidden(*_args: object, catalog: ModelCatalog) -> None:
         raise AssertionError("retired launch cannot reach the handler")
 
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", forbidden)
     status, result = await daemon._dispatch(
-        "spawn-launch", {}, active_ops={}, workers=set(), pool=pool, executor=op_executor
+        "spawn-launch",
+        {},
+        active_ops={},
+        workers=set(),
+        pool=pool,
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "failed"
     assert "unknown kind" in str(result["error"])
@@ -61,6 +83,8 @@ async def test_retired_launch_is_refused_before_handler_or_dedupe(
         active_ops={},
         workers=set(),
         executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status == "failed"
     assert "unknown kind" in str(result["error"])

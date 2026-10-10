@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from base.host.env.agent_slices import LlmCallPolicy
+from base.host.env.agent_slices import LlmCallPolicy, ModelOverrides
 from base.host.net.resilience import extract_retry_after, jittered
 from base.lm.effort import ReasoningEffort
 
@@ -112,6 +112,7 @@ def invoke_response(
     retry_max_delay_seconds: float = 30.0,
     model: str | None = None,
     usage_source: str | None = None,
+    catalog: Any,
     usage_agent_id: int | None = None,
 ) -> Any:
     """Invoke `runnable` on an already-built message list; return the response.
@@ -171,7 +172,9 @@ def invoke_response(
             resolved_model = model or getattr(runnable, "model_name", None)
             event_model = resolved_model if isinstance(resolved_model, str) else "unknown"
             provider_error = normalize_provider_transport_error(e)
-            classification = emit_provider_error(provider_error, model=event_model, fatal=False)
+            classification = emit_provider_error(
+                provider_error, model=event_model, fatal=False, catalog=catalog
+            )
             if classification.error_class is ErrorClass.UNKNOWN:
                 raise
             retryable = is_retryable_provider_error(provider_error)
@@ -203,6 +206,7 @@ def invoke_response(
             usage_kind="chat",
             latency_ms=latency_ms,
             source=usage_source,
+            catalog=catalog,
             for_agent_id=usage_agent_id,
         )
     return response
@@ -219,6 +223,7 @@ def invoke_text(
     retry_max_delay_seconds: float = 30.0,
     model: str | None = None,
     usage_source: str | None = None,
+    catalog: Any,
 ) -> str:
     """Invoke `llm` on a single HumanMessage of `content`, return flattened text.
 
@@ -241,6 +246,7 @@ def invoke_text(
         retry_max_delay_seconds=retry_max_delay_seconds,
         model=model,
         usage_source=usage_source,
+        catalog=catalog,
     )
     text = extract_text(response)
     if not text:
@@ -265,6 +271,9 @@ def answer_text(
     retry_max_delay_seconds: float = 30.0,
     timeout: float | None = None,
     usage_source: str | None = None,
+    catalog: Any,
+    llm_override: str,
+    overrides: ModelOverrides,
 ) -> str:
     """Build `model` at `effort` and answer `prompt` against `material`.
 
@@ -280,7 +289,14 @@ def answer_text(
     from base.lm.factory import build_chat_model
 
     try:
-        llm = build_chat_model(model, reasoning_effort=effort, timeout=timeout)
+        llm = build_chat_model(
+            model,
+            reasoning_effort=effort,
+            timeout=timeout,
+            catalog=catalog,
+            llm_override=llm_override,
+            overrides=overrides,
+        )
     except RuntimeError as e:
         if build_error is not None:
             raise build_error(model, e) from e
@@ -298,4 +314,5 @@ def answer_text(
         retry_max_delay_seconds=retry_max_delay_seconds,
         model=model,
         usage_source=usage_source,
+        catalog=catalog,
     )

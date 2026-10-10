@@ -54,7 +54,7 @@ from base.host.net.resilience import (
     http_classifier,
     retry,
 )
-from base.log import logger
+from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
 _MODEL_ID = "gemini-embedding-2"
@@ -157,29 +157,24 @@ def _vectors_from_body(body: dict[str, Any], texts: list[str]) -> np.ndarray:
     return vectors
 
 
-def _emit_billing(body: dict[str, Any]) -> None:
-    """Emit completed Gemini embedding accounting without affecting the call.
+def _emit_billing(body: dict[str, Any], *, catalog: ModelCatalog) -> None:
+    """Account for a completed request before validating its vectors.
 
-    Called before `_vectors_from_body` on purpose: the provider bills the
-    request whether or not our shape validation accepts the response, so a
-    malformed-but-billed response must still reach the ledger. A billing
-    failure is logged at WARNING and never breaks the embed call.
+    Gemini bills malformed-but-successful responses too. Accounting failures
+    propagate to the operation owner after the successful network request;
+    this stage never retries that request.
     """
-    try:
-        from base.lm.usage import log_usage_fields
+    from base.lm.usage import log_usage_fields
 
-        usage: dict[str, Any] = body.get("usageMetadata") or {}
-        tok_in = int(usage.get("promptTokenCount") or 0)
-        log_usage_fields(
-            model=_MODEL_ID,
-            tok_in=tok_in,
-            tok_out=0,
-            usage_kind="embedding",
-        )
-    except Exception:
-        logger.opt(exception=True).warning(
-            "gemini embedding usage was not recorded; this call is missing from the usage ledger"
-        )
+    usage: dict[str, Any] = body.get("usageMetadata") or {}
+    tok_in = int(usage.get("promptTokenCount") or 0)
+    log_usage_fields(
+        model=_MODEL_ID,
+        tok_in=tok_in,
+        tok_out=0,
+        usage_kind="embedding",
+        catalog=catalog,
+    )
 
 
 async def _post_attempt_once(
@@ -221,7 +216,9 @@ def _attempt_loop() -> asyncio.AbstractEventLoop:
     return loop
 
 
-def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) -> np.ndarray:
+def _embed(
+    texts: list[str], task_type: str, *, catalog: ModelCatalog, policy: Policy = _EMBED_POLICY
+) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
 
@@ -265,16 +262,16 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
 
     try:
         body = retry(policy)(_call)
-    except Exception as exc:
+    except httpx.HTTPError as exc:
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    _emit_billing(body)
+    _emit_billing(body, catalog=catalog)
     return _vectors_from_body(body, texts)
 
 
 async def _embed_async(
-    texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY
+    texts: list[str], task_type: str, *, catalog: ModelCatalog, policy: Policy = _EMBED_POLICY
 ) -> np.ndarray:
     """Async twin of ``_embed`` — native non-blocking I/O over
     ``httpx.AsyncClient`` with ``asyncio.sleep`` backoff. Same timeout /
@@ -290,10 +287,9 @@ async def _embed_async(
     timeout_s = settings.services.memory_embed_timeout_seconds
     try:
         client = httpx.AsyncClient(timeout=timeout_s)
-    except Exception as exc:
-        # AsyncClient construction can raise on its own (bad timeout config,
-        # transport setup) — wrap it to keep the module contract: only
-        # EmbeddingAPIError escapes.
+    except httpx.HTTPError as exc:
+        # Only a modelled transport failure becomes EmbeddingAPIError;
+        # invalid local setup and programming errors retain their identity.
         raise EmbeddingAPIError(f"embed HTTP client init failed: {exc!r}") from exc
     try:
         async with client:
@@ -304,21 +300,21 @@ async def _embed_async(
             body = await aretry(policy)(_call)
     except EmbeddingAPIError:
         raise
-    except Exception as exc:
+    except httpx.HTTPError as exc:
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    _emit_billing(body)
+    _emit_billing(body, catalog=catalog)
     return _vectors_from_body(body, texts)
 
 
 class GeminiEmbeddingProvider:
     """`EmbeddingProvider` for Gemini Embedding 2 (text mode).
 
-    Behavior-identical to the legacy `embedder` module it replaced: the
-    same endpoint, payload, auth, per-site retry policies, dim, and shape
-    validation — pinned by the contract tests in
-    `services/derived/memory_indexer/embeddings/tests/test_embeddings.py`.
+    Preserves the endpoint, payload, auth, per-site network retry policies,
+    dim and shape validation of the legacy `embedder` module. The service
+    root supplies the catalog used by accounting; unknown setup, request
+    and accounting failures propagate to that operation owner.
     """
 
     name = "gemini"
@@ -329,16 +325,26 @@ class GeminiEmbeddingProvider:
     per-row reconcile — any change (provider, model, dim) re-embeds the
     whole index."""
 
+    def __init__(self, catalog: ModelCatalog) -> None:
+        self._catalog = catalog
+
     def embed_batch(self, texts: list[str]) -> np.ndarray:
         """Batch embed markdown file contents for indexing. (N, DIM) float32."""
-        return _embed(texts, task_type="RETRIEVAL_DOCUMENT")
+        return _embed(texts, task_type="RETRIEVAL_DOCUMENT", catalog=self._catalog)
 
     def embed_query(self, text: str) -> np.ndarray:
         """Embed single query for search. (DIM,) float32."""
-        return _embed([text], task_type="RETRIEVAL_QUERY", policy=_QUERY_EMBED_POLICY)[0]
+        return _embed(
+            [text], task_type="RETRIEVAL_QUERY", catalog=self._catalog, policy=_QUERY_EMBED_POLICY
+        )[0]
 
     async def embed_query_async(self, text: str) -> np.ndarray:
         """Async embed of a single query for search. (DIM,) float32."""
         return (
-            await _embed_async([text], task_type="RETRIEVAL_QUERY", policy=_QUERY_EMBED_POLICY)
+            await _embed_async(
+                [text],
+                task_type="RETRIEVAL_QUERY",
+                catalog=self._catalog,
+                policy=_QUERY_EMBED_POLICY,
+            )
         )[0]

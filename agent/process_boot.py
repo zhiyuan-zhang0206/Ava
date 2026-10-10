@@ -150,7 +150,9 @@ def land_cluster_extensions(db: Database) -> None:
 # Return type is Any on purpose: the chat-model class must stay out of module
 # scope (the exec child imports this module for the SDK helpers), and Pyright
 # cannot resolve an annotation the module never imports.
-async def boot_agent_scope(agent_id: int, llm_model: str, overrides: ModelOverrides) -> Any:
+async def boot_agent_scope(
+    agent_id: int, llm_model: str, overrides: ModelOverrides, *, catalog: Any, llm_override: str
+) -> Any:
     """Agent-scope boot: workspace pre-create, screen-capture notice, chat model.
 
     Everything here is a fact about ONE agent, so the hosted runner runs it per
@@ -184,4 +186,10 @@ async def boot_agent_scope(agent_id: int, llm_model: str, overrides: ModelOverri
     await notify_desktop_permissions_at_startup()
     from base.lm.factory import build_chat_model_bound
 
-    return build_chat_model_bound(llm_model, agent_id=agent_id, overrides=overrides)
+    return build_chat_model_bound(
+        llm_model,
+        agent_id=agent_id,
+        overrides=overrides,
+        catalog=catalog,
+        llm_override=llm_override,
+    )

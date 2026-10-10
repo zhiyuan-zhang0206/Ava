@@ -176,7 +176,9 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
 
         installation = installed()
         validate_config_overlay(
-            config_overlay, None if installation is None else installation.configs
+            config_overlay,
+            None if installation is None else installation.configs,
+            models=_settings.model_catalog().models,
         )
         # Settle a withdrawn llm_model before it is stored (task #4306): the
         # rewrite is reported in this agent's own log — the spawner-visible
@@ -184,7 +186,9 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
         from base.lm.registry import normalize_overlay_llm_model
 
         config_overlay = dict(config_overlay)
-        model_receipt = normalize_overlay_llm_model(config_overlay)
+        model_receipt = normalize_overlay_llm_model(
+            config_overlay, models=_settings.model_catalog().models
+        )
         if model_receipt is not None:
             from base.log import logger
 
@@ -203,7 +207,14 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
         if config_overlay:
             from base.lm.model_config import validate_restart_model_config
 
-            validate_restart_model_config(cur, agent_identity.require_agent_id(), config_overlay)
+            validate_restart_model_config(
+                cur,
+                agent_identity.require_agent_id(),
+                config_overlay,
+                catalog=_settings.model_catalog(),
+                llm_override=_settings.settings.lm.llm_override,
+                default_model=_settings.agent_setting("llm_model"),
+            )
             cur.execute(
                 "UPDATE agents_meta "
                 "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "

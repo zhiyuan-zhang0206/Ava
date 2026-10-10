@@ -17,8 +17,10 @@ from base.agents.incarnation.resources import IncarnationResources
 from base.agents.messages.envelope import wrap_inbound
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.agents import create_agent_row, resurrect_agent, wake
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.lifecycle import force_mark_terminated
@@ -55,6 +57,8 @@ def _spawn_agent(
     label: str | None = None,
     prompt: str | None = None,
     prompt_source: str | None = None,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
 ) -> int:
     """Test setup helper — mirrors the pre-#1236 `spawn_agent()` contract
     (create row + launch) as the two-phase split: `create_agent_row`
@@ -72,6 +76,8 @@ def _spawn_agent(
         label=label,
         prompt=prompt,
         prompt_source=prompt_source,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     base.db.publish_inbound_wake(Database.from_settings(), EventBus.from_settings(), agent_id, "0")
     return agent_id
@@ -87,9 +93,11 @@ def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str,
         return cur.fetchall()
 
 
-def _hosted_agent(db: psycopg.Connection) -> int:
+def _hosted_agent(
+    db: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
+) -> int:
     """Seed the retained authority of a hosted incarnation for guard tests."""
-    agent_id = _spawn_agent()
+    agent_id = _spawn_agent(config_authority=config_authority, model_catalog=model_catalog)
     generation, owner = uuid4(), uuid4()
     resources = IncarnationResources(generation=generation, owner=owner, requests={})
     db.execute(
@@ -121,10 +129,15 @@ class TestResurrectAgent:
         aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """A repeated force creates a newer intent fence without changing the
         real status-transition epoch used to reopen pages on manual resurrect."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -188,10 +201,15 @@ class TestResurrectAgent:
         aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """Even without a real status transition, a repeated explicit force
         fences every chat inbound that existed before that latest intent."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -228,10 +246,15 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """A watchdog task selected for one death must not revive a later
         explicit kill while its RPC was in flight."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -280,10 +303,15 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """A trigger claimed while the RPC is in flight no longer justifies
         launching the terminated owner."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -317,10 +345,15 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """A pending chat created after the current death still auto-wakes the
         agent, preserving the post-termination delivery contract."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -355,10 +388,15 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """UI compact is guarded work too: its exact durable id and expected
         kind qualify only while pending after the current death."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -393,10 +431,15 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """The caller's expected kind is part of the CAS, and a compact that
         has already been claimed no longer licenses a new process."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -444,10 +487,15 @@ class TestResurrectAgent:
         aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """A force after compact enqueue fences that older work exactly like
         chat, even though no second status transition occurs."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -483,9 +531,14 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """Terminated -> unclaimed idling with durable resurrection and optional chat."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         # simulate terminate path: UPDATE 'idling' → 'terminated' (retaining the hosted incarnation)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -510,11 +563,16 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """The UI resurrect button is a pure lifecycle event — no prompt. Only
         the kind='resurrect' marker inbound is written; no chat inbound. The
         agent still wakes (the marker is the "ok I'm awake" signal)."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -530,10 +588,15 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """resurrected_by is written as-is into the inbound source field (not into content), so that claim
         can compose it into the lifecycle marker during dispatch. SDK paths pass 'agent:N', gateway passes 'user'."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -554,11 +617,16 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """A resurrect with a prompt writes two inbounds (lifecycle + chat); the chat inbound reuses
         resurrected_by as its source — that value must survive envelope wrap, otherwise
         the successor turn fails with a ValueError on its first claim (agent-240 incident)."""
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -602,6 +670,9 @@ class TestResurrectAgent:
         alive_status: str,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """Any status other than 'terminated' cannot be resurrected — only 'terminated' is a valid source state.
 
@@ -612,7 +683,9 @@ class TestResurrectAgent:
         send a revival notification to an agent that is "still running / still init'ing",
         with the production consequence of a dual-incarnation race on the same agent_id.
         """
-        agent_id = _hosted_agent(db_conn)
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )
         # the helper leaves 'idling'; other statuses are explicitly set via UPDATE for the test
         if alive_status != "idling":
             with db_conn.cursor() as cur:
@@ -632,6 +705,9 @@ class TestResurrectAgent:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
     ) -> None:
         """SELECT sees 'terminated' → after SELECT the row is concurrently changed to 'idling' → UPDATE
         WHERE status='terminated' hits 0 rows — at this point we must **not** proceed to INSERT a fake revival
@@ -640,7 +716,9 @@ class TestResurrectAgent:
         Simulate: make the first fetchone falsely report 'terminated' while the underlying row is actually 'idling'
         — equivalent to "status was rewritten after SELECT". The code must raise when UPDATE rowcount=0.
         """
-        agent_id = _hosted_agent(db_conn)  # real status='idling'
+        agent_id = _hosted_agent(
+            db_conn, config_authority=config_authority, model_catalog=model_catalog
+        )  # real status='idling'
 
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
         original_fetchone = psycopg.Cursor.fetchone

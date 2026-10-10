@@ -28,9 +28,10 @@ import pytest
 
 from base.cluster import machines as _machines
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.agents import forward as _agents_forward_router
 from gateway.agents import router as _agents_router
 from gateway.app import app
@@ -42,23 +43,11 @@ from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
 from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _provider_plugins_loaded() -> None:
-    """Load the provider plugins once, before any test isolates the plugin paths.
-
-    The app's lifespan loads provider plugins once per process
-    (`model_catalog`) and raises when it finds none. A test that
-    points `paths.repo_plugins_dir` at an empty temp directory and then starts the
-    app finds none, so it passed only when an earlier test in the same worker had
-    already loaded the real set, and failed when run alone or first. This session
-    fixture runs before every function-scoped monkeypatch.
-    """
-    model_catalog()
-
-
 @pytest.fixture(autouse=True)
 def _local_spawn_in_process(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     # The integration tests take this fixture from here (imported into their module).
     async def _in_process_forward(
@@ -67,7 +56,13 @@ def _local_spawn_in_process(
         # The gateway creates the agent row in-process (create_agent_row, real
         # DB); the runner's ops daemon dispatches launch_agent_op in-process —
         # mirror that here so a forwarded local launch produces a real child.
-        return await launch_agent_op(database, event_bus, body, app.state.db_pool)
+        return await launch_agent_op(
+            database,
+            event_bus,
+            body,
+            app.state.db_pool,
+            catalog=cast(ModelCatalog, app.state.catalog),
+        )
 
     monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
 
@@ -104,23 +99,36 @@ def _local_spawn_in_process(
 
 @pytest.fixture(autouse=True)
 def _local_lifecycle_in_process(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
-    async def _in_process_lifecycle(_db: object, target: str, path: str, json_body: dict) -> dict:
+    async def _in_process_lifecycle(
+        _db: object, target: str, path: str, json_body: dict[str, Any]
+    ) -> dict[str, Any]:
         # The runner's ops daemon dispatches lifecycle_op in-process; mirror
         # that here so a forwarded local terminate/resurrect/restart executes
         # against the test DB. AvaAgentError raises propagate directly — the
         # same exception types the wire round-trip would reconstruct. model_dump
         # mirrors the daemon serializing the response model onto the wire dict.
         return (
-            await lifecycle_op(database, event_bus, path, json_body, app.state.db_pool)  # pyright: ignore[reportUnknownArgumentType]
+            await lifecycle_op(
+                database,
+                event_bus,
+                path,
+                json_body,
+                app.state.db_pool,
+                catalog=cast(ModelCatalog, app.state.catalog),
+            )  # pyright: ignore[reportUnknownArgumentType]
         ).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture(autouse=True)
-def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+def _local_config_in_process(
+    monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
+) -> None:
     """Same stand-in for the config router: a config_read / config_write op
     addressed to the LOCAL machine runs in-process (exactly what the co-located
     ops daemon would do after receiving the forwarded op), so the config panel
@@ -152,10 +160,13 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
                 "only the local machine is simulated in-process"
             )
             if kind == "config_read":
-                return host_config.config_read_op().model_dump(mode="json")
+                return host_config.config_read_op(authority=config_authority).model_dump(
+                    mode="json"
+                )
             return host_config.config_write_op(
                 cast("dict[str, Any]", payload["overrides"]),
                 local=bool(payload.get("local", False)),
+                authority=config_authority,
             ).model_dump(mode="json")
         # Not a config op — fall through to the real dispatch (other routers
         # share this module object and must keep their own behavior).

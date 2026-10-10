@@ -18,6 +18,7 @@ from agent.graph.llm_errors import LlmLedger
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.errors import is_retryable_provider_error
+from base.lm.plugin_providers import build_model_catalog
 
 
 @pytest.mark.parametrize("during_model_iteration", [False, True])
@@ -82,10 +83,26 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
     agent = AgentSlices.resolve()
     with pytest.raises(TimeoutError) as raised:
         await _consume_llm(
-            model, [], chunks=[], handler=cast(RedisStreamHandler, sink), agent=agent
+            model,
+            [],
+            chunks=[],
+            handler=cast(RedisStreamHandler, sink),
+            agent=agent,
+            catalog=build_model_catalog(),
         )
     assert raised.value is error
-    assert retry_wait(error, 1, model=agent.brain.llm_model, agent_id=7, ledger=LlmLedger()) is None
+    assert (
+        retry_wait(
+            error,
+            1,
+            model=agent.brain.llm_model,
+            agent_id=7,
+            ledger=LlmLedger(),
+            catalog=build_model_catalog(),
+            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+        )
+        is None
+    )
     expected = ["stream", "fallback"] if timeout_origin.startswith("fallback") else ["stream"]
     assert calls == expected
 
@@ -131,6 +148,7 @@ async def test_external_cancellation_stays_external_inside_owned_model_deadline(
             chunks=[],
             handler=cast(RedisStreamHandler, sink),
             agent=AgentSlices.resolve(),
+            catalog=build_model_catalog(),
         )
     )
     await asyncio.wait_for(ready.wait(), 1)

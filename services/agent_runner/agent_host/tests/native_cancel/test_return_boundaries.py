@@ -26,6 +26,7 @@ from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
@@ -38,6 +39,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     ending: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     pool: ConnectionPool
     incarnation, initial = await managed_work(db_conn, aops_pool)
@@ -61,7 +63,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
             goto="__end__",
         )
 
-    graph, _saver, host, ctx = await _blocked_host(aops_pool, model)
+    graph, _saver, host, ctx = await _blocked_host(aops_pool, model, model_catalog=model_catalog)
     faults = _install_faults(monkeypatch, initial.agent_id, "after_ack")
     running = asyncio.create_task(
         host._invoke_until_done(
@@ -114,7 +116,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
 
 
 async def _blocked_host(
-    pool: AsyncConnectionPool[Any], model: Any
+    pool: AsyncConnectionPool[Any], model: Any, model_catalog: ModelCatalog
 ) -> tuple[Any, Any, AgentHost, AvaContext]:
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
@@ -132,6 +134,7 @@ async def _blocked_host(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     ctx = AvaContext(
         ops_pool=pool,
@@ -139,5 +142,6 @@ async def _blocked_host(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     return graph, saver, host, ctx

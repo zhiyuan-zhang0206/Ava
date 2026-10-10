@@ -9,6 +9,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, cast
 
+from base.config.service_read import ConfigAuthority
+
 
 class CompletionNoticePolicy(StrEnum):
     """How admitted platform completions reach an agent."""
@@ -54,11 +56,9 @@ def validate_completion_notice_policy(value: str) -> CompletionNoticePolicy:
         ) from exc
 
 
-def current_default_completion_notice_policy() -> CompletionNoticePolicy:
+def current_default_completion_notice_policy(authority: ConfigAuthority) -> CompletionNoticePolicy:
     """Read the live cluster default independently of the process profile."""
-    from base.config.service_read import current_field_values
-
-    value = current_field_values()["completion_notice_policy"]
+    value = authority.current_field_values()["completion_notice_policy"]
     if not isinstance(value, str):
         raise TypeError(f"completion_notice_policy must be a string, got {value!r}")
     return validate_completion_notice_policy(value)

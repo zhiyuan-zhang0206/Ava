@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from base import config
-from base.host.env import runtime_config as rt
+from base.config.service_read import ConfigAuthority
 
 _RUNNER_PW = "runner-secret-token"
 _DB_URL = "postgresql://ava@127.0.0.1:5433/ava"
@@ -42,10 +42,10 @@ def _write_gateway_env(tmp_path: Path, runner_pw: str | None = None, db_url: str
     (tmp_path / ".env").write_text("\n".join(lines) + "\n")
 
 
-def _served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, str]:
-    """bootstrap_config_values with the gateway .env pinned to tmp_path."""
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    return config.bootstrap_config_values()
+def _served(tmp_path: Path) -> dict[str, str]:
+    """Read the gateway payload through the authority owning this test file."""
+    authority = ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
+    return config.bootstrap_config_values(authority, provider_key_envs=(), plugin_cluster_config="")
 
 
 def test_local_plane_serves_the_endpoint_not_its_active_generation(
@@ -55,7 +55,7 @@ def test_local_plane_serves_the_endpoint_not_its_active_generation(
     generation here: the ledger's logins never enter the payload."""
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW)
     secret = seed_write_generation(tmp_path)
-    vals = _served(monkeypatch, tmp_path)
+    vals = _served(tmp_path)
     parts = urlsplit(vals["AVA_DB_URL"])
     assert (parts.username, parts.password) == ("ava", None)
     assert (parts.hostname, parts.port, parts.path) == ("127.0.0.1", 5433, "/ava")
@@ -75,7 +75,7 @@ def test_home_without_a_ledger_serves_the_endpoint_too(
     """Serving no login needs no authority: the payload no longer depends on
     the ledger, so a home without one serves the same credential-free shape."""
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW)
-    assert urlsplit(_served(monkeypatch, tmp_path)["AVA_DB_URL"]).password is None
+    assert urlsplit(_served(tmp_path)["AVA_DB_URL"]).password is None
 
 
 def test_remote_plane_strips_the_provider_password(
@@ -84,7 +84,7 @@ def test_remote_plane_strips_the_provider_password(
     provider_url = _pg_url("provider-pw", host="db.provider.example:5432")
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW, db_url=provider_url)
     monkeypatch.setattr(config.settings.data_plane, "db_url", provider_url)
-    vals = _served(monkeypatch, tmp_path)
+    vals = _served(tmp_path)
     parts = urlsplit(vals["AVA_DB_URL"])
     assert (parts.username, parts.password, parts.hostname) == (
         "ava",
@@ -97,17 +97,25 @@ def test_remote_plane_strips_the_provider_password(
 
 @pytest.mark.parametrize("missing_url", [None, ""])
 def test_missing_url_refuses_before_boot_time_fallback(
-    monkeypatch: pytest.MonkeyPatch, missing_url: str | None
+    monkeypatch: pytest.MonkeyPatch, missing_url: str | None, tmp_path: Path
 ) -> None:
     snapshot = {"AVA_RUNNER_DB_PASSWORD": "new-private-password"}
     if missing_url is not None:
         snapshot["AVA_DB_URL"] = missing_url
     read = Mock(return_value=snapshot)
     warning = Mock()
-    monkeypatch.setattr(rt, "read_env_aliases", read)
+
+    def read_snapshot(_owner: ConfigAuthority) -> dict[str, str]:
+        return read()
+
+    monkeypatch.setattr(ConfigAuthority, "read_env_aliases", read_snapshot)
     monkeypatch.setattr("base.log.logger.warning", warning)
     with pytest.raises(ValueError, match="AVA_DB_URL is missing") as caught:
-        config.bootstrap_config_values()
+        config.bootstrap_config_values(
+            ConfigAuthority(config.settings, config.settings, tmp_path / ".env"),
+            provider_key_envs=(),
+            plugin_cluster_config="",
+        )
     read.assert_called_once_with()
     warning.assert_not_called()
     assert "new-private-password" not in str(caught.value)
@@ -129,7 +137,7 @@ def test_served_payload_excludes_the_offsite_backup_destination(
         + "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE=/private/oss.json\n"
         + "AVA_WALG_CONFIG_FILE=/private/walg.json\n"
     )
-    vals = _served(monkeypatch, tmp_path)
+    vals = _served(tmp_path)
     for alias in (
         "AVA_BACKUP_OFFSITE_ENDPOINT",
         "AVA_BACKUP_OFFSITE_BUCKET",

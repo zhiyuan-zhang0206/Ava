@@ -19,6 +19,8 @@ import inspect
 import io
 from datetime import datetime
 
+import pytest
+
 import ava
 import ava.agents
 import ava.self
@@ -49,6 +51,7 @@ def test_self_exports_machine_consts() -> None:
     assert isinstance(str(ava.self.SELF_MACHINE_NAME), str)
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_agents_help_mentions_machines() -> None:
     """The rendered ava.agents doc — what the agent reads — names the machine
     surface (spawn's `machine` arg, list_machines)."""

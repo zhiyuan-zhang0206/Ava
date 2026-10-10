@@ -23,6 +23,7 @@ import builtins
 import sys
 
 from base.db import Database
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.docs.notes import walk_notes
 from base.paths import gateway_memory_dir
 from services.derived.memory_indexer.backends.base import MemorySearchBackend
@@ -109,7 +110,7 @@ def main() -> int:
         return 1
     print(f"{len(queries)} sample queries, k={args.k}")
 
-    provider = get_provider()
+    provider = get_provider(catalog=build_model_catalog())
     database = Database.from_settings()
     backend_a = get_backend_named(
         args.a,

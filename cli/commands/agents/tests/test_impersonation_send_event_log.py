@@ -15,14 +15,16 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
-from base.agents.impersonation.tests import test_history as history_cases
+from base.agents.impersonation import sessions
 from base.agents.messages import delivery_outbox as outbox
 from base.cluster.machine import machine_name
+from base.config import Settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.impersonation import _send
-from tests.impersonation_support import attested_caller
+from tests.impersonation_support import attested_caller, recorded_tree
 
 
 class _SingleConnectionPool:
@@ -51,7 +53,25 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
         (agent_id, machine_name(), owner.generation, owner.owner),
     )
     db_conn.commit()
-    lease = history_cases.start(owner)
+    runtime = Settings(profile=None)
+    authority = ConfigAuthority(runtime=runtime, all_domains=runtime, env_path=tmp_path / ".env")
+    result = sessions.request(
+        database,
+        event_bus,
+        owner.agent_id,
+        authority=authority,
+        name="Fix login",
+        executor_name="Codex: thoughtful squirrel",
+        provider="codex",
+        thread_id=str(uuid4()),
+        process_metadata=recorded_tree(),
+    )
+    lease = history.resolve(database, owner.agent_id, result["session_id"])
+    leases.accept(
+        database, event_bus, str(lease["id"]), owner.agent_id, owner, "Continue the login fix"
+    )
+    leases.activate(database, event_bus, str(lease["id"]), owner)
+    lease = history.resolve(database, owner.agent_id, result["session_id"])
 
     target_id = create_agent(db_conn)
     db_conn.execute(
@@ -70,7 +90,11 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
         max_entries=8,
     )
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(outbox, "limits", lambda: snapshot)
+
+    def read_limits(_authority: ConfigAuthority) -> outbox.DeliveryOutboxLimits:
+        return snapshot
+
+    monkeypatch.setattr(outbox, "limits", read_limits)
     outbox._reset_caches_for_tests()
     monkeypatch.setattr(
         "base.native_process.ownership.process_metadata", lambda: attested_caller(lease)
@@ -97,22 +121,28 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     entry = entries[0]
     assert entry.origin_agent_id == owner.agent_id
 
+    assert entry.origin_agent_id == owner.agent_id
     pool = _SingleConnectionPool(db_conn)
     assert (
-        outbox.flush(pool, publish_wake, now=datetime.now(UTC) + timedelta(seconds=1)).delivered
+        outbox.flush(
+            pool, publish_wake, authority=authority, now=datetime.now(UTC) + timedelta(seconds=1)
+        ).delivered
         == 1
     )
     # A stale retry after the first response was lost carries the same key and must
     # only recover the committed receipt, not insert a second message or log row.
     outbox.record_failed_send(
+        authority=authority,
+        origin_agent_id=owner.agent_id,
         agent_id=target_id,
-        origin_agent_id=None,
         source=f"agent:{owner.agent_id}",
         content="CLI event-log delivery",
         client_message_id=entry.client_message_id,
     )
     assert (
-        outbox.flush(pool, publish_wake, now=datetime.now(UTC) + timedelta(seconds=1)).delivered
+        outbox.flush(
+            pool, publish_wake, authority=authority, now=datetime.now(UTC) + timedelta(seconds=1)
+        ).delivered
         == 1
     )
     assert db_conn.execute(

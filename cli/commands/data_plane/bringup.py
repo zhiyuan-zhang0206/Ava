@@ -261,9 +261,9 @@ def prepare_memory_vectors() -> None:
         return
     from base.db.pg_admin import local_owner_authority
     from services.derived.memory_indexer.backends.pgvector import prepare_table
-    from services.derived.memory_indexer.embeddings.factory import get_provider
+    from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
-    dim = get_provider().dim
+    dim = get_descriptor().dim
     if settings.data_plane.is_remote:
         with Database.from_settings().connect(direct=True) as conn:
             prepare_table(conn, dim)

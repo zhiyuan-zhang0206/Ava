@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.closing_request import ClosingRequest
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 from services.agent_runner.agent_host.tests.guarded_compact.faults import install
@@ -36,11 +36,14 @@ async def test_saved_original_closing_usage_stamps_source_before_replacement(
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     fault: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     model = UsageSummary(responses=["Original anchored summary. " * 100])
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings({"gpt-": replace(binding, build_single_attempt=lambda _: model)})
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+    )
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     install(monkeypatch, fault)
     await accepted.host.run_turn(accepted.agent)
     status = accepted.status(client)

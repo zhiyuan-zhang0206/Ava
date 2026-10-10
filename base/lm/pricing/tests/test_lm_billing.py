@@ -9,14 +9,9 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderBinding
 from tests.fixtures.model_catalog import AddBindings
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _load_provider_plugins() -> None:
-    model_catalog()
 
 
 class _RecordedSpan:
@@ -94,6 +89,7 @@ def test_emit_billing_event_records_schema_v1_attributes(monkeypatch: pytest.Mon
 
 @pytest.mark.parametrize("path", ["message", "durable"])
 def test_message_billing_accounts_for_both_cache_write_ttls(
+    model_catalog: ModelCatalog,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
 ) -> None:
@@ -115,9 +111,13 @@ def test_message_billing_accounts_for_both_cache_write_ttls(
         },
     )
     if path == "message":
-        emit_billing_from_message(message, model="claude-opus-5-5", usage_kind="chat")
+        emit_billing_from_message(
+            message, model="claude-opus-5-5", usage_kind="chat", catalog=model_catalog
+        )
     else:
-        log_usage_from_message(message, model="claude-opus-5-5", usage_kind="agent")
+        log_usage_from_message(
+            message, model="claude-opus-5-5", usage_kind="agent", catalog=model_catalog
+        )
     assert len(tracer.spans) == 1
     attrs = tracer.spans[0].attributes
     assert attrs["ava.billing.cache_write_5m_tokens"] == 300
@@ -125,7 +125,9 @@ def test_message_billing_accounts_for_both_cache_write_ttls(
     assert attrs["ava.billing.cost"] == pytest.approx(0.00614)
 
 
-def test_emit_billing_from_message_marks_unpriced_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_billing_from_message_marks_unpriced_model(
+    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A known vendor without catalog pricing records an explicit free-unpriced span.
 
     The regression this catches is treating an unknown catalog price as a
@@ -139,7 +141,9 @@ def test_emit_billing_from_message_marks_unpriced_model(monkeypatch: pytest.Monk
         usage_metadata={"input_tokens": 20, "output_tokens": 5, "total_tokens": 25},
     )
 
-    emit_billing_from_message(message, model="deepseek-not-priced", usage_kind="chat")
+    emit_billing_from_message(
+        message, model="deepseek-not-priced", usage_kind="chat", catalog=model_catalog
+    )
 
     assert len(tracer.spans) == 1
     assert tracer.spans[0].attributes["ava.billing.vendor"] == "deepseek"
@@ -148,6 +152,7 @@ def test_emit_billing_from_message_marks_unpriced_model(monkeypatch: pytest.Monk
 
 
 def test_emit_billing_from_message_skips_missing_usage_metadata(
+    model_catalog: ModelCatalog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A response with no standardized token usage produces no billing span.
@@ -160,7 +165,10 @@ def test_emit_billing_from_message_skips_missing_usage_metadata(
     tracer = _enable_tracing(monkeypatch)
 
     emit_billing_from_message(
-        AIMessage(content="answer"), model="deepseek-v4-pro", usage_kind="chat"
+        AIMessage(content="answer"),
+        model="deepseek-v4-pro",
+        usage_kind="chat",
+        catalog=model_catalog,
     )
 
     assert tracer.spans == []
@@ -184,16 +192,19 @@ def test_emit_billing_from_message_skips_missing_usage_metadata(
     ],
 )
 def test_vendor_of_model_recognizes_registered_core_and_plugin_prefixes(
+    model_catalog: ModelCatalog,
     model: str,
     vendor: str | None,
 ) -> None:
     """Vendor attribution uses registered manufacturer identities without guessing."""
     from base.lm.pricing.billing import vendor_of_model
 
-    assert vendor_of_model(model) == vendor
+    assert vendor_of_model(model, catalog=model_catalog) == vendor
 
 
-def test_vendor_of_model_uses_registered_plugin_display_name(add_bindings: AddBindings) -> None:
+def test_vendor_of_model_uses_registered_plugin_display_name(
+    model_catalog: ModelCatalog, add_bindings: AddBindings
+) -> None:
     """A registered plugin provider contributes its lowercase manufacturer name.
 
     The regression this catches is silently skipping a billable plugin call
@@ -201,7 +212,8 @@ def test_vendor_of_model_uses_registered_plugin_display_name(add_bindings: AddBi
     """
     from base.lm.pricing.billing import vendor_of_model
 
-    add_bindings(
+    model_catalog = add_bindings(
+        model_catalog,
         {
             "acme-": ProviderBinding(
                 prefix="acme-",
@@ -209,10 +221,10 @@ def test_vendor_of_model_uses_registered_plugin_display_name(add_bindings: AddBi
                 key_env="ACME_API_KEY",
                 build=lambda _ctx: FakeListChatModel(responses=["unused"]),
             )
-        }
+        },
     )
 
-    assert vendor_of_model("acme-fast") == "acme ai"
+    assert vendor_of_model("acme-fast", catalog=model_catalog) == "acme ai"
 
 
 def test_emit_billing_event_is_noop_when_tracing_is_disabled(

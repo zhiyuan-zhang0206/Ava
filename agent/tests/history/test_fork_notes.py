@@ -33,6 +33,8 @@ from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.paths import skills_dir
 from tests.fixtures.units import spawn_agent
 
@@ -122,6 +124,9 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Scenario 2b: a skill the fork's config added (source never had it) rides
     the fork inbound payload and lands as a full-body note at the TAIL — after
@@ -142,7 +147,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
         "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
     )
 
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -179,10 +184,13 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
 async def test_fork_without_payload_grafts_nothing(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Legacy fork rows (payload NULL) keep the pre-ruling behavior: no delta
     note."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),

@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.db import create_agent
+from base.host.env.agent_slices import ModelOverrides
 from gateway.app import app
 
 
@@ -71,7 +72,9 @@ def test_reverse_scan_finds_most_recent_usage(
     # stop checking the moment the two drifted.
     from base.lm.context_budget import resolve_context_budget
 
-    _budget = resolve_context_budget(settings.lm.llm_model)
+    _budget = resolve_context_budget(
+        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=app.state.catalog
+    )
     expected_max = _budget.max_context_tokens
     expected_soft = _budget.soft_compact_tokens
     expected_hard = _budget.hard_compact_tokens
@@ -116,7 +119,9 @@ def test_new_agent_returns_zero(db_conn: psycopg.Connection, test_client: TestCl
     # stop checking the moment the two drifted.
     from base.lm.context_budget import resolve_context_budget
 
-    _budget = resolve_context_budget(settings.lm.llm_model)
+    _budget = resolve_context_budget(
+        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=app.state.catalog
+    )
     expected_max = _budget.max_context_tokens
     expected_soft = _budget.soft_compact_tokens
     expected_hard = _budget.hard_compact_tokens
@@ -210,7 +215,9 @@ def test_checkpoint_read_failure_returns_zero(
     # stop checking the moment the two drifted.
     from base.lm.context_budget import resolve_context_budget
 
-    _budget = resolve_context_budget(settings.lm.llm_model)
+    _budget = resolve_context_budget(
+        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=app.state.catalog
+    )
     expected_max = _budget.max_context_tokens
     expected_soft = _budget.soft_compact_tokens
     expected_hard = _budget.hard_compact_tokens

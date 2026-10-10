@@ -15,6 +15,7 @@ from psycopg_pool import PoolTimeout
 from base import config
 from base.cluster.auth import bearer_header
 from base.config import settings
+from base.config.service_read import ConfigAuthority, plugin_bootstrap_config
 from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
@@ -22,6 +23,7 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
 from base.host.env import runtime_config as rt
+from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
@@ -156,12 +158,20 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     from cli import unit_join
 
     secret = _authenticated(monkeypatch)
+    complete = settings if settings.profile is None else config.Settings(profile=None)
+    bootstrap_authority = ConfigAuthority(settings, complete, tmp_path / ".env")
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
     issued = unit.issue_bundle(
         rt._ava_home(),
         unit=unit.UnitIdentity(machine="mini", home=str(runner)),
-        endpoint=config.bootstrap_config_values()["AVA_DB_URL"],
+        endpoint=config.bootstrap_config_values(
+            bootstrap_authority,
+            provider_key_envs=(
+                binding.key_env for binding in build_model_catalog().bindings.values()
+            ),
+            plugin_cluster_config=plugin_bootstrap_config(),
+        )["AVA_DB_URL"],
         cluster_secret=secret,
         ttl_s=600,
     )

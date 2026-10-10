@@ -19,8 +19,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.pin_agent import pin_agent
 
 # ── Two-unit fixtures: model "a gateway unit" and "a runner unit" explicitly ──
@@ -234,6 +236,8 @@ def workspace(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def spawn_agent(
     *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
     spawner: str = "user",
     config: dict[str, object] | None = None,
     **kw: Any,
@@ -250,6 +254,8 @@ def spawn_agent(
         spawner=spawner,
         machine=machine_name(),
         config=config,
+        catalog=catalog,
+        authority=authority,
         **kw,
     )
     publish_inbound_wake(db, bus, agent_id, "0")
@@ -288,15 +294,21 @@ def seed_write_generation() -> Callable[[Path], Any]:
 
 @pytest.fixture
 def served_gateway_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, seed_write_generation: Callable[[Path], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
+    seed_write_generation: Callable[[Path], Any],
 ) -> Any:
-    """The suite's gateway `.env` served from a private home that keeps an active
-    write generation: bootstrap's local runner projection reads that ledger.
-    Returns the generation's secret record."""
-    import shutil
+    """Serve the test authority's data plane and active generation from one home.
 
-    from base.host.env import runtime_config as rt
+    Build the file from the isolated boot model, never another ambient home.
+    Return the generation's secret record as before.
+    """
+    from base import paths
 
-    shutil.copy(rt.env_file_path(), tmp_path / ".env")
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    return seed_write_generation(tmp_path)
+    home = config_authority.env_path.parent
+    config_authority.env_path.write_text(
+        f"AVA_DB_URL={config_authority.service_field_value('db_url')}\n"
+        f"AVA_REDIS_URL={config_authority.service_field_value('redis_url')}\n"
+    )
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    return seed_write_generation(home)

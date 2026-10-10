@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -167,3 +168,18 @@ class ExecMemoryGuard:
             except Exception:
                 logger.exception("[exec-memory-guard] tick failed — retrying next interval")
             await asyncio.sleep(self._interval_s)
+
+
+async def run_memory_guard_forever(log: logging.Logger) -> None:
+    """Relieve critical memory pressure by killing the largest exec domain.
+
+    Where the OS reports no pressure state (Linux), the guard does not run.
+    """
+    from base.host.memory_pressure import host_memory_source
+
+    source = host_memory_source()
+    if source is None:
+        log.info("[agent-host] exec memory guard idle — this OS reports no memory pressure state")
+        return
+    host_pid = os.getpid()
+    await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()

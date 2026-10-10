@@ -24,6 +24,7 @@ from base.agents.tasks.priority import Priority
 from base.config import settings
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 # Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
@@ -178,7 +179,7 @@ class AgentSnapshot(BaseModel):
     heartbeat_paused_until: datetime | None
 
 
-def _effective_model(config_overlay: Any, birth_config: Any) -> str:
+def _effective_model(config_overlay: Any, birth_config: Any, *, catalog: ModelCatalog) -> str:
     """The model an agent's own calls run, withdrawal-resolved (task #3212).
 
     The agent host's own resolution: `llm_model` is a birth-frozen field, so the
@@ -190,22 +191,24 @@ def _effective_model(config_overlay: Any, birth_config: Any) -> str:
     """
     from base.config.agent_pins import resolve_agent_config_pins
 
-    return _model_of_pins(resolve_agent_config_pins(config_overlay, birth_config))
+    return _model_of_pins(resolve_agent_config_pins(config_overlay, birth_config), catalog=catalog)
 
 
-def _model_of_pins(pins: dict[str, Any]) -> str:
+def _model_of_pins(pins: dict[str, Any], *, catalog: ModelCatalog) -> str:
     from base.lm.registry import resolve_available_model
 
-    return resolve_available_model(pins.get("llm_model") or settings.lm.llm_model)
+    return resolve_available_model(
+        pins.get("llm_model") or settings.lm.llm_model, models=catalog.models
+    )
 
 
-def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
+def _row_to_snapshot(row: tuple[Any, ...], *, catalog: ModelCatalog) -> AgentSnapshot:
     from base.lm.factory import model_supports_vision
 
     # Pydantic does the per-field type coercion / validation; the tuple
     # positions match the SELECT column order above. Capability judgments
     # answer for the model that will run (task #3212).
-    effective_model = _effective_model(row[17], row[25])
+    effective_model = _effective_model(row[17], row[25], catalog=catalog)
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
@@ -226,7 +229,7 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
             "last_probe_at": row[14],
             "notices_awaiting_response": row[15],
             "unread_notice_count": row[16],
-            "supports_vision": model_supports_vision(effective_model),
+            "supports_vision": model_supports_vision(effective_model, catalog=catalog),
             "observation": observation(row[18], row[19]),
             "availability": availability(
                 status=row[4],
@@ -241,7 +244,9 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
     )
 
 
-def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
+def select_one(
+    conn: psycopg.Connection, agent_id: int, *, catalog: ModelCatalog
+) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     with conn.cursor() as cur:
         cur.execute(
@@ -249,10 +254,12 @@ def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
             (agent_id,),
         )
         row = cur.fetchone()
-    return _row_to_snapshot(row) if row else None
+    return _row_to_snapshot(row, catalog=catalog) if row else None
 
 
-def agent_model_target(db: Database, agent_id: int, *, fallback: str) -> tuple[str, ModelOverrides]:
+def agent_model_target(
+    db: Database, agent_id: int, *, fallback: str, catalog: ModelCatalog
+) -> tuple[str, ModelOverrides]:
     """The model `agent_id`'s own calls run, withdrawal-resolved, and its tuning pins.
 
     The agent host's own resolution: `llm_model` is a birth-frozen field, so the
@@ -283,4 +290,4 @@ def agent_model_target(db: Database, agent_id: int, *, fallback: str) -> tuple[s
         )
         return fallback, ModelOverrides.from_pins(None)
     pins = resolve_agent_config_pins(row[0] if row else None, row[1] if row else None)
-    return _model_of_pins(pins), ModelOverrides.from_pins(pins)
+    return _model_of_pins(pins, catalog=catalog), ModelOverrides.from_pins(pins)

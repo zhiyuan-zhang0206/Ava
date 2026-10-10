@@ -21,9 +21,12 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.llm_errors import FatalProviderError
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from tests.fixtures.units import spawn_agent
 
 
@@ -44,6 +47,7 @@ def _context(pool: AsyncConnectionPool) -> AvaContext:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
 
 
@@ -66,6 +70,9 @@ async def test_streak_write_failure_keeps_its_traceback(
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Branch 1: the streak write failed — the warning keeps the cause (task #4979)."""
 
@@ -74,7 +81,9 @@ async def test_streak_write_failure_keeps_its_traceback(
 
     monkeypatch.setattr("base.agents.recovery.breaker.record_permanent_reject_turn", _boom)
 
-    await _reject(aops_pool, spawn_agent(spawner="user"))
+    await _reject(
+        aops_pool, spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    )
 
     record = _sole_record(loguru_records, "failed to record a permanent-rejection streak")
     assert record["exception"] is not None
@@ -85,6 +94,9 @@ async def test_halt_suppression_failure_keeps_its_traceback(
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Branch 2: suppressing automatic wakes failed (task #4979)."""
 
@@ -101,7 +113,9 @@ async def test_halt_suppression_failure_keeps_its_traceback(
     monkeypatch.setattr("base.agents.recovery.breaker.halt_automatic_recovery", _boom)
     monkeypatch.setattr("agent.db.enqueue_fatal_provider_report_to_nearest_alive_ancestor", _noop)
 
-    await _reject(aops_pool, spawn_agent(spawner="user"))
+    await _reject(
+        aops_pool, spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    )
 
     record = _sole_record(loguru_records, "failed to suppress automatic wakes")
     assert record["exception"] is not None
@@ -112,6 +126,9 @@ async def test_ancestor_report_failure_keeps_its_traceback(
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Branch 3: enqueueing the recovery-halt report failed (task #4979)."""
 
@@ -128,7 +145,9 @@ async def test_ancestor_report_failure_keeps_its_traceback(
     monkeypatch.setattr("base.agents.recovery.breaker.halt_automatic_recovery", _halt)
     monkeypatch.setattr("agent.db.enqueue_fatal_provider_report_to_nearest_alive_ancestor", _boom)
 
-    await _reject(aops_pool, spawn_agent(spawner="user"))
+    await _reject(
+        aops_pool, spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    )
 
     record = _sole_record(loguru_records, "failed to enqueue the recovery-halt report")
     assert record["exception"] is not None

@@ -17,8 +17,10 @@ from agent.state import AgentState
 from agent.tests.claim.claim_status_support import _committed_publishes, _set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 
@@ -28,9 +30,12 @@ async def test_claim_first_entry_keeps_boot_claim_running(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """The bootstrap claim already sets running before the first graph entry."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
     db_conn.commit()
@@ -56,9 +61,12 @@ async def test_claim_subsequent_entry_does_not_disturb_running(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """A subsequent graph entry leaves its already-running row untouched."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
@@ -134,6 +142,9 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """chat inbound → claim returns Command(goto='before_llm'), update.messages
     contains HumanMessage after envelope wrapping.
@@ -141,7 +152,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     state.messages empty (agent first round) → claim simultaneously injects SystemMessage as
     messages[0] for prompt cache hit across restarts.
     """
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     cmd = await claim_node(
@@ -170,10 +181,13 @@ async def test_claim_chat_expands_slash_command(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """A `/<name> ...` chat inbound is expanded by the claim node into the
     command's template + the user's note before being wrapped for the model."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     insert_inbound_message(
         db_conn, tid, "/recap just the PRs", source="user", bus=event_bus, database=database
     )
@@ -198,9 +212,12 @@ async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """multiple chat inbounds in same batch → all appended in FIFO order by created_at (none lost)."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     insert_inbound_message(db_conn, tid, "first", source="user", bus=event_bus, database=database)
     insert_inbound_message(
         db_conn, tid, "second", source="agent:5", bus=event_bus, database=database
@@ -229,11 +246,14 @@ async def test_claim_chat_marks_inbound_claimed_immediately(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """chat inbound uses two-phase commit (since 2026-05-27): claim UPDATE pending → claimed;
     a subsequent startup reconcile will move claimed → done; if the process dies midway,
     claimed rows will be reset back to pending by the new process for re-delivery."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     iid = insert_inbound_message(
         db_conn, tid, "msg", source="user", bus=event_bus, database=database
     )
@@ -292,6 +312,9 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """After each chat inbound is envelope-wrapped into state, publish one InboundCommitted
     (frontend relies on this event to trigger reload to fetch the committed version).
@@ -301,7 +324,7 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     """
     import json
 
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     id1 = insert_inbound_message(
         db_conn, tid, "first", source="user", bus=event_bus, database=database
     )
@@ -360,10 +383,13 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """same batch chat + compact_summary → publish only for the chat's inbound_id,
     summary does not emit publish."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     chat_id = insert_inbound_message(
         db_conn, tid, "user msg", source="user", bus=event_bus, database=database
     )
@@ -462,6 +488,9 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """same batch chat + resurrect → publish only for the chat's inbound_id, lifecycle
     inbound id does not enter committed_chat_ids.
@@ -469,7 +498,7 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     Lock down `committed_chat_ids.append(item.id)` appearing only in CHAT branch —
     mutation moving it to dispatch top / resurrect branch would cause publish for extra
     lifecycle id, frontend fetching timeline would not find reload anchor."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     chat_id = insert_inbound_message(
         db_conn, tid, "user msg", source="user", bus=event_bus, database=database
     )
@@ -495,12 +524,15 @@ async def test_claim_chat_message_carries_source_metadata(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """chat dispatch passes source=item.source to inbound_message helper, cannot be None.
 
     Lock down mutant_76: `source=item.source` → `source=None`. Verify message's
     additional_kwargs.ava_source equals original item.source ('user'), preventing None leak."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     cmd = await claim_node(
@@ -521,11 +553,14 @@ async def test_claim_node_wrapper_returns_underlying_command(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """`claim_node` is a thin wrapper around `node_lifecycle` enter/exit, **must** return the
     inner `_claim_node_impl`'s Command (cannot drop / change goto / wrap into something else).
     Lock down mutation that removes `await` / `return` from `return await _claim_node_impl(...)`."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     insert_inbound_message(
         db_conn, tid, "wrapper test", source="user", bus=event_bus, database=database
     )

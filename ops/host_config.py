@@ -19,6 +19,7 @@ from base.config import env_override_values, field_domain, get_config_metadata
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
 from base.config.admin.plugin_config import patch_owner, write_plugin_patch
+from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env import runtime_config
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
@@ -34,7 +35,7 @@ from ops.rpc_schemas import (
 SENSITIVE_MASK = "••••••••"
 
 
-def config_read_op() -> ConfigReadResult:
+def config_read_op(*, authority: ConfigAuthority) -> ConfigReadResult:
     """Read this machine's host-scope config fields and return them with metadata.
 
     Returns a ConfigReadResult with:
@@ -46,11 +47,11 @@ def config_read_op() -> ConfigReadResult:
         remotely-writable host fields set in this machine's .env), sensitive keys
         omitted (the frontend deltas against this to build a write payload)
     """
-    metas = get_config_metadata()
+    metas = get_config_metadata(authority=authority)
     metas_by_name = {m.name: m for m in metas}
     set_fields = set(runtime_config.env_set_field_names())
-    set_fields.update(env_override_values())
-    overrides = env_override_values()
+    set_fields.update(env_override_values(authority=authority))
+    overrides = env_override_values(authority=authority)
     host_fields: dict[str, HostConfigField] = {}
     for meta in metas:
         if meta.scope != "host":
@@ -207,6 +208,7 @@ def _apply_plugin_patch(
 def config_write_op(
     overrides: dict[str, Any],
     *,
+    authority: ConfigAuthority,
     local: bool = False,
     actor: str | None = None,
     trace_id: str | None = None,
@@ -231,7 +233,7 @@ def config_write_op(
     The gate is `base.config.admin.editing.field_editable` — the same definition the
     gateway's PUT /api/config gate uses, so the two write paths cannot drift.
     """
-    metas = {m.name: m for m in get_config_metadata()}
+    metas = {m.name: m for m in get_config_metadata(authority=authority)}
     try:
         owner = patch_owner(set(overrides))
     except InvalidConfigOverlay as exc:

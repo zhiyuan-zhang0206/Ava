@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.runtime import TurnOutcome
@@ -144,6 +145,7 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ) -> None:
     incarnation, initial = await managed_work(db_conn, aops_pool)
     _insert(db_conn, initial.agent_id)
@@ -151,7 +153,9 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
     async def unexpected(_state: object) -> None:
         raise RuntimeError("isolated unexpected graph failure")
 
-    _graph, saver, host, context = await _blocked_host(aops_pool, unexpected)
+    _graph, saver, host, context = await _blocked_host(
+        aops_pool, unexpected, model_catalog=model_catalog
+    )
     context = replace(
         context, original_incarnation=incarnation, hosted_resources=HostedTurnResources()
     )

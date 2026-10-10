@@ -26,7 +26,7 @@ from base.config import settings
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
-from services.derived.memory_indexer.embeddings.factory import get_provider
+from services.derived.memory_indexer.embeddings.factory import get_descriptor
 from services.derived.memory_search.app import build_app
 from services.derived.memory_search.config import MemorySearchConfig
 from services.derived.memory_search.store import MemoryStore
@@ -58,11 +58,11 @@ async def run(config: MemorySearchConfig) -> None:
     store's matrix width and wire bound must match the provider that
     produced the vectors, and an unknown provider value fails fast instead
     of serving a half-mismatched search surface."""
-    provider = get_provider()
+    descriptor = get_descriptor()
     store = MemoryStore(
         config.memory_search_data_dir / "vectors.npz",
-        dim=provider.dim,
-        fingerprint=provider.fingerprint,
+        dim=descriptor.dim,
+        fingerprint=descriptor.fingerprint,
     )
     await asyncio.to_thread(store.load)
     server = uvicorn.Server(

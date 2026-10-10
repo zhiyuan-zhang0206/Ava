@@ -300,6 +300,7 @@ async def post_agents_resurrect_billing(
 @router.post("/api/agents/{agent_id}/restart")
 async def post_agent_restart(
     agent_id: int,
+    request: Request,
     body: RestartAgentRequest = Body(default_factory=RestartAgentRequest),  # noqa: B008
 ) -> RestartAgentResponse:
     """Enqueue native restart on the agent's home runner.
@@ -308,6 +309,16 @@ async def post_agent_restart(
     The host then applies the exact command and releases the incarnation for
     new admission, retaining agent ID and context. Terminated agents require
     resurrection; restart returns already_terminated for them."""
+    if body.config_overlay:
+        from base.packages.plugins.config_registration import (
+            InvalidConfigOverlay,
+            validate_config_overlay,
+        )
+
+        try:
+            validate_config_overlay(body.config_overlay, models=request.app.state.catalog.models)
+        except InvalidConfigOverlay as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     forwarded = await forward_to_home_machine(
         agent_id, f"/api/agents/{agent_id}/restart", body.model_dump()
     )

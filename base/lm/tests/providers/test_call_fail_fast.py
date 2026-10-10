@@ -7,12 +7,16 @@ import openai
 import pytest
 
 from base.lm.call import invoke_response
+from base.lm.catalog import ModelCatalog
 
 
 @pytest.mark.parametrize("error", [TypeError("bad code"), ValueError("bad input")])
 @pytest.mark.parametrize("provider_cause", [False, True])
 def test_unknown_runnable_error_is_not_retried_or_wrapped(
-    monkeypatch: pytest.MonkeyPatch, error: Exception, provider_cause: bool
+    model_catalog: ModelCatalog,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    provider_cause: bool,
 ) -> None:
     calls: list[list[Any]] = []
     sleeps: list[float] = []
@@ -28,7 +32,12 @@ def test_unknown_runnable_error_is_not_retried_or_wrapped(
     monkeypatch.setattr("time.sleep", sleeps.append)
     with pytest.raises(type(error)) as raised:
         invoke_response(
-            BrokenRunnable(), [], desc="audit", error_type=RuntimeError, retry_attempts=2
+            BrokenRunnable(),
+            [],
+            desc="audit",
+            error_type=RuntimeError,
+            retry_attempts=2,
+            catalog=model_catalog,
         )
     assert raised.value is error
     assert len(calls) == 1 and sleeps == []

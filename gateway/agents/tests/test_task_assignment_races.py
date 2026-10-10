@@ -36,9 +36,9 @@ def test_fresh_simultaneous_intents_produce_one_pair(
     boundary = Barrier(3)
     real = agent_router._spawn_preflight_blocking
 
-    def preflight(*args: Any):
+    def preflight(*args: Any, **kwargs: Any):
         boundary.wait(timeout=10)
-        return real(*args)
+        return real(*args, **kwargs)
 
     monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", preflight)
     with ThreadPoolExecutor(max_workers=3) as executor:
@@ -88,7 +88,7 @@ def test_preflight_failure_returns_winner_committed_during_its_window(
     real = agent_router._spawn_preflight_blocking
     winner: list[dict[str, Any]] = []
 
-    def loses(*args: Any):
+    def loses(*args: Any, **kwargs: Any):
         monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", real)
         accepted = client.post(PATH, json=body, headers=HEADERS)
         assert accepted.status_code == 201, accepted.text
@@ -108,8 +108,8 @@ def test_second_lookup_replays_winner_after_successful_preflight_window(
     real = agent_router._spawn_preflight_blocking
     winner: list[dict[str, Any]] = []
 
-    def loses(*args: Any):
-        prepared = real(*args)
+    def loses(*args: Any, **kwargs: Any):
+        prepared = real(*args, **kwargs)
         monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", real)
         accepted = client.post(PATH, json=body, headers=HEADERS)
         assert accepted.status_code == 201, accepted.text

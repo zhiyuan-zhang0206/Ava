@@ -48,10 +48,13 @@ from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.config import settings
 from base.config.domains.agent.compaction import AgentCompactionSettings
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import ContextBudget
+from base.lm.plugin_providers import build_model_catalog
 from tests.fixtures.units import spawn_agent
 
 # ── helpers ──
@@ -160,10 +163,13 @@ def _patch_compact_config(monkeypatch: pytest.MonkeyPatch) -> None:
         soft_compact_tokens=1,
         hard_compact_tokens=1,
     )
-    monkeypatch.setattr(
-        "agent.hooks.compact.resolve_context_budget",  # pyright: ignore[reportUnknownArgumentType]
-        lambda *_: budget,  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def fixed_budget(
+        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
+    ) -> ContextBudget:
+        return budget
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixed_budget)
 
 
 def _fake_llm(summary_text: str) -> Any:
@@ -184,6 +190,7 @@ def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=build_model_catalog(),
         )
     )
 
@@ -214,6 +221,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     return Runtime(context=ctx)
 
@@ -454,6 +462,9 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Enabled → the claim-node compact path (agent-written summary) dumps the
     pre-compact state.messages and parks the note after the summary in the
@@ -461,7 +472,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     no note, no AIMessage — nothing that could sit between a tool_use and its
     tool_result on the wire."""
     _patch_dump_enabled(monkeypatch, tmp_path)
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "agent-written summary", "compact_summary")
     state = AgentState(
         messages=[
@@ -498,10 +509,13 @@ async def test_claim_compact_summary_no_note_when_disabled(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Config off → claim-path compact tail is exactly today's (summary only)."""
     _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "agent-written summary", "compact_summary")
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="old")],

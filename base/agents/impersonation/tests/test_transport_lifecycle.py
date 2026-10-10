@@ -13,6 +13,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import host_transport, relay, terminal_notices
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -21,7 +22,11 @@ from tests.impersonation_support import attested_caller, recorded_tree
 
 @pytest.fixture
 def active(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> tuple[dict[str, Any], RuntimeIncarnation]:
     aid = create_agent(db_conn)
     owner = RuntimeIncarnation(aid, uuid4(), uuid4())
@@ -42,6 +47,7 @@ def active(
         relay_thread_id=str(uuid4()),
         relay_codex_remote="unix:///tmp/recorded-codex.sock",
         process_metadata=recorded_tree(),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, session["id"], aid, owner, "Continue this task")
     leases.activate(database, event_bus, session["id"], owner)
@@ -204,6 +210,8 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
     event_bus: EventBus,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     session, owner = active
     end(database, event_bus, session)
@@ -218,6 +226,7 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
         relay_thread_id=str(uuid4()),
         relay_codex_remote="unix:///tmp/replacement.sock",
         process_metadata=recorded_tree(),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, replacement["id"], owner.agent_id, owner, "Replacement task")
     leases.activate(database, event_bus, replacement["id"], owner)

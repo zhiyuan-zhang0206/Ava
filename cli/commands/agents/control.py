@@ -248,35 +248,35 @@ def send_agent_message(
     to the calling command."""
     import sys
 
-    import httpx
-
     from base.agents.messages import delivery_outbox
+    from base.agents.messages.delivery.retry import NETWORK_ERRORS, retryable_response
+    from base.config import Settings, settings
+    from base.config.service_read import ConfigAuthority
+    from base.paths import ava_home
+
+    sender = delivery_outbox.DeliverySenderConfig(
+        ConfigAuthority(
+            runtime=settings,
+            all_domains=settings if settings.profile is None else Settings(profile=None),
+            env_path=ava_home() / ".env",
+        )
+    )
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.host.net.http_dial import post as dial_post
 
     if tail_file is not None:
         content = _with_tail(content, tail_file)
-        # All attempts of one logical message share one key; minting it here also
+    # All attempts of one logical message share one key; minting it here also
     # arms the server's client_message_id receipt for the flush replay.
-    key: str | None = None
-    try:
-        key = delivery_outbox.logical_key(
-            agent_id=agent_id,
-            source=source,
-            content=content,
-            completion_notice=completion,
-        )
-    except Exception:
-        # The outbox is a safety net for a failing send, never a reason for
-        # one: an unusable outbox degrades to the unkeyed behavior with a
-        # loud note, instead of changing the call's outcome.
-        print(
-            "warning: delivery outbox unavailable; sending an unkeyed message",
-            file=sys.stderr,
-        )
+    key = delivery_outbox.logical_key(
+        sender=sender,
+        agent_id=agent_id,
+        source=source,
+        content=content,
+        completion_notice=completion,
+    )
     headers = gateway_auth_headers()
-    if key is not None:
-        headers = {**headers, "Idempotency-Key": key}
+    headers = {**headers, "Idempotency-Key": key}
     url = f"{gateway_api_base()}/api/agents/{agent_id}/messages"
     try:
         resp = dial_post(
@@ -289,35 +289,44 @@ def send_agent_message(
             timeout=_TIMEOUT_S,
             headers=headers,
         )
-    except httpx.TransportError:
-        if key is not None:
-            delivery_outbox.record_failed_send(
-                agent_id=agent_id,
-                origin_agent_id=origin_agent_id,
-                source=source,
-                content=content,
-                client_message_id=key,
-                completion_notice=completion,
-            )
+    except NETWORK_ERRORS:
+        delivery_outbox.record_failed_send(
+            authority=sender.authority,
+            agent_id=agent_id,
+            origin_agent_id=origin_agent_id,
+            source=source,
+            content=content,
+            client_message_id=key,
+            completion_notice=completion,
+        )
         raise
-    if key is not None:
-        if resp.status_code in delivery_outbox.TRANSIENT_HTTP_STATUSES:
-            delivery_outbox.record_failed_send(
-                agent_id=agent_id,
-                origin_agent_id=origin_agent_id,
-                source=source,
-                content=content,
-                client_message_id=key,
-                completion_notice=completion,
-            )
-        elif resp.is_success:
-            delivery_outbox.note_send_succeeded(
-                agent_id=agent_id,
-                source=source,
-                content=content,
-                key=key,
-                completion_notice=completion,
-            )
+    if retryable_response(resp):
+        delivery_outbox.record_failed_send(
+            authority=sender.authority,
+            agent_id=agent_id,
+            origin_agent_id=origin_agent_id,
+            source=source,
+            content=content,
+            client_message_id=key,
+            completion_notice=completion,
+        )
+    elif resp.is_success:
+        delivery_outbox.retire_send(
+            agent_id=agent_id,
+            source=source,
+            content=content,
+            key=key,
+            completion_notice=completion,
+        )
+    else:
+        delivery_outbox.retire_send(
+            agent_id=agent_id,
+            source=source,
+            content=content,
+            key=key,
+            completion_notice=completion,
+            completed=False,
+        )
     if resp.status_code >= 400:
         # Surface the response body before raising: the 422 detail carries the
         # legal source set / validation reason, which is the actionable part.

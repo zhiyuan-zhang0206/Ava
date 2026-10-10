@@ -29,6 +29,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from base import config
+from base.config.service_read import plugin_bootstrap_config
 from gateway.http.auth.request_principal import cluster_credential
 
 router = APIRouter()
@@ -62,6 +63,11 @@ def get_bootstrap(
     ):
         raise HTTPException(status_code=401, detail="machine API token required")
     try:
-        return config.bootstrap_config_values()
+        return request.app.state.config_authority.bootstrap_config_values(
+            provider_key_envs=(
+                binding.key_env for binding in request.app.state.catalog.bindings.values()
+            ),
+            plugin_cluster_config=plugin_bootstrap_config(),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

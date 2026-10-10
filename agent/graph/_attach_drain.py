@@ -22,9 +22,12 @@ from agent.messages import attach_message
 from agent.state import AttachState, BaseAgentState
 from base.agents.context import AvaContext
 from base.lm.attach.packing import AttachEntry, pack_attachments
+from base.lm.catalog import ModelCatalog
 
 
-def build_attach_message(pending: AttachState, model: str) -> HumanMessage | None:
+def build_attach_message(
+    pending: AttachState, model: str, *, catalog: ModelCatalog
+) -> HumanMessage | None:
     """Pack one attach message from pending attachments, or None when empty.
 
     The message's content blocks are interleaved per file — a leading notice
@@ -34,7 +37,7 @@ def build_attach_message(pending: AttachState, model: str) -> HumanMessage | Non
     if not pending.pending:
         return None
     entries = [AttachEntry(path=entry.path, label=entry.label) for entry in pending.pending]
-    pack = pack_attachments(model, entries)
+    pack = pack_attachments(model, entries, catalog=catalog)
     if pack is None:
         return None
     return attach_message(blocks=pack.blocks, text=pack.text, created_at=datetime.now(UTC))
@@ -48,7 +51,7 @@ def build_attach_drain(state: BaseAgentState, ctx: AvaContext) -> dict[str, Any]
     update never ran (compact halt / crashed exec).
     """
     model = getattr(ctx.llm, "model_name", None) or ctx.require_agent().brain.llm_model
-    message = build_attach_message(state.attach, model)
+    message = build_attach_message(state.attach, model, catalog=ctx.require_catalog())
     if message is None:
         return None
     return {"messages": [message], "attach": AttachState()}

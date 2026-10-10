@@ -11,8 +11,10 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartOperation,
     NativeRestartRequest,
 )
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from ops.lifecycle.native_restart import restart_native_work_op
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
@@ -26,6 +28,7 @@ async def test_merged_effort_refusal_has_no_restart_or_config_effects(
     pool: ConnectionPool,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
 ) -> None:
     _inc, target = await managed_work(db_conn, aops_pool)
     db_conn.execute(
@@ -37,7 +40,9 @@ async def test_merged_effort_refusal_has_no_restart_or_config_effects(
         operation_key="invalid-effort",
         request=NativeRestartRequest(target=target, config_overlay={"reasoning_effort": "low"}),
     )
-    result = await restart_native_work_op(database, event_bus, target.agent_id, operation, pool)
+    result = await restart_native_work_op(
+        database, event_bus, target.agent_id, operation, pool, catalog=model_catalog
+    )
     assert result.status == "refused"
     assert result.reason == "invalid_overlay"
     assert "unsupported reasoning effort" in result.detail
@@ -57,6 +62,8 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     aops_pool: AsyncConnectionPool,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     _inc, target = await managed_work(db_conn, aops_pool)
     request = NativeRestartRequest(target=target)
@@ -88,6 +95,8 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
             active_ops={},
             workers=set(),
             executor=op_executor,
+            catalog=model_catalog,
+            authority=config_authority,
         )
     original = result
     assert original is not None
@@ -95,7 +104,15 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
         "SELECT count(*) FROM api_idempotency WHERE key='domain-ops'"
     ).fetchone() == (0,)
     status, recovered = await daemon._dispatch_idempotent_pass(
-        "lifecycle", packet, "domain-ops", pool, active_ops={}, workers=set(), executor=op_executor
+        "lifecycle",
+        packet,
+        "domain-ops",
+        pool,
+        active_ops={},
+        workers=set(),
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status is OpStatus.COMPLETED and recovered == original
     assert db_conn.execute(
@@ -104,7 +121,15 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     ).fetchone() == (1,)
     bad = packet | {"body": operation.model_dump(mode="json") | {"operation_key": "another"}}
     status, result = await daemon._dispatch_idempotent_pass(
-        "lifecycle", bad, "domain-ops", pool, active_ops={}, workers=set(), executor=op_executor
+        "lifecycle",
+        bad,
+        "domain-ops",
+        pool,
+        active_ops={},
+        workers=set(),
+        executor=op_executor,
+        catalog=model_catalog,
+        authority=config_authority,
     )
     assert status is OpStatus.FAILED
     assert result == {"error": "guarded restart envelope identity differs"}

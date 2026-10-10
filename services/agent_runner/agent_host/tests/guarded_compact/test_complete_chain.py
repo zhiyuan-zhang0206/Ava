@@ -13,7 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _agent, _insert
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.tests.guarded_compact.faults import install
@@ -33,6 +33,7 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
     add_bindings: AddBindings,
     interval: int,
     fault: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     agent = _agent(db_conn)
@@ -55,11 +56,15 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
         generated_models.append(model)
         return model
 
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings({"gpt-": replace(binding, build_single_attempt=build_single)})
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog, {"gpt-": replace(binding, build_single_attempt=build_single)}
+    )
     ordinary: list[object] = []
 
-    host, saver, config = await make_host(aops_pool, agent, interval, ordinary, monkeypatch)
+    host, saver, config = await make_host(
+        aops_pool, agent, interval, ordinary, monkeypatch, catalog=model_catalog
+    )
     await host.run_turn(agent)
     assert len(ordinary) == 1
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential

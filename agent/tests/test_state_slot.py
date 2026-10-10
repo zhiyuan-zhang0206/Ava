@@ -55,6 +55,7 @@ from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
 assert (
@@ -450,6 +451,7 @@ def _make_runtime_and_config(
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=42, owns_loop=True),
+        catalog=build_model_catalog(),
     )
     runtime = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}

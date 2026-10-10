@@ -26,7 +26,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from base import telemetry
-from services.derived.memory_indexer.embeddings.factory import get_provider
+from services.derived.memory_indexer.embeddings.factory import get_descriptor
 from services.derived.memory_search.store import MemoryStore
 
 _log = logging.getLogger("services.derived.memory_search.app")
@@ -38,7 +38,7 @@ _log = logging.getLogger("services.derived.memory_search.app")
 # import (an unknown AVA_EMBEDDING_BACKEND fails the service boot loudly)
 # — and anything longer is malformed and rejected before numpy ever
 # allocates. The store keeps its own exact-dim check as the last gate.
-_EMBED_DIM = get_provider().dim
+_EMBED_DIM = get_descriptor().dim
 _MAX_K = 1000
 
 # One stats sample per minute — bounded row rate, same cadence as the

@@ -22,6 +22,7 @@ from langchain_core.exceptions import (
     ModelTimeoutError,
 )
 
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 
@@ -357,6 +358,7 @@ def emit_provider_error(
     model: str,
     fatal: bool,
     classification: ErrorClassification | None = None,
+    catalog: ModelCatalog,
 ) -> ErrorClassification:
     """Classify and emit one provider failure for streams and synchronous SDK calls.
 
@@ -378,7 +380,7 @@ def emit_provider_error(
         fatal=fatal,
         billing=resolved.billing,
         context_overflow=resolved.context_overflow,
-        vendor=provider_key_of_model(model),
+        vendor=provider_key_of_model(model, catalog=catalog),
         model=model,
     )
     return resolved

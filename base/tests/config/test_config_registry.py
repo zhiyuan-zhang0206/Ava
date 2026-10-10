@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from base import config
+from base.config.service_read import ConfigAuthority
+
+
+@pytest.fixture
+def authority(tmp_path: Path) -> ConfigAuthority:
+    """Explicit boot model and config file owned by this test."""
+    return ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
 
 
 def test_openai_api_key_field_exists_and_is_per_secret():
@@ -19,12 +28,14 @@ def test_openai_api_key_field_exists_and_is_per_secret():
     assert field_domain("openai_api_key") == "lm"
 
 
-def test_retired_runner_selector_is_not_configurable() -> None:
+def test_retired_runner_selector_is_not_configurable(authority: ConfigAuthority) -> None:
     """Only the agent host runs agents; no UI or overlay can select the old runner."""
     from base.config import FIELD_INFOS, get_config_metadata
 
     assert "runner_mode" not in FIELD_INFOS
-    assert all(meta.env_var != "AVA_RUNNER_MODE" for meta in get_config_metadata())
+    assert all(
+        meta.env_var != "AVA_RUNNER_MODE" for meta in get_config_metadata(authority=authority)
+    )
     assert "restarter_poll_interval_seconds" not in FIELD_INFOS
 
 
@@ -67,7 +78,7 @@ def test_every_field_declares_valid_scope() -> None:
     assert not invalid, f"fields with invalid scope: {invalid}"
 
 
-def test_every_field_resolves_a_valid_capability() -> None:
+def test_every_field_resolves_a_valid_capability(authority: ConfigAuthority) -> None:
     """Every field resolves to a capability in the allowed set — the top-level
     config-panel section. Resolution is the field's `capability` override or its
     domain default; `_build_registry` fail-fasts on a bad value at import, so this
@@ -78,13 +89,15 @@ def test_every_field_resolves_a_valid_capability() -> None:
     assert frozenset({"gateway", "agent-runner", "common"}) == _ALLOWED_CAPABILITIES
     bad = [
         (m.name, m.capability)
-        for m in get_config_metadata()
+        for m in get_config_metadata(authority=authority)
         if m.capability not in _ALLOWED_CAPABILITIES
     ]
     assert not bad, f"fields with invalid capability: {bad}"
 
 
-def test_capability_assignment_is_pinned_for_load_bearing_fields() -> None:
+def test_capability_assignment_is_pinned_for_load_bearing_fields(
+    authority: ConfigAuthority,
+) -> None:
     """Spot-check the capability of one field per case so a future edit that
     misgroups a load-bearing field (or breaks the domain-default / override
     resolution) fails loudly here. Covers: domain default (gateway_port -> gateway
@@ -95,7 +108,7 @@ def test_capability_assignment_is_pinned_for_load_bearing_fields() -> None:
     machine_host -> common)."""
     from base.config import get_config_metadata
 
-    cap = {m.name: m.capability for m in get_config_metadata()}
+    cap = {m.name: m.capability for m in get_config_metadata(authority=authority)}
     expected = {
         "gateway_port": "gateway",  # gateway domain default, no override
         "db_url": "gateway",  # cluster-pinned data-plane field, still gateway-owned
@@ -203,20 +216,15 @@ def test_offsite_backup_cluster_pinned_fields_are_never_bootstrap_served() -> No
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_bootstrap_distributes_a_behavior_knob(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bootstrap_distributes_a_behavior_knob(
+    monkeypatch: pytest.MonkeyPatch, authority: ConfigAuthority
+) -> None:
     """A non-default agent-behavior knob is now distributed to agent-runners."""
     from base import config as cfg
-    from base.host.env import runtime_config
 
-    # .env file may carry a stale value from another test; bypass it so the
-    # monkeypatched settings value is the only source.
-    monkeypatch.setattr(
-        runtime_config,
-        "read_env_aliases",
-        lambda: {"AVA_DB_URL": str(cfg.settings.data_plane.db_url)},
-    )
+    authority.env_path.write_text(f"AVA_DB_URL={cfg.settings.data_plane.db_url}\n")
     monkeypatch.setattr(cfg.settings.sandbox, "exec_timeout_seconds", 123.0)
-    values = cfg.bootstrap_config_values()
+    values = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
     assert values["AVA_EXEC_TIMEOUT_SECONDS"] == "123.0"
 
 

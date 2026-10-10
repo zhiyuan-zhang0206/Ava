@@ -41,6 +41,7 @@ from base.agents.history.hierarchy.generate import (
 from base.agents.history.hierarchy.group import GroupReplyError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup, parse_reply, resolve_groups
 from base.agents.history.hierarchy.units import MessageUnit, catalog_line, divide_units
+from base.lm.catalog import ModelCatalog
 
 _CHUNK_PROMPT = """The messages above are background; what follows is a separate task.
 
@@ -110,6 +111,7 @@ def generate_chunk(
     start_offset: int,
     *,
     model: str,
+    catalog: ModelCatalog,
     agent_id: int,
     tools: Sequence[Any],
     corrections: int = 0,
@@ -164,6 +166,7 @@ def generate_chunk(
         text = _invoke_agent_shaped(
             llm,
             messages,
+            catalog=catalog,
             tools=tools,
             desc=f"{model}, understanding chunk",
             model=model,

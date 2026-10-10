@@ -34,6 +34,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
@@ -60,6 +61,7 @@ def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
+        catalog=build_model_catalog(),
     )
     return Runtime(context=ctx)
 
@@ -145,6 +147,7 @@ async def test_llm_node_stamps_last_active_at_with_text(
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
+        catalog=build_model_catalog(),
     )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(
@@ -191,6 +194,7 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
+        catalog=build_model_catalog(),
     )
     state = AgentState(messages=[HumanMessage(content="run it")], halted=False)
     await llm_node(

@@ -32,7 +32,9 @@ router = APIRouter()
 def get_default_model(request: Request) -> DefaultModelView:
     """The model a new agent is born on, and where that value came from."""
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        resolved = resolve_default_model(cur)
+        resolved = resolve_default_model(
+            cur, catalog=request.app.state.catalog, authority=request.app.state.config_authority
+        )
         return DefaultModelView(model=resolved.model, source=resolved.source)
 
 
@@ -44,9 +46,9 @@ def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModel
     Takes effect for agents born after the write; every existing agent keeps the
     model stamped on its own row.
     """
-    from base.lm.plugin_providers import model_catalog
-
-    spawnable = {m for models in model_catalog().supported_models.values() for m in models}
+    spawnable = {
+        m for models in request.app.state.catalog.supported_models.values() for m in models
+    }
     if body.model not in spawnable:
         raise HTTPException(
             status_code=400,
@@ -57,5 +59,7 @@ def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModel
         )
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         set_cluster_default_model(cur, body.model, updated_by="api")
-        resolved = resolve_default_model(cur)
+        resolved = resolve_default_model(
+            cur, catalog=request.app.state.catalog, authority=request.app.state.config_authority
+        )
         return DefaultModelView(model=resolved.model, source=resolved.source)

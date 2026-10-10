@@ -23,6 +23,7 @@ from base.agents.messages.native_cancel import accept_native_cancel, observe_nat
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_owner
 from services.agent_runner.agent_host.invocation import native_work as work_owner
@@ -95,6 +96,7 @@ async def test_original_invocation_settles_once_after_database_fault(
     monkeypatch: pytest.MonkeyPatch,
     site: str,
     database: Database,
+    model_catalog: ModelCatalog,
 ) -> None:
     pool: ConnectionPool
     incarnation, initial = await managed_work(db_conn, aops_pool)
@@ -124,6 +126,7 @@ async def test_original_invocation_settles_once_after_database_fault(
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=database,
+        catalog=model_catalog,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
@@ -131,6 +134,7 @@ async def test_original_invocation_settles_once_after_database_fault(
         agent=AgentSlices.resolve(),
         db=database,
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
     faults = _install_faults(monkeypatch, agent, site)
     running = asyncio.create_task(

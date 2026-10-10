@@ -74,6 +74,7 @@ from base.config import settings
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
+from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks
 from base.lm.usage import CACHE_MECHANISM_MIXED, CACHE_SCOPE_EXPLICIT_BLOCK
 from base.log import logger
@@ -117,6 +118,8 @@ def _finalize_turn_observability(
     final_msg: AIMessage,
     handler: RedisStreamHandler,
     model: str,
+    *,
+    catalog: ModelCatalog,
 ) -> None:
     """Post-stream metadata finalization for one completed AIMessage turn.
 
@@ -155,6 +158,7 @@ def _finalize_turn_observability(
         final_msg,
         model=model,
         agent_id=agent_id,
+        catalog=catalog,
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
         # Gemini + explicit cachedContent reports only the explicit block in
@@ -207,7 +211,17 @@ async def llm_node(
             raise
         except Exception as exc:
             failed += 1
-            wait = retry_wait(exc, failed, model=model, agent_id=agent_id, ledger=ledger)
+            wait = retry_wait(
+                exc,
+                failed,
+                model=model,
+                agent_id=agent_id,
+                ledger=ledger,
+                catalog=runtime.context.require_catalog(),
+                max_attempts_pin=runtime.context.require_agent().read(
+                    "lm", "llm_retry_max_attempts"
+                ),
+            )
             if wait is None:
                 raise
             await asyncio.sleep(wait)
@@ -246,6 +260,8 @@ def _note_failed_attempt(
             max_attempts = resolve_setting(
                 "llm_retry_max_attempts",
                 model=runtime.context.require_agent().brain.llm_model,
+                models=runtime.context.require_catalog().models,
+                explicit=runtime.context.require_agent().read("lm", "llm_retry_max_attempts"),
             )
             if attempt.number >= max_attempts:
                 _log_llm_retry_duration(attempt, outcome="attempts_exhausted")
@@ -358,7 +374,7 @@ def _is_silent_idle(final_msg: AIMessage) -> bool:
 
 
 def _silent_idle_command(
-    final_msg: AIMessage, agent_id: int, model: str, ledger: LlmLedger
+    final_msg: AIMessage, agent_id: int, model: str, ledger: LlmLedger, *, catalog: ModelCatalog
 ) -> Command[LlmGoto] | None:
     """Continue-loop vs guard-halt decision for a silent-idle turn.
 
@@ -381,7 +397,7 @@ def _silent_idle_command(
     cap = settings.lm.llm_silent_idle_max_output_tokens
     from base.lm.pricing import quote
 
-    priced = quote(model, 0, output_tokens, 0)
+    priced = quote(model, 0, output_tokens, 0, prices=catalog.prices)
     estimated_cost_usd = priced.cost_usd if priced is not None else None
     if cap > 0 and cumulative_output_tokens >= cap:
         ledger.reset_silent_idle(tid)
@@ -543,6 +559,7 @@ async def _llm_node_impl(
             chunks=chunks,
             handler=handler,
             agent=ctx.require_agent(),
+            catalog=ctx.require_catalog(),
             binding=ctx.llm_binding,
         ),
         handler,
@@ -562,7 +579,7 @@ async def _llm_node_impl(
         # LLM returned empty — extremely rare; return empty code per historical
         # behavior (exec_node will run exec(""))
         return Command[LlmGoto](update={"messages": [AIMessage(content="")]}, goto=BEFORE_EXEC)
-    final_msg = _assemble_final_message(chunks)
+    final_msg = _assemble_final_message(chunks, catalog=ctx.require_catalog())
 
     # Single-tool wire format: code is in tool_calls[0]["args"]["code"], not content.
     # content is the model's text output (e.g. "OK, let me compute fib(10)"),
@@ -577,6 +594,7 @@ async def _llm_node_impl(
         final_msg,
         handler,
         ctx.require_agent().brain.llm_model,
+        catalog=ctx.require_catalog(),
     )
 
     # Understanding chunk cut: an enqueue past the token threshold moves the
@@ -589,10 +607,15 @@ async def _llm_node_impl(
         agent_id=agent_id,
         model=ctx.require_agent().brain.llm_model,
         overrides=ctx.require_agent().overrides,
+        catalog=ctx.require_catalog(),
     )
 
     silent_idle_cmd = _silent_idle_command(
-        final_msg, agent_id, ctx.require_agent().brain.llm_model, ledger
+        final_msg,
+        agent_id,
+        ctx.require_agent().brain.llm_model,
+        ledger,
+        catalog=ctx.require_catalog(),
     )
     if silent_idle_cmd is not None:
         return Command[LlmGoto](

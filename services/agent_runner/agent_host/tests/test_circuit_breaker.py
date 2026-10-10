@@ -42,10 +42,13 @@ from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from tests.fixtures.units import spawn_agent
 
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
@@ -100,6 +103,7 @@ def _breaker_ctx() -> AvaContext:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
 
 
@@ -161,6 +165,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     exc = FatalProviderError(
         "provider permanently rejected (HTTP 400): Content Exists Risk",
@@ -186,6 +191,9 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A blocked descendant reports only metadata through immutable SPAWN lineage.
 
@@ -196,9 +204,13 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     model makes the vendor the billed DeepSeek account: the report must name
     both, vendor first (task #3916).
     """
-    ancestor_id = spawn_agent(spawner="user")
-    terminated_parent_id = spawn_agent(spawner=f"agent:{ancestor_id}")
-    child_id = spawn_agent(spawner=f"agent:{terminated_parent_id}")
+    ancestor_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    terminated_parent_id = spawn_agent(
+        spawner=f"agent:{ancestor_id}", catalog=model_catalog, authority=config_authority
+    )
+    child_id = spawn_agent(
+        spawner=f"agent:{terminated_parent_id}", catalog=model_catalog, authority=config_authority
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET spawner = 'user', status = 'idling', "
@@ -233,6 +245,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=model_catalog,
         ),
         agent_id=child_id,
         occurred_at=occurred_at,
@@ -264,10 +277,15 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
 async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Forced compaction is a healthy recovery path, not an ancestor escalation."""
-    ancestor_id = spawn_agent(spawner="user")
-    child_id = spawn_agent(spawner=f"agent:{ancestor_id}")
+    ancestor_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    child_id = spawn_agent(
+        spawner=f"agent:{ancestor_id}", catalog=model_catalog, authority=config_authority
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'idling', "
@@ -291,6 +309,7 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=model_catalog,
         ),
         agent_id=child_id,
     )
@@ -337,6 +356,9 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> No
 async def test_heartbeat_while_breaker_open_forces_compact(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Breaker open with context_overflow + heartbeat wake → the check-in note
     is NOT appended (no doomed call), and the wake routes into a compaction
@@ -345,7 +367,7 @@ async def test_heartbeat_while_breaker_open_forces_compact(
     Task #3323: the rescue also emits its live run pair (compact_started with
     mode=auto, compact_finished success — same compact_id) and the summary
     carries the durable ava_compact_id anchor."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
@@ -375,11 +397,14 @@ async def test_heartbeat_while_breaker_open_forces_compact(
 async def test_heartbeat_while_breaker_open_compaction_failure_emits_terminal(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Task #3323: when the overflow rescue itself exhausts its transient
     retries (CompactionFailedError), the run still reaches its terminal
     signal (failure) before the error propagates — no hanging ticking block."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
@@ -402,11 +427,14 @@ async def test_heartbeat_while_breaker_open_compaction_failure_emits_terminal(
 async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The 3962 shape: the compaction request itself is rejected (context over
     the effective input ceiling) — the wake must still be rescued by the
     no-LLM minimal compact instead of looping forever."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
@@ -433,11 +461,14 @@ async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
 async def test_heartbeat_while_breaker_open_non_overflow_parks(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Breaker open with a non-overflow reason (billing): the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
     doomed re-fire."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="billing")
@@ -465,9 +496,12 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     second_kind: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     inbound_ids: dict[str, int] = {}
     for kind in (first_kind, second_kind):
         content = "real user work" if kind == "chat" else "Heartbeat."
@@ -496,12 +530,15 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
 
 async def test_claim_parks_idle_while_non_overflow_breaker_open(
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """The claim no-batch branch parks a non-overflow open breaker: a
     self-initiated continue-loop (the next graph invocation after the turn
     boundary) must not re-fire the doomed call. Hosted mode surfaces the park
     as END+turn_idle without blocking on the inbound wait."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
@@ -519,10 +556,13 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
 
 async def test_claim_does_not_park_while_breaker_closed(
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Control: with the breaker closed the same no-batch state routes to the
     LLM as before (the continue-working path)."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
@@ -539,11 +579,14 @@ async def test_claim_does_not_park_while_breaker_closed(
 async def test_heartbeat_normal_when_breaker_closed(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Breaker closed: the heartbeat check-in note is appended and the wake
     routes to the LLM as before — the gate only exists while the breaker is
     open."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state()  # breaker closed
@@ -571,7 +614,9 @@ async def test_emergency_compact_summary_uses_real_summary() -> None:
     """The compaction call succeeds → its summary is used (the no-LLM fallback
     only fires when the request cannot go out)."""
     msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
-    summary = await emergency_compact_summary(msgs, _fake_llm(_LONG_SUMMARY), AgentSlices.resolve())
+    summary = await emergency_compact_summary(
+        msgs, _fake_llm(_LONG_SUMMARY), AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     assert summary == _LONG_SUMMARY
 
 
@@ -588,7 +633,9 @@ async def test_emergency_compact_summary_falls_back_on_permanent_rejection() -> 
         )
     )
 
-    summary = await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
+    summary = await emergency_compact_summary(
+        msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     assert _EMERGENCY_COMPACT_MARKER in summary
     assert llm.bind_tools.return_value.ainvoke.await_count == 1, (
         "a permanent rejection must not be retried — the request cannot succeed"
@@ -610,7 +657,9 @@ async def test_emergency_compact_summary_preserves_last_prior_summary() -> None:
     llm = MagicMock()
     llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=_FakeProviderStatusError(400))
 
-    summary = await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
+    summary = await emergency_compact_summary(
+        msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     assert prior in summary
     assert _EMERGENCY_COMPACT_MARKER in summary
 
@@ -648,16 +697,21 @@ async def _reject_turn(
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            catalog=build_model_catalog(),
         ),
         agent_id=agent_id,
         occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
     )
 
 
-def _spawn_child_under_idling_ancestor(db_conn: psycopg.Connection) -> tuple[int, int]:
+def _spawn_child_under_idling_ancestor(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> tuple[int, int]:
     """A live idling ancestor and its child; returns (ancestor_id, child_id)."""
-    ancestor_id = spawn_agent(spawner="user")
-    child_id = spawn_agent(spawner=f"agent:{ancestor_id}")
+    ancestor_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    child_id = spawn_agent(
+        spawner=f"agent:{ancestor_id}", catalog=model_catalog, authority=config_authority
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'idling', "

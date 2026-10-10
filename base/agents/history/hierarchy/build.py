@@ -44,7 +44,7 @@ from base.agents.history.hierarchy.chunk_plan import plan_replay, segment_reques
 from base.agents.history.hierarchy.chunks import uncovered
 from base.agents.history.hierarchy.sessions import Session, has_matter
 from base.db.transaction import write_transaction
-from base.lm.pricing import quote
+from base.lm.pricing import PriceBook, quote
 
 # Measured on the preview cluster's chunk calls (see the module docstring).
 CALLS_PER_JOB = 1.85
@@ -153,14 +153,16 @@ def plan_jobs(
     return jobs
 
 
-def estimate_cost(model: str, jobs: Sequence[PlannedJob]) -> CostEstimate:
+def estimate_cost(model: str, jobs: Sequence[PlannedJob], *, prices: PriceBook) -> CostEstimate:
     """The cold-cache price of `jobs` for `model` (`COST_BASIS`); `cost_usd` None when it is unpriced
     or a job's prefix size is unknown."""
     total: float | None = 0.0
     for job in jobs:
         prefix = job.input_tokens
-        first = quote(model, prefix, OUTPUT_TOKENS_PER_JOB, 0) if prefix > 0 else None
-        again = quote(model, prefix, 0, prefix) if prefix > 0 else None
+        first = (
+            quote(model, prefix, OUTPUT_TOKENS_PER_JOB, 0, prices=prices) if prefix > 0 else None
+        )
+        again = quote(model, prefix, 0, prefix, prices=prices) if prefix > 0 else None
         if first is None or again is None or total is None:
             total = None
         else:
@@ -325,8 +327,10 @@ class BuildProgress:
     cost_usd: float | None
 
 
-def _price(model: str, tok_in: int, tok_out: int, cached: int) -> float | None:
-    priced = quote(model, tok_in, tok_out, min(cached, tok_in))
+def _price(
+    model: str, tok_in: int, tok_out: int, cached: int, *, prices: PriceBook
+) -> float | None:
+    priced = quote(model, tok_in, tok_out, min(cached, tok_in), prices=prices)
     return None if priced is None else priced.cost_usd
 
 
@@ -404,7 +408,7 @@ def _read_build(pool: ConnectionPool, agent_id: int, build_id: int) -> _BuildRow
     )
 
 
-def _rebuild_progress(rows: _BuildRows) -> RebuildProgress:
+def _rebuild_progress(rows: _BuildRows, *, prices: PriceBook) -> RebuildProgress:
     status, attempts, error, leaves = rows.rebuild[:4]
     group = rows.group_calls
     return RebuildProgress(
@@ -418,7 +422,9 @@ def _rebuild_progress(rows: _BuildRows) -> RebuildProgress:
         cache_read_tokens=sum(int(r[2]) for r in group),
         output_tokens=sum(int(r[3]) for r in group),
         seconds=float(sum(float(r[4]) for r in group)),
-        cost_usd=_sum_costs([_price(str(r[0]), int(r[1]), int(r[3]), int(r[2])) for r in group]),
+        cost_usd=_sum_costs(
+            [_price(str(r[0]), int(r[1]), int(r[3]), int(r[2]), prices=prices) for r in group]
+        ),
         levels=rows.levels,
     )
 
@@ -433,13 +439,17 @@ def _phase(
     return "rebuild_pending"
 
 
-def load_build(pool: ConnectionPool, agent_id: int, build_id: int) -> BuildProgress | None:
+def load_build(
+    pool: ConnectionPool, agent_id: int, build_id: int, *, prices: PriceBook
+) -> BuildProgress | None:
     """The build's progress, or None when no such build of this agent exists."""
     rows = _read_build(pool, agent_id, build_id)
     if rows is None:
         return None
-    jobs = [_job_progress(row, rows.by_job[int(row[0])], rows.calls) for row in rows.jobs]
-    rebuild = _rebuild_progress(rows)
+    jobs = [
+        _job_progress(row, rows.by_job[int(row[0])], rows.calls, prices=prices) for row in rows.jobs
+    ]
+    rebuild = _rebuild_progress(rows, prices=prices)
     return BuildProgress(
         build_id=build_id,
         agent_id=agent_id,
@@ -453,7 +463,11 @@ def load_build(pool: ConnectionPool, agent_id: int, build_id: int) -> BuildProgr
 
 
 def _job_progress(
-    row: tuple[Any, ...], session: int, calls: Sequence[tuple[Any, ...]]
+    row: tuple[Any, ...],
+    session: int,
+    calls: Sequence[tuple[Any, ...]],
+    *,
+    prices: PriceBook,
 ) -> JobProgress:
     mine = [c for c in calls if int(c[0]) == int(row[0])]
     return JobProgress(
@@ -469,5 +483,7 @@ def _job_progress(
         cache_read_tokens=sum(int(c[3]) for c in mine),
         output_tokens=sum(int(c[4]) for c in mine),
         seconds=float(sum(float(c[5]) for c in mine)),
-        cost_usd=_sum_costs([_price(str(c[1]), int(c[2]), int(c[4]), int(c[3])) for c in mine]),
+        cost_usd=_sum_costs(
+            [_price(str(c[1]), int(c[2]), int(c[4]), int(c[3]), prices=prices) for c in mine]
+        ),
     )

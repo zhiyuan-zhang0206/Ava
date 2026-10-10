@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import _insert
-from base.lm.plugin_providers import model_catalog
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel
@@ -24,6 +24,7 @@ async def test_actual_generation_cancel_has_one_attempt_closed_work_and_next_cha
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
+    model_catalog: ModelCatalog,
 ) -> None:
     started = asyncio.Event()
     ended = asyncio.Event()
@@ -38,15 +39,16 @@ async def test_actual_generation_cancel_has_one_attempt_closed_work_and_next_cha
             finally:
                 ended.set()
 
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings(
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog,
         {
             "gpt-": replace(
                 binding, build_single_attempt=lambda _: WaitingModel(responses=["unused"])
             )
-        }
+        },
     )
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     running = asyncio.create_task(accepted.host.run_turn(accepted.agent))
     await asyncio.wait_for(started.wait(), 3)
     cancellation = accept_cancel(client, accepted)

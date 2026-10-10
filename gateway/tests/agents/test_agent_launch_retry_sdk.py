@@ -6,12 +6,15 @@ import psycopg
 import pytest
 
 import ava
+from base.config.service_read import ConfigAuthority
 from gateway.tests.agents.test_agents_sdk import _sdk_via_inprocess_gateway, _spawn_agent
 
 
 @pytest.mark.usefixtures(_sdk_via_inprocess_gateway.__name__)
-def test_retry_launch_requires_observed_operation_identity(db_conn: psycopg.Connection) -> None:
-    agent_id = _spawn_agent()
+def test_retry_launch_requires_observed_operation_identity(
+    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+) -> None:
+    agent_id = _spawn_agent(config_authority=config_authority)
     prior = ava.agents.get_launch_attempt(agent_id)
     with pytest.raises(TypeError):
         ava.agents.retry_launch(agent_id)  # pyright: ignore[reportCallIssue]

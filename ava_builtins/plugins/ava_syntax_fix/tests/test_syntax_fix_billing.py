@@ -7,9 +7,11 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
+from base.lm.catalog import ModelCatalog
+
 
 async def test_successful_syntax_repair_call_emits_chat_billing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     """A successful repair response reaches the shared billing emitter.
 
@@ -33,8 +35,9 @@ async def test_successful_syntax_repair_call_emits_chat_billing(
 
     monkeypatch.setattr("base.lm.pricing.billing.emit_billing_from_message", _emit)
 
-    assert await _repair_once(_LLM(), []) == "fixed = True"
+    assert await _repair_once(_LLM(), [], catalog=model_catalog) == "fixed = True"
     assert len(emitted) == 1
     assert emitted[0][0] is response
     assert emitted[0][1]["model"] == "deepseek-flash"
     assert emitted[0][1]["usage_kind"] == "chat"
+    assert emitted[0][1]["catalog"] is model_catalog

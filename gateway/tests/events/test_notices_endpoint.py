@@ -26,6 +26,7 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from base.agents.observation.snapshot import select_one
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 
 
@@ -102,7 +103,9 @@ def _pending_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, st
 # --- snapshot.notices_awaiting_response (require_response worklist) ----------
 
 
-def test_snapshot_lists_awaiting_oldest_first(db_conn: psycopg.Connection) -> None:
+def test_snapshot_lists_awaiting_oldest_first(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
     n1 = _insert_notice(
         db_conn,
@@ -127,7 +130,7 @@ def test_snapshot_lists_awaiting_oldest_first(db_conn: psycopg.Connection) -> No
     # an open FYI notice does NOT ride the worklist (it counts as unread instead)
     _insert_notice(db_conn, a, "fyi")
 
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [n1, n2]
     assert snap.notices_awaiting_response[0].title == "deploy to prod?"
@@ -141,22 +144,26 @@ def test_snapshot_lists_awaiting_oldest_first(db_conn: psycopg.Connection) -> No
     assert snap.unread_notice_count == 1
 
 
-def test_snapshot_awaiting_empty_when_none(db_conn: psycopg.Connection) -> None:
+def test_snapshot_awaiting_empty_when_none(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert snap.notices_awaiting_response == []
     assert snap.unread_notice_count == 0
 
 
-def test_snapshot_scoped_by_agent(db_conn: psycopg.Connection) -> None:
+def test_snapshot_scoped_by_agent(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
     na = _insert_notice(db_conn, a, "for a", require_response=True)
     _insert_notice(db_conn, b, "for b", require_response=True)
     _insert_notice(db_conn, b, "fyi b")
 
-    snap_a = select_one(db_conn, a)
+    snap_a = select_one(db_conn, a, catalog=model_catalog)
     assert snap_a is not None
     assert [n.id for n in snap_a.notices_awaiting_response] == [na]
     assert snap_a.unread_notice_count == 0
@@ -165,13 +172,15 @@ def test_snapshot_scoped_by_agent(db_conn: psycopg.Connection) -> None:
 # --- snapshot.unread_notice_count (open FYI badge) --------------------------
 
 
-def test_snapshot_counts_unread_fyi(db_conn: psycopg.Connection) -> None:
+def test_snapshot_counts_unread_fyi(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
     _insert_notice(db_conn, a, "milestone 1")
     _insert_notice(db_conn, a, "milestone 2")
     # a read FYI is no longer unread
     _insert_notice(db_conn, a, "old one", resolved_at="2026-06-14T01:00:00Z", resolution="read")
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert snap.unread_notice_count == 2
 
@@ -355,7 +364,9 @@ def test_notices_feed_excludes_resolved_from_open_lists(
     assert [n["title"] for n in feed["resolved_page"]] == ["was decision", "was fyi"]
 
 
-def test_task_id_flows_to_snapshot_and_feed(db_conn: psycopg.Connection) -> None:
+def test_task_id_flows_to_snapshot_and_feed(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     """A notice's task_id rides both the snapshot worklist (require_response) and
     the GET /api/notices/open FYI feed; a notice with no task reads back None."""
     a = _seed_agent(db_conn)
@@ -364,7 +375,7 @@ def test_task_id_flows_to_snapshot_and_feed(db_conn: psycopg.Connection) -> None
     _insert_notice(db_conn, a, "fyi with task", task_id=tid)
     _insert_notice(db_conn, a, "fyi no task")
 
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert [n.task_id for n in snap.notices_awaiting_response] == [tid]
 
@@ -432,14 +443,14 @@ def test_open_feed_drops_expired_fyi_and_auto_resolves(
 
 
 def test_snapshot_unread_count_excludes_expired_fyi(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
     """The unread badge counts only FYIs inside the TTL window (audit C1)."""
     a = _seed_agent(db_conn)
     _insert_notice(db_conn, a, "fresh")
     stale = _insert_notice(db_conn, a, "stale")
     _age_notice(db_conn, stale, 31)
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert snap.unread_notice_count == 1
 
@@ -476,7 +487,9 @@ def test_open_feed_include_awaiting_excludes_expired_fyi(
 # --- POST .../notices/{id}/resolve : answer ---------------------------------
 
 
-def test_answer_marks_and_delivers_inbound(db_conn: psycopg.Connection) -> None:
+def test_answer_marks_and_delivers_inbound(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
     nid = _insert_notice(
         db_conn, a, "send the records-release email?", require_response=True, blocking=True
@@ -512,12 +525,14 @@ def test_answer_marks_and_delivers_inbound(db_conn: psycopg.Connection) -> None:
     assert "yes, send it" in inbound_text
 
     # the answered notice drops off the worklist
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert snap.notices_awaiting_response == []
 
 
-def test_answer_without_reply_422(db_conn: psycopg.Connection) -> None:
+def test_answer_without_reply_422(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "q?", require_response=True)
     with TestClient(app) as client:
@@ -528,13 +543,15 @@ def test_answer_without_reply_422(db_conn: psycopg.Connection) -> None:
         )
     assert resp.status_code == 422
     # not resolved, not delivered
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
     assert _pending_rows(db_conn, a) == []
 
 
-def test_answer_empty_reply_422(db_conn: psycopg.Connection) -> None:
+def test_answer_empty_reply_422(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "q?", require_response=True)
     with TestClient(app) as client:
@@ -544,7 +561,7 @@ def test_answer_empty_reply_422(db_conn: psycopg.Connection) -> None:
             headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 422  # UserContent strips -> empty -> rejected
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
     assert _pending_rows(db_conn, a) == []

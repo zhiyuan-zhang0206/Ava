@@ -9,6 +9,7 @@ from pydantic.fields import FieldInfo
 
 from base.config import FIELD_INFOS, bootstrap_config_values
 from base.config.domains.agent.runtime import AgentRuntimeSettings
+from base.config.service_read import ConfigAuthority
 
 
 def test_delivery_policy_defaults() -> None:
@@ -42,7 +43,11 @@ def test_delivery_policy_is_configurable_and_bootstrapped(
         "AVA_RUNNER_DB_PASSWORD=test-only\n"
     )
     assert name in config.BOOTSTRAP_FIELDS
-    assert bootstrap_config_values()[alias] == "17"
+    authority = ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
+    assert (
+        bootstrap_config_values(authority, provider_key_envs=(), plugin_cluster_config="")[alias]
+        == "17"
+    )
 
 
 @pytest.mark.parametrize(

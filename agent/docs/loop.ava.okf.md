@@ -10,6 +10,10 @@ tags: []
 `services/agent_runner/agent_host/daemon.py` owns the process; `AgentHost` owns local agent
 turns. `TurnScheduler` serializes each agent while allowing bounded concurrency
 between agents. A wake with no work creates no model call; idle ends the task.
+The daemon's background TaskGroup runs memory-guard initialization and its loop
+from `services/agent_runner/agent_host/exec_memory_guard.py`, passing the host
+logger to the guard owner. Its OS pressure source and domain discovery remain
+unchanged.
 
 The pending scan admits new recovery turns through two gates:
 `AVA_HOST_RECOVERY_WAKE_BATCH` limits starts per scan and
@@ -27,6 +31,10 @@ its slot.
 
 `AgentHost._invoke_until_done()` invokes the same checkpoint thread until idle
 or a native lifecycle command ends the turn. Each invocation has its own trace.
+The host passes its catalog and model override through `runtime.build_runtime`
+to the model boot owner. `AvaContext` carries the admitted incarnation, native
+work and hosted resources separately from SDK identity and accounting. Compact
+continuations retain those same references while receiving that catalog.
 Normal return flushes the final checkpoint before lifecycle application; a
 failed flush cannot acknowledge a maintenance drain. A completed graph result
 and its flush/trace phase remain in the original single-flight continuation.

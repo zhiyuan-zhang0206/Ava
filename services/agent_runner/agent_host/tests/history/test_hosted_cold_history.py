@@ -19,8 +19,10 @@ from base.agents.history.delta_read_compat import (
 )
 from base.agents.incarnation.resources import ResourceBirth
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.spawn import create_agent_row
@@ -44,8 +46,17 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
     needs_repair: bool,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    agent, *_ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
+    agent, *_ = create_agent_row(
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
+    )
     async with aops_pool.connection() as conn:
         await conn.execute(
             "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
@@ -100,6 +111,7 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
         graph=graph,
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
 
     async def drive(

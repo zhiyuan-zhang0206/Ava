@@ -20,6 +20,7 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 
 
 def _plugin(unit_home: Path) -> None:
@@ -78,6 +79,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
                     database=lambda: database,
                 ),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
+                catalog=build_model_catalog(),
             ),
             agent_id,
             code,

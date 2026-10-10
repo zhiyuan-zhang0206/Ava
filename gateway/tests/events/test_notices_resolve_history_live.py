@@ -10,13 +10,16 @@ from fastapi.testclient import TestClient
 
 from base.agents.observation.snapshot import select_one
 from base.config import settings
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import _insert_notice, _pending_rows, _seed_agent
 
 # --- POST .../notices/{id}/resolve : read -----------------------------------
 
 
-def test_read_with_reply_marks_and_delivers_inbound(db_conn: psycopg.Connection) -> None:
+def test_read_with_reply_marks_and_delivers_inbound(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "migration done", content="14k rows")  # FYI
     with TestClient(app) as client:
@@ -49,7 +52,7 @@ def test_read_with_reply_marks_and_delivers_inbound(db_conn: psycopg.Connection)
     assert "nice, thanks" in inbound_text
 
     # the read FYI drops off the unread count
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert snap.unread_notice_count == 0
 
@@ -138,7 +141,9 @@ def test_read_with_reply_on_already_resolved_delivers_note(
     assert row is not None and row[0] == "read" and row[1] is None
 
 
-def test_read_on_require_response_is_409(db_conn: psycopg.Connection) -> None:
+def test_read_on_require_response_is_409(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     """read applies to an FYI; on a needs-response notice it is a kind mismatch
     -> 409 (use answer/dismiss)."""
     a = _seed_agent(db_conn)
@@ -150,7 +155,7 @@ def test_read_on_require_response_is_409(db_conn: psycopg.Connection) -> None:
             headers={"Idempotency-Key": str(uuid4())},
         )
     assert resp.status_code == 409
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
     assert _pending_rows(db_conn, a) == []
@@ -190,7 +195,9 @@ def test_resolve_twice_second_is_409_and_delivers_once(db_conn: psycopg.Connecti
     assert len(_pending_rows(db_conn, a)) == 1  # only the first answer delivered
 
 
-def test_resolve_cross_agent_path_409(db_conn: psycopg.Connection) -> None:
+def test_resolve_cross_agent_path_409(
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
+) -> None:
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
     nid = _insert_notice(db_conn, a, "for a", require_response=True)
@@ -202,7 +209,7 @@ def test_resolve_cross_agent_path_409(db_conn: psycopg.Connection) -> None:
         )
     assert resp.status_code == 409
     # a's notice is untouched
-    snap = select_one(db_conn, a)
+    snap = select_one(db_conn, a, catalog=model_catalog)
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
 

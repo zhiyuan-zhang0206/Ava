@@ -23,6 +23,7 @@ from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_module
@@ -33,7 +34,10 @@ from tests.components.agent.test_maintenance import isolate as isolate
 
 
 async def _failed_turn(
-    pool: AsyncConnectionPool[Any], agent: int, monkeypatch: pytest.MonkeyPatch
+    pool: AsyncConnectionPool[Any],
+    agent: int,
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ) -> tuple[host_module.AgentHost, AsyncPostgresSaver, RunnableConfig, AIMessage, list[str]]:
     calls: list[str] = []
     tail = AIMessage(id="saved-before-error", content="Preserve this completed work")
@@ -68,6 +72,7 @@ async def _failed_turn(
         machine=machine_name(),
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
+        catalog=model_catalog,
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(runtime_module, "validate_model_config", MagicMock())
@@ -77,6 +82,7 @@ async def _failed_turn(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=model_catalog,
     )
 
     async def drive(
@@ -116,9 +122,12 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = _agent(db_conn)
-    host, _saver, config, tail, calls = await _failed_turn(aops_pool, agent, monkeypatch)
+    host, _saver, config, tail, calls = await _failed_turn(
+        aops_pool, agent, monkeypatch, model_catalog=model_catalog
+    )
     chat = insert_inbound_message(
         db_conn, agent, "Leave queued work untouched", "user", bus=event_bus, database=database
     )
@@ -188,9 +197,12 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
 ) -> None:
     agent = _agent(db_conn)
-    host, _saver, config, tail, calls = await _failed_turn(aops_pool, agent, monkeypatch)
+    host, _saver, config, tail, calls = await _failed_turn(
+        aops_pool, agent, monkeypatch, model_catalog=model_catalog
+    )
     pause_owner.begin_maintenance("failed-flush", WHEN)
     hold = cohort.prepare(
         db_conn,

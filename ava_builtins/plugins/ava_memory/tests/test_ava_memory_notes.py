@@ -18,6 +18,7 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.host.env.agent_slices import AgentSlices
+from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
@@ -121,7 +122,9 @@ def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> Non
 def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> None:
     """The type tags the linter enforces and the recall filter reads are the ones
     the agent is told to write — one list, stated here."""
-    section = memory_plugin.memory_discipline_section(AgentSlices.resolve())
+    section = memory_plugin.memory_discipline_section(
+        AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     for tag in (
         "type/user",
         "type/feedback",
@@ -135,7 +138,9 @@ def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> No
 
 def test_discipline_carries_the_criteria_triggers_and_source_ranking(memory_plugin: Any) -> None:
     """The four parts that were missing or split across the index framings."""
-    section = memory_plugin.memory_discipline_section(AgentSlices.resolve())
+    section = memory_plugin.memory_discipline_section(
+        AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     assert "applicable, durable, legible" in section
     assert "answering is not saving" in section  # a correction is due that same turn
     assert "not a source of truth" in section  # a memory is a claim to check
@@ -148,7 +153,9 @@ def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plug
     """User ruling 2026-08-09: memory maintenance is an important standing duty —
     a stale or wrong note is corrected FIRST, before the agent continues the task
     it was on; "noticed but ignored" and waiting for consolidation are both wrong."""
-    section = memory_plugin.memory_discipline_section(AgentSlices.resolve())
+    section = memory_plugin.memory_discipline_section(
+        AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     assert "important standing duty" in section
     assert "update it first, before continuing" in section
     assert "Don't \"notice and" in section
@@ -166,7 +173,9 @@ def test_discipline_keeps_the_shared_pool_restrained_and_personal_verbose(
     stay out by default (git history carries them); the personal store is
     allowed to be verbose — process details and half-formed understanding live
     there until they earn the pool."""
-    section = memory_plugin.memory_discipline_section(AgentSlices.resolve())
+    section = memory_plugin.memory_discipline_section(
+        AgentSlices.resolve(), catalog=build_model_catalog()
+    )
     assert "Restrained by" in section
     assert "How to apply" in section
     assert "user rulings" in section
@@ -192,7 +201,14 @@ def test_discipline_empty_only_when_both_stores_are_off(
     describe a capability the agent does not have."""
     monkeypatch.setattr(memory_plugin.settings.agent, "memory_index_inject_enabled", index)
     monkeypatch.setattr(memory_plugin.settings.agent, "memory_per_agent_inject_enabled", per_agent)
-    assert bool(memory_plugin.memory_discipline_section(AgentSlices.resolve())) is expected
+    assert (
+        bool(
+            memory_plugin.memory_discipline_section(
+                AgentSlices.resolve(), catalog=build_model_catalog()
+            )
+        )
+        is expected
+    )
 
 
 def test_context_notes_skips_the_stores_that_are_off(

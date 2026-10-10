@@ -34,6 +34,7 @@ from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -67,8 +68,8 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
 
 
 @pytest.fixture
-def lease(owner: RuntimeIncarnation) -> dict[str, Any]:
-    return history_cases.start(owner)
+def lease(owner: RuntimeIncarnation, *, config_authority: ConfigAuthority) -> dict[str, Any]:
+    return history_cases.start(owner, authority=config_authority)
 
 
 def _sdk_event(agent_id: int, marker: str) -> Event:
@@ -129,10 +130,14 @@ def _rows(db_conn: psycopg.Connection[Any], lease_id: object, source_key: str) -
 
 
 def test_central_events_belong_to_the_asserted_actor_not_the_recipient(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     recipient = _owner(db_conn)
-    recipient_lease = history_cases.start(recipient)
+    recipient_lease = history_cases.start(recipient, authority=config_authority)
     tagged = record_central_event(db_conn, _send_event(owner.agent_id, recipient.agent_id))
     assert tagged.attributes["impersonation_session"] == f"{owner.agent_id}:0"
     assert _rows(db_conn, lease["id"], capture.CENTRAL_SOURCE) == 1
@@ -208,6 +213,8 @@ def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(
     owner: RuntimeIncarnation,
     database: Database,
     event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     manual = leases.request(
         database,
@@ -218,6 +225,7 @@ def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(
         relay_thread_id="manual-capture-thread",
         process_metadata=recorded_tree(),
         automatic=False,
+        authority=config_authority,
     )
     assert manual["id"] is not None
     row = db_conn.execute(
@@ -491,3 +499,77 @@ def test_a_runner_completes_a_log_whose_source_seals_after_the_lease_ended(
     assert history.resolve(database, owner.agent_id, 0)["events_completed_at"] is None
     seal_local_participant(participant)
     assert history.resolve(database, owner.agent_id, 0)["events_completed_at"] is not None
+
+
+@pytest.mark.parametrize("body_failed", [False, True])
+@pytest.mark.parametrize("async_call", [False, True])
+async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    body_failed: bool,
+    async_call: bool,
+) -> None:
+    from base.agents.sdk import call_policy
+    from base.agents.sdk import telemetry as sdk_usage
+    from base.agents.sdk.tally import SdkCallTally
+
+    previous = _open(lease, owner.agent_id, "emit-failed-original")
+    current = _open(lease, owner.agent_id, "emit-new-receipt")
+    primary = ValueError("body failed after commit")
+    cause = LookupError("body cause")
+    tally = SdkCallTally()
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    db_conn.execute("CREATE TEMP TABLE sdk_committed_effects(marker TEXT)")
+    db_conn.commit()
+    bind_local_participant(previous)
+
+    def body() -> None:
+        db_conn.execute("INSERT INTO sdk_committed_effects VALUES('committed')")
+        db_conn.commit()
+        assert not close_local_participant_admission(previous, timeout=0)
+        unbind_local_participant(previous)
+        bind_local_participant(current)
+        if body_failed:
+            raise primary from cause
+
+    async def async_body() -> None:
+        body()
+
+    try:
+        # Real emitter argument validation fails before the local capture seam.
+        expected = ValueError if body_failed else TypeError
+        with pytest.raises(expected) as raised:
+            if async_call:
+                await sdk_usage.run_metered_async(
+                    "files.write",
+                    async_body,
+                    (),
+                    {},
+                    identity={"unexpected_identity": owner.agent_id},
+                    tally=tally,
+                )
+            else:
+                sdk_usage.run_metered(
+                    "files.write",
+                    body,
+                    (),
+                    {},
+                    identity={"unexpected_identity": owner.agent_id},
+                    tally=tally,
+                )
+        if body_failed:
+            assert raised.value is primary and primary.__cause__ is cause
+            assert any("unexpected_identity" in note for note in primary.__notes__)
+        assert _state(db_conn, previous) == ("failed",)
+        assert _state(db_conn, current) == ("open",)
+        assert _rows(db_conn, lease["id"], previous.source_key) == 0
+        assert _rows(db_conn, lease["id"], current.source_key) == 0
+        assert db_conn.execute("SELECT count(*) FROM sdk_committed_effects").fetchone() == (1,)
+        assert tally.snapshot() == {"files.write": 1}
+    finally:
+        unbind_local_participant(previous)
+        unbind_local_participant(current)
+        close_local_participant_admission(current, timeout=0)
+        seal_local_participant(current)

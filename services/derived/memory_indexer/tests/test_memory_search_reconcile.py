@@ -11,6 +11,9 @@ from services.derived.memory_indexer import memory_search_reconcile as reconcile
 
 
 class _FakeProvider:
+    def __init__(self, *, catalog: object) -> None:
+        self.catalog = catalog
+
     dim = 8
     fingerprint = "test:provider:dim=8"
 

@@ -27,9 +27,11 @@ from uuid import UUID
 import psycopg
 
 from base import telemetry
+from base.config.service_read import ConfigAuthority
 from base.db import Database, announce_spawn_prompt
 from base.events.live.announce import publish_agent_spawned_sync
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.log import logger
 from ops.agents.birth_transaction import _SPAWNER_AGENT_RE as _SPAWNER_AGENT_RE
 from ops.agents.birth_transaction import _spawner_agent_id_malformed as _spawner_agent_id_malformed
@@ -106,6 +108,8 @@ def create_agent_row(
     db: Database,
     bus: EventBus,
     *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
     spawner: str = "user",
     fork_from: int | None = None,
     fork_checkpoint: str | None = None,
@@ -196,6 +200,8 @@ def create_agent_row(
         conn.execute("SET TRANSACTION READ WRITE")
         birth = insert_agent_birth(
             cur,
+            catalog=catalog,
+            authority=authority,
             spawner=spawner,
             fork_from=fork_from,
             fork_checkpoint=fork_checkpoint,

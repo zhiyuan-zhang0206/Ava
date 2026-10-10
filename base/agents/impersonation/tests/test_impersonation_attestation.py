@@ -13,6 +13,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import _store as store
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process import ownership
@@ -415,7 +416,9 @@ def _agent(db_conn: Any) -> RuntimeIncarnation:
     return owner
 
 
-def _active(owner: RuntimeIncarnation, tree: dict[str, Any]) -> dict[str, Any]:
+def _active(
+    owner: RuntimeIncarnation, tree: dict[str, Any], *, config_authority: ConfigAuthority
+) -> dict[str, Any]:
     lease = leases.request(
         Database.from_settings(),
         EventBus.from_settings(),
@@ -426,6 +429,7 @@ def _active(owner: RuntimeIncarnation, tree: dict[str, Any]) -> dict[str, Any]:
         process_metadata=tree,
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     leases.accept(
         Database.from_settings(),
@@ -445,10 +449,14 @@ def _active(owner: RuntimeIncarnation, tree: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_generation_crossing_is_refused(
-    db_conn: Any, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    config_authority: ConfigAuthority,
 ) -> None:
     """A caller attested for one generation cannot drive another's session id."""
-    first = _active(_agent(db_conn), recorded_tree())
+    first = _active(_agent(db_conn), recorded_tree(), config_authority=config_authority)
     second_tree = recorded_tree()
     second_tree["ancestors"] = [
         {
@@ -466,7 +474,7 @@ def test_generation_crossing_is_refused(
             "parent_pid": 1,
         },
     ]
-    second = _active(_agent(db_conn), second_tree)
+    second = _active(_agent(db_conn), second_tree, config_authority=config_authority)
     _stub_liveness(monkeypatch)
     _stub_birth(monkeypatch, 1998.0)
     with pytest.raises(store.ImpersonationError, match="chain-mismatch"):
@@ -474,19 +482,19 @@ def test_generation_crossing_is_refused(
 
 
 def test_terminal_sessions_report_stale_without_attestation(
-    db_conn: Any, database: Database, event_bus: EventBus
+    db_conn: Any, database: Database, event_bus: EventBus, *, config_authority: ConfigAuthority
 ) -> None:
     """A terminal lease is classified before any anchor work: native/TTL recovery
     never depends on the dead controller tree (the second, incarnation-held gate)."""
     owner = _agent(db_conn)
-    lease = _active(owner, recorded_tree())
+    lease = _active(owner, recorded_tree(), config_authority=config_authority)
     leases.release(database, event_bus, lease["id"], attested_caller(lease), "Done")
     with pytest.raises(leases.ImpersonationError, match="stale-session"):
         leases.require_active(database, lease["id"], unrelated_caller())
 
 
 def test_dsh_request_mints_a_session_relay_credential(
-    db_conn: Any, database: Database, event_bus: EventBus
+    db_conn: Any, database: Database, event_bus: EventBus, *, config_authority: ConfigAuthority
 ) -> None:
     """dsh runs its relay in the controller session, like claude: the request
     mints the scoped credential, and a thread id or codex remote is refused."""
@@ -501,6 +509,7 @@ def test_dsh_request_mints_a_session_relay_credential(
             reason="dsh",
             relay_provider="dsh",
             relay_thread_id="thread",
+            authority=config_authority,
         )
     lease = leases.request(
         database,
@@ -511,6 +520,7 @@ def test_dsh_request_mints_a_session_relay_credential(
         reason="dsh",
         process_metadata=recorded_tree(),
         relay_provider="dsh",
+        authority=config_authority,
     )
     assert lease["relay_provider"] == "dsh"
     assert lease["relay_token"]

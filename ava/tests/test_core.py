@@ -16,6 +16,8 @@ from base.agents import InvalidModelConfig
 from base.config import settings
 from tests.fixtures.pin_agent import pin_agent
 
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+
 
 @pytest.fixture(autouse=True)
 def _authenticated_sdk(monkeypatch: pytest.MonkeyPatch, gateway_client: httpx.Client) -> None:

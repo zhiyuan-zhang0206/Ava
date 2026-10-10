@@ -38,6 +38,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
+from base.lm.plugin_providers import build_model_catalog
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -170,6 +171,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        catalog=build_model_catalog(),
     )
     return Runtime(context=ctx, execution_info=execution_info)
 
@@ -371,7 +373,7 @@ def test_validate_stop_reason_unexpected_carries_stop_reason_and_output_tokens()
         usage_metadata={"input_tokens": 10, "output_tokens": 99, "total_tokens": 109},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError) as exc_info:
-        _validate_stop_reason(msg)
+        _validate_stop_reason(msg, catalog=build_model_catalog())
     assert exc_info.value.stop_reason == "pause_turn", (
         f"stop_reason attribute must be actually set (got {exc_info.value.stop_reason!r}) —— "
         "mutation `stop_reason=None` makes this assertion red"

@@ -14,15 +14,18 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
 from base.agents.incarnation.resources import ResourceProcess
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
+from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import recorded_tree
 
 
 @pytest.fixture
 def gate_ctx(database: Database, event_bus: EventBus) -> AvaContext:
-    return AvaContext(db=database, bus=event_bus)
+    return AvaContext(db=database, bus=event_bus, catalog=build_model_catalog())
 
 
 @pytest.fixture
@@ -76,6 +79,9 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     database: Database,
     event_bus: EventBus,
     exited_host: ResourceProcess,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Issue #2052: an accepted (not yet active) lease whose accepting
     incarnation died restarts at 'requested' under the successor admission —
@@ -86,7 +92,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     from base.cluster.machine import machine_name
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     first = await admit_hosted_runtime(
         aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling", db=database
     )
@@ -101,6 +107,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, lease["id"], agent_id, first, "Handoff brief")
     db_conn.execute(

@@ -15,6 +15,8 @@ from agent.state_channels import CompactState
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_plan import plan_history, plan_replay
 from base.config import settings
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 
 _THRESHOLD = 1000
 
@@ -42,9 +44,18 @@ def _segment() -> list[AnyMessage]:
     return msgs
 
 
-async def test_live_chunks_match_the_hook_turn_by_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_live_chunks_match_the_hook_turn_by_turn(
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+) -> None:
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(uc, "chunk_threshold", lambda _model, _overrides, _ratio: _THRESHOLD)
+
+    def _threshold(
+        _model: str, _overrides: ModelOverrides, _ratio: float, *, catalog: ModelCatalog
+    ) -> int:
+        assert catalog is model_catalog
+        return _THRESHOLD
+
+    monkeypatch.setattr(uc, "chunk_threshold", _threshold)
     enqueued: list[tuple[int, int, str | None]] = []
 
     async def fake_enqueue(pool: Any, agent_id: int, **kwargs: Any) -> bool:
@@ -58,7 +69,14 @@ async def test_live_chunks_match_the_hook_turn_by_turn(monkeypatch: pytest.Monke
     for i, msg in enumerate(msgs):
         if isinstance(msg, AIMessage):
             update = await uc.due_chunk_update(
-                compact, msgs[:i], msg, pool=MagicMock(), agent_id=1, model="m", overrides=None
+                compact,
+                msgs[:i],
+                msg,
+                pool=MagicMock(),
+                agent_id=1,
+                model="m",
+                overrides=ModelOverrides.from_pins({}),
+                catalog=model_catalog,
             )
             compact = update.get("compact", compact)
 

@@ -28,10 +28,12 @@ from base.agents.observation import db_wait
 from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
@@ -49,9 +51,18 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.daemon, "host_db_recovery_budget_seconds", 3600.0)
 
 
-async def _admit(pool: AsyncConnectionPool) -> RuntimeIncarnation:
+async def _admit(
+    pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+) -> RuntimeIncarnation:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner="user",
+        machine=machine_name(),
+        catalog=model_catalog,
+        authority=config_authority,
     )
     async with pool.connection() as conn:
         await conn.execute(
@@ -183,8 +194,14 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     write_before_retry: bool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
-    incarnation = await _admit(aops_pool)
+    incarnation = await _admit(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+    )
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
         raise AssertionError("recovery cannot invoke agent work")

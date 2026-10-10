@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.tests.test_agents_endpoints import _inbound_rows, _returned_id, _terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
@@ -322,18 +323,25 @@ class TestRestart:
             assert cur.fetchone() == ({"config_overlay": {"llm_model": "gpt-5.6-sol"}},)
 
     def test_restart_settles_withdrawn_model_before_storing(
-        self, db_conn: psycopg.Connection, withdrawn_model: str
+        self,
+        db_conn: psycopg.Connection,
+        withdrawn_model: tuple[str, ModelCatalog],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The ops restart channel (the provider-outage model switch) settles a
         withdrawn llm_model to its registered fallback in both the persisted
         overlay and the restart payload (task #4306)."""
+        import gateway.app as gateway_app
+
+        model, catalog = withdrawn_model
+        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
-                json={"config_overlay": {"llm_model": withdrawn_model}},
+                json={"config_overlay": {"llm_model": model}},
             )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         with db_conn.cursor() as cur:
             cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
             assert cur.fetchone() == ({"llm_model": "deepseek-flash"},)

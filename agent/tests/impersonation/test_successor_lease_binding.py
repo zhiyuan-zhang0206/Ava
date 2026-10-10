@@ -11,8 +11,10 @@ from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
 from agent.tests.impersonation.test_impersonation import incarnation as incarnation
 from agent.tests.impersonation.test_impersonation import relays as relays
 from base.agents.incarnation.resources import ResourceProcess
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -22,6 +24,8 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     database: Database,
     event_bus: EventBus,
     exited_host: ResourceProcess,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Successor admission aligns accepted_* before release; native_status
     cannot restore the dead incarnation even before a held wake."""
@@ -31,7 +35,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     from base.cluster.machine import machine_name
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent()
+    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     first = await admit_hosted_runtime(
         aops_pool,
         agent_id,
@@ -51,6 +55,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, lease["id"], agent_id, first, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], first)

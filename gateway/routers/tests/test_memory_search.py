@@ -12,14 +12,26 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
 
 @pytest.fixture(autouse=True)
-def _app_db(monkeypatch: pytest.MonkeyPatch) -> None:
+def _app_db(monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog) -> None:
     # Only the app lifespan sets app.state.db; ASGITransport tests never run it.
     monkeypatch.setattr(app.state, "db", object(), raising=False)
+    monkeypatch.setattr(app.state, "catalog", model_catalog, raising=False)
+
+
+def _patch_provider(monkeypatch: pytest.MonkeyPatch, provider: object) -> None:
+    def construct(*, catalog: ModelCatalog) -> object:
+        del catalog
+        return provider
+
+    monkeypatch.setattr(
+        "services.derived.memory_indexer.embeddings.factory.get_provider", construct
+    )
 
 
 class _StubProvider:
@@ -62,9 +74,8 @@ class TestPrimaryPath:
 
         # stub embedder/backend to avoid real Gemini / backend calls
         import services.derived.memory_indexer.backends.factory as _factory
-        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
-        monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
+        _patch_provider(monkeypatch, _StubProvider)
 
         class _FakeBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -127,9 +138,8 @@ title: No Description
         (tmp_path / "no_frontmatter.md").write_text("# Just a heading\n\nNo YAML.")
 
         import services.derived.memory_indexer.backends.factory as _factory
-        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
-        monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
+        _patch_provider(monkeypatch, _StubProvider)
 
         class _FakeBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -165,7 +175,6 @@ title: No Description
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """embedder API failure → IndexerUnavailable (wire 503)."""
-        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         class _BoomProvider:
             dim = 768
@@ -175,7 +184,7 @@ title: No Description
             async def embed_query_async(_q: str) -> Any:
                 raise EmbeddingAPIError("gemini quota exhausted")
 
-        monkeypatch.setattr(_embedding_factory, "get_provider", _BoomProvider)
+        _patch_provider(monkeypatch, _BoomProvider)
 
         with TestClient(app) as client:
             resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
@@ -184,46 +193,28 @@ title: No Description
         assert body["reason"] == "indexer_unavailable"
         assert "embed" in body["detail"]
 
-    def test_unexpected_embed_failure_also_raises_indexer_unavailable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """An embed failure that is not an `EmbeddingAPIError` is still an
-        outage, not an unmodelled error.
+    def test_unexpected_embed_failure_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An unmodelled failure keeps its identity instead of becoming an outage."""
 
-        The embed phase used to catch only `EmbeddingAPIError`, so anything else
-        escaped as a bare 500 whose body has no wire `reason` — the SDK cannot
-        rebuild `IndexerUnavailable` from that, so a caller that handles the
-        outage still saw a raw HTTP error. That is how agent 405 died on
-        2026-08-07: the gateway was running out of a deleted worktree's venv and
-        the embed client raised `FileNotFoundError` on the missing certifi
-        cacert. The backend phase below already caught broadly; this makes the
-        two symmetric.
-        """
-        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
+        failure = FileNotFoundError(2, "No such file or directory")
 
-        class _BoomProvider:
-            dim = 768
-            fingerprint = "fake:provider:dim=768"
-
+        class BrokenProvider(_StubProvider):
             @staticmethod
-            async def embed_query_async(_q: str) -> Any:
-                raise FileNotFoundError(2, "No such file or directory")
+            async def embed_query_async(_q: str) -> list[float]:
+                raise failure
 
-        monkeypatch.setattr(_embedding_factory, "get_provider", _BoomProvider)
-
-        with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
-        assert resp.status_code == 503
-        assert resp.json()["reason"] == "indexer_unavailable"
+        _patch_provider(monkeypatch, BrokenProvider)
+        with TestClient(app) as client, pytest.raises(FileNotFoundError) as caught:
+            client.post("/api/memory/search", json={"query": "x", "k": 5})
+        assert caught.value is failure
 
     def test_primary_backend_failure_raises_indexer_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """backend raises (e.g. connect refused) → IndexerUnavailable (wire 503)."""
         import services.derived.memory_indexer.backends.factory as _factory
-        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
-        monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
+        _patch_provider(monkeypatch, _StubProvider)
 
         class _BoomBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -320,7 +311,6 @@ def _stub_search_backend(
     """
     import gateway.routers.memory as _gw_memory
     import services.derived.memory_indexer.backends.factory as _factory
-    import services.derived.memory_indexer.embeddings.factory as _embedding_factory
     from base.config import settings
 
     monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
@@ -342,7 +332,7 @@ def _stub_search_backend(
         async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[str]:
             return await search(_v, _k, timeout=timeout)
 
-    monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
+    _patch_provider(monkeypatch, _StubProvider)
     monkeypatch.setattr(_factory, "get_backend", _StubBackend)
     return fresh
 
@@ -364,3 +354,39 @@ async def _assert_semaphore_locked(sem: asyncio.Semaphore, timeout_s: float = 5.
     while not sem.locked() and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
     assert sem.locked(), "search holders never acquired every permit"
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, TypeError])
+async def test_query_usage_failure_propagates_without_network_replay(
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, error_type: type[Exception]
+) -> None:
+    from types import SimpleNamespace
+
+    from fastapi import Request
+    from pydantic import SecretStr
+
+    from gateway.routers import memory
+    from gateway.schemas.memory import MemorySearchRequest
+    from services.derived.memory_indexer.embeddings.gemini import DIM
+    from services.derived.memory_indexer.embeddings.tests.test_embeddings import _AsyncClient
+
+    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    monkeypatch.setattr(httpx, "AsyncClient", fake)
+    monkeypatch.setattr(memory.settings.lm, "gemini_api_key", SecretStr("test-key"))
+    failure = error_type("accounting invariant failed")
+    seen: list[object] = []
+
+    def fail_usage(*, catalog: object, **_kwargs: object) -> None:
+        seen.append(catalog)
+        raise failure
+
+    monkeypatch.setattr("base.lm.usage.log_usage_fields", fail_usage)
+    state = SimpleNamespace(catalog=model_catalog, memory_search_gate=asyncio.Semaphore(1))
+    request = Request({"type": "http", "app": SimpleNamespace(state=state)})
+    with pytest.raises(error_type) as caught:
+        await memory.post_memory_search(request, MemorySearchRequest(query="hello", k=1))
+    assert caught.value is failure
+    assert seen == [model_catalog]
+    assert seen[0] is model_catalog
+    assert fake.call_count == 1
+    assert state.memory_search_gate._value == 1

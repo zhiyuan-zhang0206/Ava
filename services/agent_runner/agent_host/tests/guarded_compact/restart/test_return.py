@@ -13,7 +13,8 @@ from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
-from base.lm.plugin_providers import model_catalog
+from base.config import settings
+from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel
@@ -30,6 +31,7 @@ async def test_original_compact_restart_without_second_ordinary_work(
     add_bindings: AddBindings,
     mode: str,
     lost: str,
+    model_catalog: ModelCatalog,
 ) -> None:
     entered, release = asyncio.Event(), asyncio.Event()
     calls: list[str] = []
@@ -43,8 +45,9 @@ async def test_original_compact_restart_without_second_ordinary_work(
                 raise psycopg.OperationalError("test original provider response unknown")
             return await super().ainvoke(*args, **kwargs)
 
-    binding = model_catalog().bindings["gpt-"]
-    add_bindings(
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog,
         {
             "gpt-": replace(
                 binding,
@@ -52,10 +55,10 @@ async def test_original_compact_restart_without_second_ordinary_work(
                     responses=["Original compact result. " * 100]
                 ),
             )
-        }
+        },
     )
     injected = install_apply_loss(monkeypatch, aops_pool, db_conn, lost)
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch)
+    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     running = asyncio.create_task(accepted.host.run_turn(accepted.agent))
     cancelled = None
     try:
@@ -74,6 +77,9 @@ async def test_original_compact_restart_without_second_ordinary_work(
                 accepted.agent,
                 NativeRestartRequest(target=target),
                 lambda _: None,
+                catalog=model_catalog,
+                llm_override=settings.lm.llm_override,
+                default_model=settings.lm.llm_model,
             )
             if mode == "restart_first":
                 cancelled = await asyncio.to_thread(

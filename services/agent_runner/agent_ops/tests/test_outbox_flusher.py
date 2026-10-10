@@ -11,11 +11,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from base.agents.messages import delivery_outbox as outbox
+from base.config import Settings
+from base.config.service_read import ConfigAuthority
 from base.daemon import round_loop
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup, LoopProgress
@@ -23,6 +26,12 @@ from base.db import Database
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_ops import daemon, outbox_flusher
+
+
+@pytest.fixture()
+def authority(tmp_path: Path) -> ConfigAuthority:
+    runtime = Settings(profile=None)
+    return ConfigAuthority(runtime=runtime, all_domains=runtime, env_path=tmp_path / ".env")
 
 
 def _limits(interval: float) -> outbox.DeliveryOutboxLimits:
@@ -63,7 +72,11 @@ def _patch(
     quiesced: Callable[[], bool] = lambda: False,
 ) -> None:
     monkeypatch.setattr(outbox, "flush", flush)
-    monkeypatch.setattr(outbox, "limits", lambda: _limits(interval))
+
+    def read_limits(_authority: ConfigAuthority) -> outbox.DeliveryOutboxLimits:
+        return _limits(interval)
+
+    monkeypatch.setattr(outbox, "limits", read_limits)
     monkeypatch.setattr(admission, "quiesced", quiesced)
 
 
@@ -71,6 +84,7 @@ async def test_the_loop_performs_an_immediate_round_then_paces(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    authority: ConfigAuthority,
 ) -> None:
     calls: list[object] = []
 
@@ -81,7 +95,7 @@ async def test_the_loop_performs_an_immediate_round_then_paces(
     _patch(monkeypatch, interval=3600.0, flush=flush)
 
     task = asyncio.create_task(
-        outbox_flusher.outbox_loop(object(), database, event_bus, _progress())  # type: ignore[arg-type]
+        outbox_flusher.outbox_loop(object(), database, event_bus, _progress(), authority=authority)  # type: ignore[arg-type]
     )
     try:
         await _poll(lambda: bool(calls))
@@ -96,6 +110,7 @@ async def test_a_flush_pass_logs_its_summary(
     caplog: pytest.LogCaptureFixture,
     database: Database,
     event_bus: EventBus,
+    authority: ConfigAuthority,
 ) -> None:
     """The loop logs through a stdlib logger, so the summary must be `%`-formatted: a `{}`
     template with positional arguments raises while the record is formatted and the line
@@ -108,7 +123,7 @@ async def test_a_flush_pass_logs_its_summary(
     _patch(monkeypatch, interval=3600.0, flush=flush)
 
     task = asyncio.create_task(
-        outbox_flusher.outbox_loop(object(), database, event_bus, _progress())  # type: ignore[arg-type]
+        outbox_flusher.outbox_loop(object(), database, event_bus, _progress(), authority=authority)  # type: ignore[arg-type]
     )
     try:
         await _poll(lambda: bool(caplog.records))
@@ -121,7 +136,10 @@ async def test_a_flush_pass_logs_its_summary(
 
 
 async def test_the_loop_defers_while_quiesced(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    authority: ConfigAuthority,
 ) -> None:
     calls: list[object] = []
     state = {"quiesced": True}
@@ -133,7 +151,7 @@ async def test_the_loop_defers_while_quiesced(
     _patch(monkeypatch, interval=0.01, flush=flush, quiesced=lambda: state["quiesced"])
 
     task = asyncio.create_task(
-        outbox_flusher.outbox_loop(object(), database, event_bus, _progress())  # type: ignore[arg-type]
+        outbox_flusher.outbox_loop(object(), database, event_bus, _progress(), authority=authority)  # type: ignore[arg-type]
     )
     try:
         await asyncio.sleep(0.05)
@@ -145,7 +163,10 @@ async def test_the_loop_defers_while_quiesced(
 
 
 async def test_the_wait_follows_the_live_flush_interval(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    authority: ConfigAuthority,
 ) -> None:
     """The operator changes `AVA_DELIVERY_OUTBOX_FLUSH_INTERVAL_SECONDS` live: the
     next wait is the interval the round read, not the one the loop started with."""
@@ -161,12 +182,16 @@ async def test_the_wait_follows_the_live_flush_interval(
         return outbox.FlushReport()
 
     monkeypatch.setattr(outbox, "flush", flush)
-    monkeypatch.setattr(outbox, "limits", lambda: _limits(knobs["interval"]))
+
+    def read_limits(_authority: ConfigAuthority) -> outbox.DeliveryOutboxLimits:
+        return _limits(knobs["interval"])
+
+    monkeypatch.setattr(outbox, "limits", read_limits)
     monkeypatch.setattr(admission, "quiesced", lambda: False)
     monkeypatch.setattr(round_loop, "sleep_with_progress", sleep)
 
     task = asyncio.create_task(
-        outbox_flusher.outbox_loop(object(), database, event_bus, _progress())  # type: ignore[arg-type]
+        outbox_flusher.outbox_loop(object(), database, event_bus, _progress(), authority=authority)  # type: ignore[arg-type]
     )
     try:
         await _poll(lambda: len(waits) >= 2)
@@ -176,7 +201,10 @@ async def test_the_wait_follows_the_live_flush_interval(
 
 
 async def test_liveness_follows_the_pass_not_the_tick(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    authority: ConfigAuthority,
 ) -> None:
     """A pass over many records outlives one tick: each record beats the loop, and
     the wedge threshold is sized from the live knobs (three connection waits per
@@ -196,7 +224,9 @@ async def test_liveness_follows_the_pass_not_the_tick(
 
     _patch(monkeypatch, interval=30.0, flush=flush)
 
-    task = asyncio.create_task(outbox_flusher.outbox_loop(object(), database, event_bus, progress))  # type: ignore[arg-type]
+    task = asyncio.create_task(
+        outbox_flusher.outbox_loop(object(), database, event_bus, progress, authority=authority)  # type: ignore[arg-type]
+    )
     try:
         await _poll(lambda: len(beats) == 3)
     finally:
@@ -205,7 +235,10 @@ async def test_liveness_follows_the_pass_not_the_tick(
 
 
 async def test_a_failing_round_ends_the_loop(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    authority: ConfigAuthority,
 ) -> None:
     """A flush that raises (not a failed delivery, which the pass records and
     survives) ends the loop; nothing logs and carries on."""
@@ -216,19 +249,34 @@ async def test_a_failing_round_ends_the_loop(
     _patch(monkeypatch, interval=0.01, flush=flush)
 
     with pytest.raises(RuntimeError, match="journal unreadable"):
-        await outbox_flusher.outbox_loop(object(), database, event_bus, _progress())  # type: ignore[arg-type]
+        await outbox_flusher.outbox_loop(
+            object(),  # type: ignore[arg-type]
+            database,
+            event_bus,
+            _progress(),
+            authority=authority,
+        )
 
 
 async def test_an_unreadable_config_ends_the_loop(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    authority: ConfigAuthority,
 ) -> None:
-    def boom() -> outbox.DeliveryOutboxLimits:
+    def boom(_authority: ConfigAuthority) -> outbox.DeliveryOutboxLimits:
         raise RuntimeError("config unavailable")
 
     monkeypatch.setattr(outbox, "limits", boom)
 
     with pytest.raises(RuntimeError, match="config unavailable"):
-        await outbox_flusher.outbox_loop(object(), database, event_bus, _progress())  # type: ignore[arg-type]
+        await outbox_flusher.outbox_loop(
+            object(),  # type: ignore[arg-type]
+            database,
+            event_bus,
+            _progress(),
+            authority=authority,
+        )
 
 
 async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
@@ -269,8 +317,14 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
         events.append("health")
 
     async def crashing_loop(
-        _pool: object, _db: Database, _bus: EventBus, _progress: object
+        _pool: object,
+        _db: Database,
+        _bus: EventBus,
+        _progress: object,
+        *,
+        authority: ConfigAuthority,
     ) -> None:
+        assert isinstance(authority, ConfigAuthority)
         await asyncio.sleep(0.01)
         raise RuntimeError("outbox loop crashed")
 

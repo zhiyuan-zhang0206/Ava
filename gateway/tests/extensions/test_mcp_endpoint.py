@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from base import config, telemetry
 from base.api_contracts.mcp_tool_contract import project_message
 from base.cluster.auth import bearer_header
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -230,7 +231,10 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
     )
     page = AgentDirectoryPage(agents=[card], next_cursor=1)
 
-    def fake_list_directory(_conn: object, **kwargs: Any) -> AgentDirectoryPage:
+    def fake_list_directory(
+        _conn: object, *, catalog: ModelCatalog, **kwargs: Any
+    ) -> AgentDirectoryPage:
+        assert catalog is app.state.catalog
         seen.update(kwargs)
         return page
 

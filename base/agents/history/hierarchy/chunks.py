@@ -55,6 +55,7 @@ from base.agents.history.hierarchy.store import SCHEMA_VERSION
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.db.transaction import async_write_transaction
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import resolve_context_budget
 from base.log import logger
 
@@ -79,7 +80,9 @@ MAX_ATTEMPTS = 20
 GIVE_UP_AFTER_SECONDS = 6 * 3600.0
 
 
-def chunk_threshold(model: str, overrides: ModelOverrides | None, ratio: float) -> int:
+def chunk_threshold(
+    model: str, overrides: ModelOverrides, ratio: float, *, catalog: ModelCatalog
+) -> int:
     """The chunk size in tokens: `ratio` x the model's soft compaction threshold.
 
     The one definition of the size, shared by the llm node's hook, the manual build and the replay
@@ -88,7 +91,12 @@ def chunk_threshold(model: str, overrides: ModelOverrides | None, ratio: float) 
     Raises:
         UnknownModelWindowError: `model` has no context window in the registry.
     """
-    return max(1, round(ratio * resolve_context_budget(model, overrides).soft_compact_tokens))
+    return max(
+        1,
+        round(
+            ratio * resolve_context_budget(model, overrides, catalog=catalog).soft_compact_tokens
+        ),
+    )
 
 
 @dataclass(frozen=True)

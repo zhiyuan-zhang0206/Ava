@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.lm.effort import validate_effort
-from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
@@ -72,17 +71,10 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # deepseek model fails fast here rather than borrowing a wrong cap —
     # the same fail-fast posture as the unknown-prefix raise at the end.
     if ctx.spec is None or ctx.spec.max_output_tokens is None:
-        known_models = ", ".join(
-            sorted(
-                model_id
-                for model_id, registered_spec in model_catalog().models.items()
-                if registered_spec.provider == "deepseek"
-            )
-        )
         raise ValueError(
             f"Unknown deepseek model {ctx.model!r} — register it (with "
-            f"max_output_tokens) in this plugin's ModelSpec rows. "
-            f"Known deepseek models: {known_models}"
+            "max_output_tokens) in this plugin's ModelSpec rows. "
+            f"Known deepseek models: {', '.join(ctx.provider_model_ids)}"
         )
     max_tokens = ctx.spec.max_output_tokens
 

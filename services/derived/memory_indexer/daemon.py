@@ -65,6 +65,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
+from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
 from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import gateway_memory_dir
@@ -679,7 +680,7 @@ async def run() -> None:
     # Fail fast before deriving liveness or binding healthz: an unknown
     # AVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
     try:
-        provider = get_provider()
+        provider = get_provider(catalog=build_model_catalog())
     except ValueError as exc:
         _log.critical("[indexer] embedding provider config invalid: %s", exc)
         sys.stderr.write(f"[memory_indexer] FATAL: {exc}\n")

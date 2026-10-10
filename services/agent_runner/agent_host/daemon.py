@@ -99,11 +99,13 @@ from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.log import init_gateway_process, logger
 from base.sessions.helper_chain_guard import parent_chain_intact
 
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
+from .exec_memory_guard import run_memory_guard_forever
 from .force_termination import kill_terminating_agent_shells
 from .host import AgentHost
 from .pooled_checkpoint import PooledPostgresSaver
@@ -362,28 +364,11 @@ async def _close_host_runtime(
         cleanup.push_async_callback(scheduler.aclose)
 
 
-async def _exec_memory_guard_forever() -> None:
-    """Relieve critical memory pressure by killing the largest exec domain.
-
-    Where the OS reports no pressure state (Linux), the guard does not run.
-    """
-    from base.host.memory_pressure import host_memory_source
-
-    from .exec_memory_guard import (
-        ExecMemoryGuard,
-        find_exec_domains,
-    )
-
-    source = host_memory_source()
-    if source is None:
-        _log.info("[agent-host] exec memory guard idle — this OS reports no memory pressure state")
-        return
-    host_pid = os.getpid()
-    await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()
-
-
 def _background_loops(
-    control_pool: AsyncConnectionPool[psycopg.AsyncConnection], db: Database
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    db: Database,
+    *,
+    catalog: ModelCatalog,
 ) -> dict[str, Coroutine[object, object, None]]:
     """The daemon's background loops for plugins, logs, exec memory and understanding chunks.
 
@@ -396,8 +381,10 @@ def _background_loops(
     return {
         "plugins_watch": _watch_plugins_for_restart(),
         "stdout_log_rotate": _rotate_stdout_log_forever(),
-        "exec_memory_guard": _exec_memory_guard_forever(),
-        "understanding_chunks": understanding_loop_forever(control_pool, db, [execute_code]),
+        "exec_memory_guard": run_memory_guard_forever(_log),
+        "understanding_chunks": understanding_loop_forever(
+            control_pool, db, [execute_code], catalog=catalog, llm_override=settings.lm.llm_override
+        ),
     }
 
 
@@ -409,8 +396,18 @@ def _load_plugin_installation() -> Installation:
     """
     from agent.extensions import load_extensions
     from ava.sdk_surface.install import installed
+    from base.config import Settings
+    from base.config.service_read import ConfigAuthority
+    from base.lm.plugin_providers import build_model_catalog
 
-    load_extensions()
+    env_path = paths.ava_home() / ".env"
+    if settings.profile is None:
+        authority = ConfigAuthority(runtime=settings, all_domains=settings, env_path=env_path)
+    else:
+        authority = ConfigAuthority.deferred(
+            runtime=settings, build_all_domains=lambda: Settings(profile=None), env_path=env_path
+        )
+    load_extensions(catalog=build_model_catalog(), authority=authority)
     installation = installed()
     if installation is None:
         raise RuntimeError("the plugin load did not install its SDK surface")
@@ -516,13 +513,15 @@ async def _dispatch_host(
     db: Database,
     bus: EventBus,
     local_machine: str,
+    *,
+    catalog: ModelCatalog,
 ) -> None:
     """Run dispatcher siblings, joined before the owned heartbeat and turn drain."""
     async with asyncio.TaskGroup() as background:
         background.create_task(
             run_notice_delivery(db, local_machine), name="impersonation_terminal_notices"
         )
-        for name, loop in _background_loops(control_pool, db).items():
+        for name, loop in _background_loops(control_pool, db, catalog=catalog).items():
             background.create_task(loop, name=name)
         await InboundWakeDispatcher(
             bus,
@@ -587,6 +586,7 @@ async def run() -> None:
             machine=local_machine,
             bus=bus,
             db=db,
+            catalog=installation.require_catalog(),
             clients=process_clients(database=lambda: db),
             extensions=installation.registry,
             plugin_configs=installation.configs,
@@ -631,7 +631,15 @@ async def run() -> None:
         # leaves `run` so the process exits for `ava-root` to restart it. The
         # group exits, every loop joined, before the runtime drains turns.
         try:
-            await _dispatch_host(host, scheduler, control_pool, db, bus, local_machine)
+            await _dispatch_host(
+                host,
+                scheduler,
+                control_pool,
+                db,
+                bus,
+                local_machine,
+                catalog=installation.require_catalog(),
+            )
         finally:
             try:
                 await _close_host_runtime(host, scheduler, beat, beat_tasks)

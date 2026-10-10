@@ -13,8 +13,10 @@ from psycopg_pool import ConnectionPool
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm.plugin_providers import build_model_catalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from ops.agents.spawn import create_agent_row
@@ -46,10 +48,23 @@ def db_pool() -> Iterator[ConnectionPool]:
 
 
 @pytest.fixture
-def agent_id(db_conn: psycopg.Connection, database: Database, event_bus: EventBus) -> int:
+def agent_id(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+) -> int:
     """A never-admitted agent: it has no runtime identity, so a force on it
     leaves the unowned-termination receipt that resurrection accepts."""
-    new_id, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
+    new_id, _, _, _ = create_agent_row(
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_name(),
+        catalog=build_model_catalog(),
+        authority=config_authority,
+    )
     db_conn.commit()
     return new_id
 

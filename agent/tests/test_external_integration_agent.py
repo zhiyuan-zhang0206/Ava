@@ -1,6 +1,7 @@
 """Real PostgreSQL consent, checkpoint hydration and the external SDK effects of an attachment: native checkpoint reads, borrowed sender and lease-log recording."""
 
 import importlib.util
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any, cast
 from uuid import uuid4
@@ -24,6 +25,7 @@ from base.agents.impersonation import history
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -42,7 +44,10 @@ class IntegrationPlugin(BaseModel):
 
 @pytest.fixture
 def native_checkpoint(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    model_installation: Installation,
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
     registry = ExtensionRegistry(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
@@ -53,16 +58,7 @@ def native_checkpoint(
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)
 
-    installation = Installation(
-        registry=registry,
-        expansions=(),
-        wrap_layers={},
-        skill_providers=(),
-        metered=(),
-        disabled=frozenset(),
-        faces=True,
-        undo=(),
-    )
+    installation = replace(model_installation, registry=registry, faces=True)
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
 
     def loader_stub(**_kwargs: object) -> None:
@@ -108,6 +104,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    config_authority: ConfigAuthority,
 ) -> None:
     owner, handle = native_checkpoint
     agent_id = owner.agent_id
@@ -120,6 +117,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
@@ -162,6 +160,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    config_authority: ConfigAuthority,
 ) -> None:
     owner, _ = native_checkpoint
     monkeypatch.setenv(
@@ -183,6 +182,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
+        authority=config_authority,
     )
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
@@ -225,6 +225,7 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    config_authority: ConfigAuthority,
 ) -> None:
     """Attachment-owned ``ava.agents.send_message`` is a central audit row in the lease log."""
     owner, _ = native_checkpoint
@@ -246,6 +247,7 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
         automatic=True,
         name="attachment-event-log",
         executor_name="codex",
+        authority=config_authority,
     )
     leases.accept(
         database, event_bus, lease["id"], owner.agent_id, owner, "Send through the attachment"

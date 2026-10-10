@@ -30,7 +30,7 @@ import numpy as np
 import pytest
 
 from base.config import settings
-from base.lm.plugin_providers import model_catalog
+from base.lm.plugin_providers import build_model_catalog
 from services.derived.memory_indexer.embeddings import gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.gemini import (
@@ -49,7 +49,7 @@ pytestmark = pytest.mark.usefixtures("retry_waits")
 
 
 def _provider() -> GeminiEmbeddingProvider:
-    return GeminiEmbeddingProvider()
+    return GeminiEmbeddingProvider(build_model_catalog())
 
 
 class _FakeResponse(httpx.Response):
@@ -158,7 +158,7 @@ def _embedding_cost(tok_in: int) -> float:
     rounds it (6 decimals)."""
     from base.lm.pricing import quote
 
-    priced = quote(_MODEL_ID, tok_in, 0, 0)
+    priced = quote(_MODEL_ID, tok_in, 0, 0, prices=build_model_catalog().prices)
     assert priced is not None  # gemini-embedding-2 is registered in the catalog
     return priced.cost_usd
 
@@ -193,18 +193,6 @@ def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) ->
     assert span.attributes["ava.billing.usage_kind"] == "embedding"
     assert span.attributes["ava.billing.cost"] == 0.0
     assert span.attributes["ava.billing.unpriced"] is True
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _load_provider_plugins() -> None:
-    """Load the provider plugins so `vendor_of_model` can resolve a vendor.
-
-    The billing-span assertions need one: `_log_usage` skips span emission
-    when `vendor_of_model` returns None, and a bare registry resolves
-    nothing — so without this the file only passed when an earlier test
-    module in the same worker happened to load the plugins (#4031).
-    """
-    model_catalog()
 
 
 @pytest.fixture(autouse=True)
@@ -389,21 +377,53 @@ def test_embed_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None
     assert tracer.spans == []  # a failed call emits no billing span
 
 
-def test_embed_survives_billing_emit_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A billing-emit exception is swallowed — the embed call still completes
-    (module contract: billing can never affect the call it observes)."""
+@pytest.mark.parametrize("mode", ["batch", "query", "async_query"])
+@pytest.mark.parametrize("error_type", [RuntimeError, TypeError])
+def test_embed_usage_failure_propagates(
+    monkeypatch: pytest.MonkeyPatch, mode: str, error_type: type[Exception]
+) -> None:
+    """Accounting fails after one successful provider call, without replaying it."""
     fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     _patch_client(monkeypatch, fake)
-    _enable_tracing(monkeypatch)
+    failure = error_type("billing exploded")
 
-    def _boom(**kwargs: object) -> None:
-        raise RuntimeError("billing exploded")
+    def _boom(**_kwargs: object) -> None:
+        raise failure
 
-    monkeypatch.setattr("base.lm.pricing.billing.emit_billing_event", _boom)
+    monkeypatch.setattr("base.lm.usage.log_usage_fields", _boom)
+    provider = _provider()
+    with pytest.raises(error_type) as caught:
+        if mode == "batch":
+            provider.embed_batch(["hello"])
+        elif mode == "query":
+            provider.embed_query("hello")
+        else:
+            asyncio.run(provider.embed_query_async("hello"))
+    assert caught.value is failure
+    assert fake.call_count == 1
 
-    result = _provider().embed_batch(["hello"])
 
-    assert result.shape == (1, DIM)
+def test_factory_passes_same_catalog_to_all_embedding_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from services.derived.memory_indexer.embeddings import factory
+
+    catalog = build_model_catalog()
+    seen: list[object] = []
+
+    def record_usage(*, catalog: object, **_kwargs: object) -> None:
+        seen.append(catalog)
+
+    monkeypatch.setattr("base.lm.usage.log_usage_fields", record_usage)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    _patch_client(monkeypatch, fake)
+    provider = factory.get_provider(catalog=catalog)
+    provider.embed_batch(["hello"])
+    provider.embed_query("hello")
+    asyncio.run(provider.embed_query_async("hello"))
+    assert len(seen) == 3
+    assert all(received is catalog for received in seen)
+    assert fake.call_count == 3
 
 
 def test_embed_http_error_status_retries_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -491,11 +511,9 @@ def test_embed_no_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_embed_async_client_construction_failure_wraps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AsyncClient construction errors wrap into EmbeddingAPIError (#971).
+    """A modelled client transport failure becomes EmbeddingAPIError (#971).
 
-    The client is built outside the retry loop; if construction itself
-    fails (bad timeout config, transport setup), the module contract
-    still holds: only EmbeddingAPIError escapes.
+    Client construction remains outside the async request retry loop.
     """
 
     class _Boom:
@@ -505,6 +523,41 @@ def test_embed_async_client_construction_failure_wraps(
     monkeypatch.setattr(httpx, "AsyncClient", _Boom)
     with pytest.raises(EmbeddingAPIError, match="client init failed"):
         asyncio.run(_provider().embed_query_async("hello"))
+
+
+@pytest.mark.parametrize("mode", ["batch", "query", "async_query"])
+@pytest.mark.parametrize("phase", ["client", "request"])
+@pytest.mark.parametrize("error_type", [TypeError, ValueError, RuntimeError])
+def test_unknown_http_stage_failure_propagates_without_retry(
+    monkeypatch: pytest.MonkeyPatch, mode: str, phase: str, error_type: type[Exception]
+) -> None:
+    failure = error_type("local invariant failed")
+    calls: list[str] = []
+    if phase == "client":
+
+        def failed_client(**_kwargs: object) -> None:
+            calls.append("client")
+            raise failure
+
+        monkeypatch.setattr(httpx, "AsyncClient", failed_client)
+    else:
+        _patch_client(monkeypatch, _AsyncClient())
+
+        async def failed_request(*_args: object, **_kwargs: object) -> dict[str, Any]:
+            calls.append("request")
+            raise failure
+
+        monkeypatch.setattr(gemini, "_post_attempt_once", failed_request)
+    provider = _provider()
+    with pytest.raises(error_type) as caught:
+        if mode == "batch":
+            provider.embed_batch(["hello"])
+        elif mode == "query":
+            provider.embed_query("hello")
+        else:
+            asyncio.run(provider.embed_query_async("hello"))
+    assert caught.value is failure
+    assert calls == [phase]
 
 
 def test_embed_response_shape_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -533,10 +586,9 @@ def test_sync_embed_rejects_running_loop(monkeypatch: pytest.MonkeyPatch) -> Non
 
     async def invoke() -> None:
         with pytest.raises(RuntimeError, match="sync embedding provider API") as error:
-            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT")
-        # EmbeddingAPIError is a RuntimeError; preserve the existing wrapper.
-        assert isinstance(error.value, EmbeddingAPIError)
-        assert type(error.value.__cause__) is RuntimeError
+            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", catalog=build_model_catalog())
+        assert type(error.value) is RuntimeError
+        assert error.value.__cause__ is None
         message = str(error.value)
         assert "asyncio.to_thread or an executor" in message
         assert "embed_query_async" in message

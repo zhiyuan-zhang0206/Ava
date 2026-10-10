@@ -63,3 +63,23 @@ command uncertainty or cursor behavior.
 
 Owners: [[base/agents/messages/docs/caller_protocol.ava.okf.md]] and
 [[base/agents/messages/docs/inbound-provenance.ava.okf.md]].
+
+## Retry consumers
+
+`delivery.retry.retryable_response` owns the gateway policy shared by SDK
+transport and SDK/CLI outbox interception: 429/502/503/504 remain eligible for
+bounded recovery. A structured `retryable=false` or `committed=true` refuses
+automatic replay, and HTTP 500 exposes the original response once. Its durable
+receipt and logical key remain available on `HTTPStatusError.response`.
+Logical-key construction errors stop before sending instead of producing an
+unkeyed message. Only named network failures enter transport/outbox recovery.
+A terminal wire failure also retires any existing automatic recovery record
+for that key. `retire_send(completed=False)` retains the sender's logical key
+within its existing dedup window, so an explicit caller retry can recover the
+receipt; only a completed send retires that key. No new journal state is added.
+
+Outbox flush handles database connection failures (plain OperationalError
+without SQLSTATE, class 08 errors, or PoolTimeout) through its existing backoff
+and budget. Other errors propagate to the ops service with the journal intact.
+A commit followed by an unknown wake error remains committed: explicit replay
+with the stored key recovers that inbound without repeating its body effects.

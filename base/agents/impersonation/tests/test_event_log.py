@@ -28,6 +28,7 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.tests import test_history as history_cases
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -51,8 +52,8 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
 
 
 @pytest.fixture
-def lease(owner: RuntimeIncarnation) -> dict[str, Any]:
-    return history_cases.start(owner)
+def lease(owner: RuntimeIncarnation, *, config_authority: ConfigAuthority) -> dict[str, Any]:
+    return history_cases.start(owner, authority=config_authority)
 
 
 def _sdk_event(agent_id: int, marker: str) -> Event:

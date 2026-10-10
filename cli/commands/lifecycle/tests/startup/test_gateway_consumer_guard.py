@@ -524,10 +524,47 @@ def _closure_domains(closure: set[Path]) -> set[str]:
             src_text = py_file.read_text(errors="replace")
         except OSError:
             continue
-        for domain, _field in _extract_settings_reads(src_text):
+        for domain, field in _extract_settings_reads(src_text):
+            owner = Settings.model_fields.get(domain)
+            if owner is not None:
+                model = owner.annotation
+                declarations = getattr(model, "model_fields", {})
+                assert field in declarations or hasattr(model, field), (
+                    f"settings read names an undeclared field: {domain}.{field}"
+                )
             if domain not in aggregate_facts:
                 domains.add(domain)
     return domains
+
+
+def _process_profiles() -> tuple[str, ...]:
+    from base.config.profiles import PROCESS_PROFILES
+
+    return tuple(PROCESS_PROFILES)
+
+
+@pytest.mark.parametrize("profile", _process_profiles())
+def test_boot_authority_fact_is_retained_outside_profile_domains(
+    profile: str, tmp_path: Path
+) -> None:
+    from base.config import Settings
+    from base.host.env.dotenv_boot import EnvBootResult
+
+    boot = EnvBootResult(db_authority_refusal="fixture refusal")
+    runtime = Settings(profile=profile, env_boot=boot)
+    assert runtime.env_boot is boot
+    assert runtime.env_boot.db_authority_refusal == "fixture refusal"
+    source = tmp_path / "consumer.py"
+    source.write_text("settings.env_boot.db_authority_refusal\nsettings.lm.labeler_model\n")
+    assert _closure_domains({source}) == {"lm"}
+
+
+@pytest.mark.parametrize("read", ["lm.undeclared_field", "env_boot.undeclared_field"])
+def test_profile_matrix_rejects_an_undeclared_settings_read(tmp_path: Path, read: str) -> None:
+    source = tmp_path / "consumer.py"
+    source.write_text(f"settings.{read}\n")
+    with pytest.raises(AssertionError, match="undeclared"):
+        _closure_domains({source})
 
 
 def test_profile_consumption_distinguishes_runtime_facts_from_domains(tmp_path: Path) -> None:

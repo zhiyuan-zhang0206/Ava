@@ -45,6 +45,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from base.agents.messages.delivery_outbox import DeliverySenderConfig
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
@@ -73,6 +76,15 @@ class Installation:
     faces: bool
     undo: tuple[Callable[[], None], ...]
     configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
+    catalog: ModelCatalog | None = None
+    authority: ConfigAuthority | None = None
+    delivery_sender: DeliverySenderConfig | None = None
+
+    def require_catalog(self) -> ModelCatalog:
+        """Return this installation's explicit model facts or refuse a non-model installation."""
+        if self.catalog is None:
+            raise RuntimeError("the SDK installation carries no ModelCatalog")
+        return self.catalog
 
 
 # The installation is recorded on the `ava` module object itself — the one process-wide thing it
@@ -295,7 +307,11 @@ def _run(undo: list[Callable[[], None]], primary: BaseException | None = None) -
 
 
 def install(
-    registry: ExtensionRegistry, report: load_report.Reporter | None = None
+    registry: ExtensionRegistry,
+    report: load_report.Reporter | None = None,
+    *,
+    catalog: ModelCatalog | None = None,
+    authority: ConfigAuthority | None = None,
 ) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `ava`; return the registry of the plugins admitted.
 
@@ -359,6 +375,9 @@ def install(
         faces=False,
         undo=tuple(build.undo),
         configs=MappingProxyType(dict(build.configs)),
+        catalog=catalog,
+        authority=authority,
+        delivery_sender=DeliverySenderConfig(authority) if authority is not None else None,
     )
     setattr(ava_module(), _SLOT, installation)
     return installation.registry

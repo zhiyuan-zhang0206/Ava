@@ -25,18 +25,24 @@ from agent.tests.claim.claim_support import (
     _insert_inbound_kind,
     _make_runtime,
 )
+from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_restart_completed_kind_appends_marker_and_continues(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Historical restart_completed inbound → claim appends
     lifecycle marker 'You have been restarted by {source}' + goto BEFORE_LLM.
     halted=False (mid-task before restart) → wakes up to resume interrupted work."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
 
     cmd = await claim_node(
@@ -58,11 +64,15 @@ async def test_claim_restart_completed_kind_appends_marker_and_continues(
 
 
 async def test_claim_system_note_kind_appends_system_note_and_continues(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """system_note inbound (task assign/update/reminder delivery) → claim appends
     a system note (NoteTag 'task') + goto BEFORE_LLM — never a chat peer message."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -103,10 +113,14 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
 
 
 async def test_claim_co_batched_task_notes_preserve_task_links(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """Co-batched task notes retain their independent timeline links."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -133,11 +147,15 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
 
 
 async def test_claim_system_note_unknown_tag_fails_loud(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """A system_note inbound carrying a non-NoteTag payload fails loud — a
     writer bug must not silently render as the wrong timeline chip."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -296,12 +314,16 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
 
 
 async def test_claim_restart_completed_while_idle_stays_silent(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """halted=True (idle before restart, preserved from RESTART case) + batch has only
     restart_completed → after committing lifecycle marker, goto CLAIM returns to waiting,
     does **not** enter before_llm — idle agent does not burn an LLM call for 'knowing I was restarted'."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
 
     cmd = await claim_node(
@@ -327,10 +349,13 @@ async def test_claim_restart_completed_with_chat_cobatch_wakes(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """halted=True but batch has chat in addition to restart_completed (user message that arrived
     during agent downtime window) → wakes normally to before_llm, must not silently swallow the chat."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
     insert_inbound_message(
         db_conn, tid, "are you back?", source="user", bus=event_bus, database=database
@@ -376,7 +401,11 @@ async def test_claim_restart_kind_does_not_publish_committed(
 
 
 async def test_claim_restart_completed_with_payload_overlay_preserves_args(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """restart_completed inbound contains payload → claim passes both source + payload arguments
     to _render_restart_completed_marker; source determines the marker wording, payload determines
@@ -384,7 +413,7 @@ async def test_claim_restart_completed_with_payload_overlay_preserves_args(
 
     Lock down mutation that replaces source / payload args with None or skips them: losing source
     misses the 'restarted by' wording, losing payload misses overlay diff segment."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -435,11 +464,15 @@ async def test_claim_restart_self_source_sets_update_initiated(
 
 
 async def test_claim_restart_completed_system_update_clears_update_initiated(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """system:update RESTART_COMPLETED with current update_initiated=True → return
     update_initiated becomes False, update session ends."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
 
@@ -456,10 +489,14 @@ async def test_claim_restart_completed_system_update_clears_update_initiated(
 
 
 async def test_claim_restart_completed_non_system_update_preserves_update_initiated(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """non-system:update RESTART_COMPLETED → update_initiated unchanged, flag not cleared."""
-    tid = spawn_agent()
+    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="self")
 

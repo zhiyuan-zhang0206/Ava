@@ -11,10 +11,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import machine_name
+from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
     current_default_completion_notice_policy,
     policy_for_agent,
 )
+from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from tests.fixtures.model_catalog import AddModels
 
@@ -58,7 +60,7 @@ def test_post_message_inserts_chat_pending(db_conn: psycopg.Connection) -> None:
 
 
 def test_hourly_completion_policy_buffers_every_notice(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
 ) -> None:
     """The canary assertion path reads the active policy and the durable count."""
     tid = _seed_agent(db_conn)
@@ -68,7 +70,9 @@ def test_hourly_completion_policy_buffers_every_notice(
             ('{"completion_notice_policy": "hourly"}', tid),
         )
     db_conn.commit()
-    policy = policy_for_agent(db_conn, tid, current_default_completion_notice_policy())
+    policy = policy_for_agent(
+        db_conn, tid, current_default_completion_notice_policy(authority=config_authority)
+    )
     with TestClient(app) as client:
         first = client.post(
             f"/api/agents/{tid}/messages",
@@ -354,16 +358,18 @@ class TestMultimodalMessage:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         add_models: AddModels,
+        model_catalog: ModelCatalog,
     ) -> None:
         """The image gate resolves a withdrawn vision pin to its text-only fallback."""
         from dataclasses import replace
         from pathlib import Path
 
-        from base.lm.plugin_providers import model_catalog
+        from base.lm.plugin_providers import build_model_catalog
 
         model = "deepseek-vision-fixture"
-        base = model_catalog().models["deepseek-flash"]
-        add_models(
+        base = build_model_catalog().models["deepseek-flash"]
+        catalog = add_models(
+            model_catalog,
             {
                 model: replace(
                     base,
@@ -371,8 +377,11 @@ class TestMultimodalMessage:
                     unavailable_fallback="deepseek-flash",
                     media_types=frozenset({"image"}),
                 )
-            }
+            },
         )
+        import gateway.app as gateway_app
+
+        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, model=model)
         with TestClient(app) as client:

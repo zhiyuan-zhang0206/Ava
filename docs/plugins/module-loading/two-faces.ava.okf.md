@@ -34,3 +34,10 @@ Which faces load is the caller's choice:
 A face loads as `<pkg>.<name>.agent_runtime` through the same by-path
 primitive, with per-face fail-soft containment: a face that raises is reported
 and skipped, the surface stays loaded.
+
+The loader accepts the composition root's explicit model catalog and configuration
+authority; it does not construct either from ambient settings. Host and SDK roots
+supply those facts to the Installation. Inventory-only loads need neither, and
+model or configuration SDK access still fails when its owner was not supplied.
+The SDK root defers complete configuration-model construction, so installing a
+surface preserves lite boot until a real configuration read needs that model.

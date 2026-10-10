@@ -12,13 +12,18 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import gateway.app as gateway_app
 from base import paths
+from base.lm.catalog import ModelCatalog
 from base.packages.plugins.enable_config import write_local
 from gateway.app import app
 
 
 @pytest.fixture(autouse=True)
-def _isolate_plugin_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_plugin_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+) -> None:
+    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: model_catalog)
     repo = tmp_path / "repo_plugins"
     user = tmp_path / "user_plugins"
     repo.mkdir()
