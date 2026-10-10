@@ -51,7 +51,7 @@ _CATEGORIES = ("contract", "integration")
 _SUGGEST = "--suggest"
 _GUIDE = (
     "A top-level test needs complete subject evidence whose LCA is root. Otherwise use `git mv` "
-    "into its subject's tests/ directory and preserve isolation fixtures in a local conftest or path scope "
+    "into its subject's tests/ directory and preserve isolation fixtures in a local conftest or existing path_scopes.toml "
     "(tests/ci/test_path_scopes.py checks declared paths and binding, not move completeness). "
     "Attach before/after runtime fixture closure evidence to the migration review. "
     "Unknown inputs must be resolved; "
