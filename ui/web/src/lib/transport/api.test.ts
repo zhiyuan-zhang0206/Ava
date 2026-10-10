@@ -150,6 +150,22 @@ describe("lifecycle endpoints", () => {
     expect(calls[0].url).toMatch(/\/api\/agents\/405\/run-timeline$/);
   });
 
+  it("getRunTimelineLinks GETs the events of a set of agents in a window", async () => {
+    await api.getRunTimelineLinks([405, 6657], { from: "2026-10-03T00:00:00.000Z", to: "2026-10-05T00:00:00.000Z" });
+
+    expect(calls[0].url).toMatch(
+      /\/api\/insights\/run-timeline\/links\?agents=405%2C6657&from=2026-10-03T00%3A00%3A00.000Z&to=2026-10-05T00%3A00%3A00.000Z$/,
+    );
+  });
+
+  it("getRunTimelineLinkContent GETs one message or notice by its reference", async () => {
+    await api.getRunTimelineLinkContent({ inbound_id: 31 });
+    await api.getRunTimelineLinkContent({ notice_id: 4 });
+
+    expect(calls[0].url).toMatch(/\/api\/insights\/run-timeline\/link-content\?inbound_id=31$/);
+    expect(calls[1].url).toMatch(/\/api\/insights\/run-timeline\/link-content\?notice_id=4$/);
+  });
+
   it("getRunTimelineMessages GETs an index range, uncut only when asked", async () => {
     await api.getRunTimelineMessages(405, { start: 8, end: 68, limit: 50 });
     await api.getRunTimelineMessages(405, { start: 8, end: 68, full: true });
