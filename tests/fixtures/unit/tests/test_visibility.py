@@ -20,6 +20,6 @@ import pytest
 def test_unit_fixtures_are_not_visible_to_unrelated_collectors(
     request: pytest.FixtureRequest, name: str
 ) -> None:
-    assert request._fixturemanager.getfixturedefs(name, request._pyfuncitem) is None
+    assert not request._fixturemanager.getfixturedefs(name, request._pyfuncitem)
     assert request.config.pluginmanager.get_plugin("tests.fixtures.units") is None
     assert request.config.pluginmanager.get_plugin("tests.fixtures.unit.gateway") is None
