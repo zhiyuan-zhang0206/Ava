@@ -99,9 +99,11 @@ the other pre-commit hooks over all files in the `backend structure` job, and ag
 on the merged tree (`merged-tree-structure`, informational). A violation prints the
 import chain.
 
-The contracts also feed test placement: `scripts/structure/placement.py` reads
-`[tool.importlinter]` to decide which package may legally hold a test, so editing a
-contract can move the answer of the placement checks.
+The contracts also feed the legacy private-patch home calculation in
+`scripts/structure/placement.py`. Root-test admission instead uses the complete
+subject-directory LCA in `scripts/structure/placement_evidence.py`; import direction
+does not choose the owner of those subjects. Existing registered paths retain
+their policy, and package-local placement is not yet enforced.
 
 ### Shared dependency evidence
 
@@ -120,6 +122,11 @@ paths anchored by `Path(__file__)` inside the checkout. Lexical bindings
 prevent an unrelated parameter or comprehension target from shadowing another
 scope's import or path. Patch target facts retain their callee, so ownership may
 prune patch-only subjects while runtime impact keeps the import dependency.
+`patch.dict` and `patch.multiple` object forms do not invoke the string importer.
+The collector proves standard-library mappings and explicit module imports through
+lexical bindings; a `from` submodule target also requires a namespace or inert
+package door. Imported symbols that could be strings, rebound attributes and opaque
+targets retain diagnostics. Existing static imports of object targets remain edges.
 It does not execute Python, infer arbitrary builders or prove runtime branch
 coverage. Resource facts describe possible referenced paths; directory facts
 give a conservative subtree, not proof that every child was read. Known paths
