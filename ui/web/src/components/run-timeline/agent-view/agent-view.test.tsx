@@ -135,8 +135,8 @@ describe("agent view", () => {
     await screen.findByTestId("agent-view-agent-8");
     await waitFor(() => expect(within(group(7)).getByTestId("run-timeline-agent").textContent).toBe("Agent #7 · seven"));
     expect(screen.getAllByTestId("run-timeline-chart")).toHaveLength(1);
-    expect(getRunTimeline).toHaveBeenCalledWith(7, {});
-    expect(getRunTimeline).toHaveBeenCalledWith(8, {});
+    expect(getRunTimeline).toHaveBeenCalledWith(7, { signal: expect.any(AbortSignal) as AbortSignal });
+    expect(getRunTimeline).toHaveBeenCalledWith(8, { signal: expect.any(AbortSignal) as AbortSignal });
     // Each agent keeps all of its own rows: agent 7 two tree levels, agent 8 one.
     expect(rowIn(7, "run-timeline-row-level-2")).not.toBeNull();
     expect(rowIn(7, "run-timeline-row-level-1")).not.toBeNull();
@@ -391,7 +391,11 @@ describe("arrows between agents", () => {
     const detail = await screen.findByTestId("run-timeline-link-detail");
     expect(detail.textContent).toContain("#99 (not in the view)");
     fireEvent.click(screen.getByTestId("run-timeline-link-add-agent"));
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(99, {}));
+    await waitFor(() => {
+      expect(getRunTimeline).toHaveBeenCalledWith(99, { signal: expect.any(AbortSignal) as AbortSignal });
+      const call = getRunTimeline.mock.calls.find(([id]) => id === 99);
+      expect(call?.[1]).toHaveProperty("signal.aborted", false);
+    });
   });
 
   it("walks the Other agents row with the arrow keys, and enters it down from the last agent", async () => {
