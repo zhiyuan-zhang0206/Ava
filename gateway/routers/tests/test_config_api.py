@@ -616,24 +616,28 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
         applied=True,
         restart_required=[],
     )
-    dispatch = AsyncMock(return_value=host_result)
+    dispatch = AsyncMock(return_value=host_result.model_dump())
     writes: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _write_fields(*args: object, **kwargs: object) -> None:
         writes.append((args, kwargs))
 
-    def _assert_machine_known(_machine: str) -> None:
-        return None
+    def roles(_db: object, _target: str) -> list[str]:
+        return ["agent-runner"]
 
-    monkeypatch.setattr(config_router, "_assert_machine_known", _assert_machine_known)
-    monkeypatch.setattr(config_router, "_dispatch_config_write", dispatch)
+    monkeypatch.setattr("base.cluster.machines.lookup_role", roles)
+    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatch)
     monkeypatch.setattr(config_router.runtime_config, "write_fields", _write_fields)
 
     anon = cast(
         "Any",
         SimpleNamespace(
             state=SimpleNamespace(),
-            app=SimpleNamespace(state=SimpleNamespace(config_authority=config_authority)),
+            app=SimpleNamespace(
+                state=SimpleNamespace(
+                    config_authority=config_authority, db=object(), db_pool=object()
+                )
+            ),
         ),
     )
     result = await config_router.put_config(anon, {"cross_machine_transfer_backend": "none"})

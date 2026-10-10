@@ -17,6 +17,14 @@ the resolved model configuration and its field sources.
 cluster default for new agent births through `base.agents.birth_config`. The
 model registry validates writes; existing agents retain their frozen model.
 
-`gateway/app.py` mounts both routers at their existing API paths. Runtime config
+`gateway/app.py` mounts both routers at their existing API paths. Runtime
+configuration endpoints obtain their database and pool from the serving
+`Request.app.state` and pass them explicitly to the machine lookup, capability
+projection and read/audit/write RPC helpers. The audit fanout uses that same
+app database. Helpers never import the global gateway app; `ConfigAuthority`
+continues to own configuration reads only. Local identity/role reads and fresh
+configuration reads retain their existing timing. Router-only HTTP tests cover
+two app instances with distinct resources, alongside the full gateway lifespan
+integration coverage. Runtime config
 tests remain in `gateway/routers/tests/config_api/` and default-model API tests
 in `gateway/tests/bootstrap/test_default_model_api.py`.
