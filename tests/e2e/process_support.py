@@ -479,7 +479,8 @@ def _owner_live(
     by an unrelated process within days, which would give its run's residue a
     live-looking owner and hide it forever. An e2e run's owner is a pytest
     process (serial) or an xdist worker (the `-n` shape), so its command line
-    is the second half of the check.
+    is the second half of the check. If that command cannot be read, preserve
+    the live PID's children: an unknown identity does not prove a stale run.
     """
     try:
         probe(owner_pid, 0)
@@ -488,7 +489,7 @@ def _owner_live(
     except PermissionError:
         return True
     cmdline = command(owner_pid)
-    return cmdline is not None and any(hint in cmdline for hint in _LIVE_RUN_HINTS)
+    return cmdline is None or any(hint in cmdline for hint in _LIVE_RUN_HINTS)
 
 
 def _identity_holds(pid: int, cmdline: str, *, command: Callable[[int], str | None]) -> bool:
@@ -538,7 +539,7 @@ class ProcessInspection:
         return processes
 
     def owner_live(self, pid: int) -> bool:
-        """A live PID is an owner only while its command is a pytest/xdist run."""
+        """Preserve a live PID with a pytest/xdist or unreadable command."""
         return _owner_live(pid, command=self.command, probe=self.probe)
 
     def matches(self, process: E2EProcess) -> bool:
