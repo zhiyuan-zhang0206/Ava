@@ -2,7 +2,7 @@
 
 A *command* is a `commands/<name>.md` file: optional `description` +
 `instruction-hint` frontmatter, body = a fixed prompt. Skills, plugins, the
-repo, and the user overlay all contribute commands. A command takes exactly one
+built-ins, and the user overlay all contribute commands. A command takes exactly one
 argument — the free-text natural-language instruction typed after `/name`; the
 `instruction-hint` is the placeholder for it (Claude Code's `argument-hint` key
 is also read, for imported CC-plugin commands).
@@ -15,7 +15,7 @@ final prompt. The model only ever sees that expanded string. The gateway reuses
 `discover_commands` to feed the `/`-autocomplete.
 
 **One send is one message.** A caller may invoke several commands at once
-(`/plan the migration /recap`), and the whole chain expands *inside that single
+(`/recap the week /compact`), and the whole chain expands *inside that single
 message* — in the order typed, each command keeping the free text that followed
 it. Splitting the send into one message per command is what this deliberately
 does not do: separate messages are claimed as separate turns, so the model
@@ -48,7 +48,7 @@ for deeper folder nesting (`:`-joined, like `skills.identifier`). A skill-as-com
 
 Discovery sources (later overrides earlier on name collision):
   0. every active skill, as `/[ns.]<skill>`      — skill-as-command (lowest)
-  1. `<repo>/commands/<name>.md`                 — project (bare)
+  1. `<repo>/ava_builtins/commands/<name>.md`    — built-in (bare)
   2. `~/.ava/commands/<name>.md`                 — user (bare)
   3. `<repo>/ava_builtins/plugins/<p>/commands/<name>.md`     — built-in plugin → `/p.name`
   4. `~/.ava/plugins/<p>/commands/<name>.md`     — installed plugin → `/p.name`
@@ -130,11 +130,11 @@ class Command(TypedDict):
 
 def _command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
     """`(commands_dir, base_namespace)` pairs in override order (see module
-    docstring). `base_namespace` is `()` for repo / overlay, `(plugin,)` for a
+    docstring). `base_namespace` is `()` for built-ins / overlay, `(plugin,)` for a
     plugin's bundled dir, and the carrying skill's full namespace path for a
     skill-carried dir."""
     dirs: list[tuple[Path, tuple[str, ...]]] = [
-        (repo_root() / "commands", ()),
+        (repo_root() / "ava_builtins" / "commands", ()),
         (ava_home() / "commands", ()),
     ]
     for base in (repo_plugins_dir(), external_plugin_read_root()):
@@ -297,7 +297,7 @@ def expand_command(content: str) -> str:
     """Rewrite a raw `/<name> <free text>` composer message into the prompt the
     model sees.
 
-    One message may invoke several commands (`/plan the migration /recap`).
+    One message may invoke several commands (`/recap the week /compact`).
     Each is expanded exactly as it would be alone — in the order typed, with
     the free text that followed it — and the results are concatenated into this
     one message. No command is treated as special and no combination is

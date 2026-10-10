@@ -107,7 +107,6 @@ exclude = ["**/tests/**"]
 # layout in the installed application; no Git checkout is needed to read them.
 "db/schema.sql" = "db/schema.sql"
 "migrations" = "migrations"
-"commands" = "commands"
 "schedules" = "schedules"
 "deploy/otel-collector/otel-collector.yaml" = "deploy/otel-collector/otel-collector.yaml"
 "deploy/lgtm/config" = "deploy/lgtm/config"
