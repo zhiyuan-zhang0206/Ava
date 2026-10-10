@@ -6,15 +6,21 @@ read models — the head timeline window, token usage, and pending inbounds —
 with a single request instead of three per-model trailing reads. The payloads
 are the SAME shapes the standalone endpoints serve; this route composes them,
 and those endpoints stay authoritative for first paint and their own readers.
+The timeline and token-usage sections share one live-checkpoint load, the
+dominant cost of both.
 """
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.agents.history.timeline import TimelineResponse, get_timeline
+from gateway.agents.history.timeline import (
+    TimelineResponse,
+    head_timeline,
+    load_current_messages,
+)
 from gateway.agents.schemas import PendingInbound, TokenUsageResponse
-from gateway.agents.state import get_pending_messages, get_token_usage
+from gateway.agents.state import get_pending_messages, token_usage_response
 
 router = APIRouter()
 
@@ -39,13 +45,14 @@ class ConversationSnapshotResponse(BaseModel):
 def get_conversation_snapshot(agent_id: int, request: Request) -> ConversationSnapshotResponse:
     """Compose the three conversation reads in one round trip.
 
-    Calls the standalone routes' own functions — no duplicated logic. A
-    nonexistent agent 404s through the timeline read, matching
-    `GET .../timeline` (token usage and pending tolerate absence, but are not
-    reached then).
+    Calls the functions the standalone routes are built from — no duplicated
+    logic — over one deserialized checkpoint. A nonexistent agent 404s
+    through the timeline read, matching `GET .../timeline` (token usage and
+    pending tolerate absence, but are not reached then).
     """
+    messages = load_current_messages(request.app.state.db, agent_id)
     return ConversationSnapshotResponse(
-        timeline=get_timeline(agent_id, request, limit=None, before=None),
-        token_usage=get_token_usage(agent_id, request),
+        timeline=head_timeline(agent_id, request, messages),
+        token_usage=token_usage_response(agent_id, request, messages),
         pending=get_pending_messages(agent_id, request),
     )

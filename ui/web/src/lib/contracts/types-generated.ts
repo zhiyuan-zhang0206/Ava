@@ -2379,10 +2379,10 @@ export interface paths {
          * Get Conversation Snapshot
          * @description Compose the three conversation reads in one round trip.
          *
-         *     Calls the standalone routes' own functions — no duplicated logic. A
-         *     nonexistent agent 404s through the timeline read, matching
-         *     `GET .../timeline` (token usage and pending tolerate absence, but are not
-         *     reached then).
+         *     Calls the functions the standalone routes are built from — no duplicated
+         *     logic — over one deserialized checkpoint. A nonexistent agent 404s
+         *     through the timeline read, matching `GET .../timeline` (token usage and
+         *     pending tolerate absence, but are not reached then).
          */
         get: operations["get_conversation_snapshot_api_agents__agent_id__conversation_snapshot_get"];
         put?: never;

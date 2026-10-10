@@ -4339,7 +4339,7 @@
     "/api/agents/{agent_id}/conversation-snapshot": {
       "get": {
         "summary": "Get Conversation Snapshot",
-        "description": "Compose the three conversation reads in one round trip.\n\nCalls the standalone routes' own functions — no duplicated logic. A\nnonexistent agent 404s through the timeline read, matching\n`GET .../timeline` (token usage and pending tolerate absence, but are not\nreached then).",
+        "description": "Compose the three conversation reads in one round trip.\n\nCalls the functions the standalone routes are built from — no duplicated\nlogic — over one deserialized checkpoint. A nonexistent agent 404s\nthrough the timeline read, matching `GET .../timeline` (token usage and\npending tolerate absence, but are not reached then).",
         "operationId": "get_conversation_snapshot_api_agents__agent_id__conversation_snapshot_get",
         "parameters": [
           {
