@@ -389,23 +389,19 @@ class TestTimelineFailLoud:
         """
 
         tid = create_agent(db_conn)
-        # Trigger IO error: replace PostgresSaver.from_conn_string with a context manager
-        # that raises OSError (simulating DB network disruption)
-        from contextlib import contextmanager
+        attempts: list[object] = []
+        # Fail at the adapter's tuple read to simulate a database disruption.
+        from typing import NoReturn
 
-        @contextmanager
-        def fake_saver(_url):
+        def fail_read(_saver: object, config: object) -> NoReturn:
+            attempts.append(config)
             raise OSError("simulated DB connection lost")
-            yield  # type: ignore[unreachable]
 
-        # load_checkpoint_messages imports PostgresSaver inside the function
-        # from langgraph.checkpoint.postgres, so patch the source module.
-        import langgraph.checkpoint.postgres as ckpt_mod
+        # load_checkpoint_messages imports the adapter inside the function.
+        import base.agents.history.checkpoint_postgres_walks as ckpt_mod
 
-        class FakeSaver:
-            from_conn_string = staticmethod(fake_saver)  # pyright: ignore[reportUnknownArgumentType]
-
-        monkeypatch.setattr(ckpt_mod, "PostgresSaver", FakeSaver)
+        monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
         assert resp.json() == {"items": [], "msg_count": 0, "has_more": False}
+        assert len(attempts) == 1

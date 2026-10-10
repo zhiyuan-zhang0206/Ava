@@ -335,27 +335,24 @@ def test_checkpoint_read_failure_returns_503(
     endpoint does not disguise an IO failure as an empty history (contrast the
     timeline GET, which tolerates the same failure to an empty view + 200).
 
-    Mirrors test_timeline.TestTimelineFailLoud: patch langgraph.checkpoint.postgres's
-    PostgresSaver name (where load_checkpoint_messages' function-local import
-    resolves it) so from_conn_string raises, exercising the CheckpointReadError -> 503 path.
+    Make Ava's explicitly constructed saver adapter fail at its tuple read,
+    exercising the CheckpointReadError -> 503 path.
     """
-    from contextlib import contextmanager
+    from typing import NoReturn
 
-    import langgraph.checkpoint.postgres as ckpt_mod
+    import base.agents.history.checkpoint_postgres_walks as ckpt_mod
 
     tid = create_agent(db_conn)
+    attempts: list[object] = []
 
-    @contextmanager
-    def fake_saver(_url):
+    def fail_read(_saver: object, config: object) -> NoReturn:
+        attempts.append(config)
         raise OSError("simulated DB connection lost")
-        yield  # type: ignore[unreachable]
 
-    class FakeSaver:
-        from_conn_string = staticmethod(fake_saver)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(ckpt_mod, "PostgresSaver", FakeSaver)
+    monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
     # raise_server_exceptions=False so FastAPI's error middleware turns the
     # HTTPException into a real HTTP 503 instead of re-raising into the test.
     with TestClient(app, raise_server_exceptions=False) as client:
         resp = client.get(f"/api/agents/{tid}/messages")
     assert resp.status_code == 503, f"expected 503, got {resp.status_code}: {resp.text[:200]}"
+    assert len(attempts) == 1

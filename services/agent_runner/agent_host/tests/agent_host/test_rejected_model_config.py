@@ -14,6 +14,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import dispatcher, settlement
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
+from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.runtime import _config_fingerprint
 from services.agent_runner.agent_host.tests.test_agent_host import _Build, _Model, _Row
 from services.agent_runner.agent_host.tests.test_agent_host import (
@@ -444,7 +445,12 @@ class TestSchedulerIntegration:
             records.append(kw)
 
         async def _explode(
-            _agent_id: int, _fingerprint: str, _model: str, *, incarnation: RuntimeIncarnation
+            _agent_id: int,
+            _fingerprint: str,
+            _model: str,
+            *,
+            incarnation: RuntimeIncarnation,
+            checkpoints: TurnCheckpoints,
         ) -> None:
             raise ValueError("runtime build failed")
 
