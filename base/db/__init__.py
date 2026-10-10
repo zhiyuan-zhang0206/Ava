@@ -13,7 +13,7 @@ ends** helpers. Kernel-only (inbound claim, wait/mark/revert) is in
 
 import contextlib
 import json
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
@@ -57,6 +57,17 @@ class InboundRow(NamedTuple):
     # select the column (list_pending_inbounds — the multimodal
     # `{"content_blocks": [...]}` shape); the rest leave it defaulted.
     payload: dict[str, Any] | None = None
+
+
+class ChatAnchor(NamedTuple):
+    """The alignment columns of one ``kind='chat'`` inbound row.
+
+    ``build_timeline_items`` reads only the id and arrival time of a chat
+    anchor, so the gateway's cold timeline read selects nothing else.
+    """
+
+    id: int
+    created_at: datetime
 
 
 def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]:
@@ -661,23 +672,29 @@ def insert_compact_request_inbound(
     return inbound_id
 
 
-def list_inbound_messages(
+def list_chat_anchors(
     db: psycopg.Connection,
     agent_id: int,
+    *,
+    referenced_ids: Sequence[int],
     limit: int,
-) -> list[InboundRow]:
-    """Read inbound_messages rows for the given agent (including
-    done) in created_at ascending order.
+) -> list[ChatAnchor]:
+    """This agent's ``kind='chat'`` inbound anchors in created_at ascending order.
 
-    Used by the /timeline endpoint — fetched when merging three
-    sources for external inbound records. Callers state their own
-    bound: there is no default (task #3696).
+    The result is the oldest ``limit`` chat rows plus every chat row whose id
+    is in ``referenced_ids``. The oldest prefix serves legacy positional
+    alignment, which consumes anchors from the first chat row; the referenced
+    rows serve exact ``ava_inbound_id`` lookups, so a newer anchor past the
+    bound is never dropped. Callers state their own bound: there is no
+    default (task #3696).
     """
     with db.cursor() as cur:
         cur.execute(
-            "SELECT id, content, kind, source, status, created_at, claimed_at "
-            "FROM inbound_messages "
-            "WHERE agent_id = %s ORDER BY created_at ASC LIMIT %s",
-            (agent_id, limit),
+            "SELECT id, created_at FROM inbound_messages "
+            "WHERE agent_id = %s AND kind = 'chat' AND (id = ANY(%s) OR id IN ("
+            "  SELECT id FROM inbound_messages WHERE agent_id = %s AND kind = 'chat' "
+            "  ORDER BY created_at ASC, id ASC LIMIT %s"
+            ")) ORDER BY created_at ASC, id ASC",
+            (agent_id, list(referenced_ids), agent_id, limit),
         )
-        return [InboundRow(*r) for r in cur.fetchall()]
+        return [ChatAnchor(*r) for r in cur.fetchall()]

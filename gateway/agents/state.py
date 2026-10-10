@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from langchain_core.messages import AIMessage, BaseMessage
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import (
@@ -591,8 +593,27 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
     the loaded messages runs unguarded so a bug surfaces normally rather
     than being masked as 0/0.
     """
-    from langchain_core.messages import AIMessage
+    try:
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
+    except CheckpointReadError as exc:
+        _log.warning(
+            "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",
+            agent_id,
+            exc,
+        )
+        messages = []
+    return token_usage_response(agent_id, request, messages)
 
+
+def token_usage_response(
+    agent_id: int, request: Request, messages: Sequence[BaseMessage]
+) -> TokenUsageResponse:
+    """The token-usage payload for already-loaded checkpoint *messages*.
+
+    The context budget comes from the agent's model; the counts come from the
+    most recent AIMessage carrying usage_metadata (0/0 when none does, which
+    is also what an unreadable checkpoint's ``[]`` yields).
+    """
     from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
 
     # Look up the agent's model from config_overlay (per-agent override) else the
@@ -627,21 +648,6 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
     except Exception as exc:
         _log.warning("token-usage: config_overlay read failed for agent %s: %r", agent_id, exc)
 
-    try:
-        messages = load_checkpoint_messages(request.app.state.db, agent_id)
-    except CheckpointReadError as exc:
-        _log.warning(
-            "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",
-            agent_id,
-            exc,
-        )
-        return TokenUsageResponse(
-            input_tokens=0,
-            output_tokens=0,
-            max_input_tokens=max_input_tokens,
-            soft_compact_tokens=soft_compact_tokens,
-            hard_compact_tokens=hard_compact_tokens,
-        )
     # Scan in reverse for the most recent AIMessage with usage_metadata —
     # after the LLM call completes, llm_node appends final_msg to state, and
     # usage_metadata travels with it.
