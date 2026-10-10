@@ -11,7 +11,6 @@ import psycopg
 import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
@@ -29,6 +28,9 @@ from ava.sdk_surface.process_context import process_clients
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.history.checkpoint_postgres_walks import (
+    HistoryAsyncPostgresSaver as AsyncPostgresSaver,
+)
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name

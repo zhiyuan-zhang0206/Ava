@@ -127,13 +127,14 @@ def _build_host_driving_invoke_until_done(
         *,
         incarnation: RuntimeIncarnation,
         resources: HostedTurnResources | None,
+        checkpoints: Any = None,
     ) -> TurnOutcome:
         assert incarnation.agent_id == target and incarnation.owner == host._owner
         assert resources is not None
         bound = replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
         assert bound.require_original_incarnation(target) is incarnation
         assert bound.hosted_resources is resources
-        return await host._invoke_until_done(target, bound)
+        return await host._invoke_until_done(target, bound, checkpoints=checkpoints)
 
     monkeypatch.setattr(host, "_drive_turns", drive)
     return host

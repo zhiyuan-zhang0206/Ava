@@ -9,8 +9,10 @@ from psycopg import AsyncConnection, AsyncCursor
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
 
-class PooledPostgresSaver(AsyncPostgresSaver):
+
+class PooledPostgresSaver(HistoryAsyncPostgresSaver):
     """One logical saver, with independent connections for concurrent operations.
 
     LangGraph's pooled saver takes its instance lock before borrowing a

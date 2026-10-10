@@ -26,6 +26,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import host as host_owner
+from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.invocation import native_work as work_owner
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
@@ -42,7 +43,7 @@ def _install_faults(patch: pytest.MonkeyPatch, agent: int, site: str) -> _Faults
     faults = _Faults()
     actual_invoke, actual_flush, actual_tx = (
         host_owner.run_invocation_with_stall_guard,
-        host_owner.flush_checkpoint,
+        invocation_owner.flush_checkpoint,
         work_owner.async_write_transaction,
     )
 
@@ -82,7 +83,7 @@ def _install_faults(patch: pytest.MonkeyPatch, agent: int, site: str) -> _Faults
             raise psycopg.OperationalError("test lost ACK commit response")
 
     patch.setattr(host_owner, "run_invocation_with_stall_guard", invoke)
-    patch.setattr(host_owner, "flush_checkpoint", flush)
+    patch.setattr(invocation_owner, "flush_checkpoint", flush)
     patch.setattr(work_owner, "async_write_transaction", transaction)
     return faults
 

@@ -402,7 +402,8 @@ def wired(
         "services.agent_runner.agent_host.host.active_lease", AsyncMock(return_value=False)
     )
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.settle_checkpoint", AsyncMock(return_value=False)
+        "services.agent_runner.agent_host.invocation.settle_checkpoint",
+        AsyncMock(return_value=False),
     )
     import services.agent_runner.agent_host.host as host_mod
     import services.agent_runner.agent_host.runtime as runtime_mod
@@ -450,6 +451,9 @@ def wired(
         return "terminate"
 
     monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", _apply_lifecycle)
+    monkeypatch.setattr(
+        "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle", _apply_lifecycle
+    )
 
     async def _no_force(*_args: object, **_kwargs: object) -> bool:
         # These cache/context fixtures carry no force command. Real owner/pointer
@@ -611,6 +615,7 @@ class TestSettlementReconciles:
             *,
             incarnation: object,
             resources: object,
+            checkpoints: Any = None,
         ) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=True, aborted=True)
 
@@ -632,6 +637,7 @@ class TestSettlementReconciles:
             *,
             incarnation: object,
             resources: object,
+            checkpoints: Any = None,
         ) -> TurnOutcome:
             raise ValueError("unclassified crash")
 
@@ -656,6 +662,7 @@ class TestSettlementReconciles:
             *,
             incarnation: object,
             resources: object,
+            checkpoints: Any = None,
         ) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=False)
 

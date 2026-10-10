@@ -217,7 +217,6 @@ ignore_imports = [
     # Compaction exhaustion is another expected native turn abort, handled by the host.
     "services.agent_runner.agent_host.host -> agent.hooks.compact",
     # The host owns the final durable checkpoint/trace link and the node-log tail.
-    "services.agent_runner.agent_host.host -> agent.turn.trace_checkpoint",
     # The extracted failure boundary retains the same final trace correlation.
     "services.agent_runner.agent_host.invocation -> agent.turn.trace_checkpoint",
     "services.agent_runner.agent_host.host -> agent.graph.node_log",
@@ -233,7 +232,6 @@ ignore_imports = [
     "services.agent_runner.agent_host.* -> agent.ownership.hosted",
     # Completed invocation recovery reads its original lifecycle receipt and
     # handles the typed owner refusal without retargeting a replacement.
-    "services.agent_runner.agent_host.host -> agent.ownership.hosted_completion",
     "services.agent_runner.agent_host.invocation -> agent.ownership.inbound",
     "services.agent_runner.agent_host.invocation -> agent.ownership.hosted_completion",
     # The corpse reaper is the other half of the hosted ownership machinery
