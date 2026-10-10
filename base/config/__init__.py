@@ -117,6 +117,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from base.config import _lite
 from base.config._lite import (
+    ConfigBoot as ConfigBoot,
+)
+from base.config._lite import (
     ConfigBuildWaitTimeoutError as ConfigBuildWaitTimeoutError,
 )
 from base.config._lite import (
@@ -331,7 +334,11 @@ def apply_cluster_timezone() -> None:
     exist there, and the explicit ``Clock.zone()`` reads cover the display
     paths instead.
     """
-    name = cluster_tz_name()
+    _apply_timezone_name(cluster_tz_name())
+
+
+def _apply_timezone_name(name: str | None) -> None:
+    """Apply an explicitly resolved authoritative timezone to the process."""
     if name is None:
         return
     try:
@@ -362,10 +369,8 @@ def refresh_data_plane_settings() -> None:
 
     Boot-lite shim (task #3621): the name stays importable without building the
     eager chain (settings-lite repair modules import it at module scope);
-    calling it upgrades first and then runs the real implementation, which the
-    upgrade installs over this name."""
-    _lite.upgrade("refresh_data_plane_settings()")
-    globals()["refresh_data_plane_settings"]()
+    calling it upgrades first and refreshes the legacy owner in place."""
+    _lite.refresh_data_plane_settings()
 
 
 # Private acceptance/test hook: the boot-lite state machine snapshot

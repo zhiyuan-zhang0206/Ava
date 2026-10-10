@@ -6,6 +6,7 @@ import json as _json
 import uuid as _uuid
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -17,8 +18,34 @@ from base.agents.messages.delivery.retry import NETWORK_ERRORS, retryable_respon
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER, validate_idempotency_key
-from base.config import settings
 from base.host.net.resilience import Policy, http_classifier, retry
+
+__all__ = [
+    "GatewayTransportInputs",
+    "get",
+    "patch",
+    "post",
+    "raise_from_response",
+    "use_client",
+]
+
+
+@dataclass(frozen=True, kw_only=True)
+class GatewayTransportInputs:
+    """One context's live gateway retry and memory-search deadline readers.
+
+    Construction performs no reads and owns no HTTP connection. The process
+    root configures this component through its existing ClientSet factory map.
+    """
+
+    max_retries_reader: Callable[[], int]
+    retry_delay_reader: Callable[[], float]
+    memory_deadline_reader: Callable[[], float]
+
+
+def _inputs(context: AvaContext | None = None) -> GatewayTransportInputs:
+    owner = context if context is not None else ava.context
+    return owner.clients.get(GatewayTransportInputs)
 
 
 def _http(context: AvaContext | None = None) -> httpx.Client:  # pyright: ignore[reportUndefinedVariable]
@@ -47,12 +74,12 @@ def use_client(client: Any) -> Generator[Any]:
 # env override: `AVA_GATEWAY_MAX_RETRIES` / `AVA_GATEWAY_RETRY_DELAY_SECONDS`.
 
 
-def _max_retries() -> int:
-    return settings.gateway.gateway_client_max_retries
+def _max_retries(context: AvaContext | None = None) -> int:
+    return _inputs(context).max_retries_reader()
 
 
-def _base_retry_delay_s() -> float:
-    return settings.gateway.gateway_client_retry_delay_seconds
+def _base_retry_delay_s(context: AvaContext | None = None) -> float:
+    return _inputs(context).retry_delay_reader()
 
 
 # ── Transient-failure retry policy ──
@@ -89,12 +116,12 @@ _MEMORY_SEARCH_MAX_RETRIES = 2
 _MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
 
 
-def _memory_search_timeout() -> httpx.Timeout:  # pyright: ignore[reportUndefinedVariable]
+def _memory_search_timeout(context: AvaContext | None = None) -> httpx.Timeout:  # pyright: ignore[reportUndefinedVariable]
     """Per-attempt HTTP timeout for one memory search: the gateway's own
     search deadline plus the margin, so the server's deadline fires first."""
     import httpx
 
-    budget = settings.services.memory_search_deadline_seconds + _MEMORY_SEARCH_TIMEOUT_MARGIN_S
+    budget = _inputs(context).memory_deadline_reader() + _MEMORY_SEARCH_TIMEOUT_MARGIN_S
     return httpx.Timeout(budget)
 
 
@@ -121,7 +148,7 @@ def _agent_jitter_seconds(context: AvaContext | None = None) -> float:
 def _retry_delay_seconds(attempt: int, context: AvaContext | None = None) -> float:
     """Sleep before retry `attempt` (0-based): bounded exponential backoff
     plus the deterministic per-agent jitter offset."""
-    base = min(_base_retry_delay_s() * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
+    base = min(_base_retry_delay_s(context) * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
     return base + _agent_jitter_seconds(context)
 
 
@@ -363,7 +390,7 @@ def post(
             raise ValueError("idempotency scope requires a keyed route")
         headers[SCOPE_HEADER] = idempotency_scope
 
-    retries = _max_retries() if max_retries is None else max_retries
+    retries = _max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _http(context).post(
             path, json=json or {}, params=params, timeout=per_call, headers=headers
@@ -397,7 +424,7 @@ def get(
     import httpx
 
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
-    retries = _max_retries() if max_retries is None else max_retries
+    retries = _max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _http(context).get(path, params=params, timeout=per_call), retries, context=context
     )

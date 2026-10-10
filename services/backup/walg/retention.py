@@ -25,6 +25,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from services.backup.walg.backups import Backup, BackupChainError, chain_of
 from services.backup.walg.runner import WalgOutput, run_walg_logged
@@ -135,7 +136,9 @@ def _sentinel(backup_name: str) -> str:
     return f"{BACKUPS_PREFIX}{backup_name}{_SENTINEL_SUFFIX}"
 
 
-def apply_retention(backups: list[Backup], report: Callable[[str], None]) -> RetentionOutcome:
+def apply_retention(
+    backups: list[Backup], report: Callable[[str], None], *, path_reader: Callable[[], Path | None]
+) -> RetentionOutcome:
     """Delete what `retain FULL 3` expires, after auditing the dry run.
 
     `backups` is the current list, newest backup last. Nothing can expire until
@@ -149,7 +152,10 @@ def apply_retention(backups: list[Backup], report: Callable[[str], None]) -> Ret
         report(f"retention: {RETAIN_FULL_BACKUPS} or fewer full backups, nothing expires yet")
         return RetentionOutcome(marked=0, deleted=0)
     command = ["delete", "retain", "FULL", str(RETAIN_FULL_BACKUPS), "--use-sentinel-time"]
-    planned = parse_marked(run_walg_logged(command, timeout_s=DELETE_TIMEOUT_S), _DRY_RUN_COUNT)
+    planned = parse_marked(
+        run_walg_logged(command, timeout_s=DELETE_TIMEOUT_S, path_reader=path_reader),
+        _DRY_RUN_COUNT,
+    )
     if not planned:
         report("retention: nothing to delete")
         return RetentionOutcome(marked=0, deleted=0)
@@ -158,7 +164,10 @@ def apply_retention(backups: list[Backup], report: Callable[[str], None]) -> Ret
         report(f"  {key}")
     assert_invariants(planned, backups)
     deleted = parse_marked(
-        run_walg_logged([*command, "--confirm"], timeout_s=DELETE_TIMEOUT_S), _DELETED_COUNT
+        run_walg_logged(
+            [*command, "--confirm"], timeout_s=DELETE_TIMEOUT_S, path_reader=path_reader
+        ),
+        _DELETED_COUNT,
     )
     if sorted(deleted) != sorted(planned):
         raise RetentionAbortedError(

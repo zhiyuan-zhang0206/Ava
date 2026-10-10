@@ -15,8 +15,9 @@ live tail + historical REST query) live in `gateway/events/agent_events.py`.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
@@ -178,6 +179,9 @@ def get_agents(
             query=query,
             before_id=before_id,
             limit=limit,
+            default_model_reader=lambda: cast(
+                str, request.app.state.config_authority.service_field_value("llm_model")
+            ),
         )
 
 
@@ -185,7 +189,13 @@ def get_agents(
 def get_agent_roster(request: Request) -> roster.AgentRoster:
     """Read the live tree and its necessary ancestor links in one snapshot."""
     with request.app.state.db_pool.connection() as conn:
-        return roster.select_roster(conn, catalog=request.app.state.catalog)
+        return roster.select_roster(
+            conn,
+            catalog=request.app.state.catalog,
+            default_model_reader=lambda: cast(
+                str, request.app.state.config_authority.service_field_value("llm_model")
+            ),
+        )
 
 
 def _patch_label_blocking(
@@ -447,9 +457,19 @@ def _validate_fork_config(
 
 
 async def _accepted_launch_receipt(
-    pool: ConnectionPool, spawned: SpawnedAgent, *, catalog: ModelCatalog
+    pool: ConnectionPool,
+    spawned: SpawnedAgent,
+    *,
+    catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> SpawnedAgent:
-    observed = await asyncio.to_thread(_creation_availability, pool, spawned.id, catalog=catalog)
+    observed = await asyncio.to_thread(
+        _creation_availability,
+        pool,
+        spawned.id,
+        catalog=catalog,
+        default_model_reader=default_model_reader,
+    )
     return spawned.model_copy(
         update={
             "accepted": True,
@@ -491,7 +511,11 @@ def _clear_launch_failure(
 
 
 def _read_launch_state(
-    pool: ConnectionPool, agent_id: int, *, catalog: ModelCatalog
+    pool: ConnectionPool,
+    agent_id: int,
+    *,
+    catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> tuple[dict[str, object], bool, bool]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -499,7 +523,9 @@ def _read_launch_state(
             (agent_id,),
         )
         row = cur.fetchone()
-        snapshot = snapshot_module.select_one(conn, agent_id, catalog=catalog)
+        snapshot = snapshot_module.select_one(
+            conn, agent_id, catalog=catalog, default_model_reader=default_model_reader
+        )
     if row is None or snapshot is None:
         return {"status": "unknown", "availability": None}, False, False
     status, admission_at, attempt_id = row
@@ -523,6 +549,7 @@ async def _dispatch_committed_launch(
     launch: LaunchAgentRequest,
     *,
     catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> SpawnedAgent:
     attempt_id = launch.launch_attempt_id
     try:
@@ -549,7 +576,11 @@ async def _dispatch_committed_launch(
                 _mark_launch_failure, pool, bus, launch.agent_id, attempt_id, reason
             )
             state, admitted, retry_legal = await asyncio.to_thread(
-                _read_launch_state, pool, launch.agent_id, catalog=catalog
+                _read_launch_state,
+                pool,
+                launch.agent_id,
+                catalog=catalog,
+                default_model_reader=default_model_reader,
             )
         except Exception as persistence_exc:
             # The retry endpoint re-reads status/attempt once Postgres returns.
@@ -587,11 +618,17 @@ def _require_matching_launch_receipt(spawned: SpawnedAgent, agent_id: int, targe
 
 
 def _creation_availability(
-    pool: ConnectionPool, agent_id: int, *, catalog: ModelCatalog
+    pool: ConnectionPool,
+    agent_id: int,
+    *,
+    catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> AgentAvailability:
     try:
         with pool.connection() as conn:
-            snap = snapshot_module.select_one(conn, agent_id, catalog=catalog)
+            snap = snapshot_module.select_one(
+                conn, agent_id, catalog=catalog, default_model_reader=default_model_reader
+            )
     except Exception as exc:
         logger.warning(
             "created agent {} receipt read failed ({}): {}",
@@ -693,7 +730,14 @@ def get_agent(agent_id: int, request: Request) -> AgentRow:
     A nonexistent ID returns 404 rather than falling back to another agent.
     """
     with request.app.state.db_pool.connection() as conn:
-        snap = snapshot_module.select_one(conn, agent_id, catalog=request.app.state.catalog)
+        snap = snapshot_module.select_one(
+            conn,
+            agent_id,
+            catalog=request.app.state.catalog,
+            default_model_reader=lambda: cast(
+                str, request.app.state.config_authority.service_field_value("llm_model")
+            ),
+        )
     if snap is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
     return AgentRow.model_validate(snap.model_dump())

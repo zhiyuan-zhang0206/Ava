@@ -17,6 +17,7 @@ from agent.graph.prompt.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE,
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
+from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -33,8 +34,11 @@ def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 def _context(agent_id: int | None = 7) -> AvaContext:
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
 
 
@@ -101,3 +105,49 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
 
     assert note is not None
     assert "Asia/Shanghai" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+
+def test_timezone_notes_follow_two_explicit_live_clock_roots() -> None:
+    import os
+    import time
+    from unittest.mock import patch
+
+    from base.clock import ClockConfig
+    from base.config import ConfigBoot
+
+    try:
+        with patch.dict(os.environ):
+            first, second = ConfigBoot(), ConfigBoot()
+            first.set_field("timezone", "UTC")
+            second.set_field("timezone", "Asia/Shanghai")
+
+            def clock(owner: ConfigBoot) -> Clock:
+                return Clock(
+                    ClockConfig(
+                        owner.view.general.timezone,
+                        owner.view.general.timezone
+                        if owner.field_explicitly_set("timezone")
+                        else None,
+                        owner.view.general.message_timestamp_weekday,
+                    )
+                )
+
+            first_ctx = AvaContext(
+                identity=AgentIdentity(1, True), clock_factory=lambda: clock(first)
+            )
+            second_ctx = AvaContext(
+                identity=AgentIdentity(2, True), clock_factory=lambda: clock(second)
+            )
+            first_note, second_note = timezone_note(first_ctx), timezone_note(second_ctx)
+            assert first_note is not None and second_note is not None
+            assert "(UTC+00:00)" in str(first_note.content)
+            assert "(UTC+08:00)" in str(second_note.content)
+            first.set_field("timezone", "America/New_York")
+            first_note, second_note = timezone_note(first_ctx), timezone_note(second_ctx)
+            assert first_note is not None and second_note is not None
+            assert "America/New_York" in str(first_note.content)
+            assert "Asia/Shanghai" in str(second_note.content)
+    finally:
+        tzset = getattr(time, "tzset", None)
+        if tzset is not None:
+            tzset()

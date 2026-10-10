@@ -28,6 +28,7 @@ from langchain_core.messages import (
     ToolCall,
 )
 
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.impersonation.history import ImpersonationMetadata
 from base.agents.messages.kwargs import (
@@ -44,9 +45,15 @@ from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
 
 # Re-export: TimelineItem's home is base/agents/history/timeline_item.py (file line budget);
 # callers keep importing it from here.
-from base.clock import Clock
-from base.config import settings
 from base.db import ChatAnchor, InboundRow
+
+__all__ = [
+    "build_timeline_items",
+    "needs_chat_anchors",
+    "tail_window",
+    "timeline_default_limit",
+]
+
 
 # Items after the same inbound anchor are offset by a microsecond increment to
 # preserve relative order without colliding with the next real-ts anchor
@@ -138,6 +145,7 @@ def build_timeline_items(
     messages: Sequence[BaseMessage],
     chat_anchors: Sequence[ChatAnchor | InboundRow],
     *,
+    inputs: TimelineReadInputs,
     start: int = 0,
     segment_prefix: str = "",
 ) -> tuple[list[TimelineItem], int]:
@@ -231,7 +239,7 @@ def build_timeline_items(
             )
             items.append(item)
         else:
-            items.extend(_message_items(msg, msg_idx, kwargs, next_ts, sdk_by_id))
+            items.extend(_message_items(msg, msg_idx, kwargs, next_ts, sdk_by_id, inputs))
     _add_source_coordinates(items, messages)
     if segment_prefix:
         items = [
@@ -262,6 +270,7 @@ def _message_items(
     kwargs: AvaMessageKwargs,
     next_ts: Callable[[BaseMessage | None], str],
     sdk_by_id: dict[str, Any],
+    inputs: TimelineReadInputs,
 ) -> list[TimelineItem]:
     """The timeline items of one non-system, non-inbound message (empty for an unknown shape)."""
     raw_content = message_content(msg)
@@ -284,6 +293,7 @@ def _message_items(
                 content,
                 next_ts(msg),
                 kwargs.get("ava_compact_id"),
+                inputs=inputs,
             )
         ]
     if ava_type == AvaMsgType.COMPACT_REQUEST:
@@ -294,6 +304,7 @@ def _message_items(
                 content,
                 next_ts(msg),
                 kwargs.get("ava_compact_id"),
+                inputs=inputs,
             )
         ]
     if isinstance(msg, AIMessage):
@@ -486,11 +497,13 @@ def _compact_item(
     content: str,
     created_at: str,
     compact_id: str | None = None,
+    *,
+    inputs: TimelineReadInputs,
 ) -> TimelineItem:
     """A compact summary / compact request item; payload gets a ts prefix when
-    `settings.general.message_timestamps` is on. `compact_id` is the run that
+    the supplied timestamp policy is on. `compact_id` is the run that
     produced the summary (ava_compact_id), None for pre-anchor summaries."""
-    ts = f" {Clock.from_settings().now_timestamp()}" if settings.general.message_timestamps else ""
+    ts = f" {inputs.clock_factory().now_timestamp()}" if inputs.timestamps_enabled() else ""
     label = "Compact summary" if kind == "inbound_compact_summary" else "Compact request"
     return TimelineItem(
         item_id=f"{msg_idx}.0",
@@ -533,9 +546,9 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str) -> Timelin
 # turn always lands inside the window the frontend already holds. Read through
 # `timeline_default_limit()` (this module sits in both the gateway's and the
 # agent's import closure; consumers must not capture the value at import).
-def timeline_default_limit() -> int:
+def timeline_default_limit(*, limit_reader: Callable[[], int]) -> int:
     """The configured default timeline window (``display.timeline_default_limit``)."""
-    return settings.display.timeline_default_limit
+    return limit_reader()
 
 
 def tail_window(items: list[TimelineItem], limit: int) -> tuple[list[TimelineItem], bool]:

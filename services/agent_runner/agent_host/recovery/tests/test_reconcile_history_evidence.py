@@ -19,6 +19,7 @@ from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort 
     _seed_delta_written_checkpoint,
     _statuses,
 )
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 async def test_checkpoint_clock_skew_scans_settled_history(
@@ -41,7 +42,13 @@ async def test_checkpoint_clock_skew_scans_settled_history(
     )
     db_conn.commit()
 
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -71,7 +78,13 @@ async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
         {"configurable": {"thread_id": str(agent)}}, {"halted": True}, as_node="work"
     )
 
-    await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent, incarnation=incarnation)
+    await reconcile_claimed_inbounds_at_startup(
+        aops_pool,
+        saver,
+        agent,
+        incarnation=incarnation,
+        inputs=configured_policy().reconcile_inputs,
+    )
 
     assert saver.aget_calls == 0
     assert _statuses(db_conn, [committed]) == {committed: "done"}
@@ -100,7 +113,11 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
     monkeypatch.setattr(sideload_mod, "committed_ids_for_reconcile", _failed_scan)
     with pytest.raises(RuntimeError, match="history unavailable"):
         await reconcile_claimed_inbounds_at_startup(
-            aops_pool, saver, agent, incarnation=incarnation
+            aops_pool,
+            saver,
+            agent,
+            incarnation=incarnation,
+            inputs=configured_policy().reconcile_inputs,
         )
 
     assert _statuses(db_conn, [claimed]) == {claimed: "claimed"}

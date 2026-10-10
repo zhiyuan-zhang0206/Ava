@@ -14,6 +14,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.config import settings
 from services.backup.walg import config as walg_config
 from services.backup.walg import probe
 from services.backup.walg import state as walg_state
@@ -51,7 +52,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
 
 
 def _healthy_state() -> probe.ArchiverState:
-    expected = expected_archive()
+    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
     assert expected is not None
     return probe.ArchiverState(
         archive_mode=expected.mode,
@@ -75,7 +76,7 @@ def test_failure_texts_carry_no_number_that_could_change_between_runs() -> None:
 
 
 def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
-    expected = expected_archive()
+    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
     assert expected is not None
 
     assert probe.judge(_healthy_state(), expected) is None
@@ -92,14 +93,14 @@ def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
 def test_postgres_running_other_archive_settings_is_reported(
     sandbox: Sandbox, drift: dict[str, Any]
 ) -> None:
-    expected = expected_archive()
+    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
     assert expected is not None
 
     assert probe.judge(replace(_healthy_state(), **drift), expected) == probe.SETTINGS_DIFFER
 
 
 def test_a_failing_archiver_is_reported(sandbox: Sandbox) -> None:
-    expected = expected_archive()
+    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
     assert expected is not None
 
     state = replace(_healthy_state(), failing_now=True)
@@ -108,7 +109,7 @@ def test_a_failing_archiver_is_reported(sandbox: Sandbox) -> None:
 
 
 def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> None:
-    expected = expected_archive()
+    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
     assert expected is not None
     healthy = _healthy_state()
 
@@ -122,7 +123,7 @@ def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> 
 
 def test_settings_drift_outranks_the_archiver_conditions(sandbox: Sandbox) -> None:
     """An archiver that is off cannot be 'failing' or 'late': the settings are the cause."""
-    expected = expected_archive()
+    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
     assert expected is not None
     state = replace(
         _healthy_state(), archive_mode="off", failing_now=True, oldest_pending_age_s=10_000.0
@@ -146,29 +147,37 @@ def test_off_is_silent_and_never_dials_postgres(
 
     monkeypatch.setattr(probe, "admin_connection", explode)
 
-    assert probe.failure() is None
-    assert probe.configuration_failure() is None
+    assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) is None
+    assert probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file) is None
 
 
 def test_a_valid_configuration_is_fine(sandbox: Sandbox) -> None:
-    assert probe.configuration_failure() is None
+    assert probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file) is None
 
 
 def test_an_unusable_configuration_is_reported_without_its_contents(sandbox: Sandbox) -> None:
     sandbox.config_file.write_text("{" + "".join(SECRETS))
 
-    assert probe.configuration_failure() == probe.CONFIG_UNUSABLE
+    assert (
+        probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file)
+        == probe.CONFIG_UNUSABLE
+    )
 
 
 def test_a_swapped_key_is_reported_once_a_key_is_pinned(sandbox: Sandbox) -> None:
     sandbox.key_file.write_text("cd" * 32 + "\n")
-    assert probe.configuration_failure() is None, "nothing is pinned yet: reading never pins"
+    assert (
+        probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file) is None
+    ), "nothing is pinned yet: reading never pins"
 
-    walg_config.load_walg_config()
-    assert probe.configuration_failure() is None
+    walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+    assert probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file) is None
 
     sandbox.key_file.write_text("ef" * 32 + "\n")
-    assert probe.configuration_failure() == probe.KEY_CHANGED
+    assert (
+        probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file)
+        == probe.KEY_CHANGED
+    )
 
 
 def test_the_probe_never_raises_when_postgres_cannot_be_read(
@@ -181,7 +190,7 @@ def test_the_probe_never_raises_when_postgres_cannot_be_read(
 
     monkeypatch.setattr(probe, "admin_connection", unreachable)
 
-    assert probe.failure() == probe.UNREADABLE
+    assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) == probe.UNREADABLE
 
 
 # ── a real Postgres ──────────────────────────────────────────────────────────
@@ -212,7 +221,7 @@ def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
         time.sleep(2.5)  # idle for longer than the (shrunk) objective: nothing is pending
 
         state = probe.read_archiver_state(conn)
-        expected = expected_archive()
+        expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
         assert expected is not None
         assert (state.archive_mode, state.archive_command) == ("on", expected.command)
         assert (state.archive_timeout_s, state.failing_now, state.failed_count) == (
@@ -221,7 +230,7 @@ def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
             0,
         )
         assert probe.judge(state, expected) is None
-        assert probe.failure() is None
+        assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) is None
 
 
 def test_a_failing_archive_command_is_reported_with_work_waiting(
@@ -236,7 +245,10 @@ def test_a_failing_archive_command_is_reported_with_work_waiting(
 
         state = probe.read_archiver_state(conn)
         assert state.oldest_pending_age_s is not None, "the failed segment stays queued"
-        assert probe.failure() == probe.ARCHIVER_FAILING
+        assert (
+            probe.failure(path_reader=lambda: settings.walg.walg_config_file)
+            == probe.ARCHIVER_FAILING
+        )
 
 
 def test_a_hung_archive_command_is_caught_by_the_age_of_the_waiting_wal(
@@ -254,10 +266,15 @@ def test_a_hung_archive_command_is_caught_by_the_age_of_the_waiting_wal(
             lambda: probe.read_archiver_state(conn).oldest_pending_age_s is not None,
             what="the closed segment to be queued",
         )
-        assert probe.failure() is None, "freshly queued work is not late yet"
+        assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) is None, (
+            "freshly queued work is not late yet"
+        )
 
         wait_for(
-            lambda: probe.failure() == probe.ARCHIVE_BEHIND,
+            lambda: (
+                probe.failure(path_reader=lambda: settings.walg.walg_config_file)
+                == probe.ARCHIVE_BEHIND
+            ),
             seconds=30,
             what="the segment to be late",
         )
@@ -428,7 +445,7 @@ def test_before_any_tick_the_time_since_enabling_is_what_counts() -> None:
 
 
 def test_the_enabling_time_is_the_key_pins_mtime(sandbox: Sandbox) -> None:
-    walg_config.load_walg_config()
+    walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
     assert probe._enabled_since() is not None
     pinned_at = datetime(2026, 10, 1, 0, 0, tzinfo=UTC).timestamp()
     os.utime(walg_config.key_id_path(), (pinned_at, pinned_at))
@@ -548,7 +565,10 @@ def test_failure_reports_the_tick_when_the_archiver_is_fine(
         )
     )
 
-    assert probe.failure() == probe.RUN_FAILED_AT[walg_state.STEP_RETENTION]
+    assert (
+        probe.failure(path_reader=lambda: settings.walg.walg_config_file)
+        == probe.RUN_FAILED_AT[walg_state.STEP_RETENTION]
+    )
 
 
 def test_an_archiver_failure_outranks_a_tick_failure(
@@ -559,7 +579,9 @@ def test_an_archiver_failure_outranks_a_tick_failure(
         walg_state.State(verify=_verify("FAILURE"), tick=walg_state.TickRecord(started_at=NOW))
     )
 
-    assert probe.failure() == probe.ARCHIVER_FAILING
+    assert (
+        probe.failure(path_reader=lambda: settings.walg.walg_config_file) == probe.ARCHIVER_FAILING
+    )
 
 
 def test_off_does_not_read_the_tick_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -570,4 +592,4 @@ def test_off_does_not_read_the_tick_state(tmp_path: Path, monkeypatch: pytest.Mo
 
     monkeypatch.setattr(walg_state, "read_state", explode)
 
-    assert probe.failure() is None
+    assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) is None

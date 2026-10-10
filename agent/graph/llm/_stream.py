@@ -33,7 +33,6 @@ from agent.graph.llm_errors import (
     _parse_provider_error_type,
 )
 from agent.llm import execute_code
-from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.errors import normalize_provider_transport_error
@@ -217,7 +216,7 @@ async def _consume_llm(
                 messages,
                 chunks=chunks,
                 handler=handler,
-                timeout=settings.lm.llm_non_streaming_fallback_timeout_seconds,
+                timeout=agent.read("lm", "llm_non_streaming_fallback_timeout_seconds"),
             )
         raise
 

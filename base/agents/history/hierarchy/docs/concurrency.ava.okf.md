@@ -17,6 +17,14 @@ therefore claims every due job and runs it at once; there is no cap setting.
 
 ## Model
 
+The hierarchy consumer's composition root supplies `UnderstandingReadInputs`:
+lazy readers for model defaults, grouping cadence and generation policy, feature
+admission and a clock factory. Construction evaluates none of them. Feature
+admission stays at loop start; each job or group check reads policy at its
+original decision point, including repeated cadence checks under a lease.
+`GroupingModels` is the public model-cache contract shared by grouping and
+rebuild: it carries the explicit catalog and resolves models with their overrides.
+
 - The loop owns one `TaskGroup`. While a job is due it claims and starts the job as a task of that
   group; a finishing job wakes the loop (else it polls every 2 s). A job is in flight from claim
   through its upper-level checks. Nothing is spawned outside the group; cancelling the loop cancels the

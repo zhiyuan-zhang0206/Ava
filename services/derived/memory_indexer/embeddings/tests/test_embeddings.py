@@ -45,11 +45,24 @@ from services.derived.memory_indexer.embeddings.gemini import (
 # Retry backoff waits are recorded, not slept, so retry-path tests do not hang; the retry loop
 # itself is still exercised (call counts). The provider's policy is a module constant (R2-D), no
 # longer settings-driven. Tests that measure elapsed time on real sockets restore the real waits.
+
+
+def _timeout_reader() -> float:
+    return settings.services.memory_embed_timeout_seconds
+
+
+def _api_key_reader() -> str | None:
+    value = settings.lm.gemini_api_key
+    return None if value is None else value.get_secret_value()
+
+
 pytestmark = pytest.mark.usefixtures("retry_waits")
 
 
 def _provider() -> GeminiEmbeddingProvider:
-    return GeminiEmbeddingProvider(build_model_catalog())
+    return GeminiEmbeddingProvider(
+        build_model_catalog(), timeout_reader=_timeout_reader, api_key_reader=_api_key_reader
+    )
 
 
 class _FakeResponse(httpx.Response):
@@ -417,7 +430,12 @@ def test_factory_passes_same_catalog_to_all_embedding_paths(
     monkeypatch.setattr("base.lm.usage.log_usage_fields", record_usage)
     fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     _patch_client(monkeypatch, fake)
-    provider = factory.get_provider(catalog=catalog)
+    provider = factory.get_provider(
+        settings.services.embedding_backend,
+        catalog=catalog,
+        timeout_reader=_timeout_reader,
+        api_key_reader=_api_key_reader,
+    )
     provider.embed_batch(["hello"])
     provider.embed_query("hello")
     asyncio.run(provider.embed_query_async("hello"))
@@ -586,7 +604,13 @@ def test_sync_embed_rejects_running_loop(monkeypatch: pytest.MonkeyPatch) -> Non
 
     async def invoke() -> None:
         with pytest.raises(RuntimeError, match="sync embedding provider API") as error:
-            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", catalog=build_model_catalog())
+            gemini._embed(
+                ["hello"],
+                "RETRIEVAL_DOCUMENT",
+                catalog=build_model_catalog(),
+                timeout_reader=_timeout_reader,
+                api_key_reader=_api_key_reader,
+            )
         assert type(error.value) is RuntimeError
         assert error.value.__cause__ is None
         message = str(error.value)

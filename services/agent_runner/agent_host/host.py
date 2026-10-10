@@ -1,14 +1,9 @@
-"""Run local agents through one shared graph and explicit per-turn context.
+"""Run local agents through a shared graph and explicit per-turn context.
 
 The dispatcher owns single-flight; the daemon owns pools and checkpointer.
-Agent identity/configuration travel through Runtime[AvaContext]. Original
-incarnation, work and resource references remain distinct from SDK identity.
-Cold admission repairs checkpoints before preparing the cached model.
-
-Restart/terminate flushes the original command before releasing single-flight.
-Maintenance and force cancellation retain continuation/resource settlement fences.
-Database recovery repairs that same task without accepting new inbound work.
-Expected graph failures halt and settle their checkpoint; unknown errors propagate.
+Cold admission and database recovery repair the original task before model work.
+Lifecycle requests retain original command and resource settlement fences.
+Unknown failures propagate; expected failures settle their checkpoint.
 """
 
 from __future__ import annotations
@@ -20,7 +15,7 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from datetime import datetime
 from functools import partial
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 from langchain_core.runnables import RunnableConfig
@@ -76,7 +71,6 @@ from base.native_process.turn_identity import HostedServiceResources, HostedTurn
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
-from services.agent_runner.agent_host import maintenance as maintenance_receipts
 from services.agent_runner.agent_host.db_recovery import recover_database
 from services.agent_runner.agent_host.dispatcher import PendingInboundWake
 from services.agent_runner.agent_host.force_termination import (
@@ -98,6 +92,8 @@ from services.agent_runner.agent_host.invocation.native_work import (
     invoke_prepared_graph,
     recover_native_cancel,
 )
+from services.agent_runner.agent_host.lifecycle import maintenance as maintenance_receipts
+from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
 from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 from services.agent_runner.agent_host.runtime import (
     HostPolicy,
@@ -186,19 +182,22 @@ class AgentHost:
         self.stats = HostStats()
         self._resource_service = HostedServiceResources()
 
-    async def run_turn(self, agent_id: int) -> None:
-        """Retain the scheduler slot until real work, including threads, settles.
+    @property
+    def runtime_owner(self) -> UUID:
+        """The immutable owner this actual hosted service advertises to health clients."""
+        return self._owner
 
-        Cancelling an await of ``to_thread`` does not stop the thread. Shield the
-        whole owned turn (including boot and cleanup), not only graph return.
-        Durable interrupts still stop cooperative LLM/exec work. Repeated outer
-        cancellation must not release this agent to a concurrent successor.
+    async def run_turn(self, agent_id: int) -> None:
+        """Hold single-flight through boot, execution and cleanup, including threads.
+        Outer cancellation retains unjoined turns; durable interrupts still cancel work.
         """
         with self._resource_service.hold_turn(asyncio.current_task()):
             resources = await self._resource_service.turn()
             self.turn_fingerprints.pop(agent_id, None)
             work = asyncio.create_task(self._run_turn(agent_id, resources=resources))
+            self._resource_service.retain_task(resources, work)
             cancelled = False
+            primary: BaseException | None = None
             try:
                 while not work.done():
                     try:
@@ -207,57 +206,71 @@ class AgentHost:
                         cancelled = True
                 work.result()
             except BaseException as exc:
-                await maintenance_receipts.record_failure(agent_id, exc, self._maintenance_failed)
+                primary = exc
+                try:
+                    await maintenance_receipts.record_failure(
+                        agent_id, exc, self._maintenance_failed
+                    )
+                except BaseException as receipt_error:
+                    exc.add_note(f"hosted failure receipt failed: {receipt_error!r}")
                 raise
             finally:
-                from base.agents.incarnation.hosted_force import original_host_force
+                try:
+                    from base.agents.incarnation.hosted_force import original_host_force
 
-                if resources.unresolved:
-                    # Keep the actual domains and scheduler registration alive.
-                    # No timer/cache reset can turn a failed close into quiescence.
-                    self._in_flight.add(agent_id)
-                    logger.error(
-                        "hosted resources unresolved; force remains unobserved, "
-                        "exact resource inspection required: {requests}",
-                        agent_id=agent_id,
-                        requests=[str(path) for path in resources.unresolved],
+                    if resources.unresolved:
+                        # Keep the actual domains and scheduler registration alive.
+                        # No timer/cache reset can turn a failed close into quiescence.
+                        self._in_flight.add(agent_id)
+                        logger.error(
+                            "hosted resources unresolved; force remains unobserved, "
+                            "exact resource inspection required: {requests}",
+                            agent_id=agent_id,
+                            requests=[str(path) for path in resources.unresolved],
+                        )
+                        cancelled = await wait_retained_resources(resources) or cancelled
+                        self._in_flight.discard(agent_id)
+                    # The exclusive pump also covers no-task wakes.
+                    if cancelled:
+                        self.drop_agent(agent_id)
+                    from services.agent_runner.agent_host.invocation.compact.source import (
+                        finish_force_and_compact,
                     )
-                    cancelled = await wait_retained_resources(resources) or cancelled
-                    self._in_flight.discard(agent_id)
-                # The exclusive pump also covers no-task wakes.
-                if cancelled:
-                    self.drop_agent(agent_id)
-                from services.agent_runner.agent_host.invocation.compact.source import (
-                    finish_force_and_compact,
-                )
 
-                settlement = asyncio.create_task(
-                    finish_force_and_compact(
-                        original_host_force(
+                    settlement = asyncio.create_task(
+                        finish_force_and_compact(
+                            original_host_force(
+                                self._control_pool,
+                                agent_id,
+                                self._owner,
+                                self._machine,
+                                quiescent=True,
+                                kill_shell_sessions=kill_terminating_agent_shells,
+                            ),
                             self._control_pool,
+                            self._checkpointer,
+                            self._graph,
                             agent_id,
                             self._owner,
-                            self._machine,
-                            quiescent=True,
-                            kill_shell_sessions=kill_terminating_agent_shells,
-                        ),
-                        self._control_pool,
-                        self._checkpointer,
-                        self._graph,
-                        agent_id,
-                        self._owner,
-                        resources,
-                        self._bus,
-                        self.drop_agent,
-                        self.database_waits,
-                        self._peek_lock,
-                        work=None,
-                        catalog=self._catalog,
-                        llm_override=self._policy.llm_override(),
+                            resources,
+                            self._bus,
+                            self.drop_agent,
+                            self.database_waits,
+                            self._peek_lock,
+                            work=None,
+                            catalog=self._catalog,
+                            llm_override=self._policy.llm_override(),
+                            default_reader=self._policy.default_reader,
+                            reconcile_inputs=self._policy.reconcile_inputs,
+                        )
                     )
-                )
-                cancelled = await wait_shielded_task(settlement) or cancelled
-                settlement.result()
+                    self._resource_service.retain_task(resources, settlement)
+                    cancelled = await wait_shielded_task(settlement) or cancelled
+                    settlement.result()
+                except BaseException as cleanup_error:
+                    if primary is None:
+                        raise
+                    primary.add_note(f"hosted turn cleanup failed: {cleanup_error!r}")
             if cancelled:
                 raise asyncio.CancelledError
             await maintenance_receipts.record_drained(self._control_pool, self._owner, agent_id)
@@ -271,24 +284,11 @@ class AgentHost:
         )
 
     async def _run_turn(self, agent_id: int, *, resources: HostedTurnResources | None) -> None:
-        """Run `agent_id` until it has nothing left to claim, then return.
-
-        One read decides everything: whether this agent is ours to run, and what
-        config the turn runs under. Re-read every turn rather than cached with
-        the runtime — that is what makes `ava.self.restart(config_overlay)` land
-        at the next turn boundary, the hosted replacement for "the process exits
-        and boots with the merged config".
+        """Run to idle, re-reading ownership and configuration each turn boundary.
+        Restart overlays reach the next turn even when its model remains cached.
         """
-        # A new turn starts a fresh progress window HERE, before any await:
-        # without this, a long-idle agent's stale clock entry would read as
-        # "stalled" during this turn's runtime (re)build — whose startup
-        # reconcile can be slow — and the dispatcher's turn-level scan would
-        # cancel the very recovery turn it just scheduled. First-line, not
-        # merely before the build: the scan also runs during the
-        # pre-admission reads below, and a task cancelled there refuses its
-        # bounded unwind in teardown and takes the whole host down with it
-        # (2026-09-11: a resurrect wake for a terminated agent was cancelled
-        # on its predecessor's 3.5h-old clock two seconds after it started).
+        # Reset before any admission await: recovery may take time, and the
+        # dispatcher's stall scan must not cancel this turn using its predecessor's clock.
         self.turn_progress.reset(agent_id)
         stored = await _read_stored_config(self._control_pool, agent_id)
         if stored is None or not _is_runnable(self._machine, agent_id, stored):
@@ -426,6 +426,9 @@ class AgentHost:
                     incarnation,
                     outcome,
                     resources=resources,
+                    wake_enabled=self._policy.recovery_wake_enabled,
+                    prompt_reap_enabled=self._policy.recrash_reap_enabled,
+                    reconcile_inputs=self._policy.reconcile_inputs,
                 )
 
     async def _run_held_controls(
@@ -456,14 +459,10 @@ class AgentHost:
     ) -> None:
         from agent.db import claim_inbound_batch
 
-        # An active external lease owns decisions and its claim gate never
-        # runs while held, so the held-controls wake is the lease's only
-        # native relay-supervision point. Hot path: one native_status read
-        # plus known relay exit/heartbeat checks (recovery handles confirmed
-        # exit or stale heartbeat — provision, spawn, rate-limited stamp; no model
-        # calls, no polling). A supervision failure rides the existing
-        # held-wake error path (record_failure is a no-op outside a
-        # maintenance hold) and the next wake re-drives.
+        # An external lease owns decisions; held wakes alone supervise its relays.
+        # One native_status read checks known exits/heartbeats without models or polling.
+        # Confirmed exit/staleness triggers recovery; failures use held-wake error handling.
+        # record_failure is a no-op outside maintenance; the next wake re-drives recovery.
         session = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
         await supervise_relay(
             self._db, self._bus, session, agent_id, self.relays, incarnation=incarnation
@@ -527,7 +526,11 @@ class AgentHost:
         """Repair checkpoint/inbound state, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         await reconcile_claimed_inbounds_at_startup(
-            self._pool, checkpoints.saver, agent_id, incarnation=incarnation
+            self._pool,
+            checkpoints.saver,
+            agent_id,
+            incarnation=incarnation,
+            inputs=self._policy.reconcile_inputs,
         )
         await repair_dangling_tool_use_at_startup(checkpoints.graph, agent_id)
         return await build_runtime(
@@ -561,8 +564,6 @@ class AgentHost:
         self._runtimes.pop(agent_id, None)
         self.relays.drop(agent_id)
 
-    # ── the turn loop ────────────────────────────────────────────────────────
-
     async def _drive_turns(
         self,
         agent_id: int,
@@ -584,6 +585,7 @@ class AgentHost:
             catalog=self._catalog,
             event_publisher=event_publisher,
             db=self._db,
+            clock_factory=self._policy.clock_factory,
             bus=self._bus,
             agent=slices,
             extensions=self._extensions,
@@ -607,6 +609,7 @@ class AgentHost:
             partial(self._invoke_until_done, checkpoints=checkpoints),
             self.drop_agent,
             reconstruction=checkpoints.reconstruction,
+            reconcile_inputs=self._policy.reconcile_inputs,
         )
 
     async def _invoke_native_graph(
@@ -654,6 +657,7 @@ class AgentHost:
                                 ctx,
                                 config,
                                 pending_failure,
+                                notes=self._policy.handoff_notes,
                                 recovering=failure_recovered,
                                 native_work=work.target,
                             )
@@ -671,6 +675,7 @@ class AgentHost:
                                 db=self._db,
                                 bus=self._bus,
                                 relays=self.relays,
+                                notes=self._policy.handoff_notes,
                                 invoke=partial(
                                     self._invoke_native_graph,
                                     agent_id,
@@ -695,6 +700,7 @@ class AgentHost:
                             db=self._db,
                             bus=self._bus,
                             relays=self.relays,
+                            notes=self._policy.handoff_notes,
                         )
                         if outcome is not None:
                             return outcome
@@ -747,6 +753,7 @@ class AgentHost:
                 peek_lock=self._peek_lock,
                 work=native_work,
                 reconstruction_parent=checkpoints.reconstruction,
+                reconcile_inputs=self._policy.reconcile_inputs,
             ),
             self._control_pool,
             incarnation,
@@ -759,35 +766,31 @@ class AgentHost:
         return self._resource_service.joined
 
     async def aclose(self, *, resource_deadline: float | None = None) -> None:
-        """Join cross-turn resource results before releasing owners or closing clients.
+        """Join retained resources before closing clients and releasing owners.
 
-        The daemon drains turns first and closes its pools after this returns.
-        A failed completion keeps its exact unresolved scope; joining it cannot
-        certify that those resources became quiescent.
+        Failed scopes remain unresolved; the daemon closes pools only after this join.
         """
-        try:
-            await self._resource_service.aclose(deadline=resource_deadline)
-        finally:
-            if self.resources_joined:
-                self._runtimes.clear()
-                await asyncio.to_thread(self._clients.close)
-                try:
-                    async with asyncio.timeout(_RELEASE_OWNER_TIMEOUT_S):
-                        await release_hosted_owner(
-                            self._control_pool, self._machine, self._owner, self._in_flight
-                        )
-                except TimeoutError as exc:
-                    raise TimeoutError(
-                        f"hosted ownership release did not land within {_RELEASE_OWNER_TIMEOUT_S:g}s; "
-                        "its leases expire by TTL"
-                    ) from exc
+        await close_host_resources(
+            self._resource_service,
+            self._clients,
+            lambda: release_hosted_owner(
+                self._control_pool, self._machine, self._owner, self._in_flight
+            ),
+            clear_runtimes=self._runtimes.clear,
+            resource_deadline=resource_deadline,
+            release_timeout=_RELEASE_OWNER_TIMEOUT_S,
+        )
 
     async def renew_ownership(self) -> None:
         """Renew healthy leases before reaping corpses and retrying committed wakes."""
         await renew_hosted_owner(self._control_pool, self._machine, self._owner)
         try:
             reaped = await reap_crash_corpses(
-                self._control_pool, self._machine, self._owner, bus=self._bus
+                self._control_pool,
+                self._machine,
+                self._owner,
+                bus=self._bus,
+                wake_enabled=self._policy.recovery_wake_enabled,
             )
             await recover_reaped_corpses(self._db, self._bus, reaped)
         except Exception:

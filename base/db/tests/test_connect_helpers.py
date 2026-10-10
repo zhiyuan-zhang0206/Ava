@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
+import sys
+import threading
 import types
 from collections.abc import Iterator
 from typing import Any, NoReturn
@@ -35,7 +38,7 @@ from base.native_process import code_version
 from base.telemetry import process_name
 
 
-def _session_direct_url(_config: object = None) -> str:
+def _session_direct_url(_config: object = None, **_kwargs: object) -> str:
     return settings.data_plane.db_url
 
 
@@ -521,3 +524,98 @@ def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE deployment_state SET min_code_version = 0")
     assert _gated_process == []
+
+
+def test_independent_handles_and_async_restore_share_one_process_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = _clock(monkeypatch)
+    owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
+    original_connect = connections.psycopg.connect
+    test_thread = threading.current_thread()
+    restored: list[_FakeConn] = []
+
+    def dial(url: str, **kwargs: Any) -> Any:
+        if threading.current_thread() is not test_thread:
+            return original_connect(url, **kwargs)
+        conn = _FakeConn(minimum=0)
+        restored.append(conn)
+        return conn
+
+    monkeypatch.setattr(connections.psycopg, "connect", dial)
+    first = Database.from_settings(gate=owner)
+    second = Database.from_settings(gate=owner)
+    first.connect()
+    now[0] += 29.9
+    second.connect()
+    # Refreshing a handle's config does not reset this process's clock.
+    Database.from_settings(gate=owner).connect()
+    assert [conn.executed[1][0] for conn in restored] == [
+        connections.PG_POOLED_RESTORE_WITH_MIN_SQL,
+        connections.PG_POOLED_BASELINE_RESTORE_SQL[1],
+        connections.PG_POOLED_BASELINE_RESTORE_SQL[1],
+    ]
+    assert all(len(conn.executed) == 2 and conn.commits == 1 for conn in restored)
+    assert all(conn.executed[1][1] == (f"ava:test-process:v{_VERSION}",) for conn in restored)
+    now[0] += 0.1
+    first.connect()
+    assert restored[-1].executed[1][0] == connections.PG_POOLED_RESTORE_WITH_MIN_SQL
+
+
+async def test_sync_and_async_pool_callbacks_retain_the_same_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = _clock(monkeypatch)
+    owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
+
+    def pool_factory(_url: str, **kwargs: Any) -> Any:
+        return types.SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(connections, "ConnectionPool", pool_factory)
+    first: Any = Database.from_settings(gate=owner).pool()
+    pool_type: Any = pool_factory
+    second: Any = Database.from_settings(gate=owner).async_pool(
+        pool_type, min_size=1, max_size=2, timeout=1
+    )
+    sync_conn = _FakeConn(0)
+    first.configure(sync_conn)
+    first.check(sync_conn)
+    async_conn = _FakeAsyncConn(0)
+    await second.check(async_conn)
+    assert sync_conn.executed[1][0] == connections.PG_POOLED_RESTORE_WITH_MIN_SQL
+    assert sync_conn.executed[3][0] == connections.PG_POOLED_BASELINE_RESTORE_SQL[1]
+    assert async_conn.executed[1][0] == connections.PG_POOLED_BASELINE_RESTORE_SQL[1]
+    now[0] += 30
+    await second.check(async_conn)
+    assert async_conn.executed[3][0] == connections.PG_POOLED_RESTORE_WITH_MIN_SQL
+    first.check(sync_conn)
+    assert sync_conn.executed[5][0] == connections.PG_POOLED_BASELINE_RESTORE_SQL[1]
+    # A different process starts with an independent budget.
+    other = gate.ProcessDbGate(version=lambda: _VERSION, process="other-process")
+    assert other.min_read_due() is True
+
+
+def test_exempt_process_owner_never_needs_a_loaded_code_version() -> None:
+    def no_version() -> int:
+        raise AssertionError("an exempt CLI must not resolve Git")
+
+    owner = gate.ProcessDbGate(version=no_version, process="cli", exempt=True)
+    assert owner.application_name() == "ava:cli"
+    assert owner.min_read_due() is False
+
+
+def test_explicit_process_gate_hard_exits_from_a_real_worker() -> None:
+    source = """
+import threading
+from base.db.code_version_gate import ProcessDbGate
+owner = ProcessDbGate(version=lambda: 1, process="worker-proof")
+worker = threading.Thread(target=lambda: owner.observe_minimum(2))
+worker.start()
+worker.join(timeout=2)
+raise RuntimeError("the stale worker did not terminate its process")
+"""
+    result = subprocess.run(  # noqa: S603 — own interpreter and fixed source in pytest isolation
+        [sys.executable, "-c", source], capture_output=True, text=True, timeout=10, check=False
+    )
+    assert result.returncode == CODE_BEHIND_MINIMUM_EXIT_CODE
+    assert "process worker-proof runs code version 1" in result.stderr

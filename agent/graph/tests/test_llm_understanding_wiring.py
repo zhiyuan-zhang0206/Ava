@@ -21,6 +21,7 @@ from agent.state_channels import CompactState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -43,11 +44,14 @@ def _runtime(chunks: list[AIMessageChunk]) -> Runtime[AvaContext]:
             ops_pool=make_fake_ops_pool(),
             llm=llm,
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
             catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
         )
     )
 

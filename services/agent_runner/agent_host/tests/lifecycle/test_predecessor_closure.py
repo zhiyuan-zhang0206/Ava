@@ -29,7 +29,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
-from services.agent_runner.agent_host.maintenance import record_drained
+from services.agent_runner.agent_host.lifecycle.maintenance import record_drained
 
 _DRAIN = {
     "maintenance": {"holder": "legacy-host:pid41", "acquired_at": "2026-09-27T01:00:00+00:00"}

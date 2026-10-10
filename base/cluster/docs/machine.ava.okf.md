@@ -35,6 +35,14 @@ missing value prints an actionable error and exits 1. An agent calling `ava`
 
 ## The capabilities
 
+`MachineIdentity` accepts four explicit lazy readers for name, capabilities,
+reachable host, and description. Construction performs no configuration reads.
+Each field has its own cache; resolving capabilities does not require a machine
+name, and an absent description is cached too. `reset()` invalidates only that
+owner, so a configuration repair can take effect without touching another
+process context. `roles_from_flags` owns capability validation for roots that
+provide configuration readers.
+
 | Capability | Owns | Data plane it uses |
 |---|---|---|
 | `gateway` | the HTTP gateway + this cluster's Postgres / Redis + the gateway-side daemons | its own local instances |
@@ -101,3 +109,9 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
 - [[services/docs/services.ava.okf.md]] — which services each capability contributes
 - [[paths.ava.okf.md]] — where the home's `.env` lives
 - [[cli/docs/cli.ava.okf.md]] — `ava start`, which persists these labels
+
+Explicit process composition uses `resolve_gateway_api_base(value)` and
+`resolve_gateway_bearer` with narrow live readers from its configuration owner.
+The latter keeps delivered-token precedence: a present token never reads the
+secret, profile or remote-plane policy. Legacy process entry points retain
+`gateway_api_base()` and `gateway_bearer()` until their own roots migrate.

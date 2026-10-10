@@ -37,7 +37,7 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     )
     expected = [PendingInboundWake(agent_id=17, stale=False, recovery=False)]
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.maintenance.pending_wakes",
+        "services.agent_runner.agent_host.lifecycle.maintenance.pending_wakes",
         Mock(return_value=expected if held else None),
     )
     entered, release, exited = Event(), Event(), Event()

@@ -23,6 +23,7 @@ This module is **process** state, and it gets that property from two rules:
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.native_process.os_platform import CREATE_NO_WINDOW
@@ -43,10 +44,16 @@ def freeze() -> str | None:
     global _frozen  # noqa: PLW0603 — process-lifetime capture, one per process by design
     if _frozen is not None:
         return _frozen
+    _frozen = capture_commit(_SOURCE_ROOT)
+    return _frozen
+
+
+def capture_commit(source_root: Path) -> str | None:
+    """Read the source commit once at an explicit process entry point."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=_SOURCE_ROOT,
+            cwd=source_root,
             capture_output=True,
             text=True,
             check=False,
@@ -57,8 +64,7 @@ def freeze() -> str | None:
         return None
     if result.returncode != 0:
         return None
-    _frozen = result.stdout.strip() or None
-    return _frozen
+    return result.stdout.strip() or None
 
 
 def get() -> str | None:
@@ -70,3 +76,20 @@ def _reset_for_tests() -> None:
     """Drop the capture so a test can exercise the boot path more than once."""
     global _frozen  # noqa: PLW0603 — test seam for a process-lifetime global
     _frozen = None
+
+
+@dataclass(frozen=True)
+class LoadedCommit:
+    """One process entry's captured source image, including an honest unknown.
+
+    Consumers read ``sha`` rather than Git. A missing capture stays missing even
+    when the checkout later becomes available or moves underneath the process.
+    """
+
+    source_root: Path
+    sha: str | None
+
+    @classmethod
+    def capture(cls, source_root: Path = _SOURCE_ROOT) -> LoadedCommit:
+        """Capture at process startup; subsequent use never reads HEAD again."""
+        return cls(source_root=source_root, sha=capture_commit(source_root))

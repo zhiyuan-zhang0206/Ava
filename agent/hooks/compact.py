@@ -17,6 +17,7 @@ configuration changes. See docs/decisions/agents/context/2026-04-18-in-place-com
 
 __description__ = "Auto-compact history when token count exceeds threshold"
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -124,6 +125,8 @@ async def stamp_compact_boundary(
     agent_id: int,
     state: AgentState | None = None,
     closing: ClosingRequest | None = None,
+    *,
+    read_agent: Callable[[str], Any],
 ) -> None:
     """Best-effort: stamp the newest pre-compact checkpoint as the segment anchor.
 
@@ -138,7 +141,7 @@ async def stamp_compact_boundary(
     if pool is None:
         return
     boundary: str | None = None
-    await await_snapshot(pool, state, agent_id)
+    await await_snapshot(pool, state, agent_id, read_agent=read_agent)
     try:
         boundary = await mark_compact_boundary(pool, str(agent_id), closing=closing)
     except Exception as exc:
@@ -150,7 +153,12 @@ async def stamp_compact_boundary(
         )
     if state is not None:
         await enqueue_closing_chunk(
-            state.compact, list(state.messages), pool=pool, agent_id=agent_id, boundary=boundary
+            state.compact,
+            list(state.messages),
+            pool=pool,
+            agent_id=agent_id,
+            boundary=boundary,
+            read_agent=read_agent,
         )
 
 
@@ -215,7 +223,9 @@ async def generate_summary(
         content=f"{COMPACTION_INSTRUCTION}\nava.self.compact contract:\n{compact_contract()}"
     )
     compaction_input = [*system_head, *content_msgs, instruction]
-    response = await ainvoke_tool_call(llm, compaction_input)
+    response = await ainvoke_tool_call(
+        llm, compaction_input, read_timeout=lambda: slices.read("lm", "llm_compact_timeout_seconds")
+    )
     model = slices.brain.llm_model
     if isinstance(model, str) and model:
         from base.lm.usage import log_usage_from_message
@@ -613,7 +623,13 @@ async def auto_compact_for_llm(
         extra_msgs=([history_dump_note(dump_path)] if dump_path is not None else None),
         summary_kwargs=summary_kwargs,
     )
-    await stamp_compact_boundary(runtime.context.ops_pool, agent_id, state, closing_of(summary))
+    await stamp_compact_boundary(
+        runtime.context.ops_pool,
+        agent_id,
+        state,
+        closing_of(summary),
+        read_agent=lambda field: runtime.context.require_agent().read("agent", field),
+    )
     transition["compact"] = state.compact.next_segment()
     emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS)
     return transition

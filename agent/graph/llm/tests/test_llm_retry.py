@@ -38,6 +38,7 @@ from agent.graph.llm_errors import (
 )
 from agent.hooks.compact import CompactionFailedError
 from base.agents.context import AvaContext
+from base.clock import Clock
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -58,7 +59,10 @@ def _wait(
         agent_id=agent_id,
         ledger=ledger,
         catalog=build_model_catalog(),
-        max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+        max_attempts_pin=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ).read("lm", "llm_retry_max_attempts"),
+        read_lm=lambda field: getattr(settings.lm, field),
     )
 
 
@@ -70,7 +74,7 @@ def _uniform_high(_low: float, high: float) -> float:
     return high
 
 
-def _fixed_delay(_streak: int) -> float:
+def _fixed_delay(_streak: int, *, read_lm: Callable[[str], Any]) -> float:
     return 300.0
 
 
@@ -150,7 +154,10 @@ def test_the_model_caps_the_number_of_tries(
             agent_id=1,
             ledger=ledger,
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).read("lm", "llm_retry_max_attempts"),
+            read_lm=lambda field: getattr(settings.lm, field),
         )
         is not None
     )
@@ -162,7 +169,10 @@ def test_the_model_caps_the_number_of_tries(
             agent_id=1,
             ledger=ledger,
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).read("lm", "llm_retry_max_attempts"),
+            read_lm=lambda field: getattr(settings.lm, field),
         )
         is None
     )
@@ -275,9 +285,17 @@ def test_stall_pair_errors_skip_the_consecutive_tracker(
     """The tracker's cap (3) must not pre-empt the delayed schedule's 4th grant, so pair errors
     never enter it; plain stalls still do."""
     thread = str(streak_agent)
-    ledger.record_consecutive_error(thread, LLMStreamStallPairError("pair"))
+    ledger.record_consecutive_error(
+        thread,
+        LLMStreamStallPairError("pair"),
+        max_cap=settings.lm.llm_retry_max_consecutive_same_error,
+    )
     assert ledger.consecutive_error(thread) is None
-    ledger.record_consecutive_error(thread, LLMStreamStallTimeoutError("stall"))
+    ledger.record_consecutive_error(
+        thread,
+        LLMStreamStallTimeoutError("stall"),
+        max_cap=settings.lm.llm_retry_max_consecutive_same_error,
+    )
     assert ledger.consecutive_error(thread) == ("LLMStreamStallTimeoutError", 1)
 
 
@@ -310,7 +328,10 @@ def test_the_stall_pair_headroom_extends_the_transient_attempts_gate(
             agent_id=streak_agent,
             ledger=ledger,
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).read("lm", "llm_retry_max_attempts"),
+            read_lm=lambda field: getattr(settings.lm, field),
         )
         is not None
     )
@@ -322,7 +343,10 @@ def test_the_stall_pair_headroom_extends_the_transient_attempts_gate(
             agent_id=streak_agent,
             ledger=ledger,
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).read("lm", "llm_retry_max_attempts"),
+            read_lm=lambda field: getattr(settings.lm, field),
         )
         is None
     )
@@ -351,7 +375,9 @@ def test_a_spent_streak_fails_the_turn_at_node_entry_and_resets(
 ) -> None:
     ledger.record_stall_pair_streak(str(streak_agent), settings.lm.llm_stall_retry_max_consecutive)
     with pytest.raises(LLMStreamStallPairExhaustedError):
-        ledger.check_stall_pair_cap(str(streak_agent))
+        ledger.check_stall_pair_cap(
+            str(streak_agent), max_pairs=settings.lm.llm_stall_retry_max_consecutive
+        )
     assert ledger.stall_pair_streak(str(streak_agent)) == 0
     assert isinstance(LLMStreamStallPairExhaustedError("x"), FatalLLMStreamError)
     assert isinstance(LLMStreamStallPairError("x"), LLMStreamStallTimeoutError)
@@ -365,10 +391,13 @@ def _runtime() -> Runtime[AvaContext]:
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
 
@@ -456,9 +485,15 @@ def test_non_retryable_protocol_failure_does_not_poison_the_next_user_turn(
     ledger: LlmLedger,
 ) -> None:
     for _ in range(4):
-        ledger.record_consecutive_error("one-agent", LLMStreamCorruptedError("invalid response"))
+        ledger.record_consecutive_error(
+            "one-agent",
+            LLMStreamCorruptedError("invalid response"),
+            max_cap=settings.lm.llm_retry_max_consecutive_same_error,
+        )
         assert ledger.consecutive_error("one-agent") is None
-        ledger.check_consecutive_error_cap("one-agent")
+        ledger.check_consecutive_error_cap(
+            "one-agent", max_cap=settings.lm.llm_retry_max_consecutive_same_error
+        )
 
 
 def test_the_node_gives_up_at_the_models_attempt_cap(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -515,10 +550,14 @@ def _failing_node_run(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve({"llm_model": model}),
+        agent=AgentSlices.resolve(
+            {"llm_model": model},
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     config: RunnableConfig = {"configurable": {"thread_id": thread}}
     with pytest.raises(ModelConnectionError):

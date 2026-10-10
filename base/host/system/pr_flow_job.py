@@ -26,6 +26,7 @@ from __future__ import annotations
 import shlex
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -189,7 +190,7 @@ def credential_blocker() -> str | None:
     return None
 
 
-def register_pr_flow_job() -> None:
+def register_pr_flow_job(*, enabled_reader: Callable[[], bool]) -> None:
     """Register the daily PR-flow sampler (idempotent).
 
     Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED` — the test suite), when
@@ -197,7 +198,7 @@ def register_pr_flow_job() -> None:
     gate says this host cannot run the sampler; the skip reason is logged so
     converge output explains the absence.
     """
-    if not base.host.system.cron.os_jobs_enabled():
+    if not base.host.system.cron.os_jobs_enabled(enabled_reader=enabled_reader):
         base.host.system.cron.skip_os_job("pr flow")
         return
     if not base.host.system.cron.owns_os_jobs("pr flow"):

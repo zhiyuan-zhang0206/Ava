@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -25,6 +26,7 @@ from base.agents.sdk.tally import SdkCallTally
 from base.lm.plugin_providers import build_model_catalog
 
 
+@patch.dict(os.environ)
 def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[str], Path]:
     context = AvaContext(
         identity=AgentIdentity(agent_id, True),
@@ -131,6 +133,7 @@ def test_failure_preserves_legal_delta_and_original_traceback(tmp_path: Path, fa
         assert f"raise {failure}" in (payload.full_traceback or "")
 
 
+@patch.dict(os.environ)
 def test_execution_tally_stays_with_its_context_and_out_of_description() -> None:
     tally = SdkCallTally()
     context = AvaContext(
@@ -143,6 +146,7 @@ def test_execution_tally_stays_with_its_context_and_out_of_description() -> None
     assert tally.snapshot() == {"files.read": 1}
 
 
+@patch.dict(os.environ)
 def test_child_sdk_tally_includes_plain_thread_calls(tmp_path: Path) -> None:
     """Threads in the same execution report their real public SDK entries."""
     sample = tmp_path / "thread-sample.txt"
@@ -161,3 +165,23 @@ assert len(values) == 24
     payload = read_result(result)
     assert payload.kind == "done", payload.exc_msg
     assert payload.sdk_calls == [{"method": "files.read", "count": 24}]
+
+
+def test_controlled_child_plugin_faces_keep_its_context_writer(tmp_path: Path) -> None:
+    code = """
+import ava
+from ava.sdk_surface import install
+context_writer = ava.context.clients.event_pipeline()
+surface = install.installed()
+assert surface is not None and surface.producer is not None
+assert surface.producer() is context_writer
+ava.ensure_plugins_loaded(surface=False)
+faces = install.installed()
+assert faces is not None and faces.faces and faces.producer is not None
+assert faces.producer() is context_writer
+print("owned writer preserved")
+"""
+    process, result = _start(tmp_path, 515, code)
+    stdout, payload = _finish(process, result)
+    assert payload.kind == "done", payload.exc_msg
+    assert "owned writer preserved" in stdout

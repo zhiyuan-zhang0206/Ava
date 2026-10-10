@@ -13,6 +13,7 @@ from base.agents.observation.evidence import (
 )
 from base.agents.observation.roster import AgentCard, select_roster
 from base.agents.observation.snapshot import select_one
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
 from base.lm.catalog import ModelCatalog
@@ -45,7 +46,9 @@ def test_snapshot_retains_independent_probe_and_lease_clocks(
                 ("observation-test", probe),
             )
     db_conn.commit()
-    full = select_one(db_conn, aid, catalog=model_catalog)
+    full = select_one(
+        db_conn, aid, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+    )
     assert full is not None and full.observation is not None
     evidence = full.observation
     assert evidence.runtime_owner == "unknown"
@@ -57,7 +60,11 @@ def test_snapshot_retains_independent_probe_and_lease_clocks(
         else probe + timedelta(seconds=LIVENESS_PASS_INTERVAL_S * MACHINE_OFFLINE_AFTER_FAILURES)
     )
     summary = next(
-        row for row in select_roster(db_conn, catalog=model_catalog).agents if row.agent_id == aid
+        row
+        for row in select_roster(
+            db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+        ).agents
+        if row.agent_id == aid
     )
     assert isinstance(summary, AgentCard)
     assert summary.observation == evidence
@@ -165,9 +172,15 @@ def test_launch_failure_projects_on_card_and_detail(
         )
     db_conn.commit()
     card = next(
-        row for row in select_roster(db_conn, catalog=model_catalog).agents if row.agent_id == aid
+        row
+        for row in select_roster(
+            db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+        ).agents
+        if row.agent_id == aid
     )
-    detail = select_one(db_conn, aid, catalog=model_catalog)
+    detail = select_one(
+        db_conn, aid, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+    )
     assert detail is not None
     assert card.availability is not None and detail.availability is not None
     assert (
@@ -193,10 +206,14 @@ def test_snapshot_and_roster_share_machine_verdict(
 
     card = next(
         card
-        for card in select_roster(db_conn, catalog=model_catalog).agents
+        for card in select_roster(
+            db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+        ).agents
         if card.agent_id == agent_id
     )
-    detail = select_one(db_conn, agent_id, catalog=model_catalog)
+    detail = select_one(
+        db_conn, agent_id, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+    )
     assert detail is not None
     assert card.status.value == detail.status.value == "idling"
     assert card.availability is not None and detail.availability is not None

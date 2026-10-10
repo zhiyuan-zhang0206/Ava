@@ -80,7 +80,9 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
     model = MagicMock(spec=BaseChatModel)
     model.astream.return_value = stream()
     model.ainvoke = AsyncMock(side_effect=invoke)
-    agent = AgentSlices.resolve()
+    agent = AgentSlices.resolve(
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    )
     with pytest.raises(TimeoutError) as raised:
         await _consume_llm(
             model,
@@ -99,7 +101,10 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
             agent_id=7,
             ledger=LlmLedger(),
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve().read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ).read("lm", "llm_retry_max_attempts"),
+            read_lm=lambda field: getattr(settings.lm, field),
         )
         is None
     )
@@ -147,7 +152,9 @@ async def test_external_cancellation_stays_external_inside_owned_model_deadline(
             [],
             chunks=[],
             handler=cast(RedisStreamHandler, sink),
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
             catalog=build_model_catalog(),
         )
     )

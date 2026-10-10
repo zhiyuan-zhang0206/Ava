@@ -320,3 +320,59 @@ def test_unknown_ordinary_delivery_keeps_crash_primary(
     child._deliver_run_telemetry(result_path, payload)
     assert Path(result_path).read_bytes() == before
     child._deliver_envelope_telemetry()
+
+
+def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path) -> None:
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    import ava
+    from agent.execution import child
+    from agent.graph.exec.protocol import ResultPayload, read_result, write_result
+    from base.agents.context import AvaContext
+    from base.agents.context.clients import ClientSet
+    from base.telemetry import Event, EventPipeline
+
+    original = ValueError("owned writer failed after the SDK body completed")
+
+    def writer(batch: list[Event]) -> None:
+        raise original
+
+    pipe = EventPipeline(writer=writer, batch_size=1)
+    clients = ClientSet(pipeline_factory=lambda: pipe)
+    prior = getattr(ava, "context", None)
+    ava.bind_context(replace(prior or AvaContext(), clients=clients))
+    result_path = tmp_path / "result.json"
+    payload = ResultPayload(kind="done", code_reached=True)
+    write_result(result_path, payload)
+    try:
+        clients.event_pipeline().enqueue(
+            Event(
+                ts=datetime.now(UTC),
+                trace_id=None,
+                span_id=None,
+                agent_id=None,
+                machine="test",
+                cluster="test",
+                process="test",
+                category="telemetry",
+                event_name="sdk_call",
+                level="info",
+                source="system",
+                target_agent_id=None,
+            )
+        )
+        child._deliver_run_telemetry(str(result_path), payload)
+        result = read_result(result_path)
+        assert result.kind == "crashed" and result.code_reached is True
+        assert result.exc_type == "ValueError" and result.exc_msg == str(original)
+        with pytest.raises(ValueError) as observed:
+            clients.close(pipeline_timeout=1)
+        assert observed.value is original
+    finally:
+        if prior is None:
+            ava.unbind_context()
+        else:
+            ava.bind_context(prior)
+        with pytest.raises(ValueError):
+            pipe.stop(timeout=1)

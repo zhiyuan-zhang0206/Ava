@@ -6,13 +6,17 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.hooks.compact import generate_summary
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 
 
 @pytest.mark.asyncio
 async def test_compaction_preserves_fast_accounting_id() -> None:
-    slices = AgentSlices.resolve({"llm_model": "gpt-6.1-sol-fast"})
+    slices = AgentSlices.resolve(
+        {"llm_model": "gpt-6.1-sol-fast"},
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    )
     llm = MagicMock()
     llm.model_name = "gpt-6.1-sol"
     response = AIMessage(

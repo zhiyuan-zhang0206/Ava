@@ -178,7 +178,12 @@ def control_settings(directory: Path) -> dict[str, str]:
 
 
 def recovery_argv(
-    directory: Path, *, socket_dir: Path, port: int, target: RecoveryTarget
+    directory: Path,
+    *,
+    socket_dir: Path,
+    port: int,
+    target: RecoveryTarget,
+    path_reader: Callable[[], Path | None],
 ) -> list[str]:
     """The scratch postmaster's command line; every setting is an argument (see the module doc)."""
     capacity = [
@@ -205,7 +210,7 @@ def recovery_argv(
         "-c",
         "lc_messages=C",
         "-c",
-        f"restore_command={postgres_command('wal-fetch', '%f', '%p')}",
+        f"restore_command={postgres_command('wal-fetch', '%f', '%p', path_reader=path_reader)}",
         "-c",
         "recovery_target_action=promote",
         *target.pg_args(),
@@ -262,6 +267,7 @@ def restored_instance(
     report: Report,
     user: str | None = None,
     keep_data: bool,
+    path_reader: Callable[[], Path | None],
 ) -> Generator[RestoredInstance]:
     """Fetch `backup` into `directory`, recover it to `target`, yield the promoted instance.
 
@@ -277,7 +283,11 @@ def restored_instance(
     started = time.monotonic()
     report(f"fetching backup {backup} into {directory}")
     try:
-        run_walg(["backup-fetch", str(directory), backup], timeout_s=RESTORE_TIMEOUT_S)
+        run_walg(
+            ["backup-fetch", str(directory), backup],
+            timeout_s=RESTORE_TIMEOUT_S,
+            path_reader=path_reader,
+        )
     except WalgCommandError as exc:
         raise RestoreError(f"backup-fetch failed: {exc}") from None
     directory.chmod(0o700)
@@ -290,7 +300,13 @@ def restored_instance(
     instance = RestoredInstance(directory, socket_dir, _free_port(), user or getpass.getuser())
     process: subprocess.Popen[bytes] | None = None
     try:
-        argv = recovery_argv(directory, socket_dir=socket_dir, port=instance.port, target=target)
+        argv = recovery_argv(
+            directory,
+            socket_dir=socket_dir,
+            port=instance.port,
+            target=target,
+            path_reader=path_reader,
+        )
         process = start_foreground_postgres(argv, log=log, env=pg_start_env())
         timeline = _wait_promoted(process, instance, log)
         report(f"promoted on timeline {timeline} after {time.monotonic() - started:.0f}s")

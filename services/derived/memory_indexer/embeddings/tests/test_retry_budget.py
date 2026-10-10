@@ -20,7 +20,10 @@ def test_batch_budget_covers_retry_policy(monkeypatch: pytest.MonkeyPatch) -> No
             max(policy.backoff(attempt), MAX_RETRY_AFTER_RESPECT_S) + 2 * policy.jitter_span
             for attempt in range(policy.max_attempts - 1)
         )
-        provider_budget = factory.worst_case_batch_seconds()
+        provider_budget = factory.worst_case_batch_seconds(
+            settings.services.embedding_backend,
+            timeout_seconds=settings.services.memory_embed_timeout_seconds,
+        )
         assert provider_budget >= worst_batch
         return provider_budget
 

@@ -12,8 +12,8 @@ tags:
 A gateway-side daemon (`ServiceSpec.capabilities=_GATEWAY`; no port and no fixed-table slot) that serves the read models derived from agents' checkpoints and audit record. Rebuilding an agent's stitched history is seconds of CPU on a cold read, so it lives in a process of its own: it never competes with the gateway's event loop, thread pool or GIL, and stopping it never touches the gateway.
 
 ## Shape
-- `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: the only module that reads `settings` or builds the `Database`.
-- `app.py` — `build_app(db, pool, config)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `config`, `run_timeline_views`). Mount new routers here.
+- `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: owns one `ConfigBoot` and passes its live clock/timestamp readers to the app. It also builds the `Database`.
+- `app.py` — `build_app(db, pool, config, *, catalog, timeline_inputs, default_model_reader)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `config`, `catalog`, `timeline_inputs`, `default_model_reader`, `run_timeline_views`). Mount new routers here.
 - `config.py` — the settings slice (`InsightsConfig`).
 - `run_timeline/` — the per-agent reads behind the agent view, see [[run_timeline.ava.okf.md|run timeline reads]].
 
@@ -28,3 +28,6 @@ A stopped or wedged service is 502 (socket unreachable) or 504 (no reply within 
 ## Entry Points
 - `services/derived/insights/daemon.py` — `.venv/bin/python -m services.derived.insights.daemon`
 - Supervised through the roster's socket identity probe (`ops/roster/__init__.py`).
+
+Run context model fallback uses the same process configuration owner through an
+explicit live default-model reader; it never reads another process settings facade.

@@ -100,7 +100,7 @@ def attached_runtime(
     monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
     monkeypatch.setattr(external, "machine_name", lambda: "local-runner")
 
-    def load(_agent_id: int) -> tuple[ExampleState, dict[str, Any], None]:
+    def load(_agent_id: int, *, database: Database) -> tuple[ExampleState, dict[str, Any], None]:
         return snapshot.model_copy(deep=True), {"llm_model": "external-test"}, None
 
     monkeypatch.setattr(external, "load_snapshot", load)

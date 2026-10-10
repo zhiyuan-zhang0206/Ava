@@ -10,6 +10,7 @@ from langchain_core.messages import BaseMessage
 from base.db import create_agent
 from gateway.agents.history.tests.test_timeline import CompactHistoryCases
 from gateway.agents.history.tests.test_timeline import test_client as test_client
+from gateway.app import app
 
 
 class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
@@ -21,8 +22,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         self._put_checkpoint(tid, self._segment("history", 2), version="1", boundary=True)
         self._put_checkpoint(
@@ -31,11 +30,15 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             version="2",
         )
 
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 0)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", 0
+        )
         disabled = test_client.get(f"/api/agents/{tid}/timeline", params={"limit": 50}).json()
         assert disabled["has_more"] is False
 
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
+        )
         enabled = test_client.get(f"/api/agents/{tid}/timeline", params={"limit": 50}).json()
         assert enabled["has_more"] is True
         assert all(not item["item_id"].startswith("s") for item in enabled["items"])
@@ -48,8 +51,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
             tid, self._segment("history", 5), version="1", boundary=True
@@ -59,7 +60,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="2",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
+        )
 
         crossed = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "2.0", "limit": 2}
@@ -101,8 +104,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         older_id = self._put_checkpoint(
             tid,
@@ -121,7 +122,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
+        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -144,8 +147,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         self._put_checkpoint(tid, self._segment("blocked", 1), version="1", boundary=True)
         allowed_id = self._put_checkpoint(
@@ -159,7 +160,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
+        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -180,8 +183,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         older_id = self._put_checkpoint(
             tid,
@@ -200,7 +201,11 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", depth)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway,
+            "timeline_compact_history",
+            depth,
+        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -233,7 +238,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         from langchain_core.messages import AIMessage
 
         import gateway.agents.history.timeline as timeline_router
-        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -248,7 +252,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             return []
 
         monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 3)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", 3
+        )
         response = test_client.get(f"/api/agents/{tid}/timeline")
 
         assert response.status_code == 200
@@ -262,8 +268,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from base.config import settings
-
         tid = create_agent(db_conn)
         older_id = self._put_checkpoint(tid, self._segment("older", 2), version="1", boundary=True)
         newer_id = self._put_checkpoint(tid, self._segment("newer", 2), version="2", boundary=True)
@@ -273,7 +277,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             version="3",
         )
 
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
+        )
         blocked = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s2.{older_id}.1.0", "limit": 50},
@@ -292,7 +298,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         ).json()
         assert invalid_rank == {"items": [], "msg_count": 3, "has_more": False}
 
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
+        )
         stale_rank = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s99.{newer_id}.2.0", "limit": 1},
@@ -330,7 +338,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         from langchain_core.messages import AIMessage
 
         import gateway.agents.history.timeline as timeline_router
-        from base.config import settings
 
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
@@ -341,7 +348,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="2",
         )
-        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+        monkeypatch.setattr(
+            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
+        )
 
         def fail_current_read(_db: object, _agent_id: int) -> list[BaseMessage]:
             raise AssertionError("historical paging must not deserialize the live segment")

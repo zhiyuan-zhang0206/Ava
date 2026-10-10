@@ -13,6 +13,13 @@ from base.agents.history.hierarchy.units import (
     divide_units,
     read_times,
 )
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -63,7 +70,11 @@ def result(seconds: int) -> ToolMessage:
 
 
 def blocks(msgs: Sequence[BaseMessage]) -> list[tuple[str, int, int, int, int]]:
-    out = display_blocks(divide_units(msgs), msgs, read_times(msgs))
+    out = display_blocks(
+        divide_units(msgs, timeline_inputs=_TIMELINE_INPUTS),
+        msgs,
+        read_times(msgs, timeline_inputs=_TIMELINE_INPUTS),
+    )
     return [
         (b.kind, b.i0, b.i1, int((b.start - T0).total_seconds()), int((b.end - T0).total_seconds()))
         for b in out
@@ -142,4 +153,8 @@ def test_a_result_with_a_recorded_body_start_shows_only_the_body() -> None:
 
 
 def display_blocks_of(msgs: Sequence[BaseMessage]) -> list[DisplayBlock]:
-    return display_blocks(divide_units(msgs), msgs, read_times(msgs))
+    return display_blocks(
+        divide_units(msgs, timeline_inputs=_TIMELINE_INPUTS),
+        msgs,
+        read_times(msgs, timeline_inputs=_TIMELINE_INPUTS),
+    )

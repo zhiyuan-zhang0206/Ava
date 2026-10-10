@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.config import ConfigBoot
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import cleanup as bridge_cleanup
@@ -32,7 +33,11 @@ def _world(tmp_path: Path) -> tuple[Path, Path, ConvergeCtx]:
     client.mkdir(parents=True)
     ava_home = tmp_path / "ava-home"
     (ava_home / "configs").mkdir(parents=True)
-    return source, client, ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
+    return (
+        source,
+        client,
+        ConvergeCtx(repo=repo, ava_home=ava_home, roles=None, config=ConfigBoot()),
+    )
 
 
 def _target(client: Path) -> Path:

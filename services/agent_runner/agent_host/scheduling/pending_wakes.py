@@ -7,8 +7,8 @@ from uuid import UUID
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from services.agent_runner.agent_host import maintenance as maintenance_receipts
 from services.agent_runner.agent_host.dispatcher import PendingInboundWake
+from services.agent_runner.agent_host.lifecycle import maintenance as maintenance_receipts
 
 _WORK_EXISTS_SQL = (
     "EXISTS (SELECT 1 FROM inbound_messages work "

@@ -23,7 +23,9 @@ async def test_shared_saver_reports_each_failed_write_owner_without_swallowing(
         settings.data_plane.db_url, min_size=0, max_size=2, open=False
     )
     await pool.open()
-    saver = await _build_checkpointer(pool)
+    saver = await _build_checkpointer(
+        pool, read_checkpoint_interval=lambda: settings.agent.checkpoint_interval
+    )
     configs: list[RunnableConfig] = []
     records: list[dict[str, Any]] = []
 

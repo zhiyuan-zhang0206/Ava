@@ -6,6 +6,7 @@ Directory cards and the live tree have their own bounded read contract in
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -21,7 +22,6 @@ from base.agents.observation.evidence import (
     observation,
 )
 from base.agents.tasks.priority import Priority
-from base.config import settings
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -179,36 +179,52 @@ class AgentSnapshot(BaseModel):
     heartbeat_paused_until: datetime | None
 
 
-def _effective_model(config_overlay: Any, birth_config: Any, *, catalog: ModelCatalog) -> str:
+def _effective_model(
+    config_overlay: Any,
+    birth_config: Any,
+    *,
+    catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
+) -> str:
     """The model an agent's own calls run, withdrawal-resolved (task #3212).
 
     The agent host's own resolution: `llm_model` is a birth-frozen field, so the
     pin is `config_overlay` over `birth_config` (an agent born under an older
-    cluster default keeps its birth model), `settings.lm.llm_model` only when
+    cluster default keeps its birth model), the caller's live default only when
     neither pins it, and a withdrawn id is served by its registered fallback.
     One resolution site for the snapshot's capability judgment and
     `agent_model_target`, so the two cannot drift.
     """
     from base.config.agent_pins import resolve_agent_config_pins
 
-    return _model_of_pins(resolve_agent_config_pins(config_overlay, birth_config), catalog=catalog)
-
-
-def _model_of_pins(pins: dict[str, Any], *, catalog: ModelCatalog) -> str:
-    from base.lm.registry import resolve_available_model
-
-    return resolve_available_model(
-        pins.get("llm_model") or settings.lm.llm_model, models=catalog.models
+    return _model_of_pins(
+        resolve_agent_config_pins(config_overlay, birth_config),
+        catalog=catalog,
+        default_model_reader=default_model_reader,
     )
 
 
-def _row_to_snapshot(row: tuple[Any, ...], *, catalog: ModelCatalog) -> AgentSnapshot:
+def _model_of_pins(
+    pins: dict[str, Any], *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+) -> str:
+    from base.lm.registry import resolve_available_model
+
+    return resolve_available_model(
+        pins.get("llm_model") or default_model_reader(), models=catalog.models
+    )
+
+
+def _row_to_snapshot(
+    row: tuple[Any, ...], *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+) -> AgentSnapshot:
     from base.lm.factory import model_supports_vision
 
     # Pydantic does the per-field type coercion / validation; the tuple
     # positions match the SELECT column order above. Capability judgments
     # answer for the model that will run (task #3212).
-    effective_model = _effective_model(row[17], row[25], catalog=catalog)
+    effective_model = _effective_model(
+        row[17], row[25], catalog=catalog, default_model_reader=default_model_reader
+    )
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
@@ -245,7 +261,11 @@ def _row_to_snapshot(row: tuple[Any, ...], *, catalog: ModelCatalog) -> AgentSna
 
 
 def select_one(
-    conn: psycopg.Connection, agent_id: int, *, catalog: ModelCatalog
+    conn: psycopg.Connection,
+    agent_id: int,
+    *,
+    catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     with conn.cursor() as cur:
@@ -254,11 +274,20 @@ def select_one(
             (agent_id,),
         )
         row = cur.fetchone()
-    return _row_to_snapshot(row, catalog=catalog) if row else None
+    return (
+        _row_to_snapshot(row, catalog=catalog, default_model_reader=default_model_reader)
+        if row
+        else None
+    )
 
 
 def agent_model_target(
-    db: Database, agent_id: int, *, fallback: str, catalog: ModelCatalog
+    db: Database,
+    agent_id: int,
+    *,
+    fallback: str,
+    catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> tuple[str, ModelOverrides]:
     """The model `agent_id`'s own calls run, withdrawal-resolved, and its tuning pins.
 
@@ -290,4 +319,6 @@ def agent_model_target(
         )
         return fallback, ModelOverrides.from_pins(None)
     pins = resolve_agent_config_pins(row[0] if row else None, row[1] if row else None)
-    return _model_of_pins(pins, catalog=catalog), ModelOverrides.from_pins(pins)
+    return _model_of_pins(
+        pins, catalog=catalog, default_model_reader=default_model_reader
+    ), ModelOverrides.from_pins(pins)

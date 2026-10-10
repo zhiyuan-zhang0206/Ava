@@ -11,9 +11,10 @@ import pytest
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.tests.understand.provider_support import ProviderCapture
 from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
+from ava.tests.understand.provider_support import understand_clock as understand_clock
 from ava.understand import understand
 
-pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+pytestmark = pytest.mark.usefixtures("sdk_model_owner", "understand_clock")
 
 # ── batch (concurrent) mode ─────────────────────────────────────────────────
 

@@ -13,6 +13,8 @@ from psycopg_pool import AsyncConnectionPool
 import ava
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -53,7 +55,10 @@ def _make_runtime(
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm(),
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
+        clock_factory=Clock.from_settings,
         extensions=extensions,
         db=Database.from_settings(),
         bus=EventBus.from_settings(),

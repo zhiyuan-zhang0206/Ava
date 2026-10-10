@@ -20,6 +20,10 @@ _FLASH = "deepseek-flash"
 _HAIKU = "claude-haiku-4-5-20251001"
 
 
+def _read_agent(field: str):
+    return getattr(settings.agent, field)
+
+
 def test_the_threshold_is_the_ratio_of_each_models_soft_threshold(
     *, model_catalog: ModelCatalog
 ) -> None:
@@ -110,6 +114,7 @@ async def test_the_hook_and_the_build_cut_the_same_chunks(
                 model=_FLASH,
                 overrides=ModelOverrides.from_pins({}),
                 catalog=model_catalog,
+                read_agent=_read_agent,
             )
             compact = update.get("compact", compact)
     live = [

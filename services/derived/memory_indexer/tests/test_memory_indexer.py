@@ -32,7 +32,7 @@ from base.config import settings
 from base.daemon import health
 from base.daemon.health import Liveness
 from base.lm.plugin_providers import build_model_catalog
-from services.derived.memory_indexer import daemon
+from services.derived.memory_indexer import config, daemon
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
@@ -40,6 +40,13 @@ from services.derived.memory_indexer.tests.store_backend import StoreBackend
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
+
+
+def _liveness_timeout() -> float:
+    return config.liveness_timeout_seconds(
+        settings.services.embedding_backend,
+        timeout_seconds=settings.services.memory_embed_timeout_seconds,
+    )
 
 
 @pytest.fixture
@@ -136,7 +143,7 @@ def test_process_paths_embeds_new_files(
         store_backend,
         {f1.resolve(), f2.resolve()},
         provider,
-        Liveness(daemon._liveness_timeout_s()),
+        Liveness(_liveness_timeout()),
     )
     assert provider.embed_batch_count == 1
     meta = store_backend.all_meta()
@@ -154,12 +161,18 @@ def test_process_paths_skips_unchanged_hash(
 
     provider = _FakeProvider()
     daemon._process_paths(
-        store_backend, {f.resolve()}, provider, Liveness(daemon._liveness_timeout_s())
+        store_backend,
+        {f.resolve()},
+        provider,
+        Liveness(_liveness_timeout()),
     )
     assert provider.embed_batch_count == 1
 
     daemon._process_paths(
-        store_backend, {f.resolve()}, provider, Liveness(daemon._liveness_timeout_s())
+        store_backend,
+        {f.resolve()},
+        provider,
+        Liveness(_liveness_timeout()),
     )
     assert provider.embed_batch_count == 1  # hash unchanged, no re-embed
 
@@ -177,7 +190,10 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
 
     first = _FakeProvider()
     daemon._process_paths(
-        store_backend, {f.resolve()}, first, Liveness(daemon._liveness_timeout_s())
+        store_backend,
+        {f.resolve()},
+        first,
+        Liveness(_liveness_timeout()),
     )
     assert first.embed_batch_count == 1
 
@@ -186,7 +202,10 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
     switched = _FakeProvider(fingerprint="another-provider:dim=8")
     switched_backend = store_backend.reopen("another-provider:dim=8")
     daemon._process_paths(
-        switched_backend, {f.resolve()}, switched, Liveness(daemon._liveness_timeout_s())
+        switched_backend,
+        {f.resolve()},
+        switched,
+        Liveness(_liveness_timeout()),
     )
     assert switched.embed_batch_count == 1  # re-embedded despite unchanged hash
     meta = switched_backend.all_meta()
@@ -203,7 +222,7 @@ def test_process_paths_deletes_missing_files(tmp_path: Path, store_backend: Stor
         store_backend,
         {Path(ghost)},
         _FakeProvider(),
-        Liveness(daemon._liveness_timeout_s()),
+        Liveness(_liveness_timeout()),
     )
     assert store_backend.all_meta() == {}
 
@@ -263,7 +282,10 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
 
     store_backend.upsert(str(foreign), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     daemon._process_paths(
-        store_backend, {foreign}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        store_backend,
+        {foreign},
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
     )
     assert store_backend.all_meta() == {}
 
@@ -289,7 +311,11 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     backend.upsert(str(watched.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
 
-    daemon._reconcile(backend, _FakeProvider(), Liveness(daemon._liveness_timeout_s()))
+    daemon._reconcile(
+        backend,
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
+    )
     meta = store_backend.all_meta()
     assert str(foreign.resolve()) not in meta
     assert str(watched.resolve()) in meta
@@ -317,7 +343,11 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
 
     switched = _FakeProvider(fingerprint="other:provider")
     switched_backend = store_backend.reopen("other:provider")
-    daemon._reconcile(switched_backend, switched, Liveness(daemon._liveness_timeout_s()))
+    daemon._reconcile(
+        switched_backend,
+        switched,
+        Liveness(_liveness_timeout()),
+    )
     # The row was re-embedded with the new fingerprint.
     meta = switched_backend.all_meta()
     assert str(watched.resolve()) in meta
@@ -391,7 +421,7 @@ def test_process_paths_beats_per_embed_batch(
     """Every batch gets its own beat, even when their total exceeds the ceiling."""
     now = 0.0
     monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
-    liveness = Liveness(daemon._liveness_timeout_s())
+    liveness = Liveness(_liveness_timeout())
     batch_duration = 100.0
     monkeypatch.setattr(daemon, "_BATCH_SIZE", 2)
     paths: set[Path] = set()
@@ -412,7 +442,7 @@ def test_process_paths_beats_per_embed_batch(
     provider = SlowProvider()
     daemon._process_paths(backend, paths, provider, liveness)
 
-    assert now > daemon._liveness_timeout_s()
+    assert now > _liveness_timeout()
     assert provider.embed_batch_count == 10
     assert liveness.is_alive()
     assert set(backend.all_meta()) == {str(path) for path in paths}
@@ -425,7 +455,7 @@ def test_process_paths_beats_during_commit(
     """The final embed, cleanup and upsert cannot share a beat-free interval."""
     now = 0.0
     monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
-    liveness = Liveness(daemon._liveness_timeout_s())
+    liveness = Liveness(_liveness_timeout())
     durations = {"delete_stale_rows": 5.0, "upsert_many": 300.0}
 
     def spend(op: str) -> None:
@@ -437,7 +467,10 @@ def test_process_paths_beats_during_commit(
     class SlowFinalProvider(_FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
             nonlocal now
-            now += factory.worst_case_batch_seconds()
+            now += factory.worst_case_batch_seconds(
+                settings.services.embedding_backend,
+                timeout_seconds=settings.services.memory_embed_timeout_seconds,
+            )
             assert liveness.is_alive()
             if fail_last_batch and self.embed_batch_count == 1:
                 raise EmbeddingAPIError("last batch failed")
@@ -463,7 +496,7 @@ def test_process_paths_beats_per_delete(tmp_path: Path, monkeypatch: pytest.Monk
     """A delete-only drain batch may exceed the ceiling while each delete is timely."""
     now = 0.0
     monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
-    liveness = Liveness(daemon._liveness_timeout_s())
+    liveness = Liveness(_liveness_timeout())
 
     def spend(op: str) -> None:
         nonlocal now
@@ -476,7 +509,7 @@ def test_process_paths_beats_per_delete(tmp_path: Path, monkeypatch: pytest.Monk
     backend.rows = {(str(path), "body", 0): (0.0, "old", _FP) for path in paths}
     provider = _FakeProvider()
     daemon._process_paths(backend, paths, provider, liveness)
-    assert now > daemon._liveness_timeout_s()
+    assert now > _liveness_timeout()
     assert backend.all_meta() == {}
     assert backend.calls == ["delete"] * len(paths)
     assert provider.embed_batch_count == 0
@@ -486,23 +519,41 @@ def test_process_paths_beats_per_delete(tmp_path: Path, monkeypatch: pytest.Monk
 def test_liveness_timeout_covers_worst_embed_batch(
     monkeypatch: pytest.MonkeyPatch, provider_budget: float
 ) -> None:
-    monkeypatch.setattr(factory, "worst_case_batch_seconds", lambda: provider_budget)
-    ceiling = daemon._liveness_timeout_s()
-    assert ceiling >= daemon._LIVENESS_TIMEOUT_FLOOR_S
-    assert ceiling >= provider_budget + daemon._LIVENESS_SAFETY_MARGIN_S
+    def batch_budget(name: str, *, timeout_seconds: float) -> float:
+        del name, timeout_seconds
+        return provider_budget
+
+    monkeypatch.setattr(factory, "worst_case_batch_seconds", batch_budget)
+    ceiling = _liveness_timeout()
+    assert ceiling >= config._LIVENESS_TIMEOUT_FLOOR_S
+    assert ceiling >= provider_budget + config._LIVENESS_SAFETY_MARGIN_S
 
 
 def test_factory_worst_case_registry_complete(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in factory._PROVIDERS:
         monkeypatch.setattr(settings.services, "embedding_backend", name)
-        assert factory.worst_case_batch_seconds() > 0, name
+        assert (
+            factory.worst_case_batch_seconds(
+                settings.services.embedding_backend,
+                timeout_seconds=settings.services.memory_embed_timeout_seconds,
+            )
+            > 0
+        ), name
 
     unknown = "unknown-provider"
     monkeypatch.setattr(settings.services, "embedding_backend", unknown)
     with pytest.raises(ValueError, match="unknown embedding provider") as provider_error:
-        factory.get_provider_named(unknown, catalog=build_model_catalog())
+        factory.get_provider_named(
+            unknown,
+            catalog=build_model_catalog(),
+            timeout_reader=lambda: settings.services.memory_embed_timeout_seconds,
+            api_key_reader=lambda: None,
+        )
     with pytest.raises(ValueError) as budget_error:
-        factory.worst_case_batch_seconds()
+        factory.worst_case_batch_seconds(
+            settings.services.embedding_backend,
+            timeout_seconds=settings.services.memory_embed_timeout_seconds,
+        )
     assert str(budget_error.value) == str(provider_error.value)
 
 

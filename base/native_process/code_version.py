@@ -112,3 +112,22 @@ def exempt_from_db_gate() -> None:
 def db_gate_applies() -> bool:
     """Whether this process's pooled database sessions enforce the cluster minimum."""
     return not _db_gate_exempt
+
+
+class CodeVersion:
+    """The lazy integer version of one explicitly captured process image."""
+
+    def __init__(self, loaded: loaded_commit.LoadedCommit) -> None:
+        self.loaded = loaded
+        self._version: int | None = None
+
+    def get(self) -> int:
+        """Resolve only the captured SHA, without consulting the current HEAD."""
+        if self._version is None:
+            if self.loaded.sha is None:
+                raise CodeVersionError(
+                    f"cannot resolve the loaded commit of {self.loaded.source_root}: "
+                    "the process must capture its code version at startup"
+                )
+            self._version = first_parent_count(self.loaded.source_root, self.loaded.sha)
+        return self._version

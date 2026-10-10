@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 
 import ava
+from base.db import Database
 
 
 def _evaluate_module() -> ModuleType:
@@ -119,7 +120,9 @@ def test_verify_replay(
     assert ok is expected
 
 
-def test_gather_excludes_invalid_replays_from_mean(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gather_excludes_invalid_replays_from_mean(
+    monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     evaluate = _evaluate_module()
     state: dict[str, Any] = {
         "skill": "ava-goal",
@@ -153,10 +156,12 @@ def test_gather_excludes_invalid_replays_from_mean(monkeypatch: pytest.MonkeyPat
         },
     }
 
-    def _poll(_state: dict[str, Any]) -> dict[str, list[int]]:
+    def _poll(_state: dict[str, Any], **_kwargs: object) -> dict[str, list[int]]:
+        assert _kwargs["database"] is database
         return {"done": [41, 42], "pending": []}
 
     def _collect_one(agent_id: int, **_kwargs: object) -> dict[str, Any]:
+        assert _kwargs["database"] is database
         return records[agent_id]
 
     def _scores(rec: dict[str, Any]) -> dict[str, float]:
@@ -176,7 +181,7 @@ def test_gather_excludes_invalid_replays_from_mean(monkeypatch: pytest.MonkeyPat
         _scores,
     )
 
-    report = evaluate.gather(state)
+    report = evaluate.gather(state, database=database)
 
     assert report["n"] == 1
     assert report["mean"] == {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
@@ -184,7 +189,9 @@ def test_gather_excludes_invalid_replays_from_mean(monkeypatch: pytest.MonkeyPat
     assert report["invalid"][0]["eval_agent_id"] == 42
 
 
-def test_gather_excludes_leaked_replays_from_mean(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gather_excludes_leaked_replays_from_mean(
+    monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     evaluate = _evaluate_module()
     state: dict[str, Any] = {
         "skill": "ava-goal",
@@ -216,10 +223,12 @@ def test_gather_excludes_leaked_replays_from_mean(monkeypatch: pytest.MonkeyPatc
         },
     }
 
-    def _poll(_state: dict[str, Any]) -> dict[str, list[int]]:
+    def _poll(_state: dict[str, Any], **_kwargs: object) -> dict[str, list[int]]:
+        assert _kwargs["database"] is database
         return {"done": [42, 43], "pending": []}
 
     def _collect_one(agent_id: int, **_kwargs: object) -> dict[str, Any]:
+        assert _kwargs["database"] is database
         return records[agent_id]
 
     def _scores(rec: dict[str, Any]) -> dict[str, float]:
@@ -234,7 +243,7 @@ def test_gather_excludes_leaked_replays_from_mean(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(evaluate, "_leak_paths", _leak_paths)
     monkeypatch.setattr(evaluate, "scores", _scores)
 
-    report = evaluate.gather(state)
+    report = evaluate.gather(state, database=database)
 
     assert report["n"] == 1
     assert report["mean"]["overall"] == 1.0

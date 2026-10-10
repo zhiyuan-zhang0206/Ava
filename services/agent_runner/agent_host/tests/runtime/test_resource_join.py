@@ -109,7 +109,7 @@ def _exercise_unfinished_main() -> None:
 
     migrations.assert_schema_current = schema_gate
 
-    async def run() -> None:
+    async def run(**_inputs: object) -> None:
         host = AgentHost(
             policy=configured_policy(),
             pool=cast(Any, MagicMock()),

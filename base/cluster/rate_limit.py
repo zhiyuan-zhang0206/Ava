@@ -40,8 +40,7 @@ from __future__ import annotations
 import math
 import threading
 import time
-
-from base.config import settings
+from collections.abc import Callable
 
 _MAX_ENTRIES = 10_000
 """Soft cap on tracked IPs: when exceeded, expired entries are swept on the
@@ -65,11 +64,20 @@ class LoginRateLimiter:
 
     The gateway is single-process, so one instance covers the whole cluster;
     the application lifespan owns the instance shared by its login requests.
+    Required policy readers are retained without reading during construction;
+    each failure reads their live values before acquiring the state lock.
     Methods are idempotent under races: a lock guards the dict, and
     worst-case concurrent failures just count a couple of attempts early.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_failures_reader: Callable[[], int],
+        lockout_seconds_reader: Callable[[], float],
+    ) -> None:
+        self._max_failures_reader = max_failures_reader
+        self._lockout_seconds_reader = lockout_seconds_reader
         self._entries: dict[str, _Entry] = {}
         self._lock = threading.Lock()
 
@@ -91,8 +99,8 @@ class LoginRateLimiter:
         are only "consecutive" while they keep coming.
         """
         now = time.time()
-        max_failures = settings.gateway.login_max_failures
-        lockout_seconds = settings.gateway.login_lockout_seconds
+        max_failures = self._max_failures_reader()
+        lockout_seconds = self._lockout_seconds_reader()
         with self._lock:
             entry = self._entries.get(ip)
             if entry is None or self._is_stale(entry, now, lockout_seconds):

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,14 +38,14 @@ class Step:
     ok: bool = field(default=True, kw_only=True)
 
 
-def _storage_round_trip() -> str:
+def _storage_round_trip(*, path_reader: Callable[[], Path | None]) -> str:
     token = uuid.uuid4().hex
     remote = f"{_CHECK_DIR}/{token}.txt"
     stored = f"{remote}.lz4"
     payload = f"ava walg check {token}\n".encode()
 
     def call(*args: str) -> str:
-        return str(run_walg(list(args), timeout_s=_STORAGE_CALL_TIMEOUT_S))
+        return str(run_walg(list(args), timeout_s=_STORAGE_CALL_TIMEOUT_S, path_reader=path_reader))
 
     with tempfile.TemporaryDirectory(prefix="ava-walg-check-") as scratch:
         source, fetched = Path(scratch, "put"), Path(scratch, "get")
@@ -72,8 +73,8 @@ def _storage_round_trip() -> str:
     return "put, list, get (encryption round trip), delete, list"
 
 
-def _postgres_facts() -> str:
-    expected = expected_archive()
+def _postgres_facts(*, path_reader: Callable[[], Path | None]) -> str:
+    expected = expected_archive(path_reader=path_reader)
     try:
         with probe.admin_connection() as conn:
             state = probe.read_archiver_state(conn)
@@ -89,9 +90,9 @@ def _postgres_facts() -> str:
     )
 
 
-def run_check() -> list[Step]:
+def run_check(*, path_reader: Callable[[], Path | None]) -> list[Step]:
     """Run the checks in order, stopping at the first failure; the last step is the verdict."""
-    path = walg_config.configured_path()
+    path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
         return [Step("configured", "AVA_WALG_CONFIG_FILE is not set", ok=False)]
     steps = [Step("configured", str(path))]
@@ -122,8 +123,8 @@ def run_check() -> list[Step]:
     )
 
     try:
-        steps.append(Step("storage", _storage_round_trip()))
+        steps.append(Step("storage", _storage_round_trip(path_reader=path_reader)))
     except WalgCommandError as exc:
         return [*steps, Step("storage", str(exc), ok=False)]
 
-    return [*steps, Step("postgres", _postgres_facts())]
+    return [*steps, Step("postgres", _postgres_facts(path_reader=path_reader))]

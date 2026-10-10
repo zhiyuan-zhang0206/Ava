@@ -24,6 +24,7 @@ from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.observation.db_wait import DatabaseWaits
@@ -151,7 +152,10 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
                 replace(
                     AvaContext(
                         catalog=model_catalog,
-                        agent=AgentSlices.resolve(),
+                        agent=AgentSlices.resolve(
+                            default_reader=configured_policy().default_reader
+                        ),
+                        clock_factory=configured_policy().clock_factory,
                     ),
                     original_incarnation=incarnation,
                     hosted_resources=None,
@@ -236,6 +240,7 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
             database_waits=DatabaseWaits(),
             peek_lock=asyncio.Lock(),
             work=None,
+            reconcile_inputs=configured_policy().reconcile_inputs,
         )
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
     assert await saver.aget_tuple(config) == checkpoint
@@ -280,6 +285,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
                 database_waits=DatabaseWaits(),
                 peek_lock=asyncio.Lock(),
                 work=None,
+                reconcile_inputs=configured_policy().reconcile_inputs,
             )
         )
         await asyncio.sleep(0.06)
@@ -302,6 +308,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
         database_waits=DatabaseWaits(),
         peek_lock=asyncio.Lock(),
         work=None,
+        reconcile_inputs=configured_policy().reconcile_inputs,
     )
     resumed = admission.require_operation("outage", acquired)
     assert resumed.maintenance is not None and not resumed.maintenance.drained
@@ -344,6 +351,7 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
                     database_waits=DatabaseWaits(),
                     peek_lock=asyncio.Lock(),
                     work=None,
+                    reconcile_inputs=configured_policy().reconcile_inputs,
                 )
             )
             try:
@@ -416,6 +424,7 @@ async def test_repair_timeout_retries_and_remains_cancellable(
             database_waits=DatabaseWaits(),
             peek_lock=asyncio.Lock(),
             work=None,
+            reconcile_inputs=configured_policy().reconcile_inputs,
         )
     )
     try:
@@ -580,9 +589,10 @@ async def test_healthy_stages_each_get_their_own_deadline(
         agent: int,
         *,
         incarnation: RuntimeIncarnation | None,
+        inputs: ReconcileReadInputs,
     ) -> None:
         await delay("reconcile")
-        await reconcile(pool, checkpointer, agent, incarnation=incarnation)
+        await reconcile(pool, checkpointer, agent, incarnation=incarnation, inputs=inputs)
         events.append(("reconcile", "done", 0))
 
     async def slow_repair(compiled: Any, agent: int) -> None:
@@ -602,6 +612,7 @@ async def test_healthy_stages_each_get_their_own_deadline(
                 database_waits=DatabaseWaits(),
                 peek_lock=asyncio.Lock(),
                 work=None,
+                reconcile_inputs=configured_policy().reconcile_inputs,
             ),
             15,
         )

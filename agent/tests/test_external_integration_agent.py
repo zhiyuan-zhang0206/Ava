@@ -140,7 +140,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         handle.update({"seen": {"external"}})
     updated = leases.get(database, event_bus, lease["id"], attested_caller(lease))
     assert updated["delta_version"] == 1
-    native_snapshot, _, _ = load_snapshot(agent_id)
+    native_snapshot, _, _ = load_snapshot(agent_id, database=database)
     assert decode_plugin_delta(updated["plugin_delta"][0], cast(Any, type(native_snapshot))) == {
         "integration__seen": {"external"}
     }

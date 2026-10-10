@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import secrets
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -25,7 +27,7 @@ def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     tid = create_agent(db_conn)
-    with TestClient(app) as client:
+    with patch.dict(os.environ), TestClient(app) as client:
         rejected = client.get(f"/api/agents/{tid}/timeline/retained")
         assert rejected.status_code == 401
         accepted = client.get(f"/api/agents/{tid}/timeline/retained", headers=bearer_header(secret))
@@ -37,7 +39,7 @@ def test_retained_history_can_start_and_page_without_reading_broken_live_head(
     db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tid = create_agent(db_conn)
-    monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+    monkeypatch.setattr(app.state.config_authority.runtime.gateway, "timeline_compact_history", -1)
     boundaries = ["retained-newer", "retained-older"]
     reads: list[str] = []
 
@@ -91,7 +93,7 @@ def test_retained_entry_never_guesses_a_boundary_or_current_cursor(
     status: int,
 ) -> None:
     tid = create_agent(db_conn)
-    monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+    monkeypatch.setattr(app.state.config_authority.runtime.gateway, "timeline_compact_history", -1)
     response = test_client.get(f"/api/agents/{tid}/timeline/retained", params=params)
     assert response.status_code == status
 

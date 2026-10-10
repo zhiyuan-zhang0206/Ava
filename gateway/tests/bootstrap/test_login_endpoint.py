@@ -168,7 +168,10 @@ def test_limiter_locks_at_threshold_and_restarts_after_expiry(
 ) -> None:
     fake = _FakeClock()
     monkeypatch.setattr(rate_limit, "time", fake)
-    limiter = rate_limit.LoginRateLimiter()
+    limiter = rate_limit.LoginRateLimiter(
+        max_failures_reader=lambda: config.settings.gateway.login_max_failures,
+        lockout_seconds_reader=lambda: config.settings.gateway.login_lockout_seconds,
+    )
     ip = "203.0.113.9"
 
     for _ in range(config.settings.gateway.login_max_failures - 1):
@@ -195,7 +198,10 @@ def test_limiter_locks_at_threshold_and_restarts_after_expiry(
 def test_limiter_success_resets_streak(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeClock()
     monkeypatch.setattr(rate_limit, "time", fake)
-    limiter = rate_limit.LoginRateLimiter()
+    limiter = rate_limit.LoginRateLimiter(
+        max_failures_reader=lambda: config.settings.gateway.login_max_failures,
+        lockout_seconds_reader=lambda: config.settings.gateway.login_lockout_seconds,
+    )
     ip = "203.0.113.11"
 
     for _ in range(config.settings.gateway.login_max_failures - 1):

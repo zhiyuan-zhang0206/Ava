@@ -50,3 +50,16 @@ How much runs at once, and how rate limits are met:
   explicit error.
 - **No gap hidden**: a chunk that fails for good stays undescribed and emits
   `understanding_chunk_failed`; the timeline shows the raw messages there.
+
+## Rendering policy ownership
+
+Timeline rendering requires `TimelineReadInputs` from the producer: a live clock
+factory and timestamp-policy reader. Constructing the inputs performs no reads.
+Each compact item reads the flag first and obtains a clock only when enabled;
+other items do not read either input. The tail-window limit has its own required
+live reader and is evaluated only at the existing window-selection points.
+
+Hierarchy `read_times`, `divide_units`, chunk generation, matter filtering, and
+rebuild planning carry those same explicit rendering inputs. Resident consumers
+build them from `UnderstandingReadInputs.clock_factory` and
+`UnderstandingReadInputs.timestamps_enabled`, preserving operation-time reads.

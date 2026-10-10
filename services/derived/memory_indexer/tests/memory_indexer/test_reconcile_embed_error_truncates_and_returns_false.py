@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import queue
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import numpy as np
 import pytest
+from pydantic import SecretStr
 
-from base.config import settings
+from base.config import ConfigBoot
 from base.daemon.health import Liveness
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.backends.base import content_hash
@@ -31,6 +33,7 @@ from services.derived.memory_indexer.tests.test_memory_indexer import (
     _cancel_quietly,
     _FakeProvider,
     _FlakyProvider,
+    _liveness_timeout,
     _long_note,
 )
 from services.derived.memory_indexer.tests.test_memory_indexer import (
@@ -39,6 +42,18 @@ from services.derived.memory_indexer.tests.test_memory_indexer import (
 from services.derived.memory_indexer.tests.test_memory_indexer import (
     store_backend as store_backend,
 )
+
+
+@pytest.fixture
+def owned_config_environment() -> Iterator[None]:
+    """Restore environment delivery and the process timezone after a real ConfigBoot."""
+    try:
+        with patch.dict(os.environ):
+            yield
+    finally:
+        tzset = getattr(time, "tzset", None)
+        if tzset is not None:
+            tzset()
 
 
 def test_reconcile_embed_error_truncates_and_returns_false(
@@ -213,7 +228,7 @@ def test_process_paths_indexes_desc_and_body_chunks(
         store_backend,
         {f.resolve()},
         _FakeProvider(),
-        Liveness(daemon._liveness_timeout_s()),
+        Liveness(_liveness_timeout()),
     )
     assert str(f.resolve()) in store_backend.all_meta()
     kinds = sorted(store_backend.rows(f))
@@ -231,13 +246,19 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
     f.write_text(_long_note(12), encoding="utf-8")
     backend = store_backend
     daemon._process_paths(
-        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        backend,
+        {f.resolve()},
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
 
     f.write_text(_long_note(3), encoding="utf-8")
     daemon._process_paths(
-        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        backend,
+        {f.resolve()},
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
@@ -253,13 +274,19 @@ def test_process_paths_removes_desc_row_when_description_deleted(
     f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
     backend = store_backend
     daemon._process_paths(
-        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        backend,
+        {f.resolve()},
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
     f.write_text("body text", encoding="utf-8")
     daemon._process_paths(
-        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        backend,
+        {f.resolve()},
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
     )
     assert store_backend.rows(f) == {("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
@@ -275,13 +302,19 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
     f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
     backend = store_backend
     daemon._process_paths(
-        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        backend,
+        {f.resolve()},
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
     f.write_text("", encoding="utf-8")
     daemon._process_paths(
-        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        backend,
+        {f.resolve()},
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
     )
     assert store_backend.rows(f) == set()
     assert backend.all_meta() == {}
@@ -311,7 +344,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
         backend,
         {first.resolve(), second.resolve()},
         _FakeProvider(),
-        Liveness(daemon._liveness_timeout_s()),
+        Liveness(_liveness_timeout()),
     )
 
     assert len(backend.calls) == 1
@@ -347,7 +380,10 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
     monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
     backend = _RecordingBackend()
     daemon._process_paths(
-        backend, {note.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        backend,
+        {note.resolve()},
+        _FakeProvider(),
+        Liveness(_liveness_timeout()),
     )
     old_meta = backend.all_meta()
 
@@ -358,7 +394,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
             backend,
             {note.resolve()},
             _FailSecondBatchProvider(),
-            Liveness(daemon._liveness_timeout_s()),
+            Liveness(_liveness_timeout()),
         )
 
     # Nothing was written for the partially-embedded file; the old rows stand.
@@ -392,7 +428,7 @@ def test_complete_file_still_commits_when_another_fails(
             backend,
             {complete.resolve(), partial.resolve()},
             _FailOnSecondFileProvider(),
-            Liveness(daemon._liveness_timeout_s()),
+            Liveness(_liveness_timeout()),
         )
 
     meta = backend.all_meta()
@@ -540,6 +576,7 @@ async def test_reconcile_retry_beats_between_failed_pass_and_batch(
         await _cancel_quietly(task)
 
 
+@pytest.mark.usefixtures("owned_config_environment")
 async def test_run_unknown_provider_fails_before_health_server(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -547,16 +584,18 @@ async def test_run_unknown_provider_fails_before_health_server(
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
     monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
     monkeypatch.setattr(daemon, "start_health_server", start_health_server)
-    monkeypatch.setattr(settings.services, "embedding_backend", "unknown-provider")
+    boot = ConfigBoot()
+    monkeypatch.setattr(boot.view.services, "embedding_backend", "unknown-provider")
 
     with pytest.raises(SystemExit) as exc:
-        await daemon.run()
+        await daemon.run(config=boot)
 
     assert exc.value.code == 1
     assert "FATAL: unknown embedding provider 'unknown-provider'" in capsys.readouterr().err
     start_health_server.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("owned_config_environment")
 async def test_run_arms_retry_when_startup_reconcile_incomplete(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -575,8 +614,17 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
     monkeypatch.setattr(daemon, "stop_health_server", AsyncMock())
     monkeypatch.setattr(daemon, "_endpoint", lambda: Mock(health_port=0))
 
-    def get_provider(*, catalog: object) -> _FakeProvider:
+    provider_inputs: list[tuple[str, float, str | None]] = []
+
+    def get_provider(
+        name: str,
+        *,
+        catalog: object,
+        timeout_reader: Callable[[], float],
+        api_key_reader: Callable[[], str | None],
+    ) -> _FakeProvider:
         del catalog
+        provider_inputs.append((name, timeout_reader(), api_key_reader()))
         return provider
 
     monkeypatch.setattr(daemon, "get_provider", get_provider)
@@ -585,13 +633,16 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
     monkeypatch.setattr(daemon, "Observer", Mock())
     monkeypatch.setattr(daemon, "_reconcile", reconcile)
     monkeypatch.setattr(daemon, "_drain_loop", drain)
-    monkeypatch.setattr(
-        daemon.settings.services, "memory_indexer_reconcile_retry_backoff_seconds", 7.0
-    )
+    boot = ConfigBoot()
+    boot.set_field("memory_indexer_reconcile_retry_backoff_seconds", 7.0)
+    boot.set_field("embedding_backend", "gemini")
+    boot.set_field("memory_embed_timeout_seconds", 17.0)
+    boot.set_field("gemini_api_key", SecretStr("root-key"))
 
     with caplog.at_level(logging.WARNING, logger="services.derived.memory_indexer.daemon"):
-        await daemon.run()
+        await daemon.run(config=boot)
 
+    assert provider_inputs == [("gemini", 17.0, "root-key")]
     reconcile.assert_called_once()
     assert reconcile.call_args.args[:2] == (backend, provider)
     drain.assert_awaited_once()

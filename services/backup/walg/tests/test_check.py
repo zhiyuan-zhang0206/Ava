@@ -11,6 +11,7 @@ import psycopg
 import pytest
 
 from base.cluster.dataplane import walg_binary
+from base.config import settings
 from services.backup.walg import check, probe
 from services.backup.walg import config as walg_config
 from services.backup.walg.tests.support import (
@@ -42,7 +43,7 @@ def _verdicts(steps: list[check.Step]) -> list[tuple[str, bool]]:
 def test_off_is_a_single_failing_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps) == [("configured", False)]
     assert "AVA_WALG_CONFIG_FILE is not set" in steps[0].detail
@@ -51,7 +52,7 @@ def test_off_is_a_single_failing_step(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_a_working_setup_passes_every_step_and_leaves_nothing_in_the_store(
     sandbox: Sandbox,
 ) -> None:
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps) == [
         ("configured", True),
@@ -71,7 +72,7 @@ def test_a_working_setup_passes_every_step_and_leaves_nothing_in_the_store(
 
 
 def test_the_check_never_pins_the_key(sandbox: Sandbox) -> None:
-    check.run_check()
+    check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert walg_config.pinned_key_id() is None
 
@@ -81,7 +82,7 @@ def test_a_missing_or_edited_binary_stops_at_the_binary(
 ) -> None:
     monkeypatch.setattr(walg_binary, "installed_problem", lambda: "wal-g is not installed at /x")
 
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps) == [("configured", True), ("binary", False)]
     assert "ava converge installs it" in steps[-1].detail
@@ -91,7 +92,7 @@ def test_a_missing_or_edited_binary_stops_at_the_binary(
 def test_an_unusable_configuration_stops_before_any_storage_call(sandbox: Sandbox) -> None:
     sandbox.write_config(valid_config(sandbox.key_file, WALG_PREVENT_WAL_OVERWRITE=None))
 
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps)[-1] == ("configuration", False)
     assert "WALG_PREVENT_WAL_OVERWRITE" in steps[-1].detail
@@ -99,10 +100,10 @@ def test_an_unusable_configuration_stops_before_any_storage_call(sandbox: Sandbo
 
 
 def test_a_key_that_differs_from_the_pinned_one_fails(sandbox: Sandbox) -> None:
-    walg_config.load_walg_config()
+    walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
     sandbox.key_file.write_text("cd" * 32 + "\n")
 
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps)[-1] == ("configuration", False)
     assert "is not the key this home pinned" in steps[-1].detail
@@ -112,7 +113,7 @@ def test_a_key_that_differs_from_the_pinned_one_fails(sandbox: Sandbox) -> None:
 def test_unreachable_storage_fails_the_storage_step(sandbox: Sandbox) -> None:
     sandbox.set_mode("fail")
 
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps)[-1] == ("storage", False)
     assert "simulated failure" in steps[-1].detail
@@ -121,7 +122,7 @@ def test_unreachable_storage_fails_the_storage_step(sandbox: Sandbox) -> None:
 def test_a_credential_that_cannot_delete_fails_even_though_it_can_write(sandbox: Sandbox) -> None:
     sandbox.set_mode("nodelete")
 
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps)[-1] == ("storage", False)
     assert "cannot delete" in steps[-1].detail and "Delete granted" in steps[-1].detail
@@ -130,7 +131,7 @@ def test_a_credential_that_cannot_delete_fails_even_though_it_can_write(sandbox:
 def test_a_round_trip_that_returns_other_bytes_fails(sandbox: Sandbox) -> None:
     sandbox.set_mode("corrupt")
 
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps)[-1] == ("storage", False)
     assert "differs from the one written" in steps[-1].detail
@@ -140,7 +141,7 @@ def test_a_round_trip_that_returns_other_bytes_fails(sandbox: Sandbox) -> None:
 def test_postgres_facts_are_reported_not_judged(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    steps = check.run_check()
+    steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
     assert steps[-1].ok and "not read" in steps[-1].detail
 
     with archiving_postgres() as pg:
@@ -151,7 +152,7 @@ def test_postgres_facts_are_reported_not_judged(
                 yield conn
 
         monkeypatch.setattr(probe, "admin_connection", admin)
-        running = check.run_check()[-1]
+        running = check.run_check(path_reader=lambda: settings.walg.walg_config_file)[-1]
 
     assert running.ok
     assert "archive_mode=on, matches the configuration" in running.detail

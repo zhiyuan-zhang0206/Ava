@@ -5,10 +5,13 @@ from pathlib import Path
 import pytest
 
 import cli.commands.converge.host as cv
+from base.config import ConfigBoot
 
 
 def _ctx(home: Path) -> cv.ConvergeCtx:
-    return cv.ConvergeCtx(repo=Path("/repo"), ava_home=home, roles=frozenset({"agent-runner"}))
+    return cv.ConvergeCtx(
+        repo=Path("/repo"), ava_home=home, roles=frozenset({"agent-runner"}), config=ConfigBoot()
+    )
 
 
 def test_passes_when_pr_capable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -32,7 +35,10 @@ def test_skips_on_single_box(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: "gh CLI not installed")
     ctx = cv.ConvergeCtx(
-        repo=Path("/repo"), ava_home=tmp_path, roles=frozenset({"gateway", "agent-runner"})
+        repo=Path("/repo"),
+        ava_home=tmp_path,
+        roles=frozenset({"gateway", "agent-runner"}),
+        config=ConfigBoot(),
     )
     cv._ensure_github_pr(ctx)  # no raise
 

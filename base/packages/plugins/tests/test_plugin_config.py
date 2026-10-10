@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.config import ConfigBoot, set_field, settings
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -112,7 +113,12 @@ def test_bind_auto_writes_default_when_missing(isolated_registry: dict[str, Base
     bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
 
     cfg = get_plugin_config(
-        "test_plugin", AgentSlices.resolve(plugin_configs=isolated_registry), _FixtureConfig
+        "test_plugin",
+        AgentSlices.resolve(
+            plugin_configs=isolated_registry,
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ),
+        _FixtureConfig,
     )
     assert cfg.flag is True
     assert cfg.marker == ".git"
@@ -132,7 +138,12 @@ def test_bind_reads_existing_image(isolated_registry: dict[str, BaseModel], unit
     bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
 
     cfg = get_plugin_config(
-        "test_plugin", AgentSlices.resolve(plugin_configs=isolated_registry), _FixtureConfig
+        "test_plugin",
+        AgentSlices.resolve(
+            plugin_configs=isolated_registry,
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ),
+        _FixtureConfig,
     )
     assert cfg.flag is False
     assert cfg.marker == ".hg"
@@ -205,7 +216,12 @@ def test_merge_then_bind_resolves_removed_field_drift(
     )  # before fix, would raise SchemaDriftError here
 
     cfg = get_plugin_config(
-        "test_plugin", AgentSlices.resolve(plugin_configs=isolated_registry), _FixtureConfig
+        "test_plugin",
+        AgentSlices.resolve(
+            plugin_configs=isolated_registry,
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        ),
+        _FixtureConfig,
     )
     assert cfg.flag is True
     assert cfg.marker == ".git"
@@ -566,14 +582,24 @@ def test_apply_config_overlay_mutates_plugin_config(
     _setup_overlayable_plugin(isolated_registry)
     assert (
         get_plugin_config(
-            "overlay_test", AgentSlices.resolve(plugin_configs=isolated_registry), _FixtureConfig
+            "overlay_test",
+            AgentSlices.resolve(
+                plugin_configs=isolated_registry,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            _FixtureConfig,
         ).marker
         == ".git"
     )
     isolated_registry.update(apply_config_overlay({"marker": ".hg"}, configs=isolated_registry))
     assert (
         get_plugin_config(
-            "overlay_test", AgentSlices.resolve(plugin_configs=isolated_registry), _FixtureConfig
+            "overlay_test",
+            AgentSlices.resolve(
+                plugin_configs=isolated_registry,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            _FixtureConfig,
         ).marker
         == ".hg"
     )
@@ -589,7 +615,12 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
     monkeypatch.setattr(settings.lm, "llm_model", settings.lm.llm_model)  # snapshot for teardown
     assert (
         get_plugin_config(
-            "overlay_test", AgentSlices.resolve(plugin_configs=isolated_registry), _FixtureConfig
+            "overlay_test",
+            AgentSlices.resolve(
+                plugin_configs=isolated_registry,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            _FixtureConfig,
         ).marker
         == ".git"
     )
@@ -599,13 +630,19 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
             {"llm_model": "claude-opus-5", "marker": ".hg"},
             scope="framework",
             configs=isolated_registry,
+            set_framework_field=set_field,
         )
     )
 
     assert settings.lm.llm_model == "claude-opus-5"
     assert (
         get_plugin_config(
-            "overlay_test", AgentSlices.resolve(plugin_configs=isolated_registry), _FixtureConfig
+            "overlay_test",
+            AgentSlices.resolve(
+                plugin_configs=isolated_registry,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            _FixtureConfig,
         ).marker
         == ".git"
     )  # plugin untouched
@@ -631,7 +668,12 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
     assert settings.lm.llm_model == original_model  # framework untouched
     assert (
         get_plugin_config(
-            "overlay_test", AgentSlices.resolve(plugin_configs=isolated_registry), _FixtureConfig
+            "overlay_test",
+            AgentSlices.resolve(
+                plugin_configs=isolated_registry,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            ),
+            _FixtureConfig,
         ).marker
         == ".hg"
     )
@@ -740,3 +782,17 @@ def test_retired_google_cache_overlay_is_rejected(
         validate_config_overlay(
             {field: True}, configs=isolated_registry, models=model_catalog.models
         )
+
+
+def test_framework_overlay_targets_its_explicit_owner() -> None:
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("llm_model", "first")
+    second.set_field("llm_model", "second")
+    apply_config_overlay(
+        {"llm_model": "updated"}, scope="framework", set_framework_field=first.set_field
+    )
+    assert first.get_field("llm_model") == "updated"
+    assert second.get_field("llm_model") == "second"
+    with pytest.raises(RuntimeError, match="configuration owner's setter"):
+        apply_config_overlay({"llm_model": "refused"}, scope="framework")
+    assert first.get_field("llm_model") == "updated"

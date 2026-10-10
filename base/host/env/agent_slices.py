@@ -7,7 +7,7 @@ and hands them to the graph through `AvaContext.agent`; nodes and hooks read
 instead of reading a context-bound view.
 
 Each slice is a frozen dataclass whose field names are the flat setting names, grouped by the
-package that reads them. `AgentSlices.resolve(pins)` fills every field with the agent's pin
+package that reads them. `AgentSlices.resolve(pins, default_reader=...)` fills every field with the agent's pin
 (`config_overlay > birth_config`, merged by `resolve_agent_config_pins`) and falls through to the
 live cluster default for an unpinned field: a configuration
 change reaches the agent's next turn, and a turn sees one value of each field throughout.
@@ -21,7 +21,7 @@ build the slices too.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from types import MappingProxyType
 from typing import Any, Literal, cast
@@ -135,28 +135,30 @@ class AgentKernel:
     heartbeat_pause_max_seconds: float
 
 
-def _value(pins: Mapping[str, Any], name: str) -> Any:
+def _value(pins: Mapping[str, Any], name: str, default_reader: Callable[[str, str], Any]) -> Any:
     """The pin for `name` when the agent has one, else the live cluster default."""
-    if name in pins:
-        value = pins[name]
-    else:
-        from base.config import settings
-
-        value = getattr(getattr(settings, FIELD_DOMAINS[name]), name)
+    value = pins[name] if name in pins else default_reader(FIELD_DOMAINS[name], name)
     return tuple(cast("list[Any]", value)) if isinstance(value, list) else value
 
 
-def agent_setting(name: str, pins: Mapping[str, Any] | None = None) -> Any:
+def agent_setting(
+    name: str,
+    pins: Mapping[str, Any] | None = None,
+    *,
+    default_reader: Callable[[str, str], Any],
+) -> Any:
     """One per-agent setting: the pin when `pins` holds one, else the live default.
 
     For a process that needs a handful of fields and must not read the rest (the exec child boots
     on the lite config index, and reading a field outside it upgrades the whole config).
     """
-    return _value(pins or {}, name)
+    return _value(pins or {}, name, default_reader)
 
 
-def _kwargs(slice_type: type, pins: Mapping[str, Any]) -> dict[str, Any]:
-    return {f.name: _value(pins, f.name) for f in fields(slice_type)}
+def _kwargs(
+    slice_type: type, pins: Mapping[str, Any], default_reader: Callable[[str, str], Any]
+) -> dict[str, Any]:
+    return {f.name: _value(pins, f.name, default_reader) for f in fields(slice_type)}
 
 
 @dataclass(frozen=True)
@@ -177,6 +179,7 @@ class AgentSlices:
     pins: Mapping[str, Any]
     plugin_pins: Mapping[str, Mapping[str, Any]]
     _plugin_view: Any = field(repr=False, compare=False)
+    _default_reader: Callable[[str, str], Any] = field(repr=False, compare=False)
 
     @classmethod
     def resolve(
@@ -184,39 +187,42 @@ class AgentSlices:
         pins: Mapping[str, Any] | None = None,
         plugin_pins: Mapping[str, Mapping[str, Any]] | None = None,
         *,
+        default_reader: Callable[[str, str], Any],
         plugin_configs: Mapping[str, BaseModel] | None = None,
         brain: AgentBrain | None = None,
     ) -> AgentSlices:
         """The slices of an agent holding `pins` (`resolve_agent_config_pins`) and `plugin_pins`
         (`resolve_agent_plugin_pins`); no pins reads the cluster defaults as they are now.
         A composition owner may supply a pre-resolved `brain`; other slices still use
-        their existing live defaults and pins."""
+        their existing live defaults and pins. The root supplies the live reader;
+        resolving slices freezes their values, while read() remains live for unpinned fields."""
         from base.packages.plugins.config_view import PluginConfigView
 
         pins = pins or {}
         plugin_pins = plugin_pins or {}
         return cls(
-            brain=brain if brain is not None else AgentBrain(**_kwargs(AgentBrain, pins)),
-            prompt=Prompt(**_kwargs(Prompt, pins)),
-            memory=MemoryRecall(**_kwargs(MemoryRecall, pins)),
-            history_dump=HistoryDump(**_kwargs(HistoryDump, pins)),
-            sdk_reminders=SdkReminders(**_kwargs(SdkReminders, pins)),
-            llm_policy=LlmCallPolicy(**_kwargs(LlmCallPolicy, pins)),
-            overrides=ModelOverrides(**_kwargs(ModelOverrides, pins)),
-            sandbox=Sandbox(**_kwargs(Sandbox, pins)),
-            kernel=AgentKernel(**_kwargs(AgentKernel, pins)),
+            brain=brain
+            if brain is not None
+            else AgentBrain(**_kwargs(AgentBrain, pins, default_reader)),
+            prompt=Prompt(**_kwargs(Prompt, pins, default_reader)),
+            memory=MemoryRecall(**_kwargs(MemoryRecall, pins, default_reader)),
+            history_dump=HistoryDump(**_kwargs(HistoryDump, pins, default_reader)),
+            sdk_reminders=SdkReminders(**_kwargs(SdkReminders, pins, default_reader)),
+            llm_policy=LlmCallPolicy(**_kwargs(LlmCallPolicy, pins, default_reader)),
+            overrides=ModelOverrides(**_kwargs(ModelOverrides, pins, default_reader)),
+            sandbox=Sandbox(**_kwargs(Sandbox, pins, default_reader)),
+            kernel=AgentKernel(**_kwargs(AgentKernel, pins, default_reader)),
             pins=MappingProxyType(dict(pins)),
             plugin_pins=MappingProxyType({p: dict(f) for p, f in plugin_pins.items()}),
             _plugin_view=PluginConfigView(plugin_configs or {}, plugin_pins),
+            _default_reader=default_reader,
         )
 
     def read(self, domain: str, field: str) -> Any:
         """The raw value of any core setting for this agent: its pin, else the live default."""
         if field in self.pins:
             return self.pins[field]
-        from base.config import settings
-
-        return getattr(getattr(settings, domain), field)
+        return self._default_reader(domain, field)
 
     def plugin_config(self, plugin: str) -> Any:
         """This agent's config: the supplied boot image with its own plugin pins."""

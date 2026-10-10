@@ -20,7 +20,8 @@ from datetime import time as clock_time
 from pathlib import Path
 
 from base import telemetry
-from base.config import settings
+from base.clock import Clock, clock_config_from_boot
+from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.health_schema import DEGRADED, OK, component
@@ -140,10 +141,12 @@ async def _sleep(seconds: float) -> None:
         remaining -= chunk
 
 
-async def _sleep_until_next_backup_hour(now: datetime) -> None:
+async def _sleep_until_next_backup_hour(now: datetime, *, config: ConfigBoot) -> None:
     """Sleep until the next configured backup hour on the cluster clock."""
-    local_now = now.astimezone(_cluster_tz())
-    backup_hour = settings.services.backup_hour
+    local_now = now.astimezone(
+        _cluster_tz(clock_factory=lambda: Clock(clock_config_from_boot(config)))
+    )
+    backup_hour = config.view.services.backup_hour
     next_date = local_now.date()
     target = datetime.combine(next_date, clock_time(hour=backup_hour), tzinfo=local_now.tzinfo)
     if local_now >= target:
@@ -155,12 +158,17 @@ async def _sleep_until_next_backup_hour(now: datetime) -> None:
     await _sleep((target.astimezone(UTC) - now).total_seconds())
 
 
-async def _run_due_local_dump_restore(now: datetime) -> None:
+async def _run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> None:
     """Run one weekly local restore proof without re-running the daily dump."""
     try:
-        if not local_dump_restore_due(now, last_success=load_local_dump_restore_success()):
+        if not local_dump_restore_due(
+            now,
+            last_success=load_local_dump_restore_success(),
+            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+            hour_reader=lambda: config.view.services.backup_hour,
+        ):
             return
-        await run_job("restore")
+        await run_job("restore", config=config)
         record_local_dump_restore_success(now)
     except OperationBusyError as exc:
         _log.info("[pg-backup] local restore drill deferred: %s", exc)
@@ -174,22 +182,26 @@ async def _run_due_local_dump_restore(now: datetime) -> None:
         _log.exception("[pg-backup] local restore drill failed")
 
 
-async def _backup_loop(state: _BackupState) -> None:
+async def _backup_loop(state: _BackupState, *, config: ConfigBoot) -> None:
     """Run due dumps and retry a failed dump sooner than the next schedule."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
     # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
     while True:
         now = datetime.now(UTC)
-        if not is_due(now):
-            await _sleep_until_next_backup_hour(now)
+        if not is_due(
+            now,
+            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+            hour_reader=lambda: config.view.services.backup_hour,
+        ):
+            await _sleep_until_next_backup_hour(now, config=config)
             continue
 
         state.record_attempt(now)
         state.running = True
         try:
-            await run_job("dump", now=now)
+            await run_job("dump", now=now, config=config)
             state.record_success(now)
-            await _run_due_local_dump_restore(now)
+            await _run_due_local_dump_restore(now, config=config)
         except Exception as exc:
             state.record_error(str(exc))
             _log.exception("[pg-backup] dump failed; retrying in %ss", BACKUP_RETRY_INTERVAL_S)
@@ -197,10 +209,10 @@ async def _backup_loop(state: _BackupState) -> None:
             continue
         finally:
             state.running = False
-        await _sleep_until_next_backup_hour(datetime.now(UTC))
+        await _sleep_until_next_backup_hour(datetime.now(UTC), config=config)
 
 
-async def run() -> None:
+async def run(*, config: ConfigBoot) -> None:
     """Own the pidfile and health server for the backup scheduler."""
     if _is_running():
         _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -216,7 +228,7 @@ async def run() -> None:
     )
     _log.info("[pg-backup] healthz listening on :%s", endpoint.health_port)
     try:
-        await _backup_loop(state)
+        await _backup_loop(state, config=config)
     finally:
         await stop_health_server(health)
         _remove_pidfile()
@@ -227,6 +239,7 @@ def main() -> None:
     """Entry point for the gateway service session."""
     from base.deploy.schema.migrations import assert_schema_current
 
+    config = ConfigBoot()
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="pg_backup")
     install_graceful_shutdown("pg_backup")
@@ -238,7 +251,7 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(config=config))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[pg-backup] interrupted, shutting down")

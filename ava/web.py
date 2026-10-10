@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
-from base.config import settings
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.lm.call import answer_text
 from base.lm.effort import ReasoningEffort, coerce_effort
@@ -53,20 +52,26 @@ class FetchError(WebError):
 # `settings.web` read would crash a gateway-profile process at import.
 def _max_count() -> int:
     """`AVA_WEB_MAX_RESULTS` — the search-result cap (Brave free tier: 20)."""
-    return settings.web.web_max_search_results
+    from ava.sdk_surface.settings import config_authority
+
+    return config_authority().service_field_value("web_max_search_results")
 
 
 def _search_timeout_s() -> float:
     """`AVA_WEB_SEARCH_TIMEOUT_SECONDS` — Brave search usually answers < 1s;
     10s covers occasional network jitter."""
-    return settings.web.web_search_timeout_seconds
+    from ava.sdk_surface.settings import config_authority
+
+    return config_authority().service_field_value("web_search_timeout_seconds")
 
 
 def _fetch_timeout_s() -> float:
     """`AVA_WEB_FETCH_TIMEOUT_SECONDS` — Jina Reader runs a headless browser +
     JS + content-extraction server-side, significantly slower than a pure HTTP
     API; 30s covers a heavy SPA cold render."""
-    return settings.web.web_fetch_timeout_seconds
+    from ava.sdk_surface.settings import config_authority
+
+    return config_authority().service_field_value("web_fetch_timeout_seconds")
 
 
 def _search_endpoint() -> str:
@@ -75,13 +80,17 @@ def _search_endpoint() -> str:
     Read lazily like the other web settings: the web domain is
     agent-profile-only and the gateway imports this module transitively via
     `ava` (see the comment above `_max_count`)."""
-    return settings.web.web_brave_search_endpoint
+    from ava.sdk_surface.settings import config_authority
+
+    return config_authority().service_field_value("web_brave_search_endpoint")
 
 
 def _reader_base() -> str:
     """`AVA_WEB_JINA_BASE_URL` — Jina Reader base URL; the target page URL is
     appended after it."""
-    return settings.web.web_jina_reader_base
+    from ava.sdk_surface.settings import config_authority
+
+    return config_authority().service_field_value("web_jina_reader_base")
 
 
 # Python urllib default UA (`Python-urllib/3.x`) is blocked by Cloudflare
@@ -153,7 +162,9 @@ def search(
 
 def _search_one(query: str, count: int) -> list[SearchResult]:
     """The synchronous unit of work — search Brave for one query."""
-    if settings.web.brave_api_key is None:
+    from ava.sdk_surface.settings import config_authority
+
+    if config_authority().service_field_value("brave_api_key") is None:
         raise SearchError(
             "BRAVE_API_KEY environment variable not set — register for a free tier key at "
             "https://brave.com/search/api/ then export it or write it into .env"
@@ -164,7 +175,9 @@ def _search_one(query: str, count: int) -> list[SearchResult]:
     req = urllib.request.Request(  # noqa: S310 — endpoint comes from settings; default is an https:// literal
         url,
         headers={
-            "X-Subscription-Token": settings.web.brave_api_key.get_secret_value(),
+            "X-Subscription-Token": config_authority()
+            .service_field_value("brave_api_key")
+            .get_secret_value(),
             "Accept": "application/json",
         },
     )
@@ -297,6 +310,8 @@ def _read_page(url: str, max_chars: int) -> tuple[str, str, str, bool]:
             upstream URL was unreachable, or the body came back as a
             bot-challenge / login wall instead of the page.
     """
+    from ava.sdk_surface.settings import config_authority
+
     # URL must be safely encoded — Jina docs say "don't forget to encode".
     # Safe keeps common URL characters to avoid double-encoding; special chars
     # (spaces / CJK query) get quoted to %xx
@@ -308,8 +323,10 @@ def _read_page(url: str, max_chars: int) -> tuple[str, str, str, bool]:
         "User-Agent": _AVA_USER_AGENT,
     }
     # JINA_API_KEY is optional — with a key 20 RPM → 500 RPM; anonymous also works
-    if settings.web.jina_api_key is not None:
-        headers["Authorization"] = f"Bearer {settings.web.jina_api_key.get_secret_value()}"
+    if config_authority().service_field_value("jina_api_key") is not None:
+        headers["Authorization"] = (
+            f"Bearer {config_authority().service_field_value('jina_api_key').get_secret_value()}"
+        )
 
     req = urllib.request.Request(request_url, headers=headers)  # noqa: S310 — base comes from settings; default is an https:// literal
 
@@ -384,13 +401,19 @@ def _answer(
             empty answer. Unknown model invocation errors retain their original
             type without retries.
     """
+    from ava.sdk_surface.settings import config_authority
+
     cut = "\n\n[The page was longer than the read limit and was cut off here.]" if truncated else ""
     page = f"# {title}\n{url}\n\n{content}{cut}"
 
     from ava.sdk_surface import settings as sdk_settings
 
-    model = settings.web.web_fetch_model
-    resolved_effort = effort if effort is not None else settings.web.web_fetch_reasoning
+    model = config_authority().service_field_value("web_fetch_model")
+    resolved_effort = (
+        effort
+        if effort is not None
+        else config_authority().service_field_value("web_fetch_reasoning")
+    )
     return answer_text(
         prompt,
         page,
@@ -399,13 +422,17 @@ def _answer(
         error_type=FetchError,
         desc=f"{model} for {url}",
         build_error=lambda m, e: FetchError(f"Building model {m!r} for {url} failed: {e}"),
-        retry_attempts=settings.lm.llm_invoke_retry_attempts,
-        retry_delay_seconds=settings.lm.llm_invoke_retry_delay_seconds,
-        retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
-        timeout=settings.lm.llm_invoke_timeout_seconds,
+        retry_attempts=config_authority().service_field_value("llm_invoke_retry_attempts"),
+        retry_delay_seconds=config_authority().service_field_value(
+            "llm_invoke_retry_delay_seconds"
+        ),
+        retry_max_delay_seconds=config_authority().service_field_value(
+            "llm_invoke_retry_max_delay_seconds"
+        ),
+        timeout=config_authority().service_field_value("llm_invoke_timeout_seconds"),
         usage_source="web.fetch",
         catalog=sdk_settings.model_catalog(),
-        llm_override=settings.lm.llm_override,
+        llm_override=config_authority().service_field_value("llm_override"),
         overrides=sdk_settings.model_overrides(),
     )
 

@@ -19,17 +19,24 @@ Coverage:
     the elif header and silently lost AIMessage is exactly this kind of bug)
 """
 
+import os
+from unittest.mock import patch
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from base.agents.history.timeline import (
-    TimelineItem,
-    build_timeline_items,
-)
+from base.agents.history.timeline import TimelineItem, build_timeline_items
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock
+from base.config import settings
 from base.db import create_agent
 from gateway.app import app
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 
 @pytest.fixture
@@ -37,7 +44,7 @@ def test_client(db_conn: psycopg.Connection):
     """TestClient + lifespan. db_conn's TRUNCATE runs before the lifespan —
     the DB pool reuses the same test library (settings.data_plane.db_url is
     already replaced by conftest)."""
-    with TestClient(app) as client:
+    with patch.dict(os.environ), TestClient(app) as client:
         yield client
 
 
@@ -76,7 +83,7 @@ class TestSdkCallsProjection:
                 "sdk_calls": [{"method": "files.read", "count": 3}],
             },
         )
-        items, _ = build_timeline_items([ai, out], [])
+        items, _ = build_timeline_items([ai, out], [], inputs=_TIMELINE_INPUTS)
         code = next(it for it in items if it.kind == "agent_code")
         assert code.sdk_calls is not None
         assert [(c.method, c.count) for c in code.sdk_calls] == [("files.read", 3)]
@@ -93,7 +100,7 @@ class TestSdkCallsProjection:
                 {"name": "execute_code", "args": {"code": "ava.files.read('x')"}, "id": "tc-1"}
             ],
         )
-        items, _ = build_timeline_items([ai], [])
+        items, _ = build_timeline_items([ai], [], inputs=_TIMELINE_INPUTS)
         code = next(it for it in items if it.kind == "agent_code")
         assert code.sdk_calls is None
 
@@ -110,7 +117,7 @@ class TestSdkCallsProjection:
             tool_call_id="tc-9",
             additional_kwargs={"ava_msg_type": "exec_output", "sdk_calls": []},
         )
-        items, _ = build_timeline_items([ai, out], [])
+        items, _ = build_timeline_items([ai, out], [], inputs=_TIMELINE_INPUTS)
         code = next(it for it in items if it.kind == "agent_code")
         assert code.sdk_calls == []
 
@@ -141,7 +148,7 @@ class TestSdkCallsProjection:
                 "sdk_calls": [{"method": "b.fn", "count": 2}],
             },
         )
-        items, _ = build_timeline_items([ai, out_a, out_b], [])
+        items, _ = build_timeline_items([ai, out_a, out_b], [], inputs=_TIMELINE_INPUTS)
         codes = [it for it in items if it.kind == "agent_code"]
         assert [[(c.method, c.count) for c in (it.sdk_calls or [])] for it in codes] == [
             [("a.fn", 1)],
@@ -168,7 +175,7 @@ class TestAvaMsgTypeDispatch:
     @staticmethod
     def _render(msg: HumanMessage) -> list[TimelineItem]:
 
-        return build_timeline_items([msg], [])[0]
+        return build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)[0]
 
     @staticmethod
     def _tagged(msg_type: str, **extra: object) -> HumanMessage:
@@ -365,7 +372,7 @@ class TestTimelineFailLoud:
             )
 
         monkeypatch.setattr(gateway_timeline, "build_timeline_items", boom)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with patch.dict(os.environ), TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 500, (
             f"dispatch error must fail-loud as 500, got {resp.status_code}: {resp.text[:200]}"

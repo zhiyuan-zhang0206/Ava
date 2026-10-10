@@ -582,6 +582,7 @@ def apply_config_overlay(
     *,
     configs: Mapping[str, BaseModel] | None = None,
     scope: Literal["framework", "plugin", "all"] = "all",
+    set_framework_field: Callable[[str, object], None] | None = None,
 ) -> dict[str, BaseModel]:
     """Apply framework fields and return a resolved plugin config image.
 
@@ -589,11 +590,10 @@ def apply_config_overlay(
     fields afterwards. ``scope="framework"`` preserves the supplied plugin
     image; ``scope="plugin"`` preserves core settings. Plugin instances are
     rebuilt from their owning image without mutating the input mapping.
-    Core fields still use ``base_config.set_field`` at their existing boot stage.
+    Core fields use the supplied root setter at their existing boot stage.
+    Plugin-only operations need no framework mutation capability.
     Invalid plugin values raise ``InvalidConfigOverlay``.
     """
-    import base.config as base_config
-
     targets = resolve_overlay_targets(overlay, configs)
     resolved = dict(configs or {})
     grouped: dict[str | None, dict[str, object]] = {}
@@ -607,8 +607,12 @@ def apply_config_overlay(
     for plugin, updates in grouped.items():
         try:
             if plugin is None:
+                if set_framework_field is None:
+                    raise RuntimeError(
+                        "framework overlay requires its configuration owner's setter"
+                    )
                 for field, value in updates.items():
-                    base_config.set_field(field, value)
+                    set_framework_field(field, value)
             else:
                 instance = resolved[plugin]
                 resolved[plugin] = type(instance)(**{**instance.model_dump(), **updates})

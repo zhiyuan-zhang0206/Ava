@@ -7,6 +7,7 @@ import json
 import threading
 import time
 import urllib.error
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -15,13 +16,14 @@ from pydantic import SecretStr
 
 import ava
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
+from ava.sdk_surface.install import Installation
 from ava.tests.web._web_helpers import _FakeResp
 from ava.web import SearchError, WebError
 from base.config import settings
 
 # Retry backoff waits are recorded, not slept, so retry-path tests run instantly; the retry
 # loop itself is still exercised (call counts).
-pytestmark = pytest.mark.usefixtures("retry_waits")
+pytestmark = [pytest.mark.usefixtures("retry_waits"), pytest.mark.usefixtures("sdk_model_owner")]
 
 
 def _make_brave_response(results: list[dict]) -> bytes:
@@ -273,6 +275,85 @@ def test_search_hits_configured_endpoint(monkeypatch: pytest.MonkeyPatch) -> Non
     with patch("ava.web.urllib.request.urlopen", side_effect=_capture):
         ava.web.search(["query"])
     assert captured["url"].startswith("https://search.relay.example/api?")
+
+
+def test_search_uses_two_owned_boots_and_live_updates(
+    monkeypatch: pytest.MonkeyPatch, model_installation: Installation, tmp_path: Path
+) -> None:
+    """SDK configuration follows its installation, including later owner writes."""
+    import os
+    from dataclasses import replace
+
+    from base.config import ConfigBoot
+    from base.config.service_read import ConfigAuthority
+
+    observed: list[tuple[str, str, float]] = []
+
+    def capture(req: Any, timeout: float) -> _FakeResp:
+        observed.append((req.full_url, req.get_header("X-subscription-token"), timeout))
+        return _FakeResp(_make_brave_response([]))
+
+    try:
+        with patch.dict(os.environ), patch("ava.web.urllib.request.urlopen", side_effect=capture):
+            first, second = ConfigBoot(), ConfigBoot()
+            installations: list[Installation] = []
+            for index, boot in enumerate((first, second), start=1):
+                boot.set_field("brave_api_key", SecretStr(f"key-{index}"))
+                boot.set_field("web_brave_search_endpoint", f"https://search-{index}.example/api")
+                boot.set_field("web_search_timeout_seconds", float(index + 10))
+                boot.set_field("web_max_search_results", index)
+                authority = ConfigAuthority.deferred(
+                    runtime=boot.view,
+                    build_all_domains=boot.ensure_eager,
+                    env_path=tmp_path / f"config-{index}.env",
+                )
+                installations.append(replace(model_installation, authority=authority))
+                assert not boot.is_full()
+            for installation in installations:
+                monkeypatch.setattr(ava, "__plugin_installation__", installation)
+                assert ava.web.search(["q"], count=20) == [[]]
+            first.set_field("brave_api_key", SecretStr("key-updated"))
+            first.set_field("web_search_timeout_seconds", 31.0)
+            monkeypatch.setattr(ava, "__plugin_installation__", installations[0])
+            assert ava.web.search(["q"], count=20) == [[]]
+            assert observed == [
+                ("https://search-1.example/api?q=q&count=1", "key-1", 11.0),
+                ("https://search-2.example/api?q=q&count=2", "key-2", 12.0),
+                ("https://search-1.example/api?q=q&count=1", "key-updated", 31.0),
+            ]
+    finally:
+        time.tzset()
+
+
+def test_search_keeps_key_and_retry_timeout_read_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The key check/header and each retry retain their original read points."""
+    from base.config.service_read import ConfigAuthority
+
+    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    original_read = ConfigAuthority.service_field_value
+    reads: list[str] = []
+
+    def record(authority: ConfigAuthority, field: str) -> Any:
+        reads.append(field)
+        return original_read(authority, field)
+
+    monkeypatch.setattr(ConfigAuthority, "service_field_value", record)
+    with patch(
+        "ava.web.urllib.request.urlopen",
+        side_effect=[
+            urllib.error.URLError("temporary failure"),
+            _FakeResp(_make_brave_response([])),
+        ],
+    ):
+        assert ava.web.search(["q"]) == [[]]
+    assert reads == [
+        "brave_api_key",
+        "web_max_search_results",
+        "web_brave_search_endpoint",
+        "brave_api_key",
+        "web_search_timeout_seconds",
+        "web_search_timeout_seconds",
+    ]
 
 
 # ─── search signature ───

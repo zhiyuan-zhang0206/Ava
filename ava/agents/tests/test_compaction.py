@@ -3,6 +3,8 @@
 import contextlib
 import io
 import json
+import os
+from unittest.mock import patch
 from uuid import uuid4
 
 import httpx
@@ -67,6 +69,7 @@ def test_fixed_routes_keep_original_source_and_distinguish_status() -> None:
         return httpx.Response(202 if len(calls) == 2 else 200, json=body.model_dump(mode="json"))
 
     with (
+        patch.dict(os.environ),  # restore the cold config owner's real environment delivery
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
         transport.use_client(http),
     ):

@@ -8,8 +8,9 @@ hands components the `Database` handle, never the URL: the URL carries the login
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
-from base.config import settings
+from base.config import ConfigBoot, settings
 
 
 @dataclass(frozen=True)
@@ -30,11 +31,20 @@ class DbConfig:
 def db_config_from_settings() -> DbConfig:
     """Build the slice from the live settings (read at each call, so a test or an overlay that
     changed a field reaches the next dial exactly as the former direct reads did)."""
+    return _from_view(settings)
+
+
+def db_config_from_boot(boot: ConfigBoot) -> DbConfig:
+    """Read the same dial slice from this composition root's configuration owner."""
+    return _from_view(boot.view)
+
+
+def _from_view(view: Any) -> DbConfig:
     return DbConfig(
-        db_url=settings.data_plane.db_url,
-        db_sslmode=settings.data_plane.db_sslmode,
-        db_pool_min_size=settings.data_plane.db_pool_min_size,
-        db_pool_max_size=settings.data_plane.db_pool_max_size,
-        pgbouncer_enabled=settings.data_plane.pgbouncer_enabled,
-        db_authority_refusal=settings.env_boot.db_authority_refusal,
+        db_url=view.data_plane.db_url,
+        db_sslmode=view.data_plane.db_sslmode,
+        db_pool_min_size=view.data_plane.db_pool_min_size,
+        db_pool_max_size=view.data_plane.db_pool_max_size,
+        pgbouncer_enabled=view.data_plane.pgbouncer_enabled,
+        db_authority_refusal=view.env_boot.db_authority_refusal,
     )

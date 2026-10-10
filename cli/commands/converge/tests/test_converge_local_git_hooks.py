@@ -10,10 +10,13 @@ import pytest
 import cli.commands.converge._brew_pin as cbp
 import cli.commands.converge._steps as csteps
 import cli.commands.converge.host as cv
+from base.config import ConfigBoot
 
 
 def _ctx(tmp_path: Path) -> cv.ConvergeCtx:
-    return cv.ConvergeCtx(repo=Path("/repo"), ava_home=tmp_path, roles=cv.ALL_ROLES)
+    return cv.ConvergeCtx(
+        repo=Path("/repo"), ava_home=tmp_path, roles=cv.ALL_ROLES, config=ConfigBoot()
+    )
 
 
 def _with_script(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

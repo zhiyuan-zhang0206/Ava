@@ -1,7 +1,9 @@
 """On an agent-runner (the conftest default role), the SDK client's base_url
 must resolve to gateway_url, not the (empty/removed) gateway_url."""
 
+import os
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
@@ -13,13 +15,15 @@ from base.agents.context import AvaContext
 @pytest.fixture(autouse=True)
 def _fresh_clients() -> Any:
     """Each test builds the gateway client itself: a context with a clean `ClientSet`."""
-    context = AvaContext(clients=process_clients())
-    ava.context = context
-    try:
-        yield
-    finally:
-        del ava.context
-        context.clients.close()
+    # The owned cold ConfigBoot may deliver environment at first HTTP use.
+    with patch.dict(os.environ):
+        context = AvaContext(clients=process_clients())
+        ava.context = context
+        try:
+            yield
+        finally:
+            del ava.context
+            context.clients.close()
 
 
 def test_gateway_client_base_url_is_gateway_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,7 +169,21 @@ def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> Non
         seen.append(str(request.url))
         return httpx.Response(200, json={"results": [], "ancestors": []})
 
-    context = AvaContext(identity=AgentIdentity(44, True))
+    from ava.gateway_client.transport import GatewayTransportInputs
+    from base.agents.context.clients import ClientSet
+
+    context = AvaContext(
+        identity=AgentIdentity(44, True),
+        clients=ClientSet(
+            factories={
+                GatewayTransportInputs: lambda: GatewayTransportInputs(
+                    max_retries_reader=lambda: 3,
+                    retry_delay_reader=lambda: 1.0,
+                    memory_deadline_reader=lambda: 15.0,
+                )
+            }
+        ),
+    )
     pin_no_identity()
     with (
         httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(answer)) as client,

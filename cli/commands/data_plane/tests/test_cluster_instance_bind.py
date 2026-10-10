@@ -8,16 +8,31 @@ fails fast on timeout. A loopback-only single box never waits.
 
 import os
 import subprocess
+from collections.abc import Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
 from base.cluster import ownership, port_preflight
-from base.config import settings
+from base.config import ConfigBoot, settings
 from cli.commands.data_plane import cluster_instance as _ci
+
+
+@pytest.fixture(autouse=True)
+def config_boot_environment(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
+    """Restore process delivery from each independent operation's boot."""
+
+    def build_owner() -> ConfigBoot:
+        config = ConfigBoot()
+        config.view.walg.walg_config_file = settings.walg.walg_config_file
+        return config
+
+    monkeypatch.setattr(_ci, "ConfigBoot", build_owner)
+    with patch.dict(os.environ):
+        yield
 
 
 def _no_native_effect(*_args: object, **_kwargs: object) -> None:
@@ -629,12 +644,16 @@ def test_start_pg_launches_with_the_archive_arguments_when_wal_g_is_on(
 
     make_sandbox(tmp_path, monkeypatch)
     warned: list[bool] = []
-    monkeypatch.setattr(_ci, "warn_archive_inactive", lambda: warned.append(True))
+
+    def record_archive_warning(**_inputs: object) -> None:
+        warned.append(True)
+
+    monkeypatch.setattr(_ci, "warn_archive_inactive", record_archive_warning)
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
     assert _ci._start_pg(5433, "", retained_children=retained_children) == 0
 
-    args = archive_pg_args()
+    args = archive_pg_args(path_reader=lambda: settings.walg.walg_config_file)
     assert args and args[1] == "archive_mode=on"
     assert calls[0][-len(args) :] == args, (
         "the archive settings are launch arguments of the postmaster"

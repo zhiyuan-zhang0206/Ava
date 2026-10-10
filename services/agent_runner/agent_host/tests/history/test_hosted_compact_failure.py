@@ -214,10 +214,11 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         ops_pool=aops_pool,
         event_publisher=publisher,
         llm=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=configured_policy().clock_factory,
     )
     host = _build_host_driving_invoke_until_done(aops_pool, saver, graph, ctx, monkeypatch)
     async with asyncio.TaskGroup() as tasks:

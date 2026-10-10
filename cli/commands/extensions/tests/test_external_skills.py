@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import ConfigBoot
 from cli.commands.converge import spec as converge_host
 
 SKILL_NAME = "operating-ava-cluster"
@@ -67,7 +68,7 @@ def _write_source(repo: Path, *, body: str = "operator v1\n") -> Path:
 def _ctx(repo: Path, home: Path) -> converge_host.ConvergeCtx:
     ava_home = home / ".ava"
     (ava_home / "configs").mkdir(parents=True, exist_ok=True)
-    return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
+    return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None, config=ConfigBoot())
 
 
 def _target(client_home: Path) -> Path:

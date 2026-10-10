@@ -10,6 +10,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent.hooks import compact
+from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
@@ -47,14 +48,21 @@ async def test_compaction_programming_error_stops_once_without_history_change(
     with pytest.raises(TypeError) as raised:
         if emergency:
             await compact.emergency_compact_summary(
-                messages, llm, AgentSlices.resolve(), catalog=model_catalog
+                messages,
+                llm,
+                AgentSlices.resolve(
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                ),
+                catalog=model_catalog,
             )
         else:
             await compact._auto_compact_summary(
                 messages,
                 llm,
                 content_count=1,
-                slices=AgentSlices.resolve(),
+                slices=AgentSlices.resolve(
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                ),
                 catalog=model_catalog,
             )
     assert raised.value is error
@@ -77,7 +85,9 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
     )
     monkeypatch.setattr(compact, "ainvoke_tool_call", invocation)
     llm = cast(BaseChatModel, MagicMock())
-    slices = AgentSlices.resolve()
+    slices = AgentSlices.resolve(
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    )
     if emergency:
         result = await compact.emergency_compact_summary(
             messages, llm, slices, catalog=build_model_catalog()

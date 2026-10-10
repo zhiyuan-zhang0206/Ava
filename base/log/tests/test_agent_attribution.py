@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest import mock
 
 import pytest
@@ -91,3 +93,34 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
     assert fields["sha"] == "loaded-generation"
     assert fields["host"] == "machine-a"
     assert fields["pid"] > 0
+
+
+def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import base.log as slog
+
+    monkeypatch.setattr(slog, "_init_done", False)
+    producer = mock.Mock(side_effect=AssertionError("the logger must pass its root's factory"))
+    machine = mock.Mock(return_value="owned-machine")
+    image = cast(Any, SimpleNamespace(sha="already-loaded"))
+    with (
+        mock.patch.object(slog.logger, "add"),
+        mock.patch.object(slog, "_add_file_sink"),
+        mock.patch.object(slog, "add_postgres_sink") as init_pipeline,
+        mock.patch.object(slog, "_install_stdlib_intercept"),
+        mock.patch.object(slog.loaded_commit, "freeze") as freeze,
+        mock.patch.object(slog.loaded_commit, "get") as read_late_version,
+        mock.patch.object(slog.logger, "info") as boot_log,
+    ):
+        slog.init_gateway_process(
+            name="agent_host", producer=producer, machine_reader=machine, image=image
+        )
+    init_pipeline.assert_called_once_with(
+        process="agent_host", producer=producer, machine_reader=machine
+    )
+    producer.assert_not_called()
+    freeze.assert_not_called()
+    read_late_version.assert_not_called()
+    assert boot_log.call_args.kwargs["sha"] == "already-loaded"
+    assert boot_log.call_args.kwargs["host"] == "owned-machine"

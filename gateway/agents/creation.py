@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TypedDict
+from collections.abc import Callable
+from typing import TypedDict, cast
 
 from fastapi import Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
@@ -93,6 +94,9 @@ async def create_and_launch_agent(
     """
     from gateway.agents import router as agent_router
 
+    def default_model_reader() -> str:
+        return cast(str, authority.service_field_value("llm_model"))
+
     snapshot = immutable_birth or creation_identity is not None
     arguments = _creation_arguments(
         body, creation_key, creation_identity, immutable_birth=immutable_birth
@@ -104,7 +108,13 @@ async def create_and_launch_agent(
         )
         if existing is not None:
             return await recover_launch(
-                pool, db, bus, existing, immutable_snapshot=snapshot, catalog=catalog
+                pool,
+                db,
+                bus,
+                existing,
+                immutable_snapshot=snapshot,
+                catalog=catalog,
+                default_model_reader=default_model_reader,
             )
     preset_name, tail_skills, model_receipt = await asyncio.to_thread(
         agent_router._spawn_preflight_blocking,
@@ -154,7 +164,13 @@ async def create_and_launch_agent(
             raise RuntimeError("committed agent creation receipt is missing")
         if not committed.launch_pending:
             return await recover_launch(
-                pool, db, bus, committed, immutable_snapshot=snapshot, catalog=catalog
+                pool,
+                db,
+                bus,
+                committed,
+                immutable_snapshot=snapshot,
+                catalog=catalog,
+                default_model_reader=default_model_reader,
             )
         target, birth_config, launch_attempt_id = (
             committed.machine,
@@ -173,7 +189,7 @@ async def create_and_launch_agent(
     # equal to new_id in production; the runner answers for the launch). A
     # withdrawal settlement travels as the spawner's receipt (task #4306).
     spawned = await agent_router._dispatch_committed_launch(
-        pool, db, bus, target, launch, catalog=catalog
+        pool, db, bus, target, launch, catalog=catalog, default_model_reader=default_model_reader
     )
     if model_receipt is not None:
         spawned = spawned.model_copy(
@@ -183,7 +199,9 @@ async def create_and_launch_agent(
                 )
             }
         )
-    return await agent_router._accepted_launch_receipt(pool, spawned, catalog=catalog)
+    return await agent_router._accepted_launch_receipt(
+        pool, spawned, catalog=catalog, default_model_reader=default_model_reader
+    )
 
 
 async def recover_launch(
@@ -193,6 +211,7 @@ async def recover_launch(
     existing: CreationReceipt,
     *,
     catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
     immutable_snapshot: bool = False,
 ) -> SpawnedAgent:
     """Recover only an unadmitted birth; a completed incarnation is never revived."""
@@ -213,10 +232,13 @@ async def recover_launch(
                 birth_config=existing.birth_config,
             ),
             catalog=catalog,
+            default_model_reader=default_model_reader,
         )
     else:
         spawned = SpawnedAgent(id=existing.agent_id)
-    return await agent_router._accepted_launch_receipt(pool, spawned, catalog=catalog)
+    return await agent_router._accepted_launch_receipt(
+        pool, spawned, catalog=catalog, default_model_reader=default_model_reader
+    )
 
 
 async def announce_creation_prompt(

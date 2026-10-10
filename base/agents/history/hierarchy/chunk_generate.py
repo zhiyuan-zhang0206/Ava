@@ -41,6 +41,7 @@ from base.agents.history.hierarchy.generate import (
 from base.agents.history.hierarchy.group import GroupReplyError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup, parse_reply, resolve_groups
 from base.agents.history.hierarchy.units import MessageUnit, catalog_line, divide_units
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.lm.catalog import ModelCatalog
 
 _CHUNK_PROMPT = """The messages above are background; what follows is a separate task.
@@ -110,6 +111,7 @@ def generate_chunk(
     prefix: Sequence[BaseMessage],
     start_offset: int,
     *,
+    timeline_inputs: TimelineReadInputs,
     model: str,
     catalog: ModelCatalog,
     agent_id: int,
@@ -132,7 +134,7 @@ def generate_chunk(
         ValueError: the stretch has no unit.
     """
     chunk = list(prefix[start_offset:])
-    units = divide_units(chunk)
+    units = divide_units(chunk, timeline_inputs=timeline_inputs)
     instruction = build_chunk_instruction(chunk, units)
     catalog_lines = build_catalog(chunk, units).splitlines()
     buffer: list[ChunkCall] = []

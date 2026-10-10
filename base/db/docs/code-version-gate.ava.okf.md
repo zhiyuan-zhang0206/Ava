@@ -72,3 +72,16 @@ the restore against a fake and a real Postgres, the raise, the migration pair),
 `tests/components/cli/test_pgbouncer_wire.py` (the name in a real PgBouncer's client list).
 
 Parent: [[base/docs/infrastructure-utilities.ava.okf.md|infrastructure utilities]].
+
+## Explicit process composition
+
+`ProcessDbGate` is the gate owner supplied by an executable entry point. The
+entry retains one instance across its independent `Database` handles, lazy
+handle factories and sync/async pools. A handle binds that owner; creating or
+refreshing a handle does not restart its 30-second budget. Pool configure and
+check callbacks retain the same owner and keep the two-statement restore.
+
+The entry supplies the version reader of its captured loaded image, the existing
+process label and the CLI exemption posture. Version resolution remains lazy;
+a service's reader must resolve the captured SHA, never the checkout's later
+HEAD. An exempt CLI does not resolve a Git version to name or restore a session.

@@ -28,8 +28,15 @@ from base.agents.history.delta_read_compat import (
     wrap_saver_reads_with_delta_reconstruction,
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.identity import normalize_stored_message_ids
+from base.clock import Clock
+from base.config import settings
 from base.db import InboundRow
+
+_TIMELINE_INPUTS = TimelineReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 
 def _tuple(messages: Any) -> CheckpointTuple:
@@ -80,7 +87,7 @@ def test_legacy_walk_seed_and_writes_never_upgrade_after_reserialization(seed: s
     if seed == "writes":
         assert first[0].id and first[0].id != second[0].id
     restored = serde.loads_typed(serde.dumps_typed(first))
-    items, _ = build_timeline_items(restored, [])
+    items, _ = build_timeline_items(restored, [], inputs=_TIMELINE_INPUTS)
     assert items[0].source_message_id is None
     assert items[0].source_block_idx is None
     assert "ava_ephemeral_message_id" not in items[0].payload
@@ -91,9 +98,13 @@ def test_durable_source_coordinates_survive_compact_renumbering_and_json() -> No
         id="durable",
         content=[{"type": "text", "text": "first"}, {"type": "text", "text": "second"}],
     )
-    before, _ = build_timeline_items([HumanMessage(content="old head", id="head"), msg], [])
-    history, _ = build_timeline_items([msg], [], segment_prefix="s1.boundary")
-    current, _ = build_timeline_items([msg], [])
+    before, _ = build_timeline_items(
+        [HumanMessage(content="old head", id="head"), msg], [], inputs=_TIMELINE_INPUTS
+    )
+    history, _ = build_timeline_items(
+        [msg], [], segment_prefix="s1.boundary", inputs=_TIMELINE_INPUTS
+    )
+    current, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
     assert before[1].item_id == "1.0"
     assert history[0].item_id == "s1.boundary.0.0"
     assert current[0].item_id == "0.0"
@@ -103,7 +114,9 @@ def test_durable_source_coordinates_survive_compact_renumbering_and_json() -> No
             ("durable", 1),
         ]
         assert TimelineItem.model_validate_json(items[0].model_dump_json()) == items[0]
-    other, _ = build_timeline_items([AIMessage(id="different", content=msg.content)], [])
+    other, _ = build_timeline_items(
+        [AIMessage(id="different", content=msg.content)], [], inputs=_TIMELINE_INPUTS
+    )
     assert other[0].source_message_id != current[0].source_message_id
 
 
@@ -118,14 +131,16 @@ def test_only_explicit_inbound_id_qualifies_legacy_source() -> None:
         created_at=datetime.now(UTC),
     )
     legacy = HumanMessage(content="chat", additional_kwargs={"ava_msg_type": "inbound"})
-    anchored, _ = build_timeline_items([legacy], [anchor])
+    anchored, _ = build_timeline_items([legacy], [anchor], inputs=_TIMELINE_INPUTS)
     assert anchored[0].inbound_id == 9
     assert anchored[0].source_inbound_id is None
     assert anchored[0].source_block_idx is None
     explicit = HumanMessage(
         content="chat", additional_kwargs={"ava_msg_type": "inbound", "ava_inbound_id": 9}
     )
-    qualified, _ = build_timeline_items(normalize_stored_message_ids([explicit]), [])
+    qualified, _ = build_timeline_items(
+        normalize_stored_message_ids([explicit]), [], inputs=_TIMELINE_INPUTS
+    )
     assert qualified[0].source_message_id is None
     assert qualified[0].source_inbound_id == 9
     assert qualified[0].source_block_idx == 0

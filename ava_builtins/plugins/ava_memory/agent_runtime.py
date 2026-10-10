@@ -26,7 +26,6 @@ from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
 from base.agents.context import AvaContext
-from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log import logger
@@ -175,7 +174,8 @@ def memory_discipline_section(slices: AgentSlices, *, catalog: ModelCatalog) -> 
     ):
         return ""
     if not (
-        settings.agent.memory_index_inject_enabled or settings.agent.memory_per_agent_inject_enabled
+        slices.read("agent", "memory_index_inject_enabled")
+        or slices.read("agent", "memory_per_agent_inject_enabled")
     ):
         return ""
     return _DISCIPLINE

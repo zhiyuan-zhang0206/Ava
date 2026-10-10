@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from agent.llm.invoke import ainvoke_tool_call
+from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import build_chat_model
@@ -49,7 +50,9 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
 
     monkeypatch.setattr(llm.async_client.models, "generate_content", generate)
     response = await ainvoke_tool_call(
-        llm, [SystemMessage(content="stable system head"), HumanMessage(content="history")]
+        llm,
+        [SystemMessage(content="stable system head"), HumanMessage(content="history")],
+        read_timeout=lambda: settings.lm.llm_compact_timeout_seconds,
     )
     assert response.text == "summary"
     assert len(requests) == 1
@@ -96,7 +99,9 @@ async def test_cache_403_has_no_application_recovery(
     monkeypatch.setattr(llm.async_client.models, "generate_content", reject)
     with pytest.raises(ModelError) as caught:
         await ainvoke_tool_call(
-            llm, [SystemMessage(content="head"), HumanMessage(content="history")]
+            llm,
+            [SystemMessage(content="head"), HumanMessage(content="history")],
+            read_timeout=lambda: settings.lm.llm_compact_timeout_seconds,
         )
     assert caught.value.__cause__ is failure
     assert calls == 1

@@ -12,12 +12,13 @@ from ava_builtins.skills.tests.test_self_evolution_collect import _build_minimal
 from ava_builtins.skills.tests.test_self_evolution_collect import (
     test_fetch_exhausted_diagnostics_are_bounded as test_fetch_exhausted_diagnostics_are_bounded,
 )
+from base.db import Database
 from base.db.tests.fakes import patch_database
 from tests.skills import load_skill_script
 
 
 def test_build_record_adds_leak_audit_only_for_eval_collection(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database
 ) -> None:
     """Weekly collection remains unchanged; eval collection records invalidating reads."""
     paths = collect_mod.LeakPaths(
@@ -30,8 +31,10 @@ def test_build_record_adds_leak_audit_only_for_eval_collection(
         collect_mod,
         monkeypatch,
         [("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
+        database=database,
     )
     audited = collect_mod.build_record(
+        database=database,
         agent_id=1,
         week="2026-W99",
         events=[("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
@@ -85,7 +88,7 @@ def test_test_label_ids_excludes_direct_children_of_test_orchestrators(
 
 
 def test_collect_with_counts_keeps_records_and_reports_filters(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """collect_with_counts() returns the same records as collect() plus the
     pre-record counts the daily sentinel keys on: distinct window agents
@@ -127,18 +130,20 @@ def test_collect_with_counts_keeps_records_and_reports_filters(
 
     monkeypatch.setattr(collect_mod, "build_record", _fake_build_record)
 
-    records, counts = collect_mod.collect_with_counts(1, "2026-08-26")
+    records, counts = collect_mod.collect_with_counts(1, "2026-08-26", database=database)
 
     assert counts == {"seen": 4, "excluded_test": 1, "skipped_meta": 1}
     assert [r["agent_id"] for r in records] == [1, 3]
 
     # include_test opts the TEST- spawns back in for measurement runs.
-    records_all, counts_all = collect_mod.collect_with_counts(1, "2026-08-26", include_test=True)
+    records_all, counts_all = collect_mod.collect_with_counts(
+        1, "2026-08-26", database=database, include_test=True
+    )
     assert counts_all == {"seen": 4, "excluded_test": 0, "skipped_meta": 1}
     assert [r["agent_id"] for r in records_all] == [1, 2, 3]
 
     # The plain collect() wrapper stays records-only for existing callers.
-    assert collect_mod.collect(1, "2026-08-26") == records
+    assert collect_mod.collect(1, "2026-08-26", database=database) == records
 
 
 @pytest.fixture(scope="module")

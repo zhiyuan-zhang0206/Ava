@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -232,9 +235,14 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
     page = AgentDirectoryPage(agents=[card], next_cursor=1)
 
     def fake_list_directory(
-        _conn: object, *, catalog: ModelCatalog, **kwargs: Any
+        _conn: object,
+        *,
+        catalog: ModelCatalog,
+        default_model_reader: Callable[[], str],
+        **kwargs: Any,
     ) -> AgentDirectoryPage:
         assert catalog is app.state.catalog
+        assert default_model_reader() == app.state.config_authority.service_field_value("llm_model")
         seen.update(kwargs)
         return page
 
@@ -769,3 +777,10 @@ def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
         hits = _audit_hits("spawn_agent_guarded_v1", credential["name"])
         assert hits[-1]["attributes"]["client_id"] == credential["id"]
         assert hits[-1]["attributes"]["outcome"] == "ok"
+
+
+@pytest.fixture(autouse=True)
+def _restore_cold_gateway_delivery() -> Iterator[None]:
+    """This module owns every environment mutation made by its real gateway lifespan."""
+    with patch.dict(os.environ):
+        yield

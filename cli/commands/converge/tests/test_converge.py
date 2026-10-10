@@ -4,9 +4,11 @@ import os
 import stat
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 import pytest
 
+from base.config import ConfigBoot
 from cli.commands.converge import _frontend_env as _fe_env
 from cli.commands.converge import _steps
 from cli.commands.converge import host as converge_host
@@ -20,7 +22,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _ctx(repo: Path, ava_home: Path, roles=None):
-    return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=roles)  # pyright: ignore[reportUnknownArgumentType]
+    return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=roles, config=ConfigBoot())  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_ensure_ava_on_path_links_bare_ava_to_this_checkouts_cli(
@@ -358,7 +360,9 @@ def test_cmd_converge_unconfigured_returns_zero(
         with pytest.raises(RuntimeError, match="cannot release"):
             converge_host.cmd_converge()
         operation = admission.authorized_start("converge", acquired_at)
-    rc = converge_host.cmd_converge(operation=operation)
+    # The real lazy boot delivers the scratch unit environment during WAL-G's gate.
+    with patch.dict(os.environ):
+        rc = converge_host.cmd_converge(operation=operation)
     assert rc == 0
     assert helper_calls == []
     assert (home / ".local" / "bin" / "ava").is_symlink()  # pyright: ignore[reportUnknownMemberType]

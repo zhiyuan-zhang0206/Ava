@@ -12,6 +12,13 @@ and response projections. Its `history/` package serves conversation and
 timeline reads. Native lifecycle execution remains with the home runner and
 agent host; an HTTP acceptance does not prove that execution completed.
 
+Directory, launch receipts, history rendering and understanding requests retain narrow
+readers from their gateway
+lifespan's `ConfigBoot`. Window limits, retained depth, model defaults and clock
+policy are read at the original operation boundaries; another lifespan's overlay
+cannot alter them. A gateway profile without the agent domain reads understanding
+switches freshly from its own authority's unit file, preserving the field defaults.
+
 ## Component owners
 
 History reads fail visibly when checkpoint storage or delta reconstruction is

@@ -52,3 +52,37 @@ def test_from_settings_reads_the_live_settings(monkeypatch: pytest.MonkeyPatch) 
     clock = Clock.from_settings()
     assert clock.timezone == "Europe/Paris"
     assert clock.explicit_zone() == ZoneInfo("Europe/Paris")
+
+
+def test_boot_clock_reads_keep_two_owners_and_previous_handles_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    import time
+
+    from base.clock import clock_config_from_boot
+    from base.config import ConfigBoot
+
+    # ConfigBoot applies TZ when a timezone overlay changes; restore process state.
+    with monkeypatch.context() as env:
+        env.setattr(os, "environ", os.environ.copy())
+        first, second = ConfigBoot(), ConfigBoot()
+        first.boot()
+        second.boot()
+        first.set_field("timezone", "UTC")
+        first.set_field("message_timestamp_weekday", False)
+        second.set_field("timezone", "Asia/Shanghai")
+        second.set_field("message_timestamp_weekday", True)
+        old = Clock(clock_config_from_boot(first))
+        other = Clock(clock_config_from_boot(second))
+        moment = datetime(2026, 5, 6, 6, 32, 5, tzinfo=UTC)
+        assert old.format_timestamp(moment) == "[2026-05-06 06:32:05]"
+        assert other.format_timestamp(moment) == "[2026-05-06 Wed 14:32:05]"
+        first.set_field("timezone", "Europe/Paris")
+        current = Clock(clock_config_from_boot(first))
+        assert current.authoritative_timezone == "Europe/Paris"
+        assert current.format_timestamp(moment) == "[2026-05-06 08:32:05]"
+        assert old.timezone == "UTC"
+        assert other.timezone == "Asia/Shanghai"
+    if hasattr(time, "tzset"):
+        time.tzset()

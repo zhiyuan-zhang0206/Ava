@@ -63,6 +63,8 @@ import itertools
 import os
 import sys
 import traceback as _traceback
+from collections.abc import Callable
+from functools import partial
 from typing import Any, cast
 
 import loguru
@@ -243,7 +245,7 @@ _LOG_LEVELS: dict[str, str] = {
 }
 
 
-def _postgres_sink(message: loguru.Message) -> None:
+def _postgres_sink(message: loguru.Message, *, producer: Callable[[], Any] | None = None) -> None:
     """Route one loguru record into the unified event pipeline.
 
     This is the loguru-side adapter: field derivation lives in
@@ -268,6 +270,7 @@ def _postgres_sink(message: loguru.Message) -> None:
         source=source,
         attributes=payload,
         ts=ts,
+        producer=producer,
     )
 
 
@@ -311,7 +314,13 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
     return True
 
 
-def add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) -> int:
+def add_postgres_sink(
+    process: str = "unknown",
+    *,
+    agent_id: int | None = None,
+    producer: Callable[[], Any] | None = None,
+    machine_reader: Callable[[], str] | None = None,
+) -> int:
     """Eagerly open the unified event pipeline + register the loguru adapter.
     Pipeline open failure raises during init_* (it no longer touches the DB);
     agent / gateway startup fails loud, never becomes "sink silently
@@ -333,13 +342,21 @@ def add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) 
     JSONL file sink is the durable backfill source."""
     from base import telemetry
 
-    telemetry.init_telemetry(process=process, agent_id=agent_id)
+    if producer is None and machine_reader is None:
+        telemetry.init_telemetry(process=process, agent_id=agent_id)
+    else:
+        telemetry.init_telemetry(
+            process=process,
+            agent_id=agent_id,
+            pipeline=producer() if producer is not None else None,
+            machine_reader=machine_reader,
+        )
     global _postgres_sink_id  # noqa: PLW0603 — process-level singleton
     live_handlers: Any = cast(Any, logger)._core.handlers  # private `_core` registry
     if _postgres_sink_id is not None and _postgres_sink_id in live_handlers:
         return _postgres_sink_id
     _postgres_sink_id = add_sink(
-        _postgres_sink,
+        partial(_postgres_sink, producer=producer),
         level="INFO",
         enqueue=False,
         catch=True,
@@ -423,7 +440,13 @@ def _add_stderr_sink_before_settings() -> None:
     add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
 
 
-def init_gateway_process(name: str = "gateway") -> None:
+def init_gateway_process(
+    name: str = "gateway",
+    *,
+    producer: Callable[[], Any] | None = None,
+    machine_reader: Callable[[], str] | None = None,
+    image: loaded_commit.LoadedCommit | None = None,
+) -> None:
     """Called once at a gateway-style process startup — the gateway itself
     and every long-running service daemon (agent-host / watchdog / labeler /
     memory_indexer / heartbeat / task_maintenance / ops). stderr (human) +
@@ -452,13 +475,17 @@ def init_gateway_process(name: str = "gateway") -> None:
     from base.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"{name}.log")
-    add_postgres_sink(process=name)
+    if producer is None and machine_reader is None:
+        add_postgres_sink(process=name)
+    else:
+        add_postgres_sink(process=name, producer=producer, machine_reader=machine_reader)
     _install_stdlib_intercept()
     # Capture the commit this process loaded, here at the top of its main() —
     # the earliest seam every gateway-style process shares. Deferring the
     # capture would let a checkout that moved under a long-lived daemon answer
     # on its behalf; see `base.native_process.loaded_commit`.
-    loaded_commit.freeze()
+    if image is None:
+        loaded_commit.freeze()
     # One structured `service_started` agent_event per gateway-style process
     # boot — the ops monitor panel's restart-count source. This function is
     # the single boot seam every long-lived service shares (gateway + all
@@ -471,8 +498,8 @@ def init_gateway_process(name: str = "gateway") -> None:
         event="service_started",
         name=name,
         pid=os.getpid(),
-        sha=loaded_commit.get(),
-        host=_machine_name_lazy(),
+        sha=image.sha if image is not None else loaded_commit.get(),
+        host=(machine_reader or _machine_name_lazy)(),
     )
     _init_done = True
 

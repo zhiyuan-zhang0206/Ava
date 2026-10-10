@@ -3,14 +3,21 @@
 import asyncio
 from dataclasses import replace
 
-from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
+from services.agent_runner.agent_host.runtime import HostCachePolicy
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.test_agent_host import _Build, _Row
 from services.agent_runner.agent_host.tests.test_agent_host import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.test_agent_host import wired as wired
 
 
 async def test_host_capacity_is_independent_and_fixed_at_construction(wired: _Build) -> None:
-    policy = HostPolicy(1, lambda: HostCachePolicy(60, 4), lambda: "alpha", lambda: "")
+    policy = replace(
+        configured_policy(),
+        max_concurrent_turns=1,
+        cache=lambda: HostCachePolicy(60, 4),
+        default_model=lambda: "alpha",
+        llm_override=lambda: "",
+    )
     first, _, _ = wired({}, policy=policy)
     second, _, _ = wired({}, policy=replace(policy, max_concurrent_turns=2))
     entered = asyncio.Event()
@@ -36,8 +43,12 @@ async def test_hosts_read_their_live_model_defaults_and_preserve_explicit_pins(
     wired: _Build,
 ) -> None:
     defaults = {"first": "alpha", "second": "beta"}
-    first_policy = HostPolicy(
-        0, lambda: HostCachePolicy(60, 4), lambda: defaults["first"], lambda: ""
+    first_policy = replace(
+        configured_policy(),
+        max_concurrent_turns=0,
+        cache=lambda: HostCachePolicy(60, 4),
+        default_model=lambda: defaults["first"],
+        llm_override=lambda: "",
     )
     second_policy = replace(first_policy, default_model=lambda: defaults["second"])
     first, first_graph, _ = wired({1: _Row()}, policy=first_policy)
@@ -66,7 +77,13 @@ async def test_hosts_read_their_live_model_defaults_and_preserve_explicit_pins(
 
 async def test_cache_policy_reads_live_values_for_each_host(wired: _Build) -> None:
     policies = {"first": HostCachePolicy(60, 4), "second": HostCachePolicy(60, 4)}
-    first_policy = HostPolicy(0, lambda: policies["first"], lambda: "alpha", lambda: "")
+    first_policy = replace(
+        configured_policy(),
+        max_concurrent_turns=0,
+        cache=lambda: policies["first"],
+        default_model=lambda: "alpha",
+        llm_override=lambda: "",
+    )
     first, _, _ = wired({1: _Row(), 2: _Row(), 3: _Row()}, policy=first_policy)
     second, _, _ = wired(
         {1: _Row(), 2: _Row(), 3: _Row()},

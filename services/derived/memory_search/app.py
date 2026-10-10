@@ -26,38 +26,19 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from base import telemetry
-from services.derived.memory_indexer.embeddings.factory import get_descriptor
 from services.derived.memory_search.store import MemoryStore
 
 _log = logging.getLogger("services.derived.memory_search.app")
 
-# Loopback-only is the trust model, not a security boundary: any local
-# process could still POST a huge body and drive an allocation, so the
-# wire models carry hard size bounds. An embedding is exactly
-# `_EMBED_DIM` floats — the configured provider's width, resolved at
-# import (an unknown AVA_EMBEDDING_BACKEND fails the service boot loudly)
-# — and anything longer is malformed and rejected before numpy ever
-# allocates. The store keeps its own exact-dim check as the last gate.
-_EMBED_DIM = get_descriptor().dim
+# Loopback-only is the trust model, not a security boundary. Each app's
+# composition root supplies its embedding width so the wire models reject
+# oversized vectors before numpy allocates; the store also checks exact width.
 _MAX_K = 1000
 
 # One stats sample per minute — bounded row rate, same cadence as the
 # gateway's gauge flushers (agent_registry / auth401 / latency). A 60s
 # gauge is plenty for a growth curve that moves with note churn.
 _STATS_FLUSH_INTERVAL_S = 60.0
-
-
-class UpsertBody(BaseModel):
-    path: str
-    mtime: float
-    content_hash: str
-    kind: str
-    chunk_idx: int
-    vector: list[float] = Field(max_length=_EMBED_DIM)
-
-
-class UpsertBatchBody(BaseModel):
-    rows: list[UpsertBody] = Field(min_length=1)
 
 
 class DeleteBody(BaseModel):
@@ -71,11 +52,6 @@ class DeleteStaleRow(BaseModel):
 
 class DeleteStaleBatchBody(BaseModel):
     entries: list[DeleteStaleRow] = Field(min_length=1)
-
-
-class SearchBody(BaseModel):
-    vector: list[float] = Field(max_length=_EMBED_DIM)
-    k: int = Field(ge=1, le=_MAX_K)
 
 
 def emit_memory_search_stats(rows: int, last_save_seconds: float | None) -> None:
@@ -124,12 +100,23 @@ async def _stats_flusher(store: MemoryStore, lock: asyncio.Lock) -> None:
 
 
 def _mount_mutations(
-    app: FastAPI, store: MemoryStore, lock: asyncio.Lock, max_batch_rows: int
+    app: FastAPI, store: MemoryStore, lock: asyncio.Lock, max_batch_rows: int, embedding_dim: int
 ) -> None:
     """The four protocol write endpoints (upsert / upsert_batch / delete /
     delete_stale_batch) — extracted so build_app stays a router, not a wall
     of handlers. Each mutation persists the npz before responding."""
     from fastapi import HTTPException
+
+    class UpsertBody(BaseModel):
+        path: str
+        mtime: float
+        content_hash: str
+        kind: str
+        chunk_idx: int
+        vector: list[float] = Field(max_length=embedding_dim)
+
+    class UpsertBatchBody(BaseModel):
+        rows: list[UpsertBody] = Field(min_length=1)
 
     def check_batch(size: int) -> None:
         if size > max_batch_rows:
@@ -195,13 +182,18 @@ def _mount_mutations(
         return {"status": "ok"}
 
 
-def build_app(store: MemoryStore, max_batch_rows: int) -> FastAPI:
+def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) -> FastAPI:
     """Wire the store into a FastAPI app. One mutation lock serializes every
     operation (search included) — the store is pure in-memory state and a
     full exact scan is microseconds, so the lock is the whole concurrency
     story at this scale. The stats flusher runs as a lifespan task so the
     metrics stream lives and dies with the serving process. `max_batch_rows` is
     the cluster's batch-size bound (`services.memory_search_max_batch_rows`)."""
+
+    class SearchBody(BaseModel):
+        vector: list[float] = Field(max_length=embedding_dim)
+        k: int = Field(ge=1, le=_MAX_K)
+
     lock = asyncio.Lock()
 
     @asynccontextmanager
@@ -224,7 +216,7 @@ def build_app(store: MemoryStore, max_batch_rows: int) -> FastAPI:
         async with lock:
             return {"rows": len(store), "last_save_seconds": store.last_save_seconds}
 
-    _mount_mutations(app, store, lock, max_batch_rows)
+    _mount_mutations(app, store, lock, max_batch_rows, embedding_dim)
 
     @app.get("/meta")
     async def meta() -> dict[str, tuple[float, str, str]]:

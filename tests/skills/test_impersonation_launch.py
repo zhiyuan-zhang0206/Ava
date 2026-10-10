@@ -605,7 +605,7 @@ def test_instruction_script_prints_only_after_successful_detach(
 
     monkeypatch.setattr(instruction_reader.external, "attach", attach)
 
-    def snapshot(_agent_id: int) -> tuple[SimpleNamespace, None, None]:
+    def snapshot(_agent_id: int, **_kwargs: Any) -> tuple[SimpleNamespace, None, None]:
         return SimpleNamespace(messages=[SystemMessage(content="Native rules")]), None, None
 
     monkeypatch.setattr(instruction_reader.snapshots, "load_snapshot", snapshot)

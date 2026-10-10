@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
@@ -12,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.state import CompactState
 from base.agents.compaction.history import ADMISSION_SQL, PENDING_HISTORY_SQL
 from base.agents.compaction.models import CompactTarget
+from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.incarnation.native_work import NativeWorkRecord, load_work, managed_resources
 from base.agents.incarnation.native_work_models import NativeWorkPhase, NativeWorkTarget
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
@@ -39,11 +41,14 @@ async def produce_source(
     *,
     catalog: ModelCatalog,
     llm_override: str,
+    default_reader: Callable[[str, str], Any],
 ) -> None:
     """Called only after the actual turn task ended, inside its serialized pump."""
     if resources.unresolved or any(not task.done() for task in resources.completions):
         return
-    model = await _source_model(pool, agent_id, catalog=catalog, llm_override=llm_override)
+    model = await _source_model(
+        pool, agent_id, catalog=catalog, llm_override=llm_override, default_reader=default_reader
+    )
     if model is None:
         return
     reader = cold_reader(saver)
@@ -97,6 +102,7 @@ async def finish_compact_pump(
     *,
     catalog: ModelCatalog,
     llm_override: str,
+    default_reader: Callable[[str, str], Any],
 ) -> None:
     """Actual closed pump is the only producer; failures preserve pending intent."""
     from services.agent_runner.agent_host.invocation.compact.recovery import settle_quiescent
@@ -104,7 +110,14 @@ async def finish_compact_pump(
     try:
         await settle_quiescent(pool, saver, graph, agent_id, owner, resources)
         await produce_source(
-            pool, saver, agent_id, owner, resources, catalog=catalog, llm_override=llm_override
+            pool,
+            saver,
+            agent_id,
+            owner,
+            resources,
+            catalog=catalog,
+            llm_override=llm_override,
+            default_reader=default_reader,
         )
     except Exception as exc:
         logger.warning(
@@ -116,13 +129,19 @@ async def finish_compact_pump(
 
 
 async def _source_model(
-    pool: AsyncConnectionPool, agent_id: int, *, catalog: ModelCatalog, llm_override: str
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    *,
+    catalog: ModelCatalog,
+    llm_override: str,
+    default_reader: Callable[[str, str], Any],
 ) -> str | None:
     stored = await read_stored_config(pool, agent_id)
     if stored is None or llm_override:
         return None
     slices = AgentSlices.resolve(
         resolve_agent_config_pins(stored.config_overlay, stored.birth_config),
+        default_reader=default_reader,
     )
     model = slices.brain.llm_model
     if not isinstance(model, str) or not any(
@@ -207,11 +226,21 @@ async def finish_force_and_compact(
     work: NativeWorkTarget | None,
     catalog: ModelCatalog,
     llm_override: str,
+    default_reader: Callable[[str, str], Any],
+    reconcile_inputs: ReconcileReadInputs,
 ) -> None:
     """Both proof tails share the original shielded owned settlement task."""
     await force
     await finish_compact_pump(
-        pool, saver, graph, agent_id, owner, resources, catalog=catalog, llm_override=llm_override
+        pool,
+        saver,
+        graph,
+        agent_id,
+        owner,
+        resources,
+        catalog=catalog,
+        llm_override=llm_override,
+        default_reader=default_reader,
     )
     await settle_original_restart(
         pool,
@@ -227,6 +256,7 @@ async def finish_force_and_compact(
             database_waits=database_waits,
             peek_lock=peek_lock,
             work=work,
+            reconcile_inputs=reconcile_inputs,
         ),
         resources=resources,
     )

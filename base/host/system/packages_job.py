@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import shlex
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 from loguru import logger
 
 import base.host.system.cron
-from base.config import settings
 
 _CRON_MARKER = "# ava-packages-refresh"
 
@@ -41,11 +41,11 @@ def _shell_command() -> str:
     return f"{ava} packages refresh --from-job"
 
 
-def _tick_seconds() -> int:
-    return settings.packages.refresh_tick_seconds
+def _tick_seconds(*, tick_reader: Callable[[], int]) -> int:
+    return tick_reader()
 
 
-def _launchd_plist_content() -> str:
+def _launchd_plist_content(*, tick_reader: Callable[[], int]) -> str:
     log_file = _log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -62,7 +62,7 @@ def _launchd_plist_content() -> str:
     </array>
 {base.host.system.cron.launchd_env_block()}
     <key>StartInterval</key>
-    <integer>{_tick_seconds()}</integer>
+    <integer>{_tick_seconds(tick_reader=tick_reader)}</integer>
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>
@@ -74,18 +74,20 @@ def _launchd_plist_content() -> str:
 """
 
 
-def _register_macos() -> int:
+def _register_macos(*, tick_reader: Callable[[], int]) -> int:
     """Rewrite and reload the refresh LaunchAgent."""
     label = _LABEL
     plist_path = _launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(_launchd_plist_content(), encoding="utf-8")
+    plist_path.write_text(_launchd_plist_content(tick_reader=tick_reader), encoding="utf-8")
 
     if base.host.system.cron.reload_launchd_job(label, plist_path) != 0:
         return 1
-    logger.info("launchd job '{}' loaded (every {}s)", label, _tick_seconds())
+    logger.info(
+        "launchd job '{}' loaded (every {}s)", label, _tick_seconds(tick_reader=tick_reader)
+    )
     return 0
 
 
@@ -94,7 +96,7 @@ def _unregister_macos() -> int:
     return 0
 
 
-def _register_linux() -> int:
+def _register_linux(*, tick_reader: Callable[[], int]) -> int:
     """Replace the refresh line in the user crontab.
 
     Lines are matched by the marker as a substring, so a line an older version
@@ -110,7 +112,7 @@ def _register_linux() -> int:
         return missing_rc
 
     marker = _CRON_MARKER
-    minutes = max(1, _tick_seconds() // 60)
+    minutes = max(1, _tick_seconds(tick_reader=tick_reader) // 60)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
     entry = (
@@ -135,26 +137,35 @@ def _unregister_linux() -> int:
     )
 
 
-def register_packages_job() -> None:
+def register_packages_job(
+    *,
+    enabled_reader: Callable[[], bool],
+    refresh_enabled_reader: Callable[[], bool],
+    tick_reader: Callable[[], int],
+) -> None:
     """Register the recurring refresh pass (idempotent).
+
+    Readers remain live through platform dispatch. The refresh switch is read
+    after home ownership; the tick is read only while generating the job spec
+    (and the existing macOS success log). No policy snapshot is retained.
 
     Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED`), when this home is not
     the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
     simply leaves no job behind on machines that never registered one.
     """
-    if not base.host.system.cron.os_jobs_enabled():
+    if not base.host.system.cron.os_jobs_enabled(enabled_reader=enabled_reader):
         base.host.system.cron.skip_os_job("packages refresh")
         return
     if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
-    if not settings.packages.refresh_enabled:
+    if not refresh_enabled_reader():
         logger.info(
             "packages refresh disabled (AVA_PACKAGES_REFRESH_ENABLED=false) — not registering"
         )
         return
     from base.host.system.backend import get_backend
 
-    get_backend().register_packages_job()
+    get_backend().register_packages_job(tick_reader=tick_reader)
 
 
 def unregister_packages_job() -> None:

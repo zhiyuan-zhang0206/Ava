@@ -88,9 +88,11 @@ from base.agents.history.hierarchy.chunks import (  # noqa: E402
     enqueue_chunk,
     message_time,
 )
+from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs  # noqa: E402
 from base.agents.history.hierarchy.rebuild import run_rebuild  # noqa: E402
 from base.agents.observation.snapshot import agent_model_target  # noqa: E402
-from base.config import settings  # noqa: E402
+from base.clock import Clock, clock_config_from_boot  # noqa: E402
+from base.config import ConfigBoot  # noqa: E402
 from base.db import Database  # noqa: E402
 from base.lm.catalog import ModelCatalog  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
@@ -113,6 +115,21 @@ def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[str]]:
     return history, boundaries
 
 
+def _understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
+    return UnderstandingReadInputs(
+        enabled=lambda: config.view.agent.understanding_enabled,
+        default_model=lambda: config.view.lm.llm_model,
+        hierarchy_model=lambda: config.view.lm.hierarchy_model,
+        group_model=lambda: config.view.agent.understanding_group_model,
+        check_open=lambda: config.view.agent.understanding_group_check_open,
+        check_decay=lambda: config.view.agent.understanding_group_check_decay,
+        reasoning=lambda: config.view.agent.understanding_group_reasoning,
+        corrections=lambda: config.view.agent.understanding_group_corrections,
+        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        timestamps_enabled=lambda: config.view.general.message_timestamps,
+    )
+
+
 def _threshold(
     db: Database,
     agent_id: int,
@@ -120,9 +137,16 @@ def _threshold(
     explicit: int | None,
     *,
     catalog: ModelCatalog,
+    config: ConfigBoot,
 ) -> tuple[str, int, int]:
     """(model, soft threshold, chunk threshold) for the agent."""
-    model, overrides = agent_model_target(db, agent_id, fallback="", catalog=catalog)
+    model, overrides = agent_model_target(
+        db,
+        agent_id,
+        fallback="",
+        catalog=catalog,
+        default_model_reader=lambda: config.view.lm.llm_model,
+    )
     soft = resolve_context_budget(model, overrides, catalog=catalog).soft_compact_tokens
     if explicit is not None:
         return model, soft, explicit
@@ -132,7 +156,7 @@ def _threshold(
         chunk_threshold(
             model,
             overrides,
-            settings.agent.understanding_chunk_ratio if ratio is None else ratio,
+            config.view.agent.understanding_chunk_ratio if ratio is None else ratio,
             catalog=catalog,
         ),
     )
@@ -181,7 +205,9 @@ async def _enqueue(db: Database, agent_id: int, planned: Sequence[PlannedChunk])
         await pool.close()
 
 
-async def _consume(db: Database, agent_id: int, *, catalog: ModelCatalog) -> None:
+async def _consume(
+    db: Database, agent_id: int, *, catalog: ModelCatalog, config: ConfigBoot
+) -> None:
     pool = db.async_pool(AsyncConnectionPool, min_size=1, max_size=32, timeout=30.0)
     await pool.open()
     try:
@@ -192,7 +218,8 @@ async def _consume(db: Database, agent_id: int, *, catalog: ModelCatalog) -> Non
             [execute_code],
             agent_id,
             catalog=catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override=config.view.lm.llm_override,
+            inputs=_understanding_inputs(config),
         )
     finally:
         await pool.close()
@@ -210,12 +237,18 @@ def _report_jobs(db: Database, agent_id: int) -> None:
         print(f"  segment {segment}: {count} {status}")
 
 
-async def _regroup(db: Database, agent_id: int, *, catalog: ModelCatalog) -> None:
+async def _regroup(
+    db: Database, agent_id: int, *, catalog: ModelCatalog, config: ConfigBoot
+) -> None:
     pool = db.async_pool(AsyncConnectionPool, min_size=1, max_size=3, timeout=30.0)
     await pool.open()
     try:
         leaves = await run_rebuild(
-            pool, db, ModelCache(catalog, settings.lm.llm_override), agent_id
+            pool,
+            db,
+            ModelCache(catalog, config.view.lm.llm_override),
+            agent_id,
+            inputs=_understanding_inputs(config),
         )
         print(f"agent {agent_id}: upper levels rebuilt over {leaves} leaves")
     finally:
@@ -313,20 +346,22 @@ def main() -> None:
     )
     args = parser.parse_args()
     _require_preview()
+    config = ConfigBoot()
+    config.boot()
     db = Database.from_settings()
     if args.command == "report":
         _report(db, args.agent_id)
         return
     catalog = build_model_catalog()
     if args.command == "consume":
-        asyncio.run(_consume(db, args.agent_id, catalog=catalog))
+        asyncio.run(_consume(db, args.agent_id, catalog=catalog, config=config))
         return
     if args.command == "regroup":
-        asyncio.run(_regroup(db, args.agent_id, catalog=catalog))
+        asyncio.run(_regroup(db, args.agent_id, catalog=catalog, config=config))
         return
     history, boundaries = _load(db, args.agent_id)
     model, soft, threshold = _threshold(
-        db, args.agent_id, args.ratio, args.threshold_tokens, catalog=catalog
+        db, args.agent_id, args.ratio, args.threshold_tokens, catalog=catalog, config=config
     )
     planned = plan_history(history, boundaries, threshold=threshold)
     print(

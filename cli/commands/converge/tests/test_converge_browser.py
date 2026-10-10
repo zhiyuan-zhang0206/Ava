@@ -5,10 +5,13 @@ from pathlib import Path
 import pytest
 
 import cli.commands.converge.host as cv
+from base.config import ConfigBoot
 
 
 def _ctx(home: Path) -> cv.ConvergeCtx:
-    return cv.ConvergeCtx(repo=Path("/repo"), ava_home=home, roles=frozenset({"agent-runner"}))
+    return cv.ConvergeCtx(
+        repo=Path("/repo"), ava_home=home, roles=frozenset({"agent-runner"}), config=ConfigBoot()
+    )
 
 
 def _plugin_path(home: Path) -> Path:

@@ -20,12 +20,14 @@ one resident wrapper process per agent:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
+from base.config import ConfigBoot
 from base.paths import chrome_mcp_socket
 from services.desktop.browser.mcp_socket_bridge import (
     ReconnectingLink,
@@ -43,8 +45,20 @@ def _retryable_rejection(exc: Exception) -> bool:
 
 
 class _Link(SocketLink):
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        super().__init__(reader, writer, service_label="chrome MCP daemon", extra_fields=None)
+    def __init__(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        *,
+        timeout_reader: Callable[[], float],
+    ) -> None:
+        super().__init__(
+            reader,
+            writer,
+            service_label="chrome MCP daemon",
+            timeout_reader=timeout_reader,
+            extra_fields=None,
+        )
 
 
 async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -52,10 +66,12 @@ async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
 
 
 class _ReconnectingLink(ReconnectingLink):
-    def __init__(self, max_retries: int = 5, base_delay: float = 1.0) -> None:
+    def __init__(
+        self, *, timeout_reader: Callable[[], float], max_retries: int = 5, base_delay: float = 1.0
+    ) -> None:
         super().__init__(
             _connect,
-            _Link,
+            lambda reader, writer: _Link(reader, writer, timeout_reader=timeout_reader),
             max_attempts=max_retries + 1,
             base_delay=base_delay,
             retryable_rejection=_retryable_rejection,
@@ -63,8 +79,8 @@ class _ReconnectingLink(ReconnectingLink):
         )
 
 
-async def _serve() -> None:
-    link = _ReconnectingLink()
+async def _serve(*, timeout_reader: Callable[[], float]) -> None:
+    link = _ReconnectingLink(timeout_reader=timeout_reader)
 
     async def _list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
         tools = await link.request({"method": "list_tools"})
@@ -86,7 +102,9 @@ async def _serve() -> None:
 
 
 def main() -> None:
-    asyncio.run(_serve())
+    config = ConfigBoot()
+    config.boot()
+    asyncio.run(_serve(timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds))
 
 
 if __name__ == "__main__":

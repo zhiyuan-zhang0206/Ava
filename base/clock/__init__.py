@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from base.config import cluster_tz_name, settings
+from base.config import ConfigBoot, cluster_tz_name, settings
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,17 @@ def clock_config_from_settings() -> ClockConfig:
         timezone=settings.general.timezone,
         authoritative_timezone=cluster_tz_name(),
         message_timestamp_weekday=settings.general.message_timestamp_weekday,
+    )
+
+
+def clock_config_from_boot(boot: ConfigBoot) -> ClockConfig:
+    """Read the operation's clock facts from its composition owner's live view."""
+    return ClockConfig(
+        timezone=boot.view.general.timezone,
+        authoritative_timezone=(
+            boot.view.general.timezone if boot.field_explicitly_set("timezone") else None
+        ),
+        message_timestamp_weekday=boot.view.general.message_timestamp_weekday,
     )
 
 

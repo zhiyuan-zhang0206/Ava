@@ -131,10 +131,11 @@ async def test_hosted_applies_only_after_continuation_returns(
             replace(
                 AvaContext(
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
                     catalog=model_catalog,
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=old,
                 hosted_resources=None,
@@ -234,10 +235,13 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
                 replace(
                     AvaContext(
                         ops_pool=aops_pool,
-                        agent=AgentSlices.resolve(),
+                        agent=AgentSlices.resolve(
+                            default_reader=configured_policy().default_reader
+                        ),
                         db=Database.from_settings(),
                         bus=EventBus.from_settings(),
                         catalog=model_catalog,
+                        clock_factory=configured_policy().clock_factory,
                     ),
                     original_incarnation=owner,
                     hosted_resources=None,
@@ -258,10 +262,11 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             replace(
                 AvaContext(
                     ops_pool=aops_pool,
-                    agent=AgentSlices.resolve(),
+                    agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                     db=Database.from_settings(),
                     bus=EventBus.from_settings(),
                     catalog=model_catalog,
+                    clock_factory=configured_policy().clock_factory,
                 ),
                 original_incarnation=owner,
                 hosted_resources=None,
@@ -375,10 +380,11 @@ async def _run_terminating_turn(
             original_incarnation=incarnation,
             hosted_resources=HostedTurnResources(),
             ops_pool=aops_pool,
-            agent=AgentSlices.resolve(),
+            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
+            clock_factory=configured_policy().clock_factory,
         ),
     )
 

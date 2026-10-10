@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
+from base.config import ConfigBoot, settings
 from cli.commands.converge import host as converge_host
 from cli.commands.converge import walg as converge_walg_module
 from cli.commands.converge.spec import ConvergeCtx
@@ -30,7 +30,11 @@ def _remote(monkeypatch: pytest.MonkeyPatch, *, remote: bool) -> None:
 
 
 def _ctx(sandbox: Sandbox) -> ConvergeCtx:
-    return ConvergeCtx(repo=sandbox.home, ava_home=sandbox.home, roles=frozenset({"gateway"}))
+    config = ConfigBoot()
+    config.set_field("walg_config_file", settings.walg.walg_config_file)
+    return ConvergeCtx(
+        repo=sandbox.home, ava_home=sandbox.home, roles=frozenset({"gateway"}), config=config
+    )
 
 
 def test_the_step_sits_between_the_postgres_runtime_and_the_pooler_on_gateways() -> None:
@@ -120,7 +124,11 @@ def job_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     from base.host.system import walg_job
 
     calls: list[str] = []
-    monkeypatch.setattr(walg_job, "register_walg_job", lambda: calls.append("register"))
+
+    def register(*, enabled_reader: object, backup_hour_reader: object) -> None:
+        calls.append("register")
+
+    monkeypatch.setattr(walg_job, "register_walg_job", register)
     monkeypatch.setattr(walg_job, "unregister_walg_job", lambda: calls.append("unregister"))
     return calls
 

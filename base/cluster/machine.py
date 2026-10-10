@@ -32,7 +32,7 @@ if no capability is set, a start fails loud and prints an actionable hint.
 """
 
 import enum
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Literal
 
 from base.cluster.auth import bearer_header, delivered_token
@@ -85,15 +85,26 @@ class _Unset(enum.Enum):
 _UNSET = _Unset.TOKEN
 
 
-class _IdentityHolder:
-    """Process-level machine identity cache. Each field resolves lazily and
+class MachineIdentity:
+    """An explicitly owned machine identity cache. Each field resolves lazily and
     independently (a caller needing only role never triggers name resolution),
     sharing one reset() for test isolation and one set() for explicit injection.
     Replaces a per-function lru_cache so callers inject a value instead of
     monkeypatching settings + busting caches.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        name: Callable[[], str],
+        role: Callable[[], MachineRoles],
+        host: Callable[[], str],
+        description: Callable[[], str | None],
+    ) -> None:
+        self._read_name = name
+        self._read_role = role
+        self._read_host = host
+        self._read_description = description
         self._name: str | None = None
         self._role: MachineRoles | None = None
         self._description: str | None = None
@@ -102,22 +113,23 @@ class _IdentityHolder:
 
     def name(self) -> str:
         if self._name is None:
-            self._name = _resolve_name()
+            self._name = validate_machine_name(self._read_name())
         return self._name
 
     def role(self) -> MachineRoles:
         if self._role is None:
-            self._role = _resolve_role()
+            self._role = _coerce_roles(self._read_role())
         return self._role
 
     def host(self) -> str:
         if self._host is None:
-            self._host = _resolve_host()
+            self._host = self._read_host().strip() or "localhost"
         return self._host
 
     def description(self) -> str | None:
         if not self._description_resolved:
-            self._description = _resolve_description()
+            description = self._read_description()
+            self._description = description.strip() or None if description else None
             self._description_resolved = True
         return self._description
 
@@ -145,9 +157,6 @@ class _IdentityHolder:
         self._description = None
         self._description_resolved = False
         self._host = None
-
-
-_identity = _IdentityHolder()
 
 
 def machine_name() -> str:
@@ -274,7 +283,12 @@ def reset_identity() -> None:
 
 
 def _resolve_name() -> str:
-    env = settings.general.machine_name.strip()
+    return validate_machine_name(settings.general.machine_name)
+
+
+def validate_machine_name(value: str) -> str:
+    """Normalize a configured name and reject an uninitialized machine."""
+    env = value.strip()
     if env:
         return env
     raise MachineNameMissing(
@@ -284,9 +298,20 @@ def _resolve_name() -> str:
 
 
 def _resolve_role() -> MachineRoles:
-    serve_gateway = bool(settings.general.machine_serve_gateway)
-    serve_agent_runner = bool(settings.general.machine_serve_agent_runner)
-    serve_observability_station = bool(settings.general.machine_serve_observability_station)
+    return roles_from_flags(
+        serve_gateway=bool(settings.general.machine_serve_gateway),
+        serve_agent_runner=bool(settings.general.machine_serve_agent_runner),
+        serve_observability_station=bool(settings.general.machine_serve_observability_station),
+    )
+
+
+def roles_from_flags(
+    *,
+    serve_gateway: bool,
+    serve_agent_runner: bool,
+    serve_observability_station: bool,
+) -> MachineRoles:
+    """Resolve the declared capability set without reading process settings."""
     caps = {
         cap
         for cap, on in (
@@ -322,6 +347,14 @@ def _resolve_host() -> str:
     return "localhost"
 
 
+_identity = MachineIdentity(
+    name=_resolve_name,
+    role=_resolve_role,
+    host=_resolve_host,
+    description=_resolve_description,
+)
+
+
 def _resolve_gateway_url() -> str | None:
     """Resolve the configured gateway base URL (`AVA_GATEWAY_URL`) or None.
     Trailing slash stripped.
@@ -330,8 +363,12 @@ def _resolve_gateway_url() -> str | None:
     base.cluster.machines.gateway_url() read, so the "where is the gateway" answer
     never drifts between them.
     """
-    env = settings.gateway.gateway_url.strip()
-    return env.rstrip("/") if env else None
+    return _normalize_gateway_url(settings.gateway.gateway_url)
+
+
+def _normalize_gateway_url(value: str) -> str | None:
+    value = value.strip()
+    return value.rstrip("/") if value else None
 
 
 def gateway_api_base() -> str:
@@ -348,7 +385,12 @@ def gateway_api_base() -> str:
     Raises:
         GatewayApiBaseMissing: gateway_url unset.
     """
-    url = _resolve_gateway_url()
+    return resolve_gateway_api_base(settings.gateway.gateway_url)
+
+
+def resolve_gateway_api_base(value: str) -> str:
+    """Validate an explicitly owned gateway URL with the canonical resolver rules."""
+    url = _normalize_gateway_url(value)
     if url is None:
         raise GatewayApiBaseMissing(
             "gateway_url unset — `ava start` writes it on an agent-runner; "
@@ -381,12 +423,28 @@ def gateway_bearer() -> str:
         GatewayApiTokenMissing: an agent- or runner-profile process has no
             `AVA_API_TOKEN` while `AVA_CLUSTER_SECRET` is set.
     """
-    token = delivered_token()
+    return resolve_gateway_bearer(
+        token_reader=delivered_token,
+        secret_reader=lambda: settings.data_plane.cluster_secret,
+        profile_reader=launcher_context,
+        no_tokens_reader=_plane_delivers_no_tokens,
+    )
+
+
+def resolve_gateway_bearer(
+    *,
+    token_reader: Callable[[], str | None],
+    secret_reader: Callable[[], str],
+    profile_reader: Callable[[], str | None],
+    no_tokens_reader: Callable[[], bool],
+) -> str:
+    """Read one owner's credential policy, preserving token-first lazy admission."""
+    token = token_reader()
     if token:
         return token
-    secret = settings.data_plane.cluster_secret
-    profile = launcher_context()
-    if secret and profile in _TOKEN_ONLY_PROFILES and not _plane_delivers_no_tokens():
+    secret = secret_reader()
+    profile = profile_reader()
+    if secret and profile in _TOKEN_ONLY_PROFILES and not no_tokens_reader():
         raise GatewayApiTokenMissing(
             f"this {profile}-profile process carries no machine API token (AVA_API_TOKEN) "
             "while the cluster API is authenticated (AVA_CLUSTER_SECRET is set). The root "

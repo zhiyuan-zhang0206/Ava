@@ -58,6 +58,7 @@ from langgraph.types import Command
 from agent import state as _state
 from agent.nodes import NodeName
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.log import logger
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import GraphHook, HookPoint
@@ -235,6 +236,16 @@ def make_hook_runner(
             event_publisher=event_publisher,
             agent_id=agent_id_from_config(config),
             turn_progress=runtime.context.turn_progress,
+            read_stall_seconds=lambda: runtime.context.require_agent().read(
+                "agent", "node_stall_dump_seconds"
+            ),
+            timeline_inputs=TimelineReadInputs(
+                runtime.context.require_clock,
+                lambda: runtime.context.require_agent().read("general", "message_timestamps"),
+            ),
+            limit_reader=lambda: runtime.context.require_agent().read(
+                "display", "timeline_default_limit"
+            ),
         ):
             update: dict[str, Any] = {}
             key_writer: dict[str, str] = {}  # key -> name of the hook that set it

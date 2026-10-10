@@ -30,6 +30,7 @@ from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
@@ -61,12 +62,15 @@ def _make_runtime(
         ops_pool=make_fake_ops_pool(),
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
 
@@ -156,11 +160,14 @@ async def test_llm_node_stamps_last_active_at_with_text(
         ops_pool=ops_pool,
         llm=fake_llm,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(
@@ -205,11 +212,14 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         ops_pool=ops_pool,
         llm=fake_llm,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     state = AgentState(messages=[HumanMessage(content="run it")], halted=False)
     await llm_node(

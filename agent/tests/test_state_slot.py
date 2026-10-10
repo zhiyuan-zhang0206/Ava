@@ -52,6 +52,8 @@ from agent.state import (
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -446,12 +448,15 @@ def _make_runtime_and_config(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(pins),
+        agent=AgentSlices.resolve(
+            pins, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        ),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=42, owns_loop=True),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     runtime = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}

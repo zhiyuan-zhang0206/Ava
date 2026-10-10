@@ -220,6 +220,7 @@ def _select_directory_blocking(
     pool: Any,
     *,
     catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
     scope: roster.AgentDirectoryScope,
     query: str,
     before_id: int | None,
@@ -227,13 +228,23 @@ def _select_directory_blocking(
 ) -> roster.AgentDirectoryPage:
     with pool.connection() as conn:
         return roster.list_directory(
-            conn, catalog=catalog, scope=scope, query=query, before_id=before_id, limit=limit
+            conn,
+            catalog=catalog,
+            scope=scope,
+            query=query,
+            before_id=before_id,
+            limit=limit,
+            default_model_reader=default_model_reader,
         )
 
 
-def _select_one_blocking(pool: Any, agent_id: int, *, catalog: ModelCatalog) -> Any:
+def _select_one_blocking(
+    pool: Any, agent_id: int, *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+) -> Any:
     with pool.connection() as conn:
-        return snapshot_module.select_one(conn, agent_id, catalog=catalog)
+        return snapshot_module.select_one(
+            conn, agent_id, catalog=catalog, default_model_reader=default_model_reader
+        )
 
 
 def _require_write_scope(tool: str, client: dict[str, Any]) -> None:
@@ -250,6 +261,7 @@ def _register_read_tools(
     db: Database,
     *,
     catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> None:
     """Read-side tools: list / inspect / cluster snapshot."""
     from mcp.server.mcpserver import MCPServer
@@ -267,6 +279,7 @@ def _register_read_tools(
         page = await asyncio.to_thread(
             _select_directory_blocking,
             pool,
+            default_model_reader=default_model_reader,
             catalog=catalog,
             scope=scope,
             query=query,
@@ -277,7 +290,13 @@ def _register_read_tools(
 
     @typed_server.tool(description=tool_description("get_agent"))
     async def get_agent(agent_id: int) -> dict[str, Any]:
-        snap = await asyncio.to_thread(_select_one_blocking, pool, agent_id, catalog=catalog)
+        snap = await asyncio.to_thread(
+            _select_one_blocking,
+            pool,
+            agent_id,
+            catalog=catalog,
+            default_model_reader=default_model_reader,
+        )
         if snap is None:
             raise ToolError(f"agent {agent_id} does not exist")
         return AgentRow.model_validate(snap.model_dump()).model_dump(mode="json")
@@ -517,7 +536,13 @@ def _build_server(  # noqa: ANN202 — inferred from the lazy import
     from mcp.server.mcpserver import MCPServer
 
     server = MCPServer("ava", instructions=server_instructions(), middleware=[_AuditMiddleware(db)])
-    _register_read_tools(server, pool, db, catalog=catalog)
+    _register_read_tools(
+        server,
+        pool,
+        db,
+        catalog=catalog,
+        default_model_reader=lambda: cast(str, authority.service_field_value("llm_model")),
+    )
     _register_fleet_tools(server, pool, db, bus, catalog=catalog, authority=authority)
     return server
 

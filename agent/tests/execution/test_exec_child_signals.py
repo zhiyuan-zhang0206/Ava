@@ -87,6 +87,7 @@ def test_child_installs_signal_handlers_before_reading_request(
         _overlay: dict[str, object] | None,
         *,
         scope: str,
+        set_framework_field: object = None,
     ) -> bool:
         return False
 
@@ -99,7 +100,9 @@ def test_child_installs_signal_handlers_before_reading_request(
     def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
         return None
 
-    def fake_ensure_plugins_loaded(*, surface: bool = True) -> None:
+    def fake_ensure_plugins_loaded(
+        *, surface: bool = True, config: object, clock_factory: object
+    ) -> None:
         # Stateless request (fake_read_request: state=None) -> the surface load.
         assert surface is True
 

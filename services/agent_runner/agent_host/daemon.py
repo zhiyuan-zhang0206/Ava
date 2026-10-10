@@ -1,8 +1,7 @@
 """Agent-host daemon — the supervised process that runs every local agent's turns.
 
 The service roster starts this process to own wake dispatch, agent turns,
-health, process boot and their shutdown (see
-`future/infra/lifecycle/agent-runner-as-server.md`).
+health, process boot and their shutdown.
 
 Usage:
     .venv/bin/python -m services.agent_runner.agent_host.daemon
@@ -34,7 +33,7 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Collection, Coroutine, Iterable
+from collections.abc import Callable, Collection, Coroutine, Iterable
 from pathlib import Path
 from typing import cast
 
@@ -62,15 +61,15 @@ from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
 from ava.sdk_surface.install import Installation
 from ava.sdk_surface.process_context import process_clients
-from base import paths
+from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.impersonation.terminal_notices import run_notice_delivery
 from base.agents.incarnation.exec_request_evidence import disposition_hint
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.turn_progress import TurnProgress
-from base.cluster.machine import machine_name
-from base.config import settings
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     Liveness,
@@ -80,13 +79,16 @@ from base.daemon.health import (
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.deploy.timing import assert_clock_lattice
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, EventBusConfig
 from base.lm.catalog import ModelCatalog
-from base.log import init_gateway_process, logger
+from base.log import logger
+from base.native_process.code_version import CodeVersion
 from base.sessions.helper_chain_guard import parent_chain_intact
 
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -94,10 +96,17 @@ from .dispatcher import InboundWakeDispatcher, TurnScheduler
 from .exec_memory_guard import run_memory_guard_forever
 from .force_termination import kill_terminating_agent_shells
 from .host import AgentHost
+from .lifecycle.configuration import (
+    host_machine,
+    host_policy,
+    initialize_logging,
+    load_installation,
+    understanding_inputs,
+)
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
 from .pools import close_host_pools as _close_host_pools
-from .runtime import HostCachePolicy, HostPolicy
+from .scheduling.health_routes import cancel_turn_route, stats_route
 from .stdout_log import _rotate_stdout_log_forever
 
 _log = logging.getLogger("services.agent_runner.agent_host.daemon")
@@ -227,16 +236,14 @@ async def _publish_turn_progress_heartbeat(
     return True
 
 
-def _report_long_admission_waits(host: AgentHost) -> None:
-    """One anomaly event per wait episode past the admission alert bound.
+def _report_long_admission_waits(
+    host: AgentHost, *, read_alert_seconds: Callable[[], float]
+) -> None:
+    """Report a long queue episode without cancelling its intentionally silent turn.
 
-    Queueing is the configured memory/runtime trade-off working — not an error.
-    A wait past the bound means the queue is backing up: raise the limit (after
-    the joint capacity check) or inspect the turns holding slots. The wait
-    itself is already exempt from stall cancellation; this event is the signal
-    that replaces the (wrong) cancellation.
+    The live alert bound diagnoses admission pressure, not a stalled agent.
     """
-    threshold = settings.daemon.host_admission_wait_alert_seconds
+    threshold = read_alert_seconds()
     for agent_id, waited_s in host.admission.long_waiters(threshold):
         logger.warning(
             "hosted turn for agent {agent_id} has queued at the admission gate "
@@ -256,6 +263,8 @@ async def _beat_forever(
     scheduler: TurnScheduler,
     machine: str,
     bus: EventBus,
+    *,
+    read_alert_seconds: Callable[[], float],
 ) -> None:
     """Liveness and ownership renewal, independent of the idle dispatcher.
     beat() precedes DB renewal — process health must not depend on the DB."""
@@ -281,12 +290,18 @@ async def _beat_forever(
         if published and not heartbeat_ok:
             _log.warning("[agent-host] turn-progress heartbeat publish recovered")
         heartbeat_ok = published
-        _report_long_admission_waits(host)
+        _report_long_admission_waits(host, read_alert_seconds=read_alert_seconds)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
 
 async def _ownership_beat_completion(
-    liveness: Liveness, host: AgentHost, scheduler: TurnScheduler, machine: str, bus: EventBus
+    liveness: Liveness,
+    host: AgentHost,
+    scheduler: TurnScheduler,
+    machine: str,
+    bus: EventBus,
+    *,
+    read_alert_seconds: Callable[[], float],
 ) -> Exception | None:
     """Retain a failed heartbeat for the service's stop/join boundary.
 
@@ -294,20 +309,30 @@ async def _ownership_beat_completion(
     Its owning task retains the original exception; shutdown raises it after join.
     """
     try:
-        await _beat_forever(liveness, host, scheduler, machine, bus)
+        await _beat_forever(
+            liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
+        )
     except Exception as error:
         return error
     return None
 
 
 async def _start_ownership_beat(
-    liveness: Liveness, host: AgentHost, scheduler: TurnScheduler, machine: str, bus: EventBus
+    liveness: Liveness,
+    host: AgentHost,
+    scheduler: TurnScheduler,
+    machine: str,
+    bus: EventBus,
+    *,
+    read_alert_seconds: Callable[[], float],
 ) -> tuple[asyncio.TaskGroup, asyncio.Task[Exception | None]]:
     """Enter the service-owned heartbeat group before boot settlement starts."""
     tasks = asyncio.TaskGroup()
     await tasks.__aenter__()
     beat = tasks.create_task(
-        _ownership_beat_completion(liveness, host, scheduler, machine, bus),
+        _ownership_beat_completion(
+            liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
+        ),
         name="host-ownership-heartbeat",
     )
     return tasks, beat
@@ -339,10 +364,9 @@ async def _close_host_runtime(
     beat: asyncio.Task[Exception | None] | None,
     beat_tasks: asyncio.TaskGroup,
 ) -> None:
-    """Drain turns and release settled ownership even if a stage fails.
-
-    The background group has joined. Callbacks unwind in reverse so every
-    stage runs before failure propagates; pools must outlive active turns.
+    """Drain turns and release settled ownership after background loops join.
+    Reverse callbacks attempt every cleanup before failure propagates; pools
+    must outlive active turns.
     """
     # Share the existing unwind allowance; late resource join must not add a
     # second five-second window after the scheduler has spent its own budget.
@@ -358,6 +382,7 @@ def _background_loops(
     db: Database,
     *,
     catalog: ModelCatalog,
+    config: ConfigBoot,
 ) -> dict[str, Coroutine[object, object, None]]:
     """The daemon's background loops for plugins, logs, exec memory and understanding chunks.
 
@@ -372,40 +397,21 @@ def _background_loops(
         "stdout_log_rotate": _rotate_stdout_log_forever(),
         "exec_memory_guard": run_memory_guard_forever(_log),
         "understanding_chunks": understanding_loop_forever(
-            control_pool, db, [execute_code], catalog=catalog, llm_override=settings.lm.llm_override
+            control_pool,
+            db,
+            [execute_code],
+            catalog=catalog,
+            llm_override=config.view.lm.llm_override,
+            inputs=understanding_inputs(config),
         ),
     }
-
-
-def _load_plugin_installation() -> Installation:
-    """Load one installation: its registry feeds the graph and its configs feed each turn.
-
-    The shared graph is built once and cannot take a new registry. The host
-    retains this installation's boot image until its normal process restart.
-    """
-    from agent.extensions import load_extensions
-    from ava.sdk_surface.install import installed
-    from base.config import Settings
-    from base.config.service_read import ConfigAuthority
-    from base.lm.plugin_providers import build_model_catalog
-
-    env_path = paths.ava_home() / ".env"
-    if settings.profile is None:
-        authority = ConfigAuthority(runtime=settings, all_domains=settings, env_path=env_path)
-    else:
-        authority = ConfigAuthority.deferred(
-            runtime=settings, build_all_domains=lambda: Settings(profile=None), env_path=env_path
-        )
-    load_extensions(catalog=build_model_catalog(), authority=authority)
-    installation = installed()
-    if installation is None:
-        raise RuntimeError("the plugin load did not install its SDK surface")
-    return installation
 
 
 async def _build_checkpointer(
     pool: AsyncConnectionPool[psycopg.AsyncConnection],
     plugin_state_classes: Iterable[type[BaseModel]] = (),
+    *,
+    read_checkpoint_interval: Callable[[], int],
 ) -> AsyncPostgresSaver:
     """One saver for the whole host, over the workload pool.
 
@@ -430,7 +436,7 @@ async def _build_checkpointer(
         conn=saver_pool, serde=build_checkpoint_serde(plugin_state_classes)
     )
     wrap_saver_writes_with_loud_failure(checkpointer)
-    wrap_saver_writes_with_nstep_interval(checkpointer, lambda: settings.agent.checkpoint_interval)
+    wrap_saver_writes_with_nstep_interval(checkpointer, read_checkpoint_interval)
     # Transition layer (tasks #3180/#3181): vanilla-era readers must see
     # delta-written threads' messages. Inert on vanilla-written data.
     wrap_saver_reads_with_delta_reconstruction(checkpointer)
@@ -486,16 +492,26 @@ async def _close_process_owners(
     health: asyncio.Server | None,
     beat: asyncio.Task[Exception | None] | None,
     beat_tasks: asyncio.TaskGroup | None,
+    *,
+    clients: ClientSet | None = None,
+    primary: BaseException | None = None,
 ) -> None:
-    """After turn drain, collect sampling before pools and always remove the pidfile."""
-    async with contextlib.AsyncExitStack() as cleanup:
-        cleanup.callback(remove_pidfile, _pidfile())
-        cleanup.push_async_callback(_close_joined_host_pools, host, workload_pool, control_pool)
-        if installation is not None:
-            cleanup.callback(installation.sampling.close)
-        if health is not None:
-            cleanup.push_async_callback(stop_health_server, health)
-        cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
+    """Collect process owners without replacing a failure from boot or turn drain."""
+    try:
+        async with contextlib.AsyncExitStack() as cleanup:
+            cleanup.callback(remove_pidfile, _pidfile())
+            cleanup.push_async_callback(_close_joined_host_pools, host, workload_pool, control_pool)
+            if host is None and clients is not None:
+                cleanup.callback(clients.close)
+            if installation is not None:
+                cleanup.callback(installation.sampling.close)
+            if health is not None:
+                cleanup.push_async_callback(stop_health_server, health)
+            cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)
+    except BaseException as secondary:
+        if primary is None:
+            raise
+        primary.add_note(f"Host process cleanup also failed: {secondary!r}")
 
 
 def _is_running() -> bool:
@@ -504,15 +520,22 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), _MODULE)
 
 
-def _boot_handles() -> tuple[
+def _boot_handles(
+    db: Database, config: ConfigBoot
+) -> tuple[
     AsyncConnectionPool[psycopg.AsyncConnection],
     AsyncConnectionPool[psycopg.AsyncConnection],
     EventBus,
     Database,
 ]:
     """The turn/checkpoint pool, the reserved control pool, the event bus and the database of one host."""
-    db = Database.from_settings()
-    return build_shared_pool(db), build_control_pool(db), EventBus.from_settings(), db
+    bus = EventBus(
+        EventBusConfig(
+            redis_url=config.view.data_plane.redis_url,
+            events_channel=config.view.data_plane.events_channel,
+        )
+    )
+    return build_shared_pool(db), build_control_pool(db), bus, db
 
 
 async def _dispatch_host(
@@ -524,13 +547,16 @@ async def _dispatch_host(
     local_machine: str,
     *,
     catalog: ModelCatalog,
+    config: ConfigBoot,
 ) -> None:
     """Run dispatcher siblings, joined before the owned heartbeat and turn drain."""
     async with asyncio.TaskGroup() as background:
         background.create_task(
             run_notice_delivery(db, local_machine), name="impersonation_terminal_notices"
         )
-        for name, loop in _background_loops(control_pool, db, catalog=catalog).items():
+        for name, loop in _background_loops(
+            control_pool, db, catalog=catalog, config=config
+        ).items():
             background.create_task(loop, name=name)
         await InboundWakeDispatcher(
             bus,
@@ -539,18 +565,25 @@ async def _dispatch_host(
             database_waits=host.database_waits,
             turn_progress=host.turn_progress,
             turn_admission=host.admission,
-            stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
-            recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
-            recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
-            scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
-            subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
+            stale_after_s=float(config.view.daemon.wedged_agent_inbound_age_seconds),
+            recovery_wake_batch=config.view.daemon.host_recovery_wake_batch,
+            recovery_wake_inflight=config.view.daemon.host_recovery_wake_inflight,
+            scan_interval_s=float(config.view.agent.db_notify_wait_timeout_seconds),
+            subscription_read_timeout_s=float(config.view.agent.db_notify_wait_timeout_seconds),
         ).run()
         # The dispatcher runs until cancelled; a return would leave the
         # group waiting on loops that never end, hanging the stop.
         raise RuntimeError("wake dispatcher exited without cancellation")
 
 
-async def run() -> None:
+async def run(
+    *,
+    config: ConfigBoot,
+    database: Callable[[], Database],
+    machine: MachineIdentity,
+    clients: ClientSet | None = None,
+    on_clients_owned: Callable[[], None] | None = None,
+) -> None:
     """Boot the host and serve wakes until cancelled. See the module docstring
     for why the order is what it is."""
     assert_clock_lattice()
@@ -561,34 +594,38 @@ async def run() -> None:
         _log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
         sys.exit(1)
 
-    # langgraph types its checkpointer parameter with an unparameterized generic,
-    # so the imported symbol reads as partially unknown; the return type — the
-    # only part this module uses — is fully known.
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
     from agent.process_boot import (
         init_process_scope,
         land_cluster_extensions,
     )
 
-    workload_pool, control_pool, bus, db = _boot_handles()
-    init_process_scope()
-    land_cluster_extensions(db)
-
+    workload_pool, control_pool, bus, db = _boot_handles(database(), config)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[Exception | None] | None = None
     beat_tasks: asyncio.TaskGroup | None = None
-    health = None
+    health, installation = None, None
     host: AgentHost | None = None
-    installation = None
     try:
-        local_machine = machine_name()
+        if on_clients_owned is not None:
+            on_clients_owned()
+        init_process_scope()
+        land_cluster_extensions(db)
+        local_machine = machine.name()
         await _open_host_pools(workload_pool, control_pool, local_machine)
-        installation = _load_plugin_installation()
-        checkpointer = await _build_checkpointer(
-            workload_pool, [cls for _plugin, cls in installation.registry.state_classes()]
+        if clients is None:
+            clients = process_clients(database=lambda: db, config=config)
+        from agent.extensions import load_extensions
+
+        installation = load_installation(
+            config, producer=clients.event_pipeline, load_extensions=load_extensions
         )
-        # The dynamic state class the graph builds is process-global, and the reason there is
-        # ONE graph here rather than one per agent (services/agent_runner/agent_host/host.py explains the cost).
+        checkpointer = await _build_checkpointer(
+            workload_pool,
+            [cls for _plugin, cls in installation.registry.state_classes()],
+            read_checkpoint_interval=lambda: config.view.agent.checkpoint_interval,
+        )
+        # One graph shares the dynamic state schema for all hosted turns.
         host = AgentHost(
             pool=workload_pool,
             control_pool=control_pool,
@@ -598,16 +635,8 @@ async def run() -> None:
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
-            policy=HostPolicy(
-                max_concurrent_turns=settings.daemon.host_max_concurrent_turns,
-                cache=lambda: HostCachePolicy(
-                    idle_ttl_seconds=settings.daemon.host_agent_idle_ttl_seconds,
-                    size=settings.daemon.host_agent_cache_size,
-                ),
-                default_model=lambda: settings.lm.llm_model,
-                llm_override=lambda: settings.lm.llm_override,
-            ),
-            clients=process_clients(database=lambda: db),
+            policy=host_policy(config),
+            clients=clients,
             extensions=installation.registry,
             plugin_configs=installation.configs,
         )
@@ -622,7 +651,12 @@ async def run() -> None:
         # The service owns the group across boot settle and turn drain. The
         # heartbeat's retained completion is raised only at the existing join.
         beat_tasks, beat = await _start_ownership_beat(
-            liveness, host, scheduler, local_machine, bus
+            liveness,
+            host,
+            scheduler,
+            local_machine,
+            bus,
+            read_alert_seconds=lambda: config.view.daemon.host_admission_wait_alert_seconds,
         )
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
@@ -633,8 +667,8 @@ async def run() -> None:
             endpoint.health_port,
             liveness=liveness,
             extra_routes={
-                ("GET", "/stats"): _stats_route(host, scheduler),
-                ("POST", "/cancel-turn"): _cancel_turn_route(scheduler, host),
+                ("GET", "/stats"): stats_route(host, scheduler),
+                ("POST", "/cancel-turn"): cancel_turn_route(scheduler, host),
             },
         )
         logger.info(
@@ -642,7 +676,7 @@ async def run() -> None:
             "(max concurrent turns {bound}, database pools {workload}/{control})",
             event="host_started",
             port=endpoint.health_port,
-            bound=settings.daemon.host_max_concurrent_turns or "unlimited",
+            bound=config.view.daemon.host_max_concurrent_turns or "unlimited",
             workload=workload_pool.max_size,
             control=control_pool.max_size,
         )
@@ -659,6 +693,7 @@ async def run() -> None:
                 bus,
                 local_machine,
                 catalog=installation.require_catalog(),
+                config=config,
             )
         finally:
             try:
@@ -667,9 +702,16 @@ async def run() -> None:
                 beat = None  # Runtime cleanup attempted its join even when another stage failed.
                 beat_tasks = None
     finally:
-        # Boot and drain failures still collect sampling, close pools and remove the pidfile.
         await _close_process_owners(
-            host, workload_pool, control_pool, installation, health, beat, beat_tasks
+            host,
+            workload_pool,
+            control_pool,
+            installation,
+            health,
+            beat,
+            beat_tasks,
+            clients=clients,
+            primary=sys.exception(),
         )
         _log.info("[agent-host] daemon stopped")
 
@@ -684,108 +726,53 @@ def _require_helper_parent_chain() -> None:
     os._exit(70)
 
 
-def _cancel_turn_route(scheduler: TurnScheduler, host: AgentHost):  # noqa: ANN202
-    """A `POST /cancel-turn` handler — the hosted force-terminate / wedged
-    recovery primitive.
-
-    Body: `{"agent_id": <int>, "command_id": <int>}`. Cancels the captured task with the
-    bounded unwind (a C-call-blocked turn is reported, not awaited forever) and
-    answers `{"cancelled": true|false}` — false means no task was running,
-    which the ops caller treats as "nothing to accelerate", never as an error.
-
-    Loopback-only and unauthenticated, like `/healthz`: anything that can dial
-    the host's localhost health port already owns the box. The durable
-    terminate/restart inbound is always the correctness mechanism — this
-    endpoint only accelerates a turn stuck inside a long await.
-    """
-
-    async def handler(body: bytes) -> tuple[int, bytes, str]:
-        import json
-
-        try:
-            payload = json.loads(body or b"{}")
-            agent_id, command_id = payload["agent_id"], payload["command_id"]
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
-            return (
-                400,
-                json.dumps({"error": "positive agent_id and command_id required"}).encode(),
-                "application/json",
-            )
-        if (
-            type(agent_id) is not int
-            or type(command_id) is not int
-            or agent_id <= 0
-            or command_id <= 0
-        ):
-            return 400, b'{"error":"positive integer identifiers required"}', "application/json"
-        cancelled = await scheduler.cancel_exact_force(agent_id, command_id, host.accepts_force)
-        return 200, json.dumps({"cancelled": cancelled}).encode(), "application/json"
-
-    return handler
-
-
-def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 — RouteHandler, declared in base.daemon.health
-    """Expose cache/activity counters and this running boot's maintenance identity."""
-    import json
-
-    async def handler(_body: bytes) -> tuple[int, bytes, str]:
-        # Per-agent turn-progress age: the health signal that separates
-        # "the host process is alive" from "this turn is alive". A busy agent
-        # (progress every couple of minutes) reads small; an agent whose
-        # invocation has been silent for the wedged budget reads large — the
-        # turn-level fake-alive state a heartbeat probe alone cannot see.
-        active_progress: dict[int, float] = {}
-        for agent_id in sorted(scheduler.active_agents):
-            age = host.turn_progress.age_s(agent_id)
-            if age is not None:
-                active_progress[agent_id] = round(age, 1)
-        payload = {
-            **host.stats.as_payload(),
-            **host.admission.payload(),
-            "maintenance_protocol": 1,
-            "runtime_owner": str(host._owner),
-            "home": str(paths.ava_home()),
-            "pid": os.getpid(),
-            "active_agents": sorted(scheduler.active_agents),
-            "active_progress": active_progress,
-        }
-        return 200, json.dumps(payload).encode(), "application/json"
-
-    return handler
-
-
 def main() -> None:
     """Entry point: SDK posture, schema gate, logging, graceful shutdown, then the loop."""
     import ava
 
     ava.bind_host_process()
-    from base.config import ensure_eager
     from base.deploy.schema.migrations import assert_schema_current
 
-    # Task #3621: the agent host is on the full-validation whitelist — build
-    # the eager config chain before anything else reads config.
-    ensure_eager()
+    config = ConfigBoot()
+    config.boot()
+    config.ensure_eager()
     _require_helper_parent_chain()
-    assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="agent_host")
-    install_graceful_shutdown("agent_host")
+    assert_schema_current(config.view.data_plane.db_url)
+    machine = host_machine(config)
+    version = CodeVersion(ava.loaded_code_image())
+    gate = ProcessDbGate(version=version.get, process="agent_host")
+
+    def database() -> Database:
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+
+    clients = process_clients(database=database, config=config)
+    clients_handed_off = False
+
+    def hand_off_clients() -> None:
+        nonlocal clients_handed_off
+        clients_handed_off = True
+
+    initialize_logging(clients, machine, ava.loaded_code_image())
     code = 0
-    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
-    # awaits `shutdown_default_executor`, joining the default executor's
-    # workers — the to_thread recorders among them — and a stop signal must
-    # never wait on those (see `_hard_exit`). The runner is therefore never
-    # closed: after the explicit drain below, teardown is skipped by the hard
-    # exit.
+    # Runner avoids automatic shutdown_default_executor joins of to_thread
+    # recorders. Explicit drain reaches run's cleanup; hard exit skips executor teardown.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        install_graceful_shutdown("agent_host")
+        runner.run(
+            run(
+                config=config,
+                database=database,
+                machine=machine,
+                clients=clients,
+                on_clients_owned=hand_off_clients,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[agent-host] interrupted, shutting down")
-        # The signal path skips Runner's own cancellation, so drain the loop's
-        # tasks explicitly: `run`'s finally still stops the health server,
-        # drains turns, releases ownership, closes the pools and removes the
-        # pidfile. The executor is deliberately NOT drained.
+        # Explicit task drain reaches run's health/turn/pool/pidfile cleanup
+        # without joining default-executor workers.
         failures = cancel_and_drain(runner)
         if failures:
             _log.error("[agent-host] async shutdown failed: %r", failures)
@@ -793,6 +780,18 @@ def main() -> None:
     except Exception:
         _log.exception("[agent-host] fatal error, shutting down")
         code = 1
+    finally:
+        # A running host retains its clients when a turn cannot join. Only a
+        # failure before that handoff belongs to this boot scope.
+        if not clients_handed_off:
+            try:
+                clients.close()
+            except BaseException as secondary:
+                primary = sys.exception()
+                if primary is not None:
+                    primary.add_note(f"Host boot cleanup also failed: {secondary!r}")
+                _log.exception("[agent-host] process client cleanup failed")
+                code = 1
     _hard_exit(code)
 
 

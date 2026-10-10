@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
@@ -69,13 +69,14 @@ from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
 from base.agents.messages.kwargs import ExecStatus
 from base.clock import Clock
-from base.config import settings
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.log import logger
 
+from ._crop import CropInputs
 from ._result import (
     _ExecCancelled,
     _ExecCrashed,
@@ -120,12 +121,25 @@ async def exec_node(
         event_publisher=event_publisher,
         agent_id=agent_id_from_config(config),
         turn_progress=runtime.context.turn_progress,
+        read_stall_seconds=lambda: runtime.context.require_agent().read(
+            "agent", "node_stall_dump_seconds"
+        ),
+        timeline_inputs=TimelineReadInputs(
+            runtime.context.require_clock,
+            lambda: runtime.context.require_agent().read("general", "message_timestamps"),
+        ),
+        limit_reader=lambda: runtime.context.require_agent().read(
+            "display", "timeline_default_limit"
+        ),
     ):
         return await _exec_node_impl(state, runtime, config)
 
 
 async def _exec_with_node_shield(
-    coro: Awaitable[tuple[_ExecResult, ResultPayload | None]], agent_id: int
+    coro: Awaitable[tuple[_ExecResult, ResultPayload | None]],
+    agent_id: int,
+    *,
+    read_timeout: Callable[[], float],
 ) -> tuple[_ExecResult, ResultPayload | None]:
     """Graph-level exec node timeout — defense-in-depth above the per-code-block
     exec_timeout_seconds. If the inner deadline misses a cancellable framework
@@ -135,20 +149,20 @@ async def _exec_with_node_shield(
     subscription sits outside this wait_for and is bounded by its own watcher
     exit timeout.)"""
     try:
-        return await asyncio.wait_for(coro, timeout=settings.sandbox.exec_node_timeout_seconds)
+        return await asyncio.wait_for(coro, timeout=read_timeout())
     except TimeoutError:
         logger.error(
             "[exec(node-timeout)] exec_node timed out after {timeout}s — "
             "inner code-exec timeout did not trigger; possible framework hang. "
             "Returning timeout ToolMessage so the LLM can react.",
             event="exec_node_timeout",
-            timeout=settings.sandbox.exec_node_timeout_seconds,
+            timeout=read_timeout(),
             agent_id=agent_id,
         )
         return (
             _ExecTimedOut(
                 output=(
-                    f"[exec node timeout after {settings.sandbox.exec_node_timeout_seconds:.0f}s] "
+                    f"[exec node timeout after {read_timeout():.0f}s] "
                     "Execution was stopped by an internal safeguard and did not "
                     "complete. This does not necessarily mean your code was slow; "
                     "consider re-running it, or moving long-running work to a "
@@ -196,13 +210,16 @@ async def _run_agent_code(
                 code,
                 ctx,
                 cancel_event,
-                settings.sandbox.exec_timeout_seconds,
+                ctx.require_agent().read("sandbox", "exec_timeout_seconds"),
                 chunk_publisher,
-                accumulation_max_chars=settings.sandbox.exec_output_accumulation_max_chars,
+                accumulation_max_chars=ctx.require_agent().read(
+                    "sandbox", "exec_output_accumulation_max_chars"
+                ),
                 state=state.model_dump(),
                 config_overlay=config_overlay,
             ),
             agent_id,
+            read_timeout=lambda: ctx.require_agent().read("sandbox", "exec_node_timeout_seconds"),
         )
     # Wall-clock surfaced on the code_output item ("ran in 1.3s"); cancel /
     # timeout still report the honest time-before-stop.
@@ -240,6 +257,8 @@ def _dispatch_exec_result(
     elapsed_seconds: float,
     timestamp: str | None = None,
     referenced_messages: Sequence[AnyMessage] = (),
+    read_sandbox: Callable[[str], Any],
+    clock: Clock,
 ) -> tuple[bool, ExecEnvelope, ExecStatus]:
     """Map the `_ExecResult` sum type to (halted, envelope, status).
 
@@ -251,16 +270,15 @@ def _dispatch_exec_result(
     # Present on every variant (see the sum-type definitions): when the
     # accumulation budget dropped the middle mid-run, the envelope needs it to
     # report the true produced length and to stop calling the archive complete.
-    sandbox = settings.sandbox
-    clock = Clock.from_settings()
+    crop_inputs = CropInputs(read_sandbox)
     wrap = partial(
         wrap_code_output,
-        crop_config=sandbox,
+        crop_config=crop_inputs,
         clock=clock,
         timestamp=timestamp,
         elapsed_seconds=elapsed_seconds,
-        timeout_seconds=sandbox.exec_timeout_seconds,
-        max_chars=sandbox.exec_output_max_chars,
+        timeout_seconds=read_sandbox("exec_timeout_seconds"),
+        max_chars=read_sandbox("exec_output_max_chars"),
     )
     stream_cap = result.stream_cap
     match result:
@@ -459,8 +477,10 @@ async def _exec_single_call(
         code_from_args(call["args"], source=f"tool_call {call['id']!r}"),
         chunk_publisher,
     )
-    clock = Clock.from_settings()
-    timestamp = clock.now_timestamp() if settings.general.message_timestamps else None
+    clock = ctx.require_clock()
+    timestamp = (
+        clock.now_timestamp() if ctx.require_agent().read("general", "message_timestamps") else None
+    )
     halted, envelope, status = _dispatch_exec_result(
         result,
         ctx,
@@ -468,6 +488,8 @@ async def _exec_single_call(
         elapsed_seconds=exec_ms / 1000,
         timestamp=timestamp,
         referenced_messages=state.messages,
+        read_sandbox=lambda field: ctx.require_agent().read("sandbox", field),
+        clock=ctx.require_clock(),
     )
 
     # Pop the plugin's messages delta out of the state update — merged below

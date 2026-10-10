@@ -7,7 +7,11 @@ branch + body passthrough.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
@@ -16,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from base.agents.observation.evidence import AvailabilityReason
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from gateway.agents import forward
 from gateway.agents import router as app_module
 from gateway.app import app
@@ -45,7 +50,13 @@ class TestRouting:
         ) -> SpawnedAgent:
             return SpawnedAgent(id=body.agent_id)
 
-        def _unreadable(_conn: psycopg.Connection, _agent_id: int) -> None:
+        def _unreadable(
+            _conn: psycopg.Connection,
+            _agent_id: int,
+            *,
+            catalog: ModelCatalog,
+            default_model_reader: Callable[[], str],
+        ) -> None:
             if failure == "exception":
                 raise RuntimeError("receipt read unavailable")
 
@@ -53,7 +64,7 @@ class TestRouting:
         monkeypatch.setattr(app_module.snapshot_module, "select_one", _unreadable)
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "local-test"})
-        assert resp.status_code == 201
+        assert resp.status_code == 201, resp.text
         body = resp.json()
         assert db_conn.execute("SELECT id FROM agents_meta WHERE id=%s", (body["id"],)).fetchone()
         assert body["accepted"] is True
@@ -351,3 +362,19 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
         )
     assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED
     assert "invalid_model_config: key missing" in str(raised.value)
+
+
+@pytest.fixture(autouse=True)
+def _restore_cold_gateway_delivery(unit_home: Path) -> Iterator[None]:
+    """Own real lifespan delivery and declare the provider credential on its unit channel."""
+    env_file = unit_home / ".env"
+    prior = env_file.read_text(encoding="utf-8") if env_file.exists() else None
+    with patch.dict(os.environ):
+        env_file.write_text((prior or "") + "\nDEEPSEEK_API_KEY=test-key\n", encoding="utf-8")
+        try:
+            yield
+        finally:
+            if prior is None:
+                env_file.unlink(missing_ok=True)
+            else:
+                env_file.write_text(prior, encoding="utf-8")

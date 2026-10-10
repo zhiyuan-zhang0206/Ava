@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
@@ -147,7 +148,7 @@ def _unregister_macos() -> int:
     return 0
 
 
-def register_autostart() -> None:
+def register_autostart(*, enabled_reader: Callable[[], bool]) -> None:
     """Register the host's boot-time autostart job.
 
     Platform-aware: delegates to ``PlatformBackend.register_autostart``.
@@ -159,7 +160,7 @@ def register_autostart() -> None:
     Raises:
         RuntimeError: on registration failure.
     """
-    if not os_jobs_enabled():
+    if not os_jobs_enabled(enabled_reader=enabled_reader):
         skip_os_job("autostart")
         return
     if not owns_os_jobs("autostart"):

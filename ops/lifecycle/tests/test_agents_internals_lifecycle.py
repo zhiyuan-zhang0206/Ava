@@ -14,9 +14,11 @@ from psycopg_pool import AsyncConnectionPool
 import base.db
 from base.agents import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
 from base.agents.incarnation.resources import IncarnationResources
-from base.agents.messages.envelope import wrap_inbound
+from base.agents.messages.envelope import EnvelopeReadInputs, wrap_inbound
 from base.agents.messages.inbound import InboundKind
+from base.clock import Clock
 from base.cluster.machine import machine_name
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -25,6 +27,10 @@ from ops.agents import create_agent_row, resurrect_agent, wake
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.lifecycle import force_mark_terminated
 from ops.tests.pool_support import make_test_pool
+
+_ENVELOPE_INPUTS = EnvelopeReadInputs(
+    Clock.from_settings, lambda: settings.general.message_timestamps
+)
 
 
 def _noop(_db: object, _bus: object, *_args: object, **_kwargs: object) -> None:
@@ -645,8 +651,7 @@ class TestResurrectAgent:
             if kind == "chat":
                 assert source is not None
                 wrap_inbound(
-                    content,
-                    source,
+                    content, source, inputs=_ENVELOPE_INPUTS
                 )  # raises ValueError on illegal source
 
     def test_resurrect_nonexistent_raises_agent_not_found(

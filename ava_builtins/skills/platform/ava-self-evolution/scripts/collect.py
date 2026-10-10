@@ -427,6 +427,7 @@ def collect_with_counts(
     days: int,
     week: str,
     *,
+    database: Database,
     from_: datetime | None = None,
     to: datetime | None = None,
     include_test: bool = False,
@@ -453,7 +454,7 @@ def collect_with_counts(
     logs = _group_by_agent(audit)
     ids = sorted(events)
     window = f"{days} days"
-    with Database.from_settings().connect() as conn, conn.cursor() as cur:
+    with database.connect() as conn, conn.cursor() as cur:
         inbounds = _inbounds_by_agent(cur, ids, window)
         meta = _meta_by_agent(cur, ids)
         test_ids = set() if include_test else _test_label_ids(cur, ids)
@@ -475,6 +476,7 @@ def collect_with_counts(
             logs.get(agent_id, []),
             inbounds.get(agent_id, []),
             meta[agent_id],
+            database=database,
         )
         record["builtin_help_calls"], record["builtin_help_on_ava"] = _builtin_help_counts(
             agent_events
@@ -489,6 +491,7 @@ def collect(
     days: int,
     week: str,
     *,
+    database: Database,
     from_: datetime | None = None,
     to: datetime | None = None,
     include_test: bool = False,
@@ -513,13 +516,17 @@ def collect(
     use collect_with_counts(), which returns the same records plus the
     pre-filter counts.
     """
-    return collect_with_counts(days, week, from_=from_, to=to, include_test=include_test)[0]
+    return collect_with_counts(
+        days, week, database=database, from_=from_, to=to, include_test=include_test
+    )[0]
 
 
 def collect_one(
     agent_id: int,
     week: str | None = None,
     leak_paths: LeakPaths | None = None,
+    *,
+    database: Database,
 ) -> dict[str, Any]:
     """Build a trace record for a single agent by id — its rows from the last
     7 days (Loki retention; eval agents live minutes, so this captures their
@@ -540,7 +547,7 @@ def collect_one(
     log_events = [
         (r["event_name"], r.get("attributes") or {}) for r in audit if r.get("agent_id") == agent_id
     ]
-    with Database.from_settings().connect() as conn, conn.cursor() as cur:
+    with database.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT source, content, created_at > %s AS is_in_collection_window "
             "FROM inbound_messages WHERE agent_id = %s AND kind = 'chat' "
@@ -563,7 +570,16 @@ def collect_one(
         meta = cur.fetchone()
     if meta is None:
         raise ValueError(f"no agents_meta row for agent {agent_id}")
-    record = build_record(agent_id, week, events, log_events, inbounds, meta, leak_paths=leak_paths)
+    record = build_record(
+        agent_id,
+        week,
+        events,
+        log_events,
+        inbounds,
+        meta,
+        database=database,
+        leak_paths=leak_paths,
+    )
     record["builtin_help_calls"], record["builtin_help_on_ava"] = _builtin_help_counts(events)
     record["subprocess_calls"] = _subprocess_call_count(events)
     return record
@@ -628,11 +644,20 @@ def _parse_iso(value: str) -> datetime:
 
 
 def main() -> None:
+    from base.db.code_version_gate import ProcessDbGate
+    from base.native_process.code_version import CodeVersion
+    from base.native_process.loaded_commit import LoadedCommit
+
+    version = CodeVersion(LoadedCommit.capture())
+    gate = ProcessDbGate(version=version.get, process="unknown")
     args = parse_args()
     week = args.week or default_week()
     from_ = _parse_iso(args.from_) if args.from_ else None
     to = _parse_iso(args.to) if args.to else None
-    records = collect(args.days, week, from_=from_, to=to, include_test=args.include_test)
+    database = Database.from_settings(gate=gate)
+    records = collect(
+        args.days, week, database=database, from_=from_, to=to, include_test=args.include_test
+    )
     path = write_dataset(records, week)
     counts = Counter(r["label"] for r in records)
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

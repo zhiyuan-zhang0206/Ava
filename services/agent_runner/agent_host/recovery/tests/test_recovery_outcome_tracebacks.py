@@ -27,6 +27,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.units import spawn_agent
 
 
@@ -44,10 +45,11 @@ def _context(pool: AsyncConnectionPool) -> AvaContext:
         ops_pool=pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=configured_policy().clock_factory,
     )
 
 

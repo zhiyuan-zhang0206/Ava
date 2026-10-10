@@ -2,7 +2,7 @@
 
 `get_provider()` is the single entry point: the indexer daemon (document
 batch path) and the gateway search endpoint (async query path) both take
-their provider from here, keyed by `settings.services.embedding_backend`
+their provider from here, keyed by the name supplied by the composition root
 (`AVA_EMBEDDING_BACKEND`, default `gemini`). Unknown names fail fast — an
 unrecognized value raises ValueError naming the known providers instead of
 silently falling back to Gemini (a typo would otherwise keep the old
@@ -20,7 +20,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from base.config import settings
 from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings import gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
@@ -36,11 +35,15 @@ class EmbeddingDescriptor:
 
 
 _ProviderEntry = tuple[
-    Callable[[ModelCatalog], EmbeddingProvider], Callable[[], float], EmbeddingDescriptor
+    Callable[[ModelCatalog, Callable[[], float], Callable[[], str | None]], EmbeddingProvider],
+    Callable[[float], float],
+    EmbeddingDescriptor,
 ]
 _PROVIDERS: dict[str, _ProviderEntry] = {
     gemini.GeminiEmbeddingProvider.name: (
-        gemini.GeminiEmbeddingProvider,
+        lambda catalog, timeout_reader, api_key_reader: gemini.GeminiEmbeddingProvider(
+            catalog, timeout_reader=timeout_reader, api_key_reader=api_key_reader
+        ),
         gemini.worst_case_batch_seconds,
         EmbeddingDescriptor(
             gemini.GeminiEmbeddingProvider.name,
@@ -59,25 +62,39 @@ def _provider_entry(name: str) -> _ProviderEntry:
         raise ValueError(f"unknown embedding provider {name!r} (known: {known})") from None
 
 
-def get_provider_named(name: str, *, catalog: ModelCatalog) -> EmbeddingProvider:
+def get_provider_named(
+    name: str,
+    *,
+    catalog: ModelCatalog,
+    timeout_reader: Callable[[], float],
+    api_key_reader: Callable[[], str | None],
+) -> EmbeddingProvider:
     """Construct a provider by name; unknown names fail fast."""
     ctor, _, _ = _provider_entry(name)
-    return ctor(catalog)
+    return ctor(catalog, timeout_reader, api_key_reader)
 
 
-def get_provider(*, catalog: ModelCatalog) -> EmbeddingProvider:
+def get_provider(
+    name: str,
+    *,
+    catalog: ModelCatalog,
+    timeout_reader: Callable[[], float],
+    api_key_reader: Callable[[], str | None],
+) -> EmbeddingProvider:
     """Construct the configured provider
     (`settings.services.embedding_backend`, env `AVA_EMBEDDING_BACKEND`)."""
-    return get_provider_named(settings.services.embedding_backend, catalog=catalog)
+    return get_provider_named(
+        name, catalog=catalog, timeout_reader=timeout_reader, api_key_reader=api_key_reader
+    )
 
 
-def worst_case_batch_seconds() -> float:
+def worst_case_batch_seconds(name: str, *, timeout_seconds: float) -> float:
     """Return the configured provider's full document-batch retry budget."""
-    _, batch_seconds, _ = _provider_entry(settings.services.embedding_backend)
-    return batch_seconds()
+    _, batch_seconds, _ = _provider_entry(name)
+    return batch_seconds(timeout_seconds)
 
 
-def get_descriptor() -> EmbeddingDescriptor:
+def get_descriptor(name: str) -> EmbeddingDescriptor:
     """Read the configured provider's metadata without constructing a provider."""
-    _, _, descriptor = _provider_entry(settings.services.embedding_backend)
+    _, _, descriptor = _provider_entry(name)
     return descriptor

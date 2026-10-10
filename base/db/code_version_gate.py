@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Callable
 from typing import Any, NoReturn, Protocol, cast
 
 import psycopg
@@ -82,12 +83,15 @@ def _has_log_sink() -> bool:
     return bool(cast(Any, logger)._core.handlers)  # private `_core`, as `base.log` reads it
 
 
-def _refuse(version: int, minimum: int) -> NoReturn:
+def _refuse(version: int, minimum: int, *, process: str | None = None) -> NoReturn:
     from base.daemon.shutdown import hard_exit
-    from base.telemetry import process_name
 
+    if process is None:
+        from base.telemetry import process_name
+
+        process = process_name()
     fields = {
-        "service": process_name(),
+        "service": process,
         "version": version,
         "minimum": minimum,
         "code": CODE_BEHIND_MINIMUM_EXIT_CODE,
@@ -136,7 +140,10 @@ def raise_min_code_version(db: _Dialer) -> int:
         CodeVersionError: this process has no resolvable code version.
         RuntimeError: the `deployment_state` singleton row is missing.
     """
-    version = code_version.get()
+    return _raise_minimum(db, code_version.get())
+
+
+def _raise_minimum(db: _Dialer, version: int) -> int:
     with db.connect(autocommit=True) as conn:
         row = conn.execute(
             "UPDATE deployment_state SET min_code_version = GREATEST(min_code_version, %s) "
@@ -154,3 +161,43 @@ def raise_min_code_version(db: _Dialer) -> int:
         version=version,
     )
     return minimum
+
+
+class ProcessDbGate:
+    """One process's minimum-read budget, shared by every database handle.
+
+    The entry point supplies its captured-code reader and gate posture. Config
+    refreshes, connection rebuilds and independent pools retain this same owner.
+    Due/read observation intentionally remains two-phase: concurrent first
+    restores may both read the minimum, as they did with the process timestamp.
+    """
+
+    def __init__(self, *, version: Callable[[], int], process: str, exempt: bool = False) -> None:
+        self._version = version
+        self._process = process
+        self._exempt = exempt
+        self._last_read_at: float | None = None
+
+    def min_read_due(self) -> bool:
+        """Whether this process should read the minimum in its restore SQL."""
+        if self._exempt:
+            return False
+        seen = self._last_read_at
+        return seen is None or time.monotonic() - seen >= MIN_REFRESH_INTERVAL_S
+
+    def observe_minimum(self, minimum: int) -> None:
+        """Retain this read's time and hard-refuse the actual loaded version."""
+        self._last_read_at = time.monotonic()
+        version = self._version()
+        if version < minimum:
+            _refuse(version, minimum, process=self._process)
+
+    def application_name(self) -> str:
+        """Name the process image; an exempt CLI never resolves a Git version."""
+        if self._exempt:
+            return "ava:cli"
+        return f"ava:{self._process}:v{self._version()}"
+
+    def raise_min_code_version(self, db: _Dialer) -> int:
+        """Raise the minimum to this gateway's captured code version."""
+        return _raise_minimum(db, self._version())

@@ -31,7 +31,9 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
@@ -41,7 +43,6 @@ from agent.graph.llm_errors import (
     LLMStreamStallTimeoutError,
 )
 from agent.hooks.compact import CompactionFailedError
-from base.config import settings
 from base.host.net.resilience import jittered
 from base.lm.catalog import ModelCatalog
 from base.lm.errors import is_retryable_provider_error
@@ -70,7 +71,7 @@ def retry_phase_jitter(agent_id: int) -> float:
     return RETRY_JITTER_SPAN_S * (agent_id % 1000) / 1000.0
 
 
-def delayed_stall_sleep(streak: int) -> float:
+def delayed_stall_sleep(streak: int, *, read_lm: Callable[[str], Any]) -> float:
     """The jittered wait before the retry after stall pair number `streak`.
 
     Exponential with a cap: ``initial x 2**(streak-1)``, capped at
@@ -80,10 +81,10 @@ def delayed_stall_sleep(streak: int) -> float:
     the per-agent phase: with only a few grants each must land in a fresh spot.
     """
     base = min(
-        settings.lm.llm_stall_retry_initial_interval_seconds * (2 ** (streak - 1)),
-        settings.lm.llm_stall_retry_max_interval_seconds,
+        read_lm("llm_stall_retry_initial_interval_seconds") * (2 ** (streak - 1)),
+        read_lm("llm_stall_retry_max_interval_seconds"),
     )
-    return jittered(base, span=base * settings.lm.llm_stall_retry_jitter_fraction, mode="random")
+    return jittered(base, span=base * read_lm("llm_stall_retry_jitter_fraction"), mode="random")
 
 
 def _retryable_failure(exc: Exception) -> bool:
@@ -101,6 +102,7 @@ def retry_wait(
     ledger: LlmLedger,
     catalog: ModelCatalog,
     max_attempts_pin: int | None,
+    read_lm: Callable[[str], Any],
 ) -> float | None:
     """Seconds to sleep before the next try after the `attempts`-th failed one; None ends the node.
 
@@ -116,7 +118,7 @@ def retry_wait(
         models=catalog.models,
         explicit=max_attempts_pin,
     )
-    max_pairs = settings.lm.llm_stall_retry_max_consecutive
+    max_pairs = read_lm("llm_stall_retry_max_consecutive")
     if isinstance(exc, LLMStreamStallPairError) and max_pairs > 0:
         thread = str(agent_id)
         streak = ledger.stall_pair_streak(thread) + 1
@@ -128,7 +130,7 @@ def retry_wait(
         # failures earlier in the same sequence consumed part of the transient count.
         if attempts >= max_attempts + max_pairs:
             return None
-        return delayed_stall_sleep(streak)
+        return delayed_stall_sleep(streak, read_lm=read_lm)
 
     remaining = getattr(exc, RETRY_REMAINING_ATTR, None)
     remaining = remaining if isinstance(remaining, float) else None
@@ -136,11 +138,11 @@ def retry_wait(
         return None
     if attempts >= max_attempts:
         return None
-    max_interval = settings.lm.llm_retry_max_interval_seconds
+    max_interval = read_lm("llm_retry_max_interval_seconds")
     if remaining is not None:
         # Reserve the up-to-one-second jitter so a sleep cannot drift past the node's budget.
         max_interval = min(max_interval, remaining - (1.0 if remaining > 1.0 else 0.0))
-    initial = settings.lm.llm_retry_initial_interval_seconds + retry_phase_jitter(agent_id)
+    initial = read_lm("llm_retry_initial_interval_seconds") + retry_phase_jitter(agent_id)
     interval = min(max_interval, initial * (_BACKOFF_FACTOR ** (attempts - 1)))
     if remaining is None or remaining > 1.0:
         return interval + random.uniform(0, 1)  # noqa: S311 — retry jitter, not security

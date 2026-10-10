@@ -1,7 +1,8 @@
 """Atomic business acceptance for explicit guarded create-and-assign callers."""
 
 import asyncio
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
@@ -117,6 +118,7 @@ async def observe_launch(
     result: TaskAssignmentResult,
     *,
     catalog: ModelCatalog,
+    default_model_reader: Callable[[], str],
 ) -> TaskAssignmentAccepted:
     """The retained pair is immutable; native current eligibility controls recovery."""
 
@@ -129,7 +131,9 @@ async def observe_launch(
         existing = await asyncio.to_thread(current)
         if existing is None or existing.launch_attempt_id != result.launch_attempt_id:
             return response
-        response.launch = await recover_launch(pool, db, bus, existing, catalog=catalog)
+        response.launch = await recover_launch(
+            pool, db, bus, existing, catalog=catalog, default_model_reader=default_model_reader
+        )
     except AgentLaunchFailed as exc:
         response.launch_failure = str(exc)
         response.retry_launch_path = exc.retry_launch_path
@@ -198,4 +202,15 @@ async def post_task_assignment(
                 await asyncio.to_thread(
                     announce_assignment, events, bus, body.actor_agent_id, result
                 )
-    return await observe_launch(pool, db, bus, key, raw, result, catalog=request.app.state.catalog)
+    return await observe_launch(
+        pool,
+        db,
+        bus,
+        key,
+        raw,
+        result,
+        catalog=request.app.state.catalog,
+        default_model_reader=lambda: cast(
+            str, request.app.state.config_authority.service_field_value("llm_model")
+        ),
+    )

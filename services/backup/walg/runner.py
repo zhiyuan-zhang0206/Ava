@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -63,6 +64,7 @@ def run_walg_logged(
     timeout_s: float,
     pg_admin_url: str | None = None,
     extra_env: Mapping[str, str] | None = None,
+    path_reader: Callable[[], Path | None],
 ) -> WalgOutput:
     """Run `wal-g --config <file> *args` and return both streams.
 
@@ -73,7 +75,7 @@ def run_walg_logged(
         WalgConfigError: WAL-G is not configured.
         WalgCommandError: non-zero exit or timeout (the stderr tail is attached).
     """
-    config_file = configured_path()
+    config_file = configured_path(path_reader=path_reader)
     if config_file is None:
         raise WalgConfigError("AVA_WALG_CONFIG_FILE is not set")
     argv = [str(walg_path()), "--config", str(config_file), *args]
@@ -103,6 +105,7 @@ def run_walg(
     pg_admin_url: str | None = None,
     extra_env: Mapping[str, str] | None = None,
     as_json: bool = False,
+    path_reader: Callable[[], Path | None],
 ) -> Any:
     """Run `wal-g --config <file> *args`; stdout text, or parsed JSON with `as_json`.
 
@@ -111,6 +114,10 @@ def run_walg(
         WalgCommandError: non-zero exit or timeout (the stderr tail is attached).
     """
     output = run_walg_logged(
-        args, timeout_s=timeout_s, pg_admin_url=pg_admin_url, extra_env=extra_env
+        args,
+        timeout_s=timeout_s,
+        pg_admin_url=pg_admin_url,
+        extra_env=extra_env,
+        path_reader=path_reader,
     )
     return json.loads(output.stdout) if as_json else output.stdout

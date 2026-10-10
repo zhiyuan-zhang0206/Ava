@@ -11,14 +11,13 @@ operator's stop budget (2026-09-09 #2043), and the stop-aware sleep
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from datetime import timedelta
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 
-from base.config import settings
 from base.log import logger
 from services.desktop.browser.shutdown_budget import SHUTDOWN_STEP_TIMEOUT_S
 
@@ -90,7 +89,7 @@ async def _await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:
 
 
 async def _create_upstream(
-    browser_url: str, stop: asyncio.Event
+    browser_url: str, stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
 ) -> tuple[ClientSession, AsyncExitStack]:
     """Create a new chrome-devtools-mcp upstream session.
 
@@ -121,7 +120,9 @@ async def _create_upstream(
         session = await stack.enter_async_context(
             ClientSession(read, write, read_timeout_seconds=_READ_TIMEOUT.total_seconds())
         )
-        await _initialize_until_stop_or_timeout(session, stop)
+        await _initialize_until_stop_or_timeout(
+            session, stop, connect_timeout_reader=connect_timeout_reader
+        )
         return session, stack
     except BaseException:
         # The failed connect's stack close is bounded too: a stuck child
@@ -130,7 +131,9 @@ async def _create_upstream(
         raise
 
 
-async def _initialize_until_stop_or_timeout(session: ClientSession, stop: asyncio.Event) -> None:
+async def _initialize_until_stop_or_timeout(
+    session: ClientSession, stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
+) -> None:
     """Run ``session.initialize()`` until it returns, the stop event fires, or
     the configured connect timeout elapses — whichever comes first.
 
@@ -145,7 +148,7 @@ async def _initialize_until_stop_or_timeout(session: ClientSession, stop: asynci
             await asyncio.wait(
                 {init_task, stop_task},
                 return_when=asyncio.FIRST_COMPLETED,
-                timeout=settings.sandbox.mcp_connect_timeout_seconds,
+                timeout=connect_timeout_reader(),
             )
         finally:
             stop_task.cancel()

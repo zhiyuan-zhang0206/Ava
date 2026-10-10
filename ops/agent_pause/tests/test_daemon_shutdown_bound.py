@@ -123,7 +123,7 @@ def _run_child() -> None:
     if case.argv:
         sys.argv = [case.module, *case.argv]
 
-    async def wedge_run(*_args: object) -> None:
+    async def wedge_run(*_args: object, **_kwargs: object) -> None:
         try:
             # The shape under test: a default-executor job that never finishes
             # (the in-flight check / scan / reconcile), so closing the loop can

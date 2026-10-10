@@ -33,6 +33,8 @@ host's: reading a host timezone can make a current dump appear to be future.
 - **Timeout guard**: `_DUMP_TIMEOUT_S=60min` bounds pg_dump inside the scheduler; a stalled dump cannot freeze watchdog supervision.
 - **Dump authority** (`dump_source`): a locally owned plane dumps as the administrator acting as the schema owner over the home's owner-only socket (`base.db.pg_admin`), custody-checked first and password-free, so no write-generation login is needed and a rollout revoking one cannot kill a dump; a remote-managed plane dumps through its provider URL (password in the child environment only). The restore drill recreates the capability groups `ava_gateway`/`ava_runner` the dump's grants name.
 
+- **Configuration ownership**: dump decisions require hour, retention and remote-plane readers plus a fresh `Clock` factory at each original timezone read. Off-site publication requires endpoint, bucket and credentials-file readers; explicit bucket injection does not read them. Roots bind these readers to their own `ConfigBoot` without moving database or publication authority.
+
 ## Key Dependencies
 - [[ava_root.ava.okf.md]] — probes and restarts the scheduler without executing the dump
 - [[agent/db/docs/db.ava.okf.md]] — the dump target is the cluster's Postgres database

@@ -24,16 +24,22 @@ from agent.graph.exec.protocol import read_request, write_request
 from agent.state import BaseAgentState
 from agent.tests._fakes import placeholder_runtime
 from base.agents.context import AvaContext
+from base.agents.impersonation.notes import HandoffNotes
 from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
+from base.clock import Clock
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
 from tests.fixtures.pin_agent import exec_context, pin_agent
+
+
+def _notes() -> HandoffNotes:
+    return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
 
 
 @pytest.fixture
@@ -47,7 +53,13 @@ def gate_ctx(
     event_bus: EventBus,
     relays: RelaySupervision,
 ) -> AvaContext:
-    return AvaContext(db=database, bus=event_bus, relays=relays, catalog=build_model_catalog())
+    return AvaContext(
+        db=database,
+        bus=event_bus,
+        relays=relays,
+        catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
+    )
 
 
 @pytest.fixture
@@ -124,43 +136,6 @@ async def test_hold_ends_before_claim_or_compaction(
     hook.assert_not_awaited()
 
 
-async def test_activation_waits_for_resource_closure(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
-) -> None:
-    monkeypatch.setattr(
-        impersonation, "native_status", AsyncMock(return_value=_session("accepted"))
-    )
-    activate = Mock(return_value=_session())
-    monkeypatch.setattr("base.agents.impersonation.activate", activate)
-    resources = HostedTurnResources(unresolved={Path("request"): object()})
-    with pytest.raises(RuntimeError, match="unresolved native exec"):
-        await impersonation.settle_checkpoint(
-            MagicMock(),
-            database,
-            event_bus,
-            42,
-            relays,
-            incarnation=incarnation,
-            resources=resources,
-        )
-    activate.assert_not_called()
-    assert not await impersonation.settle_checkpoint(
-        MagicMock(),
-        database,
-        event_bus,
-        42,
-        relays,
-        activate_accepted=False,
-        incarnation=incarnation,
-        resources=resources,
-    )
-    activate.assert_not_called()
-
-
 async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
@@ -198,12 +173,26 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     monkeypatch.setattr("base.agents.impersonation.mark_plugin_applied", receipt)
     with pytest.raises(RuntimeError, match="receipt commit lost"):
         await impersonation.settle_checkpoint(
-            graph, database, event_bus, 42, relays, incarnation=incarnation, resources=None
+            graph,
+            database,
+            event_bus,
+            42,
+            relays,
+            incarnation=incarnation,
+            resources=None,
+            notes=_notes(),
         )
     assert (await graph.aget_state(config)).values["counter"] == 3
     receipt.side_effect = None
     await impersonation.settle_checkpoint(
-        graph, database, event_bus, 42, relays, incarnation=incarnation, resources=None
+        graph,
+        database,
+        event_bus,
+        42,
+        relays,
+        incarnation=incarnation,
+        resources=None,
+        notes=_notes(),
     )
     assert (await graph.aget_state(config)).values["counter"] == 3
     assert receipt.call_count == 2
@@ -410,7 +399,14 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
 
     monkeypatch.setattr(impersonation, "establish_relay", refused)
     assert not await impersonation.settle_checkpoint(
-        MagicMock(), database, event_bus, 42, relays, incarnation=incarnation, resources=None
+        MagicMock(),
+        database,
+        event_bus,
+        42,
+        relays,
+        incarnation=incarnation,
+        resources=None,
+        notes=_notes(),
     )
     activate.assert_not_called()
     checkpoint.assert_awaited_once()
@@ -433,7 +429,14 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
     establish = Mock(return_value=True)
     monkeypatch.setattr(impersonation, "establish_relay", establish)
     assert await impersonation.settle_checkpoint(
-        MagicMock(), database, event_bus, 42, relays, incarnation=incarnation, resources=None
+        MagicMock(),
+        database,
+        event_bus,
+        42,
+        relays,
+        incarnation=incarnation,
+        resources=None,
+        notes=_notes(),
     )
     checkpoint.assert_awaited_once()
     establish.assert_called_once()

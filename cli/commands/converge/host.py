@@ -16,7 +16,7 @@ from pathlib import Path
 
 from base.cluster import is_default_home
 from base.cluster.machine import MachineRoles
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
@@ -510,7 +510,9 @@ def converge_host(
     """
     resolved_home = ava_home if ava_home is not None else resolve_ava_home()
     selected = _desired_service_names(roles) if services is None else services
-    ctx = ConvergeCtx(repo=repo, ava_home=resolved_home, roles=roles, services=selected)
+    ctx = ConvergeCtx(
+        repo=repo, ava_home=resolved_home, roles=roles, config=ConfigBoot(), services=selected
+    )
 
     # Host-global steps belong to the host's prod install (the default home
     # `~/.ava`), not to a dev cluster spun up from a worktree — a dev cluster must

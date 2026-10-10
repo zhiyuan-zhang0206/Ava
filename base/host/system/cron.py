@@ -30,7 +30,6 @@ from typing import TextIO
 
 from loguru import logger
 
-from base.config import settings
 from base.native_process.os_platform import (
     crontab_lock,
     descends_from_launchd_job,
@@ -51,7 +50,7 @@ LAUNCHD_LABEL_PREFIX = "com.ava"
 _CRON_MARKER = "# ava-health-probe"
 
 
-def os_jobs_enabled() -> bool:
+def os_jobs_enabled(*, enabled_reader: Callable[[], bool]) -> bool:
     """Whether this process may hand a job to the platform scheduler.
 
     Every other host resource a test isolates — `$AVA_HOME`, the database, redis,
@@ -71,7 +70,8 @@ def os_jobs_enabled() -> bool:
     wherever registration is forbidden, including on the leftovers of a run that
     predates this switch.
     """
-    return settings.general.os_jobs_enabled
+    # The composition root supplies the live switch; this gate owns read timing.
+    return enabled_reader()
 
 
 def skip_os_job(kind: str) -> None:
@@ -513,6 +513,8 @@ def _unregister_linux() -> int:
 
 def register_os_cron(
     interval_s: int = DEFAULT_INTERVAL_SECONDS,
+    *,
+    enabled_reader: Callable[[], bool],
 ) -> None:
     """Register the OS cron job for the cluster health probe.
 
@@ -534,7 +536,7 @@ def register_os_cron(
     Raises:
         RuntimeError: on registration failure.
     """
-    if not os_jobs_enabled():
+    if not os_jobs_enabled(enabled_reader=enabled_reader):
         skip_os_job("health-probe")
         return
     if not owns_os_jobs("health-probe"):

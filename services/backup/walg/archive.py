@@ -19,7 +19,9 @@ The command itself holds no secret: the pinned binary, `--config <file>` and
 from __future__ import annotations
 
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from base.cluster.dataplane.walg_binary import walg_path
 from services.backup.walg.config import WalgConfigError, configured_path
@@ -47,7 +49,7 @@ def _percent_escaped(text: str) -> str:
     return text.replace("%", "%%")
 
 
-def postgres_command(*walg_args: str) -> str:
+def postgres_command(*walg_args: str, path_reader: Callable[[], Path | None]) -> str:
     """A shell command Postgres runs: the pinned wal-g, `--config <file>`, then `walg_args`.
 
     `walg_args` are written as given (they hold Postgres' own `%p` / `%f`
@@ -57,7 +59,7 @@ def postgres_command(*walg_args: str) -> str:
     Raises:
         WalgConfigError: WAL-G is not configured.
     """
-    config_file = configured_path()
+    config_file = configured_path(path_reader=path_reader)
     if config_file is None:
         raise WalgConfigError("AVA_WALG_CONFIG_FILE is not set")
     return shlex.join(
@@ -70,18 +72,20 @@ def postgres_command(*walg_args: str) -> str:
     )
 
 
-def expected_archive() -> ExpectedArchive | None:
+def expected_archive(*, path_reader: Callable[[], Path | None]) -> ExpectedArchive | None:
     """The archive settings for the configured WAL-G, or None when WAL-G is off."""
-    if configured_path() is None:
+    if configured_path(path_reader=path_reader) is None:
         return None
     return ExpectedArchive(
-        mode="on", timeout_s=ARCHIVE_TIMEOUT_S, command=postgres_command("wal-push", "%p")
+        mode="on",
+        timeout_s=ARCHIVE_TIMEOUT_S,
+        command=postgres_command("wal-push", "%p", path_reader=path_reader),
     )
 
 
-def archive_pg_args() -> list[str]:
+def archive_pg_args(*, path_reader: Callable[[], Path | None]) -> list[str]:
     """`postgres` launch arguments for the configured archiving; empty when WAL-G is off."""
-    expected = expected_archive()
+    expected = expected_archive(path_reader=path_reader)
     if expected is None:
         return []
     return [

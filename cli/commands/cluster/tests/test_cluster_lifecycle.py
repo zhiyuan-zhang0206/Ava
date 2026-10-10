@@ -370,3 +370,41 @@ def test_destroying_a_scratch_home_never_reaches_the_hosts_scheduler(
     monkeypatch.setattr("base.host.system.backend.get_backend", _Backend)
 
     lifecycle._unregister_scheduled_jobs()  # no AssertionError == nothing was touched
+
+
+def test_cron_cli_keeps_its_interval_and_passes_a_live_owned_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections.abc import Callable
+
+    from base.config import ConfigBoot
+    from cli.commands.cluster import cron as command
+
+    owner = ConfigBoot()
+    owner.set_field("os_jobs_enabled", False)
+    observed: list[tuple[int, Callable[[], bool]]] = []
+
+    def register(*, interval_s: int, enabled_reader: Callable[[], bool]) -> None:
+        observed.append((interval_s, enabled_reader))
+
+    monkeypatch.setattr(command, "ConfigBoot", lambda: owner)
+    monkeypatch.setattr(command, "register_os_cron", register)
+    assert command.cmd_cron_register(interval_s=420) == 0
+    interval, gate = observed[0]
+    assert interval == 420 and gate() is False
+    owner.set_field("os_jobs_enabled", True)
+    assert gate() is True
+
+
+def test_cron_cli_keeps_registration_failure_returncode(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.commands.cluster import cron as command
+
+    def failed(**_kwargs: object) -> None:
+        raise RuntimeError("scheduler denied")
+
+    monkeypatch.setattr(command, "register_os_cron", failed)
+    assert command.cmd_cron_register() == 1
+    assert capsys.readouterr().out == "  * scheduler denied\n"

@@ -11,6 +11,8 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from base.agents.history.checkpoint import single_segment_history
+from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.clock import Clock, ClockConfig
 from services.derived.insights.run_timeline import history
 from services.derived.insights.run_timeline.history import HistoryViewCache
 
@@ -37,11 +39,14 @@ class FakeStore:
 
 
 DB: Any = SimpleNamespace()
+_TIMELINE_INPUTS = TimelineReadInputs(
+    lambda: Clock(ClockConfig("UTC", "UTC", False)), lambda: False
+)
 
 
 def test_concurrent_cold_readers_share_one_build(monkeypatch: pytest.MonkeyPatch) -> None:
     store = FakeStore(monkeypatch, delay=0.2)
-    cache = HistoryViewCache()
+    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     views: list[Any] = []
     threads = [threading.Thread(target=lambda: views.append(cache.get(DB, 9))) for _ in range(6)]
     for t in threads:
@@ -57,7 +62,7 @@ def test_an_unchanged_checkpoint_keeps_the_view_past_the_ttl(
 ) -> None:
     store = FakeStore(monkeypatch)
     monkeypatch.setattr(history, "_TTL_SECONDS", 0.0)
-    cache = HistoryViewCache()
+    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     first = cache.get(DB, 9)
     assert cache.get(DB, 9) is first
     assert (store.loads, store.probes) == (1, 2)
@@ -66,7 +71,7 @@ def test_an_unchanged_checkpoint_keeps_the_view_past_the_ttl(
 def test_a_new_checkpoint_rebuilds_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
     store = FakeStore(monkeypatch)
     monkeypatch.setattr(history, "_TTL_SECONDS", 0.0)
-    cache = HistoryViewCache()
+    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     first = cache.get(DB, 9)
     store.head = "c2"
     assert cache.get(DB, 9) is not first
@@ -77,7 +82,7 @@ def test_a_view_is_rebuilt_past_the_max_age(monkeypatch: pytest.MonkeyPatch) -> 
     store = FakeStore(monkeypatch)
     monkeypatch.setattr(history, "_TTL_SECONDS", 0.0)
     monkeypatch.setattr(history, "_MAX_AGE_SECONDS", -1.0)
-    cache = HistoryViewCache()
+    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     cache.get(DB, 9)
     cache.get(DB, 9)
     assert store.loads == 2
@@ -85,7 +90,7 @@ def test_a_view_is_rebuilt_past_the_max_age(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_within_the_ttl_the_store_is_not_probed(monkeypatch: pytest.MonkeyPatch) -> None:
     store = FakeStore(monkeypatch)
-    cache = HistoryViewCache()
+    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     cache.get(DB, 9)
     cache.get(DB, 9)
     assert (store.loads, store.probes) == (1, 1)
@@ -95,7 +100,7 @@ def test_one_page_of_agents_stays_cached_and_the_oldest_is_evicted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = FakeStore(monkeypatch)
-    cache = HistoryViewCache()
+    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     cap = history._MAX_ENTRIES
     for agent_id in range(cap):
         cache.get(DB, agent_id)

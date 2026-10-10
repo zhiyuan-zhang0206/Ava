@@ -18,8 +18,8 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 
-from ava.sdk_surface.settings import database
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
+from base.db import Database
 
 
 def _state_module() -> Any:
@@ -78,13 +78,15 @@ def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
         setattr(state, name, reducer(getattr(state, name), value))
 
 
-def load_snapshot(agent_id: int) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
+def load_snapshot(
+    agent_id: int, *, database: Database
+) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
     """Read native state and pinned config; never create or update a checkpoint."""
     # What the plugins this attachment loaded declare; the checkpoint decode's allowlist is the state
     # classes of the faces it loaded (`process_state_classes`).
     registry = importlib.import_module("agent.extensions.registry").build_registry()
     state_cls = _state_module().build_agent_state(registry)
-    with database().connect(autocommit=True) as conn:
+    with database.connect(autocommit=True) as conn:
         conn.row_factory = cast(Any, dict_row)
         typed_conn = cast(Connection[DictRow], conn)
         row = typed_conn.execute(

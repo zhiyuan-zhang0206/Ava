@@ -1,8 +1,10 @@
 """Guarded compound acceptance has one atomic pair and immutable receipt."""
 
+import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+from unittest.mock import patch
 from uuid import UUID
 
 import psycopg
@@ -305,3 +307,10 @@ def test_corrupt_snapshot_fails_without_recreating_mutable_state(
     with pytest.raises(ValueError, match="missing or unknown"):
         client.post(PATH, json=body, headers=HEADERS)
     assert _counts(db_conn) == before
+
+
+@pytest.fixture(autouse=True)
+def _restore_cold_gateway_delivery() -> Iterator[None]:
+    """This module owns every environment mutation made by its real gateway lifespan."""
+    with patch.dict(os.environ):
+        yield

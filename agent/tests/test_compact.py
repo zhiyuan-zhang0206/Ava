@@ -16,6 +16,7 @@ summary is complete memory; framework no longer appends any original messages (n
 """
 
 import json
+from collections.abc import Mapping
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -44,6 +45,8 @@ from agent.hooks.compact import (
 from agent.llm import execute_code
 from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
+from base.clock import Clock
+from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
@@ -53,16 +56,21 @@ from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
 
-def _compact_tail(update: Any) -> list[AnyMessage]:
-    """Assert the transport every compaction now shares — the window is cleared
-    and rebuilding the standing head is handed to `init_context` — and return the
-    parked tail, which is what the compaction itself decided.
+def _read_agent(field: str):
+    return getattr(settings.agent, field)
 
-    A compaction no longer emits a replacement window: `messages` carries the
-    REMOVE_ALL sentinel alone, and what belongs *behind* the head — the summary
-    — rides in `context_reset`. A compact is a clean wipe: chats co-batched
-    with the compact request are re-delivered as pending inbounds, never parked
-    here.
+
+def _slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
+    return AgentSlices.resolve(
+        pins, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    )
+
+
+def _compact_tail(update: Any) -> list[AnyMessage]:
+    """Assert the shared wipe transport and return the parked compaction tail.
+
+    Messages carry only REMOVE_ALL; context_reset carries the tail.
+    Co-batched chats are re-delivered as pending inbounds.
     """
     msgs = update["messages"]
     assert len(msgs) == 1, f"expected the sentinel alone, got {len(msgs)} messages"
@@ -139,10 +147,11 @@ def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=_slices(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
 
@@ -160,9 +169,7 @@ async def test_generate_summary_returns_summary():
     msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
 
     llm = _fake_llm(summary_text="a synthetic summary")
-    summary = await generate_summary(
-        msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
-    )
+    summary = await generate_summary(msgs, llm, _slices(), catalog=build_model_catalog())
 
     assert summary == "a synthetic summary"
 
@@ -180,7 +187,7 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
         response_metadata={"model_name": "m1"},
     )
     summary = await generate_summary(
-        msgs, _fake_llm(response=response), AgentSlices.resolve(), catalog=build_model_catalog()
+        msgs, _fake_llm(response=response), _slices(), catalog=build_model_catalog()
     )
 
     closing = closing_of(summary)
@@ -191,7 +198,7 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
     assert summary == "a synthetic summary"  # still the plain text everywhere else
 
     bare = await generate_summary(
-        msgs, _fake_llm("no usage"), AgentSlices.resolve(), catalog=build_model_catalog()
+        msgs, _fake_llm("no usage"), _slices(), catalog=build_model_catalog()
     )
     assert closing_of(bare) is None
     assert closing_of("an agent-written summary") is None
@@ -209,14 +216,16 @@ async def test_stamp_compact_boundary_writes_the_closing_request(
         seen.append(closing)
         return "boundary"
 
-    async def no_wait(*_args: Any) -> None:
+    async def no_wait(*_args: Any, **_kwargs: Any) -> None:
         return None
 
     monkeypatch.setattr(compact, "mark_compact_boundary", fake_mark)
     monkeypatch.setattr(compact, "await_snapshot", no_wait)
     closing = ClosingRequest(100, 5, "m1")
-    await compact.stamp_compact_boundary(MagicMock(), 1, None, closing=closing)
-    await compact.stamp_compact_boundary(MagicMock(), 1)
+    await compact.stamp_compact_boundary(
+        MagicMock(), 1, None, closing=closing, read_agent=_read_agent
+    )
+    await compact.stamp_compact_boundary(MagicMock(), 1, read_agent=_read_agent)
     assert seen == [closing, None]
 
 
@@ -277,7 +286,7 @@ async def test_generate_summary_emits_agent_billing_span(
     )
     llm = _fake_llm(response=response)
     llm.model_name = "deepseek-flash"
-    slices = AgentSlices.resolve({"llm_model": "deepseek-flash"})
+    slices = _slices({"llm_model": "deepseek-flash"})
 
     assert (
         await generate_summary(
@@ -313,7 +322,7 @@ async def test_generate_summary_includes_whole_conversation():
     ]
 
     llm = _fake_llm()
-    await generate_summary(convo, llm, AgentSlices.resolve(), catalog=build_model_catalog())
+    await generate_summary(convo, llm, _slices(), catalog=build_model_catalog())
 
     [call] = _compaction_ainvoke(llm).call_args_list
     [llm_input] = call.args
@@ -328,9 +337,7 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
     content: list[AnyMessage] = [HumanMessage(content=f"m-{i}") for i in range(5)]
 
     llm = _fake_llm()
-    await generate_summary(
-        [sys_msg, *content], llm, AgentSlices.resolve(), catalog=build_model_catalog()
-    )
+    await generate_summary([sys_msg, *content], llm, _slices(), catalog=build_model_catalog())
 
     llm.bind_tools.assert_called_once_with([execute_code])
     [call] = _compaction_ainvoke(llm).call_args_list
@@ -347,7 +354,7 @@ async def test_generate_summary_raises_on_empty_llm_text():
 
     with pytest.raises(RuntimeError, match="no text"):
         await generate_summary(
-            msgs, _fake_llm(summary_text=""), AgentSlices.resolve(), catalog=build_model_catalog()
+            msgs, _fake_llm(summary_text=""), _slices(), catalog=build_model_catalog()
         )
 
 
@@ -363,9 +370,7 @@ async def test_generate_summary_extracts_text_from_block_content():
     )
 
     llm = _fake_llm(response=block_response)
-    summary = await generate_summary(
-        msgs, llm, AgentSlices.resolve(), catalog=build_model_catalog()
-    )
+    summary = await generate_summary(msgs, llm, _slices(), catalog=build_model_catalog())
     assert summary == "the real summary"
 
 
@@ -381,7 +386,7 @@ async def test_generate_summary_raises_on_tool_use_only_block_content():
         await generate_summary(
             msgs,
             _fake_llm(response=tool_only),
-            AgentSlices.resolve(),
+            _slices(),
             catalog=build_model_catalog(),
         )
 
@@ -392,7 +397,7 @@ async def test_generate_summary_raises_on_empty_conversation():
         await generate_summary(
             [SystemMessage(content="<sys>")],
             _fake_llm(),
-            AgentSlices.resolve(),
+            _slices(),
             catalog=build_model_catalog(),
         )
 
@@ -570,10 +575,11 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
         ops_pool=None,
         llm=llm,
         event_publisher=publisher,
-        agent=AgentSlices.resolve(),
+        agent=_slices(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
@@ -614,10 +620,11 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
         ops_pool=None,
         llm=llm,
         event_publisher=publisher,
-        agent=AgentSlices.resolve(),
+        agent=_slices(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     state = _over_threshold_state()
 
@@ -775,10 +782,11 @@ def _make_runtime(ops_pool=None, llm=None):
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=_slices(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
     )
     from langgraph.runtime import Runtime
 
