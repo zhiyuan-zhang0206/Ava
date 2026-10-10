@@ -414,8 +414,8 @@ def select_tests(
     repo_root = repo_root.resolve()
     changed = tuple(sorted({path.strip() for path in changed_files if path.strip()}))
     checkout = load_checkout(repo_root)
-    durations = _load_durations(repo_root / ".test_durations")
-    full_estimate = _estimate_seconds(checkout.collectable, durations)
+    durations = load_durations(repo_root / ".test_durations")
+    full_estimate = estimate_seconds(checkout.collectable, durations)
 
     if event != "pull_request" or head_ref.startswith(_QUEUE_PREFIXES):
         return _result("FULL", "queue-or-non-pr", full_estimate=full_estimate)
@@ -437,7 +437,7 @@ def select_tests(
     # SELECTED run keeps the repo-wide gates (task #4183).
     owned.update(tree_scan_tests(repo_root))
     tests = tuple(sorted((owned | tainted) & checkout.collectable))
-    estimate = _estimate_seconds(tests, durations, reference_paths=set(checkout.collectable))
+    estimate = estimate_seconds(tests, durations, reference_paths=set(checkout.collectable))
     if not tests:
         return _result(
             "FULL",
@@ -447,7 +447,7 @@ def select_tests(
             diagnostics=diagnostics,
         )
     if estimate > 0.8 * full_estimate:
-        owned_estimate = _estimate_seconds(
+        owned_estimate = estimate_seconds(
             tuple(sorted(owned & checkout.collectable)),
             durations,
             reference_paths=set(checkout.collectable),
@@ -627,7 +627,8 @@ def _plugin_files(repo_root: Path) -> set[str]:
     return {file for module in _plugin_modules(repo_root) for file in module_files(module, index)}
 
 
-def _load_durations(path: Path) -> dict[str, float]:
+def load_durations(path: Path) -> dict[str, float]:
+    """Load measured pytest node durations; an absent timing file has no measurements."""
     if not path.is_file():
         return {}
     data = cast(dict[object, object], json.loads(path.read_text()))
@@ -644,12 +645,13 @@ def _load_durations(path: Path) -> dict[str, float]:
     return durations
 
 
-def _estimate_seconds(
+def estimate_seconds(
     test_paths: set[str] | frozenset[str] | tuple[str, ...],
     durations: dict[str, float],
     *,
     reference_paths: set[str] | None = None,
 ) -> float:
+    """Estimate selected files using the reference population's average for unmeasured files."""
     reference = test_paths if reference_paths is None else reference_paths
     ordered_reference = tuple(sorted(reference))
     ordered_tests = tuple(sorted(test_paths))

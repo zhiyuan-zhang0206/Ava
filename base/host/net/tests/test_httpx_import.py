@@ -10,11 +10,14 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
-def _probe(body: str) -> dict[str, object]:
-    """Run `body` in a fresh interpreter and return the JSON object it prints last."""
-    code = f"import json\nimport sys\n\nsys.path.insert(0, {str(_REPO_ROOT)!r})\n{body}"
+def _probe(code: str) -> dict[str, object]:
+    """Run `code` in a fresh interpreter and return the JSON object it prints last.
+
+    `code` is a literal that puts its `sys.argv[1]` (the repo root) on `sys.path`, so
+    test selection can read the probe's imports.
+    """
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-X", "utf8", "-c", code],
+        [sys.executable, "-I", "-X", "utf8", "-c", code, str(_REPO_ROOT)],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -27,7 +30,11 @@ def _probe(body: str) -> dict[str, object]:
 
 def test_httpx_sync_and_async_transports_after_host_network_import() -> None:
     report = _probe(
-        """
+        """import json
+import sys
+
+sys.path.insert(0, sys.argv[1])
+
 import asyncio
 
 import base.host.net
@@ -56,7 +63,11 @@ print(json.dumps({"transport_ok": True}))
 
 def test_host_network_import_preserves_httpx_cli_help() -> None:
     report = _probe(
-        """
+        """import json
+import sys
+
+sys.path.insert(0, sys.argv[1])
+
 import base.host.net
 import httpx
 
