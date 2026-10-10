@@ -121,6 +121,7 @@ def test_a_new_top_level_test_is_refused_with_the_fix(
     )
     assert "scripts/structure/tests_location.py --suggest tests/components/base/test_new.py" in out
     assert "git mv" in err
+    assert "local conftest" in err
     assert "path_scopes.toml" in err  # the autouse fixtures do not follow a move
     assert "Unknown inputs must be resolved" in err
 

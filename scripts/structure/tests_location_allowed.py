@@ -12,10 +12,10 @@ repo-relative POSIX path:
   `db/schema.sql`, migrations, `ui/`, `schedules/`, `deploy/`, skill scripts, the test harness
   itself) or scans the whole tree. `integration`: it spans units that may not import each other,
   so no package may hold it. An entry whose file is gone, that no longer needs one (it moved under
-  `BY_DESIGN`, or is also frozen in the baseline) or that has another category or an empty reason
-  fails the lint. A complete root subject proof needs no entry: those files use the
-  shared facts on each check, and unresolved inputs prevent admission. Remaining entries
-  retain their existing policy until their actual artifact or integration subjects can
+  `BY_DESIGN`) or that has another category or an empty reason fails the lint.
+  A complete root subject proof needs no entry: those files use the shared facts
+  on each check, and unresolved inputs prevent admission. Remaining entries retain
+  their existing policy until their actual artifact or integration subjects can
   be proved without a path exception. There is no tests-location baseline.
 """
 

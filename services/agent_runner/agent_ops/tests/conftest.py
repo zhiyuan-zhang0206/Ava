@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from services.agent_runner.agent_ops import daemon
+from tests.fixtures.unit.homes import unit_home as unit_home
 
 
 @pytest.fixture
