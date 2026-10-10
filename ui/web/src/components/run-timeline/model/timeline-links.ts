@@ -284,8 +284,11 @@ export interface Cluster {
   x1: number;
 }
 
-/** The bucket of a link: kind and the two rows with their agents. */
-export const bucketOf = (l: ResolvedLink): string => `${l.link.kind}|${l.from.row}:${l.from.agent}|${l.to.row}:${l.to.agent}`;
+/** The row an end stands in: an agent's own Messages row, or the User / Other agents group row (shared by every peer in it). */
+const rowId = (end: LinkEnd) => (end.row === "units" ? `units:${end.agent}` : end.row);
+
+/** The bucket of a link: its kind and the two rows its ends stand in. Arrows merge only within one. */
+export const bucketOf = (l: ResolvedLink): string => `${l.link.kind}|${rowId(l.from)}|${rowId(l.to)}`;
 
 /** Arrows grouped by bucket and sorted by their start, ready to be merged at any distance. */
 export type PreparedArrows = readonly { bucket: string; list: readonly Arrow[] }[];
