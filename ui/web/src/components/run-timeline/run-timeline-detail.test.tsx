@@ -2,13 +2,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RunTimelineNode } from "@/lib/contracts/types";
+import type { RunTimelineMessages, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
+import { api } from "@/lib/transport/api";
 
 vi.mock("@/lib/transport/api", () => ({
   api: { getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)) },
 }));
 
-import { NodeDetail } from "./run-timeline-detail";
+import { NodeDetail, UnitDetail } from "./run-timeline-detail";
+import { LinkDetail } from "./run-timeline-link-detail";
+import type { ResolvedLink } from "./model/timeline-links";
 
 afterEach(cleanup);
 
@@ -65,5 +68,73 @@ describe("NodeDetail summary", () => {
     const a = el.querySelector("a");
     expect(a?.getAttribute("target")).toBe("_blank");
     expect(a?.getAttribute("rel")).toContain("noopener");
+  });
+});
+
+describe("the details of an arrow and of the block it ends on", () => {
+  const T = "2026-10-04T12:00:00Z";
+  const block = {
+    kind: "inbound",
+    i0: 4,
+    i1: 4,
+    start: T,
+    end: T,
+    source: "agent:405",
+    inbound_id: 31,
+    preview: "do the thing",
+    parent: null,
+    context_tokens: 20,
+    generation_tokens: null,
+    estimated: false,
+    session: 0,
+    context_total: 20,
+    request: null,
+  } as RunTimelineUnit;
+  const message: RunTimelineMessages = {
+    messages: [
+      {
+        idx: 4,
+        ts: T,
+        source: "agent:405",
+        parts: [{ kind: "inbound", chars: 30, text: "## Plan\n\n- one\n- two\n\n**bold** `code`", text_truncated: false }],
+        context_tokens: 20,
+        estimated: false,
+      },
+    ],
+    next_start: null,
+  };
+  const resolved = (over: Partial<ResolvedLink>): ResolvedLink => ({
+    key: "k",
+    link: { kind: "send_message", ts: T, sender: 405, receiver: 6657, inbound_id: 31, fork_from: null, preview: "do the thing" },
+    from: { row: "units", agent: 405, ms: Date.parse(T) },
+    to: { row: "units", agent: 6657, ms: Date.parse(T) },
+    external: null,
+    unmatched: false,
+    block,
+    userSource: null,
+    ...over,
+  });
+  const messagesOf = async (ui: React.ReactElement) => {
+    cleanup();
+    render(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
+    return (await screen.findAllByTestId("run-timeline-message")).map((el) => el.outerHTML);
+  };
+
+  it("render the message with the same DOM, through the same row component", async () => {
+    vi.mocked(api.getRunTimelineMessages).mockResolvedValue(message);
+    const viaBlock = await messagesOf(<UnitDetail agentId={6657} unit={block} />);
+    const viaArrow = await messagesOf(<LinkDetail resolved={resolved({})} onAddAgent={() => undefined} />);
+    expect(viaArrow).toEqual(viaBlock);
+    expect(viaBlock[0]).toContain("Plan");
+    expect(api.getRunTimelineMessages).toHaveBeenCalledWith(6657, expect.objectContaining({ start: 4, end: 4 }));
+  });
+
+  it("shows an event with no block through the same card and row, as a message", async () => {
+    vi.mocked(api.getRunTimelineMessages).mockClear();
+    const none = resolved({ block: null, link: { ...resolved({}).link, preview: "need **a** decision", receiver: null, kind: "notice" } });
+    const shown = await messagesOf(<LinkDetail resolved={none} onAddAgent={() => undefined} />);
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toContain("<strong");
+    expect(api.getRunTimelineMessages).not.toHaveBeenCalled();
   });
 });

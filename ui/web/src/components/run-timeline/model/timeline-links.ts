@@ -38,6 +38,8 @@ export interface ResolvedLink {
   to: LinkEnd;
   /** The agent at the end that is not in the view, when one is (the user is no agent). */
   external: number | null;
+  /** The receiver's block the event ends on, when it ends on one: its message is what the details show, as for a selected block. */
+  block: RunTimelineUnit | null;
   /** The user's source (`user`, `ui:page:...`), when the user is an end. */
   userSource: string | null;
   /** The event names an inbound row of the receiver in view but no block carries it: the arrow ends at the event's time, not on a block. */
@@ -79,11 +81,12 @@ export function resolveLinks(
     const from: LinkEnd = senderIn ? { row: "units", agent: sender, ms } : outer(sender);
     let to: LinkEnd = outer(receiver);
     let unmatched = false;
+    let block: RunTimelineUnit | null = null;
     if (receiverIn) {
-      const block =
-        link.inbound_id === null ? undefined : loaded.get(receiver)?.units.find((unit) => unit.inbound_id === link.inbound_id);
-      unmatched = link.inbound_id !== null && block === undefined;
-      to = { row: "units", agent: receiver, ms: block === undefined ? ms : middle(block) };
+      block =
+        link.inbound_id === null ? null : (loaded.get(receiver)?.units.find((unit) => unit.inbound_id === link.inbound_id) ?? null);
+      unmatched = link.inbound_id !== null && block === null;
+      to = { row: "units", agent: receiver, ms: block === null ? ms : middle(block) };
     }
     out.push({
       key: `${link.kind}-${link.ts}-${link.sender ?? "user"}-${link.receiver ?? "user"}-${index}`,
@@ -91,6 +94,7 @@ export function resolveLinks(
       from,
       to,
       external: userEnd || (senderIn && receiverIn) ? null : senderIn ? receiver : sender,
+      block,
       userSource: userEnd ? "user" : null,
       unmatched,
     });
@@ -106,6 +110,7 @@ export function resolveLinks(
         from: { row: "user", agent: 0, ms },
         to: { row: "units", agent: id, ms: middle(unit) },
         external: null,
+        block: unit,
         userSource: unit.source,
         unmatched: false,
       });
