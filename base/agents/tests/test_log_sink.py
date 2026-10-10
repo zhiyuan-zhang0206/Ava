@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -24,23 +25,36 @@ import pytest
 from loguru import logger as _global_logger
 
 from base import telemetry
+from base.config import settings
+from base.db import Database
 from base.log import _postgres_sink, add_postgres_sink
+from base.telemetry.delivery.receipts import DrainStatus
 
 
 @pytest.fixture
-def sink_logger():
+def sink_logger(database: Database):
     """Register the loguru -> emitter adapter + bind agent_id, cleanup after yield.
 
     The adapter enqueues (non-blocking); tests flush via `_last_event`. bind
     agent_id="-" simulates the gateway init form; within tests when the agent
     process perspective is needed, logger.bind() overrides it.
     """
-    add_postgres_sink()  # eager open pipeline (pool + drain thread)
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+
+    def producer() -> telemetry.EventPipeline:
+        return pipeline
+
+    add_postgres_sink(producer=producer, machine_reader=lambda: settings.cluster.self_machine_name)
     _global_logger.remove()
-    sink_id = _global_logger.add(_postgres_sink, level="INFO", enqueue=False, catch=False)
+    sink_id = _global_logger.add(
+        partial(_postgres_sink, producer=producer), level="INFO", enqueue=False, catch=False
+    )
     _global_logger.configure(extra={"agent_id": "-"})
-    yield _global_logger
-    _global_logger.remove(sink_id)
+    try:
+        yield _global_logger
+    finally:
+        _global_logger.remove(sink_id)
+        assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
 
 
 @pytest.fixture(autouse=True)
@@ -50,11 +64,8 @@ def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     `logs_dir()` by day, so a later test in the same worker would otherwise
     read earlier tests' lines (order-dependent failures or false passes).
 
-    `paths.ava_home` is the patch target rather than `paths.logs_dir` because
-    the telemetry module bound `logs_dir` at import time — patching the path
-    function itself would make the drain write to the session home while
-    `_last_event` read the tmp dir. Both sides resolve `ava_home()` at call
-    time, so one patch redirects the whole pipeline consistently."""
+    Both the writer and the reader resolve `ava_home()` at call time, so this
+    path owner redirects the complete operation to the same isolated home."""
     from base import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "ava_home")

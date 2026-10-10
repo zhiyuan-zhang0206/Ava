@@ -33,6 +33,7 @@ from base.cluster import authority, ownership
 from base.cluster.authority.api import API_TOKEN_ENV
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.host.net.url_secret import url_with_userinfo
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
@@ -575,7 +576,7 @@ def test_collector_postgres_receiver_keeps_no_credential(
 
 
 def test_direct_exemption_dials_postgres_as_the_delivered_login(
-    born: Born, monkeypatch: pytest.MonkeyPatch
+    born: Born, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """With pooling on, the admin-plane `direct=True` dial swaps only the port to
     the real Postgres (this home's own record) and keeps the delivered login."""
@@ -585,10 +586,10 @@ def test_direct_exemption_dials_postgres_as_the_delivered_login(
     assert direct == url_with_userinfo(
         born.endpoint().replace(str(born.pooler_port), str(born.pg_port)), *born.login("gateway")
     )
-    with base.db.connect(direct=True) as conn:
+    with base.db.connect(direct=True, gate=database_gate) as conn:
         assert conn.execute("SELECT inet_server_port(), session_user").fetchone() == (
             born.pg_port,
             born.login("gateway")[0],
         )
-    with base.db.connect() as conn:  # pooled: the one access URL
+    with base.db.connect(gate=database_gate) as conn:  # pooled: the one access URL
         assert conn.execute("SELECT session_user").fetchone() == (born.login("gateway")[0],)

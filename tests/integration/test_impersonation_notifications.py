@@ -46,6 +46,7 @@ def test_reminder_commands_are_bare_ava(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The renewal reminder names no interpreter or home: a bare `ava` resolves
     through the executor's inherited AVA_HOME."""
@@ -78,7 +79,7 @@ def test_reminder_commands_are_bare_ava(
         (lease["id"],),
     )
     db_conn.commit()
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
     reminder = db_conn.execute(
         "SELECT content FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
@@ -204,6 +205,7 @@ async def _terminate_native(
     state = BaseAgentState(impersonation_request_id=f"{session['id']}:1")
     with pool(
         max_size=2,
+        gate=database_gate,
     ) as ops_pool:
         if mode == "force":
             _force_terminate_transaction(owner.agent_id, ops_pool, source="user")
@@ -286,7 +288,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         db_conn, aops_pool, owner, session, runtime, mode, database_gate=database_gate
     )
     if mode == "delayed_resurrection":
-        _age_and_sweep_notices(db_conn, owner.agent_id)
+        _age_and_sweep_notices(db_conn, owner.agent_id, database_gate=database_gate)
     resurrect_agent(database, event_bus, owner.agent_id, resurrected_by="user")
     successor = await admit_hosted_runtime(
         aops_pool,
@@ -314,7 +316,9 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     assert "You have been resurrected" in messages[2].content
 
 
-def _age_and_sweep_notices(conn: psycopg.Connection, agent_id: int) -> None:
+def _age_and_sweep_notices(
+    conn: psycopg.Connection, agent_id: int, *, database_gate: ProcessDbGate
+) -> None:
     from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 
     conn.execute(
@@ -328,7 +332,7 @@ def _age_and_sweep_notices(conn: psycopg.Connection, agent_id: int) -> None:
         (agent_id,),
     )
     conn.commit()
-    with pool(max_size=1) as watchdog_pool:
+    with pool(max_size=1, gate=database_gate) as watchdog_pool:
         assert dead_letter_stale_pending_terminated(watchdog_pool, 86400) == 1
     assert all(row[3] == "pending" for row in _native_notices(conn, agent_id))
 
@@ -426,6 +430,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     transport_dead: bool,
+    database: Database,
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
@@ -467,7 +472,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     # cmd_relay owns asyncio.run, as a real separately launched relay would.
     import asyncio
 
-    result = await asyncio.to_thread(relay.cmd_relay, args)
+    result = await asyncio.to_thread(relay.cmd_relay, args, database_factory=lambda: database)
     assert result == (1 if transport_dead else 0)
     assert len(emitted) == 1
     assert f"Ava impersonation lease {session['session_id']}" in emitted[0]
@@ -565,7 +570,7 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     )
     started = db_conn.execute("SELECT transaction_timestamp()").fetchone()
     assert started is not None
-    with pool(max_size=1) as other, other.connection() as conn:
+    with pool(max_size=1, gate=database_gate) as other, other.connection() as conn:
         conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     notices = _native_notices(db_conn, owner.agent_id)
     assert notices[0][4] > started[0]

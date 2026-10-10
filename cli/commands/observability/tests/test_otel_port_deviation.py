@@ -9,6 +9,7 @@ import pytest
 
 from base import db
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import _render_real_template
 from services.wake.heartbeat import station_probe
@@ -17,11 +18,14 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 
 @pytest.mark.parametrize("station_port", [4318, 4325])
 def test_remote_station_advertisement_drives_render_and_probe(
-    monkeypatch: pytest.MonkeyPatch, station_port: int, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    station_port: int,
+    operator_database: Callable[[], Any],
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(settings.observability, "telemetry_otlp_port", 4319)
     monkeypatch.setattr(settings.observability, "otel_collector_metrics_port", 8889)
-    with db.connect() as conn, conn.cursor() as cur:
+    with db.connect(gate=database_gate) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
             "(machine_name, home, serve_gateway, serve_agent_runner, serve_observability_station, url) "
@@ -44,7 +48,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
         target = station_probe.resolve_target(database=operator_database)
         assert target is not None and target.advertised and target.url == endpoint
     finally:
-        with db.connect() as conn, conn.cursor() as cur:
+        with db.connect(gate=database_gate) as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM machine_units WHERE machine_name = 'station-deviation'")
             conn.commit()
 

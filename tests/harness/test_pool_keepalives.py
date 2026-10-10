@@ -46,8 +46,10 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 
 import base.log
-from base import db
+from base import db, telemetry
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
+from base.telemetry.delivery.receipts import DrainStatus
 from gateway.app import app
 from services.agent_runner.agent_ops import boot
 from tests.fixtures.gateway_config import gateway_test_client
@@ -92,23 +94,23 @@ def _assert_pool_posture(pool: ConnectionPool, site: str) -> None:
 # ─── the single definition ─────────────────────────────────────────────────────
 
 
-def test_base_db_pool_is_the_single_definition() -> None:
+def test_base_db_pool_is_the_single_definition(database_gate: ProcessDbGate) -> None:
     """`base.db.pool()` merges both halves, so a caller cannot take one without
     the other. Every site below inherits the posture by calling it."""
-    pool = db.pool()
+    pool = db.pool(gate=database_gate)
     try:
         _assert_pool_posture(pool, "base.db.pool()")
     finally:
         pool.close()
 
 
-def test_prepare_threshold_survives_the_merge() -> None:
+def test_prepare_threshold_survives_the_merge(database_gate: ProcessDbGate) -> None:
     """`prepare_threshold=None` is what makes the pooled URL safe to point at
     PgBouncer: psycopg3 never prepares server-side statements, so a statement made
     on one backend never has to exist on the next one a transaction pooler hands
     out (cli/commands/data_plane/pgbouncer.py). Adding the keepalives must not displace it,
     and no keepalive key may collide with it."""
-    pool = db.pool()
+    pool = db.pool(gate=database_gate)
     try:
         assert _pool_kwargs(pool)["prepare_threshold"] is None
     finally:
@@ -116,7 +118,7 @@ def test_prepare_threshold_survives_the_merge() -> None:
     assert "prepare_threshold" not in db.PG_KEEPALIVE_KWARGS
 
 
-def test_borrowed_connection_arms_the_kernel_keepalive() -> None:
+def test_borrowed_connection_arms_the_kernel_keepalive(database_gate: ProcessDbGate) -> None:
     """The kwargs reach the kernel: a borrowed connection's socket carries our
     exact idle / interval / count on the fd libpq opened.
 
@@ -129,7 +131,7 @@ def test_borrowed_connection_arms_the_kernel_keepalive() -> None:
     `TCP_KEEPIDLE`, macOS/BSD as `TCP_KEEPALIVE`. Whichever name this interpreter
     has is asserted, so the test is not silently vacuous on either.
     """
-    pool = db.pool(min_size=1, max_size=1)
+    pool = db.pool(min_size=1, max_size=1, gate=database_gate)
     try:
         with pool.connection() as conn:
             sock = socket.socket(fileno=conn.fileno())
@@ -161,27 +163,22 @@ def test_borrowed_connection_arms_the_kernel_keepalive() -> None:
 # ─── the three sites #940 flagged and left ────────────────────────────────────
 
 
-def test_log_sink_pipeline_drain_thread_stays_alive() -> None:
-    """The event emitter's pipeline — the longest-lived resource in every ava
-    process (opened at `init_*` via `base.log.add_postgres_sink` ->
-    `base.telemetry`, never closed), drained by a background thread nobody
-    watches. A stalled drain there is the least likely to be noticed — and
-    since the LGTM cutover (task #1197 close-C) the pipeline no longer owns a
-    Postgres pool, only the queue + drain thread + JSONL mirror.
+def test_log_sink_pipeline_drain_thread_stays_alive(database: db.Database) -> None:
+    """The real log adapter uses its entry's writer and acknowledges a drain marker.
 
-    Asserts the emitter pipeline `add_postgres_sink` opens, matching
-    base/agents/tests/test_log_sink.py; only the sink handler this call adds is
-    removed, the shared pipeline is left as the rest of the suite expects it.
+    A completed marker proves the background worker can drain. The pipeline
+    remains live until this entry removes the adapter and performs bounded close.
     """
-    sink_id = base.log.add_postgres_sink()
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    sink_id = base.log.add_postgres_sink(
+        producer=lambda: pipeline, machine_reader=lambda: settings.cluster.self_machine_name
+    )
     try:
-        from base import telemetry
-
-        assert telemetry._state["pipeline"] is not None
-        pipe = telemetry._state["pipeline"]
-        assert pipe._thread is not None and pipe._thread.is_alive()
+        assert not pipeline.stopped
+        assert pipeline.flush().status is DrainStatus.COMPLETED
     finally:
         base.log.logger.remove(sink_id)
+        assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
 
 
 def test_log_sink_import_of_base_db_stays_deferred() -> None:

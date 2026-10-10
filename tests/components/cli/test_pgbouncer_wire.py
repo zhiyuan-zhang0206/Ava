@@ -369,6 +369,7 @@ def test_async_write_transaction_overrides_a_read_only_default() -> None:
 
 def test_plain_autocommit_write_still_fails_under_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The read-only-default tests have teeth: an unpostured pooled write is rejected."""
     from base import config
@@ -376,7 +377,10 @@ def test_plain_autocommit_write_still_fails_under_a_read_only_default(
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        with connect(autocommit=True) as conn, pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+        with (
+            connect(autocommit=True, gate=database_gate) as conn,
+            pytest.raises(psycopg.errors.ReadOnlySqlTransaction),
+        ):
             conn.execute(
                 "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
             )

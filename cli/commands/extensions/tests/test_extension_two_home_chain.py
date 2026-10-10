@@ -33,6 +33,7 @@ from typing import Any
 import psycopg
 
 from base import paths
+from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import materialize as mat
 from base.packages.extensions import registry as reg
 from cli.commands.extensions.skill import cmd_skill_install
@@ -171,6 +172,7 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
     as_machine: _AsMachine,
     db_conn: psycopg.Connection,
     operator_database: Callable[[], Any],
+    database_gate: ProcessDbGate,
 ) -> None:
     """The user-edit guard, across machines rather than within one.
 
@@ -198,13 +200,14 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
         from base import db as base_db
         from base.cluster.machine import machine_name
 
-        reg.register_tree(
-            base_db.pool(),
-            root=newer,
-            name="edit-demo",
-            kind="skill",
-            source=f"local:{machine_name()}",
-        )
+        with base_db.pool(gate=database_gate) as registry_pool:
+            reg.register_tree(
+                registry_pool,
+                root=newer,
+                name="edit-demo",
+                kind="skill",
+                source=f"local:{machine_name()}",
+            )
 
     with as_machine(home_b):
         result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
