@@ -49,12 +49,12 @@ jobs:
           PY
       - name: Publish planning diagnostics, including failed collection
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: file-shard-plan-diagnostics
           path: tmp/file-plan-*.log
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: file-shard-plan
           path: tmp/file-plan.json
@@ -79,7 +79,7 @@ jobs:
       - uses: ./.github/actions/install-pg-redis
       - uses: ./.github/actions/uv-sync
       - uses: ./.github/actions/vendor-pg-runtime
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: file-shard-plan
           path: tmp
@@ -128,7 +128,7 @@ jobs:
         with:
           test-outcome: ${{ steps.candidate.outcome }}
           junit-patterns: '["tmp/proof/candidate/${{ matrix.group }}/junit.xml"]'
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: file-shard-proof-group-${{ matrix.group }}
@@ -147,11 +147,11 @@ jobs:
         with:
           version: 0.12.23
       - uses: ./.github/actions/uv-sync
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: file-shard-plan
           path: tmp
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: file-shard-proof-group-*
           path: tmp/proof
@@ -172,7 +172,7 @@ jobs:
         run: >
           uv run python -m scripts.ci.file_shard_runtime --plan tmp/file-plan.json
           --reports tmp/proof --workers 4 --out tmp/file-runtime-comparison.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: file-shard-runtime-comparison
