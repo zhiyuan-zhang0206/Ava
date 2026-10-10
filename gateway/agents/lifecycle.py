@@ -53,7 +53,7 @@ from base.agents.messages.native_restart import (
     lookup_native_restart,
     native_restart_progress,
 )
-from base.db import publish_inbound_wake
+from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
 from gateway.agents.forward import forward_to_home_machine
 from gateway.http.auth.request_principal import (
@@ -147,11 +147,13 @@ async def post_agent_terminate(
     agent still owns (in_progress; at most five, most recently
     updated first) as it goes down. The hint is advisory: a failed read leaves
     it null and never changes the termination result."""
-    return await terminate_agent_with_open_tasks(agent_id, body, request.app.state.db_pool)
+    return await terminate_agent_with_open_tasks(
+        agent_id, body, request.app.state.db_pool, db=request.app.state.db
+    )
 
 
 async def terminate_agent_with_open_tasks(
-    agent_id: int, body: TerminateAgentRequest, pool: ConnectionPool
+    agent_id: int, body: TerminateAgentRequest, pool: ConnectionPool, *, db: Database
 ) -> TerminateAgentResponse:
     """Forward the terminate op to the home runner, drop the TTL rows of any
     shell sessions it killed, then attach the agent's open-task hint — read
@@ -160,7 +162,7 @@ async def terminate_agent_with_open_tasks(
     Advisory by design: a failed hint read is logged and leaves `open_tasks`
     null, so it can never block or alter the termination itself."""
     forwarded = await forward_to_home_machine(
-        agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump()
+        agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump(), db=db, pool=pool
     )
     response = TerminateAgentResponse.model_validate(forwarded)
     if response.shell_sessions is not None and response.shell_sessions.killed:
@@ -232,6 +234,7 @@ def _open_tasks_hint_blocking(pool: ConnectionPool, agent_id: int) -> OpenTasksH
 @router.post("/api/agents/{agent_id}/resurrect")
 async def post_agent_resurrect(
     agent_id: int,
+    request: Request,
     body: ResurrectAgentRequest = Body(default_factory=ResurrectAgentRequest),  # noqa: B008
 ) -> ResurrectAgentResponse:
     """Resurrect a terminated agent — UPDATE 'terminated' -> 'idling' +
@@ -266,6 +269,8 @@ async def post_agent_resurrect(
         agent_id,
         f"/api/agents/{agent_id}/resurrect-explicit-v2",
         body.model_dump(),
+        db=request.app.state.db,
+        pool=request.app.state.db_pool,
     )
     return ResurrectAgentResponse.model_validate(forwarded)
 
@@ -320,7 +325,11 @@ async def post_agent_restart(
         except InvalidConfigOverlay as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     forwarded = await forward_to_home_machine(
-        agent_id, f"/api/agents/{agent_id}/restart", body.model_dump()
+        agent_id,
+        f"/api/agents/{agent_id}/restart",
+        body.model_dump(),
+        db=request.app.state.db,
+        pool=request.app.state.db_pool,
     )
     return RestartAgentResponse.model_validate(forwarded)
 
@@ -386,6 +395,8 @@ async def native_restart(
         agent_id,
         f"/api/agents/{agent_id}/restart-work-v1",
         operation.model_dump(mode="json"),
+        db=request.app.state.db,
+        pool=request.app.state.db_pool,
         idempotency_key=key,
     )
     try:
