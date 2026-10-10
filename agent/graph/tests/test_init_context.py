@@ -28,6 +28,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugins.extensions import (
     EMPTY,
     ContextNote,
@@ -35,6 +36,7 @@ from base.packages.plugins.extensions import (
     PluginContributions,
 )
 from base.paths import skills_dir
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _config(tid: int) -> RunnableConfig:
@@ -42,11 +44,15 @@ def _config(tid: int) -> RunnableConfig:
 
 
 def _runtime(
-    ops_pool: AsyncConnectionPool | None, extensions: ExtensionRegistry = EMPTY
+    ops_pool: AsyncConnectionPool | None,
+    extensions: ExtensionRegistry = EMPTY,
+    *,
+    resources: HostedTurnResources | None = None,
 ) -> Runtime[AvaContext]:
     """`ops_pool=None` takes the container path."""
     return Runtime(
         context=AvaContext(
+            hosted_resources=resources,
             ops_pool=ops_pool,
             llm=AsyncMock(),
             event_publisher=MagicMock(),
@@ -337,6 +343,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
 
 @pytest.mark.usefixtures("skills_unit")
 async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
+    hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -367,7 +374,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
 
-    established = await init_context_node(AgentState(), _runtime(aops_pool), _config(tid))
+    established = await init_context_node(
+        AgentState(), _runtime(aops_pool, resources=hosted_resources), _config(tid)
+    )
 
     # A skill lands mid-window, and the window is simultaneously over the
     # force-compact ceiling — one turn, both triggers.
@@ -404,7 +413,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )
     cmd = await make_hook_runner(
         "before_llm", "llm", [(None, hook) for hook in framework_hooks()["before_llm"]]
-    )(state, _runtime(aops_pool), _config(tid))
+    )(state, _runtime(aops_pool, resources=hosted_resources), _config(tid))
 
     assert cmd.goto == "llm"
     hook_update = cast("dict[str, object]", cmd.update)
@@ -413,7 +422,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )  # Both hooks defer to the model operation.
     from agent.graph.llm.node import llm_node
 
-    cmd = await llm_node(state, _runtime(aops_pool), _config(tid), ledger=LlmLedger())
+    cmd = await llm_node(
+        state, _runtime(aops_pool, resources=hosted_resources), _config(tid), ledger=LlmLedger()
+    )
     assert cmd.goto == "init_context"
     assert isinstance(cmd.update, dict)
     # The reducer that makes the bug possible. With the note deferred there is
@@ -427,7 +438,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
 
     reestablished = await init_context_node(
         AgentState(messages=committed, context_reset=cmd.update["context_reset"]),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        _runtime(aops_pool),
+        _runtime(aops_pool, resources=hosted_resources),
         _config(tid),
     )
 

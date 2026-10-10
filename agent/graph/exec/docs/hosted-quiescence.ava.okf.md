@@ -36,6 +36,12 @@ waits for the same actual reader to exit. Exact request/domain CAS then wakes
 the original scope. Other uncertain cleanup retains its task and diagnostic
 evidence; a new cache, elapsed grace or retry count cannot clear it.
 
+The original service consumes a late reader or owner-completion failure. It
+reports the unknown immediately and raises the original failure at stop/join;
+a delayed result never becomes a synchronous exception in an already returned
+invocation. The exact scope remains unresolved after failure. A later turn has
+its own scope even when it uses the same cached model.
+
 ## Remaining boundary
 
 On exclusive agent-host boot, an applied force left by the dead host is observed
@@ -64,8 +70,9 @@ not disposable exec descendants to kill wholesale.
 ## Contract verification
 
 The host force tests exercise real thread work, exec children and late readers.
-Reader delay and bounded join are simulated at the standard-library thread
-boundary for the exact reader, while preserving force observation and successor
-isolation assertions. History owner tests verify that an incomplete settled-write
+Reader delay and bounded join exercise the actual retained output pipe and
+service task handles, while preserving force observation and successor isolation
+assertions. An uncooperative actual task proves finite service return and pool
+retention through the existing daemon hard exit. History owner tests verify that an incomplete settled-write
 scan propagates its failure; host reconciliation preserves the claimed row when
 the public committed-id resolver fails.
