@@ -351,7 +351,10 @@ jobs:
 
   submit:
     needs: refresh
-    if: needs.refresh.outputs.changed == 'true'
+    if: >-
+      !cancelled() && needs.refresh.result == 'success' &&
+      needs.refresh.outputs.changed == 'true' &&
+      needs.refresh.outputs.pr-number != '' && needs.refresh.outputs.head-sha != ''
     name: Submit generated durations PR
     runs-on: ubuntu-24.04
     timeout-minutes: 5
