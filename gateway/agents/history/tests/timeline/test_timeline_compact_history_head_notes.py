@@ -128,7 +128,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         assert page["has_more"] is False
 
     @pytest.mark.parametrize("damage", ["read_error", "missing", "malformed_message"])
-    def test_damaged_or_disappeared_segment_returns_terminal_empty_window(
+    def test_failed_read_is_unavailable_but_disappeared_segment_is_terminal(
         self,
         db_conn: psycopg.Connection,
         test_client: TestClient,
@@ -190,13 +190,24 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
                 malformed_segment,
             )
 
-        response = test_client.get(
-            f"/api/agents/{tid}/timeline",
-            params={"before": f"s1.{checkpoint_id}.1.0", "limit": 50},
-        )
+        url = f"/api/agents/{tid}/timeline"
+        params = {"before": f"s1.{checkpoint_id}.1.0", "limit": 50}
+        if damage == "malformed_message":
+            with pytest.raises(ValueError):
+                test_client.get(url, params=params)
+            return
+        response = test_client.get(url, params=params)
 
-        assert response.status_code == 200
-        assert response.json() == {"items": [], "msg_count": 3, "has_more": False}
+        if damage == "read_error":
+            assert response.status_code == 503
+            problem = response.json()
+            assert problem["detail"] == f"Checkpoint history unavailable for agent {tid}"
+            assert problem["status"] == 503
+            assert problem["code"] == "http_503"
+            assert problem["retryable"] is True
+        else:
+            assert response.status_code == 200
+            assert response.json() == {"items": [], "msg_count": 3, "has_more": False}
 
     def test_long_conversation_keeps_standing_head_notes(
         self, db_conn: psycopg.Connection, test_client: TestClient
