@@ -30,7 +30,8 @@ scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule 
 - free-floating background work: `asyncio-task`, `thread` (keyed by the enclosing
   function). Background work must be durable or re-derivable from durable state and
   run as its own service loop; use a per-iteration `async with asyncio.TaskGroup()`
-  for bounded parallelism, never a free-floating `create_task` or thread.
+  for bounded parallelism. Threads require visible admission, handle, stop and
+  completion/error wiring (thread_owner.py), plus consumer lifecycle proof.
 
 Scope: the governed packages plus `schedules/`. Tests, `__main__.py`, an
 `if __name__ == "__main__":` block and skill scripts (`ava_builtins/skills/**`,
@@ -78,7 +79,8 @@ _STATE_FIX = (
 _BACKGROUND_FIX = (
     "background work must be durable or re-derivable from durable state and run as its own "
     "service loop; use a per-iteration `async with asyncio.TaskGroup()` for bounded "
-    "parallelism, never a free-floating `create_task` or thread"
+    "parallelism; threads require explicit admission, retained handles, stop, bounded join "
+    "and completion/error collection (see Python conventions)"
 )
 _FIXES: dict[str, str] = {
     scan.INSTANCE: f"module-level instance — {_STATE_FIX}",
