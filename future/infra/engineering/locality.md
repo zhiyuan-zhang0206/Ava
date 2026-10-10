@@ -21,7 +21,7 @@ fresh census. The unified lifecycle work referenced as #3479 is on main;
 `base/native_process/ownership.py` owns native identity and
 `scripts/structure/cochange.py` supplies the existing co-change index. Current
 package layout is described by the component docs. Recheck remaining owner
-bypasses and private-import entries against the enforced structure baseline
+bypasses and private imports against the current structure gate
 and [debt ledger](../../tech-debt/ledger.md) before marking any item resolved;
 the old directory counts and wait conditions do not establish current debt.
 
@@ -89,9 +89,13 @@ lifecycle; those items wait for it to land and are then designed on its code.
    candidate — most of its readers sit in files #3479 rewrites.
    `base/config` as a registration hub needs a design pass first.
 5. **Tests in the top-level `tests/`** (`scripts/structure/tests_location.py`;
-   `tests_location_allowed.py`: 120 registered, 82 `contract` and 38 `integration`; nothing is
-   frozen). The lint refuses a new top-level test that is not e2e, UI or registered, by path
-   alone (`--suggest <file>` names a test's lowest legal package).
+   `BY_DESIGN` and `ALLOWED` in `scripts/structure/tests_location_allowed.py`
+   own the by-design paths and reasoned `contract` / `integration` registrations;
+   derive their counts from those tables instead of maintaining a second census here).
+   An unregistered root test needs complete Python subjects whose LCA is the
+   repository root. Unknown or single-component subjects do not certify it.
+   Registered and by-design paths retain the fast path; no placement baseline
+   exists. `--suggest <file>` explains the same subject proof.
    Still open: (a) **legality of tests inside packages** (a test whose package may not import what it
    uses, or that holds none of the code it tests): it needs `place()` and the import-linter
    contracts, so it is a separate check, not a hook; today three package tests would fail it
@@ -100,6 +104,6 @@ lifecycle; those items wait for it to land and are then designed on its code.
    `services.backup.artifact`); (b) the `path_scopes.toml` files (read by `tests/fixtures/path_scopes.py`) still give autouse
    isolation fixtures by directory, so a test moved into a directory whose file does not name it
    loses them (the lint's message says so; `tests/ci/test_path_scopes.py` catches a listed directory left
-   without tests, not a test moved out of a listed directory or placed in an unlisted one); (c) whether a frozen or registered
-   entry still needs its place (a frozen test that has since lost its package home) needs the
-   placement rule, so it belongs in a slow CI check, not a hook.
+   without tests, not a test moved out of a listed directory or placed in an unlisted one); (c) whether a registered
+   entry still needs its root placement requires subject analysis beyond the
+   current stale, needless and malformed-entry checks.
