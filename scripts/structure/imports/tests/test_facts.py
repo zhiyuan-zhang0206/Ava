@@ -215,3 +215,21 @@ def test_class_base_uses_parent_scope_before_class_local_import(tmp_path: Path) 
         "import importlib\nclass Example(importlib.import_module('base.net.retry')):\n import third_party as importlib\n",
     )
     assert [fact.target for fact in found.records] == ["base.net.retry"]
+
+
+def test_file_relative_resource_has_a_proven_checkout_anchor(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\n(Path(__file__).parent / 'data.txt').read_text()\n",
+    )
+    assert [fact.target for fact in found.records] == ["cli/tests/data.txt"]
+    assert found.unknown == ()
+
+
+def test_unsupported_path_operation_read_is_explicitly_unknown(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path\nPath(__file__).with_name('data.txt').read_text()\n",
+    )
+    assert len(found.unknown) == 1
+    assert found.unknown[0].kind == facts.FactKind.RESOURCE

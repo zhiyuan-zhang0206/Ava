@@ -115,7 +115,7 @@ door's own imports belongs to a consumer's dependency closure.
 
 The collector also recognizes literal dynamic imports, bounded literal pytest
 string parameters and f-strings, actual Python `-m`/`-c` launches, and literal
-paths anchored by `Path(__file__)` at the repository root. Lexical bindings
+paths anchored by `Path(__file__)` inside the checkout. Lexical bindings
 prevent an unrelated parameter from shadowing another scope's import or path.
 It does not execute Python, infer arbitrary builders or prove runtime branch
 coverage. Resource facts describe possible referenced paths; directory facts

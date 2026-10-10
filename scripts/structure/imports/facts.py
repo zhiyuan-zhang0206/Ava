@@ -195,11 +195,14 @@ class _Collector(ast.NodeVisitor):
                 return None
             value = self.scope.value(node)
             return self._resource_path(value, seen | {node.id}) if value is not node else None
-        ascents = placement_evidence.file_ascents(
-            node, lambda expr: self.scope.origin(expr) == "pathlib.Path"
-        )
-        if self.depth and not self.scope.bound("__file__") and ascents == self.depth:
-            return ""
+        file_path = self._file_path(node)
+        if file_path is not None:
+            return file_path
+        if isinstance(node, ast.Attribute) and node.attr == "parent":
+            prefix = self._resource_path(node.value, seen)
+            if prefix:
+                parent = Path(prefix).parent.as_posix()
+                return "" if parent == "." else parent
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             return self._divided_path(node, seen)
         if (
@@ -209,6 +212,22 @@ class _Collector(ast.NodeVisitor):
         ):
             return self._joined_path(node.func.value, node.args, seen)
         return None
+
+    def _file_path(self, node: ast.AST) -> str | None:
+        ascents = placement_evidence.file_ascents(
+            node, lambda expr: self.scope.origin(expr) == "pathlib.Path"
+        )
+        if (
+            not self.depth
+            or self.scope.bound("__file__")
+            or ascents is None
+            or ascents > self.depth
+        ):
+            return None
+        path = Path(self.path)
+        for _ in range(ascents):
+            path = path.parent
+        return "" if path.as_posix() == "." else path.as_posix()
 
     def _divided_path(self, node: ast.BinOp, seen: frozenset[str]) -> str | None:
         prefix = self._resource_path(node.left, seen)
@@ -231,6 +250,8 @@ class _Collector(ast.NodeVisitor):
             return  # Python -c has no source-file __file__ anchor.
         if id(node) in self.resource_seen:
             return
+        if self._file_path(node) is not None:
+            return  # A file/root anchor alone is a builder, not a resource reference.
         target = self._resource_path(node)
         if not target or target == ".":
             return
@@ -242,12 +263,7 @@ class _Collector(ast.NodeVisitor):
         self.records.append(Fact(node.lineno, FactKind.RESOURCE, path.as_posix()))
 
     def _read_target(self, node: ast.Call) -> ast.expr | None:
-        builtin_open = (
-            isinstance(node.func, ast.Name)
-            and node.func.id == "open"
-            and not self.scope.bound("open")
-        )
-        if builtin_open or self.scope.origin(node.func) in {"builtins.open", "io.open"}:
+        if self._open_function(node.func):
             return (
                 node.args[0]
                 if node.args
@@ -263,15 +279,28 @@ class _Collector(ast.NodeVisitor):
         }:
             return None
         receiver = self.scope.value(node.func.value)
+        if self._resource_path(receiver) is not None:
+            return receiver
         if isinstance(receiver, ast.Call) and self.scope.origin(receiver.func) == "pathlib.Path":
             return receiver.args[0] if receiver.args else None
         return receiver if self._path_expression(receiver) else None
+
+    def _open_function(self, node: ast.expr) -> bool:
+        builtin = isinstance(node, ast.Name) and node.id == "open" and not self.scope.bound("open")
+        return builtin or self.scope.origin(node) in {"builtins.open", "io.open"}
 
     def _path_expression(self, node: ast.expr) -> bool:
         if self._resource_path(node) is not None:
             return True
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             return self._path_expression(node.left)
+        if isinstance(node, ast.Attribute) and node.attr in {"parent", "parents"}:
+            return self._path_expression(node.value)
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute):
+            return self._path_expression(node.value)
+        return self._path_call(node)
+
+    def _path_call(self, node: ast.expr) -> bool:
         if isinstance(node, ast.Call):
             if self.scope.origin(node.func) == "pathlib.Path":
                 return True
@@ -279,6 +308,8 @@ class _Collector(ast.NodeVisitor):
                 "resolve",
                 "absolute",
                 "joinpath",
+                "with_name",
+                "with_suffix",
             }:
                 return self._path_expression(node.func.value)
         return False
@@ -289,8 +320,7 @@ class _Collector(ast.NodeVisitor):
             return
         path = self._resource_path(target)
         if path is not None:
-            if not path:
-                self.records.append(Fact(node.lineno, FactKind.RESOURCE, "."))
+            self.records.append(Fact(node.lineno, FactKind.RESOURCE, path or "."))
             return
         values = self.scope.strings(target)
         if values and all(Path(value).is_absolute() for value in values):
