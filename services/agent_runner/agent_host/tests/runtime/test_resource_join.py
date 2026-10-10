@@ -14,7 +14,6 @@ import pytest
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from base.native_process.turn_identity import HostedServiceResources
 
 from ... import daemon
 from ...host import AgentHost
@@ -61,7 +60,19 @@ def _exercise_unfinished_main() -> None:
     migrations.assert_schema_current = schema_gate
 
     async def run() -> None:
-        service = HostedServiceResources()
+        host = AgentHost(
+            pool=cast(Any, MagicMock()),
+            checkpointer=cast(Any, object()),
+            graph=cast(Any, object()),
+            machine="resource-join-test",
+            catalog=cast(ModelCatalog, MagicMock()),
+            bus=EventBus.from_settings(),
+            db=Database.from_settings(),
+        )
+        marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
+        patch = pytest.MonkeyPatch()
+        patch.setattr(host._clients, "close", lambda: marker.with_suffix(".clients").touch())
+        service = host._resource_service
         scope = await service.turn()
         entered = asyncio.Event()
 
@@ -76,10 +87,9 @@ def _exercise_unfinished_main() -> None:
         service.complete_later(scope, uncooperative(), name="uncooperative-resource")
         await entered.wait()
         try:
-            await service.aclose(deadline=asyncio.get_running_loop().time() + 0.02)
+            await host.aclose(resource_deadline=asyncio.get_running_loop().time() + 0.02)
         finally:
-            Path(os.environ["RESOURCE_JOIN_MARKER"]).write_text(str(service.joined))
-            host = cast(AgentHost, MagicMock(resources_joined=service.joined))
+            marker.write_text(str(host.resources_joined))
             await daemon._close_joined_host_pools(host, cast(Any, object()), cast(Any, object()))
 
     daemon.run = run
@@ -115,5 +125,6 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(tmp_path: Path) -> No
     assert time.monotonic() - started < 8
     assert marker.exists(), result.stdout + result.stderr
     assert marker.read_text() == "False"
+    assert not marker.with_suffix(".clients").exists()
     assert "uncooperative-resource" in result.stderr
     assert "keeping pools open until hard exit" in result.stderr
