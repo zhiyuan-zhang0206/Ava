@@ -40,6 +40,7 @@ export interface LinkHitResult {
 }
 
 const BADGE_FONT_PX = 9;
+const BADGE_AT = 0.2;
 // One width for every arrow, merged or not; a hovered or selected one is a little thicker.
 const WIDTH_PX = 1.25;
 
@@ -165,8 +166,8 @@ export function LinksCanvas({
         ctx.closePath();
         ctx.fill();
         if (count > 1) {
-          // The count, in a badge in the middle of the arrow.
-          const mid = curvePoint(c, 0.5);
+          // The count, in a badge on the arrow just after it leaves its start row, clear of the rows between.
+          const mid = curvePoint(c, BADGE_AT);
           const label = String(count);
           ctx.font = `600 ${BADGE_FONT_PX}px sans-serif`;
           const w = Math.max(ctx.measureText(label).width + 6, 14);
