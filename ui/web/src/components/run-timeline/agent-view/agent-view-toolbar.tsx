@@ -25,8 +25,6 @@ export function AgentViewToolbar({
   onContextSize,
   unitHeights,
   onUnitHeights,
-  interactions,
-  onInteractions,
   showUser,
   onShowUser,
   showOther,
@@ -44,9 +42,7 @@ export function AgentViewToolbar({
   unitHeights: UnitHeights;
   onUnitHeights: (heights: UnitHeights) => void;
   /** Whether the arrows between agents (and the Other agents group) are shown. */
-  interactions: boolean;
-  onInteractions: (on: boolean) => void;
-  /** Within Interactions: the User group and its arrows, the Other agents group and its arrows. */
+  /** The User group and the arrows with the user; the Other agents group and the arrows with agents outside the view. */
   showUser: boolean;
   onShowUser: (on: boolean) => void;
   showOther: boolean;
@@ -135,31 +131,20 @@ export function AgentViewToolbar({
       <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground")}>
         <input
           type="checkbox"
-          checked={interactions}
-          onChange={(event) => onInteractions(event.target.checked)}
-          data-testid="agent-view-interactions"
-        />
-        {t("interactionsLabel")}
-      </label>
-      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground", !interactions && "opacity-50")}>
-        <input
-          type="checkbox"
           checked={showUser}
-          disabled={!interactions}
           onChange={(event) => onShowUser(event.target.checked)}
           data-testid="agent-view-interactions-user"
         />
-        {t("userGroup")}
+        {t("userInteractionsLabel")}
       </label>
-      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground", !interactions && "opacity-50")}>
+      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground")}>
         <input
           type="checkbox"
           checked={showOther}
-          disabled={!interactions}
           onChange={(event) => onShowOther(event.target.checked)}
           data-testid="agent-view-interactions-other"
         />
-        {t("otherAgents")}
+        {t("otherInteractionsLabel")}
       </label>
     </div>
   );

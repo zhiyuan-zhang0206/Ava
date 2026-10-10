@@ -18,7 +18,6 @@ export function RunTimelineLegend({
   classLabel,
   sources,
   sourceLabel,
-  interactions,
   linkKinds,
   linkLabels,
   linkCounts,
@@ -30,7 +29,6 @@ export function RunTimelineLegend({
   /** The distinct senders of the highlighted inbound kind. */
   sources: readonly string[];
   sourceLabel: (source: string) => string;
-  interactions: boolean;
   /** The kinds of arrows between agents that are drawn. */
   linkKinds: ReadonlySet<LinkKind>;
   linkLabels: Record<LinkKind, string>;
@@ -73,7 +71,6 @@ export function RunTimelineLegend({
           );
         })}
       </ul>
-      {interactions ? (
       <ul
         aria-label={t("linkLegendLabel")}
         data-testid="run-timeline-link-legend"
@@ -98,7 +95,6 @@ export function RunTimelineLegend({
           );
         })}
       </ul>
-      ) : null}
       {highlight !== null && sources.length > 1 ? (
         <label className={cn(FLEX, "items-center gap-1.5 pl-[88px] text-[10px] text-muted-foreground")}>
           {t("legendSource")}
