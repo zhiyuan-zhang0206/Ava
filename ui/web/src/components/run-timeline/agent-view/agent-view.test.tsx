@@ -577,19 +577,47 @@ describe("arrows between agents", () => {
     expect(strokes().map((d) => d.color)).toEqual([BLUE]);
   });
 
-  it("limits the arrows shown to 20 by default, or to 50 by the toolbar's choice", async () => {
+  it("limits the arrows shown to 20 by default, and to any valid number typed; an invalid one changes nothing and says why", async () => {
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
-    getRunTimelineLinks.mockResolvedValue({ links: Array.from({ length: 80 }, (_, i) => link({ ts: at(20 + i) })) });
+    getRunTimelineLinks.mockResolvedValue({ links: Array.from({ length: 120 }, (_, i) => link({ ts: at(20 + i * 0.7) })) });
     render("7,8");
     await screen.findByTestId("agent-view-user");
-    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 80"));
-    expect(screen.getByTestId<HTMLSelectElement>("agent-view-max-arrows").value).toBe("20");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 120"));
+    const input = screen.getByTestId<HTMLInputElement>("agent-view-max-arrows");
+    expect(input.value).toBe("20");
+    expect(screen.queryByTestId("agent-view-max-arrows-error")).toBeNull();
     await paintFrame();
     expect(strokes().length).toBeLessThanOrEqual(20);
-    const fewer = strokes().length;
-    fireEvent.change(screen.getByTestId("agent-view-max-arrows"), { target: { value: "50" } });
+    const base = strokes().length;
+    const type = (text: string) => fireEvent.change(input, { target: { value: text } });
+
+    type("7");
     await paintFrame();
-    expect(strokes().length).toBeLessThanOrEqual(50);
-    expect(strokes().length).toBeGreaterThan(fewer);
+    expect(strokes().length).toBeLessThanOrEqual(7);
+    const seven = strokes().length;
+    type("45");
+    await paintFrame();
+    expect(strokes().length).toBeGreaterThan(base);
+    expect(strokes().length).toBeLessThanOrEqual(45);
+    const valid = strokes().length;
+    expect(input.getAttribute("aria-invalid")).toBe("false");
+
+    // Anything else keeps the last valid limit in force, marks the field and says what is accepted.
+    for (const bad of ["", "0", "-3", "2.5", "abc", "1e2", "+5", "501", "20 arrows"]) {
+      type(bad);
+      await paintFrame();
+      expect(strokes().length, `"${bad}"`).toBe(valid);
+      expect(input.getAttribute("aria-invalid"), `"${bad}"`).toBe("true");
+      expect(screen.getByTestId("agent-view-max-arrows-error").textContent).toContain("1 to 500");
+    }
+    // The boundaries are valid, and a valid number clears the complaint.
+    type("1");
+    await paintFrame();
+    expect(strokes().length).toBeLessThanOrEqual(1);
+    expect(screen.queryByTestId("agent-view-max-arrows-error")).toBeNull();
+    type("500");
+    await paintFrame();
+    expect(screen.queryByTestId("agent-view-max-arrows-error")).toBeNull();
+    expect(strokes().length).toBeGreaterThan(seven);
   });
 });

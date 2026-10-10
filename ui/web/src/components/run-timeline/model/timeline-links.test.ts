@@ -7,6 +7,8 @@ import {
   clusterArrows,
   clusterToMax,
   MAX_ARROWS,
+  MAX_ARROWS_CAP,
+  parseArrowLimit,
   curveOf,
   curvePoint,
   distanceToCurve,
@@ -367,8 +369,15 @@ describe("merging down to a limit", () => {
     expect(new Set(found.clusters.map((c) => c.bucket)).size).toBe(4);
   });
 
-  it("has a sensible default limit", () => {
-    expect(MAX_ARROWS).toBeGreaterThanOrEqual(10);
+  it("defaults to 20", () => {
+    expect(MAX_ARROWS).toBe(20);
+  });
+
+  it("accepts whole numbers from 1 to the cap, and nothing else", () => {
+    for (const ok of ["1", "20", "50", "499", String(MAX_ARROWS_CAP)]) expect(parseArrowLimit(ok), ok).toBe(Number(ok));
+    for (const bad of ["", " ", "0", "00", "-1", "1.5", "2.0", "abc", "1e2", "+5", "0x10", "٣", String(MAX_ARROWS_CAP + 1), "99999999999999999999", "5 "]) {
+      expect(parseArrowLimit(bad), JSON.stringify(bad)).toBeNull();
+    }
   });
 
   it("stays fast on thousands of arrows, the search included", () => {
