@@ -113,3 +113,33 @@ def test_unknown_import_prefix_is_not_a_resolved_parent(tmp_path: Path) -> None:
     found = evidence(make_repo(tmp_path), "import base.net.missing\n")
     assert found.records == ()
     assert found.unknown[0].kind == facts.FactKind.IMPORT
+
+
+@pytest.mark.parametrize("shadow", ["Path", "__file__"])
+def test_resource_root_requires_real_path_constructor_and_file_anchor(
+    tmp_path: Path, shadow: str
+) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        f"from pathlib import Path\ndef unrelated({shadow}):\n return Path(__file__).resolve().parents[2] / 'base/data.txt'\n",
+    )
+    assert found.records == ()
+
+
+def test_resource_constructor_alias_is_supported(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "from pathlib import Path as FilePath\n(FilePath(__file__).resolve().parents[2] / 'base/data.txt').read_text()\n",
+    )
+    assert [fact.target for fact in found.records] == ["base/data.txt"]
+
+
+def test_execution_unknowns_retain_their_kinds(tmp_path: Path) -> None:
+    found = evidence(
+        make_repo(tmp_path),
+        "import sys, subprocess\ndef launch(target):\n subprocess.run([sys.executable, '-m', target])\n subprocess.run([sys.executable, '-c', target])\n",
+    )
+    assert {item.kind for item in found.unknown} == {
+        facts.FactKind.PYTHON_MODULE,
+        facts.FactKind.EMBEDDED_IMPORT,
+    }

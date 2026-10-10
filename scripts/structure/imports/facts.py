@@ -127,12 +127,14 @@ class _Collector(ast.NodeVisitor):
             if target is not None:
                 values = self.scope.strings(target)
                 if values is None:
-                    self.gap(node, "Python -m target is not bounded literal text")
+                    self.gap(
+                        node, "Python -m target is not bounded literal text", FactKind.PYTHON_MODULE
+                    )
                 else:
                     for value in values:
                         self.module(node, value, FactKind.PYTHON_MODULE)
             elif reason is not None:
-                self.gap(node, reason)
+                self.gap(node, reason, FactKind.PYTHON_MODULE)
         self._resource(node)
         self.generic_visit(node)
 
@@ -173,7 +175,10 @@ class _Collector(ast.NodeVisitor):
                 return None
             value = self.scope.value(node)
             return self._resource_path(value, seen | {node.id}) if value is not node else None
-        if self.depth and placement_evidence.file_ascents(node) == self.depth:
+        ascents = placement_evidence.file_ascents(
+            node, lambda expr: self.scope.origin(expr) == "pathlib.Path"
+        )
+        if self.depth and not self.scope.bound("__file__") and ascents == self.depth:
             return ""
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             return self._divided_path(node, seen)
@@ -230,7 +235,8 @@ def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str])
     collector.visit(tree)
     inputs = executed.inputs(tree, rel_path)
     collector.unknown.extend(
-        Unknown(g.path, g.line, "Python -c", g.reason) for g in inputs.unresolved
+        Unknown(g.path, g.line, "Python -c", g.reason, FactKind.EMBEDDED_IMPORT)
+        for g in inputs.unresolved
     )
     for source in inputs.sources:
         embedded = executed.import_facts(source, rel_path)
@@ -246,6 +252,7 @@ def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str])
                     source.line,
                     ast.unparse(node),
                     f"First-party module does not exist: {target}",
+                    FactKind.EMBEDDED_IMPORT,
                 )
                 for target in evidence.unknown
             )
@@ -253,7 +260,8 @@ def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str])
             synthetic = ast.Constant(value=target, lineno=source.line, col_offset=0)
             collector.module(synthetic, target, FactKind.EMBEDDED_IMPORT)
         collector.unknown.extend(
-            Unknown(g.path, g.line, source.text, g.reason) for g in embedded.unresolved
+            Unknown(g.path, g.line, source.text, g.reason, FactKind.EMBEDDED_IMPORT)
+            for g in embedded.unresolved
         )
     return Evidence(
         tuple(dict.fromkeys(collector.records)), tuple(dict.fromkeys(collector.unknown))

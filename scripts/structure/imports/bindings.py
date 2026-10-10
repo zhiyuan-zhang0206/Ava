@@ -112,6 +112,10 @@ class Scope:
             scope = scope.parent
         return scope
 
+    def bound(self, name: str) -> bool:
+        """Whether source binds a name in this scope or an enclosing lexical scope."""
+        return name in self.stores or (self.parent is not None and self.parent.bound(name))
+
     def strings(self, node: ast.expr, seen: frozenset[str] = frozenset()) -> tuple[str, ...] | None:
         """Literal texts, one binding, or a bounded literal pytest parameter domain."""
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
