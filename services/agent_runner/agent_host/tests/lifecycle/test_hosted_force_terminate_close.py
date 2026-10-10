@@ -485,6 +485,18 @@ async def test_a_lapsed_lease_still_crashes(
         )
 
 
+def _assert_failed_exec_owner(owner: object, pid: int, failure: BaseException) -> None:
+    from agent.graph.exec._process import DomainCloseOwner
+
+    assert isinstance(owner, DomainCloseOwner)
+    assert owner.pid == pid
+    assert owner.task.done()
+    assert owner.task.exception() is failure
+    assert owner.reap_task is not None
+    assert owner.reap_task.done()
+    assert owner.reap_task.exception() is failure
+
+
 async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -500,10 +512,13 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
     original_close = ExecProcessDomain.close_confirmed
+    failure = PermissionError("injected unverifiable domain closure")
+    closed_domains: list[ExecProcessDomain] = []
 
     def failed_close(domain: ExecProcessDomain, deadline: float) -> None:
+        closed_domains.append(domain)
         original_close(domain, deadline)
-        raise PermissionError("injected unverifiable domain closure")
+        raise failure
 
     monkeypatch.setattr(ExecProcessDomain, "close_confirmed", failed_close)
     scope = HostedTurnResources()
@@ -517,22 +532,29 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         exec_dir=tmp_path,
         accumulation_max_chars=1_000_000,
     )
-    assert isinstance(outcome, _ExecCrashed)
-    assert "teardown failure" in outcome.output
-    assert len(scope.unresolved) == 1
-    path, domain = next(iter(scope.unresolved.items()))
-    assert path.exists() and isinstance(domain, ExecProcessDomain)
-    assert not scope.complete(path, object())
-    assert scope.unresolved[path] is domain
-    assert domain.proc.returncode is None  # unresolved closure must not reap
-    # A formatted tool failure cannot become a positive lifecycle barrier.
-    assert (
-        await hosted.apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=scope)
-        is None
-    )
-    assert not await hosted.settle_hosted_runtime(
-        aops_pool, incarnation, bus=event_bus, resources=scope
-    )
-    assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
-    original_close(domain, time.monotonic() + 5)
-    domain.proc.wait(timeout=5)
+    (domain,) = closed_domains
+    try:
+        assert isinstance(outcome, _ExecCrashed)
+        assert "teardown failure" in outcome.output
+        assert len(scope.unresolved) == 1
+        path, owner = next(iter(scope.unresolved.items()))
+        assert path.exists()
+        _assert_failed_exec_owner(owner, domain.proc.pid, failure)
+        assert not scope.complete(path, object())
+        assert scope.unresolved[path] is owner
+        assert domain.proc.returncode is None  # unresolved closure must not reap
+        # A formatted tool failure cannot become a positive lifecycle barrier.
+        assert (
+            await hosted.apply_hosted_lifecycle(
+                aops_pool, incarnation, bus=event_bus, resources=scope
+            )
+            is None
+        )
+        assert not await hosted.settle_hosted_runtime(
+            aops_pool, incarnation, bus=event_bus, resources=scope
+        )
+        assert scope.unresolved[path] is owner  # reset preserves the original owner
+        assert domain.proc.returncode is None
+    finally:
+        original_close(domain, time.monotonic() + 5)
+        domain.proc.wait(timeout=5)
